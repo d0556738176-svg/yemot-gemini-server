@@ -10,3 +10,7 @@ create index if not exists conversations_phone_created_at_idx
  on public.conversations(phone, created_at desc);
 create index if not exists conversations_created_at_idx
  on public.conversations(created_at desc);
+
+-- Server-side access should use the Supabase service-role key. No public policies are created.
+alter table public.conversations enable row level security;
+revoke all on table public.conversations from anon, authenticated;
