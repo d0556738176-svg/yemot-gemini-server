@@ -332,32 +332,87 @@ async function configureYemotStructure() {
   const apiUser=process.env.YEMOT_API_USERNAME?.trim();
   const apiPassword=process.env.YEMOT_API_PASSWORD?.trim();
   const apiKey=process.env.YEMOT_API_KEY?.trim();
-  const token=apiUser && apiPassword ? `${apiUser}:${apiPassword}` : apiKey;
-  if(!token) { console.log('Yemot management credentials not configured; skipping automatic setup'); return; }
+  if((!apiUser || !apiPassword) && !apiKey) {
+    console.log('Yemot management credentials not configured; skipping automatic setup');
+    return;
+  }
+
   const base='https://www.call2all.co.il/ym/api';
+  let token=apiKey || '';
+
+  // Prefer the documented Login flow when username/password are supplied.
+  // This avoids ambiguity around whether a long-lived API key is a login token.
+  if(apiUser && apiPassword) {
+    const loginUrl=new URL(base + '/Login');
+    loginUrl.searchParams.set('username', apiUser);
+    loginUrl.searchParams.set('password', apiPassword);
+    const loginResponse=await fetch(loginUrl);
+    const loginText=await loginResponse.text();
+    let loginData;
+    try { loginData=JSON.parse(loginText); } catch { loginData={}; }
+    if(!loginResponse.ok) {
+      throw new Error('Yemot Login HTTP ' + loginResponse.status);
+    }
+    if(!loginData.token) {
+      const status=loginData.responseStatus ? String(loginData.responseStatus) : 'NO_TOKEN';
+      throw new Error('Yemot Login failed: ' + status);
+    }
+    token=String(loginData.token);
+  }
+
   async function updateExtension(path,params) {
     const qs=new URLSearchParams({token,path,...params});
-    const r=await fetch(`${base}/UpdateExtension?${qs}`);
-    const text=await r.text();
-    if(!r.ok) throw new Error(`UpdateExtension HTTP ${r.status}`);
-    let data; try{data=JSON.parse(text)}catch{data={raw:text}};
-    if(data.responseStatus && data.responseStatus!=='OK') throw new Error('UpdateExtension failed: ' + String(data.responseStatus));
+    const url=base + '/UpdateExtension?' + qs.toString();
+    const r=await fetch(url);
+    const responseText=await r.text();
+    let data;
+    try { data=JSON.parse(responseText); } catch { data={raw:responseText}; }
+
+    if(!r.ok) {
+      throw new Error('UpdateExtension HTTP ' + r.status + ' path=' + path);
+    }
+
+    if(data.responseStatus && data.responseStatus!=='OK') {
+      const detail=data.message || data.error || data.responseStatus;
+      throw new Error('UpdateExtension failed path=' + path + ': ' + String(detail).slice(0,180));
+    }
+
     return data;
   }
+
   const publicUrl=(process.env.PUBLIC_BASE_URL||'').replace(/\/$/,'');
-  if(!publicUrl) { console.log('PUBLIC_BASE_URL missing; skipping automatic IVR URL setup'); return; }
+  if(!publicUrl) {
+    console.log('PUBLIC_BASE_URL missing; skipping automatic IVR URL setup');
+    return;
+  }
+
   let parsedBase;
-  try { parsedBase = new URL(publicUrl); } catch { throw new Error('PUBLIC_BASE_URL is invalid'); }
-  if(parsedBase.protocol !== 'https:') throw new Error('PUBLIC_BASE_URL must use HTTPS');
-  await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl+'/yemot'});
+  try { parsedBase = new URL(publicUrl); }
+  catch { throw new Error('PUBLIC_BASE_URL is invalid'); }
+  if(parsedBase.protocol !== 'https:') {
+    throw new Error('PUBLIC_BASE_URL must use HTTPS');
+  }
+
+  // The documented UpdateExtension format supports creating an API extension
+  // directly with type=api and api_link.
+  await updateExtension('ivr2:/1',{
+    type:'api',
+    api_link:publicUrl + '/yemot'
+  });
+
+  // Keep the existing voice-selection branches, but only attempt them after
+  // the main API extension has been created successfully.
   const voiceMap=(process.env.YEMOT_VOICE_OPTIONS||'1:Elik_2100,2:Jacob,3:ymMale').split(',');
   for(const item of voiceMap){
     const [extension,voice]=item.split(':');
     if(!extension||!voice) continue;
-    await updateExtension(`ivr2:/2/${extension}`,{
-      type:'add_id_to_list',add_id_to_list_location_list:'/ivr',
-      add_id_to_list_key:'voice',add_id_to_list_value:voice,
-      add_id_to_list_value_change:'yes',add_id_to_list_end_goto:'/1',
+    await updateExtension('ivr2:/2/' + extension,{
+      type:'add_id_to_list',
+      add_id_to_list_location_list:'/ivr',
+      add_id_to_list_key:'voice',
+      add_id_to_list_value:voice,
+      add_id_to_list_value_change:'yes',
+      add_id_to_list_end_goto:'/1',
       add_id_to_list_error_end_goto:'/2'
     });
   }
