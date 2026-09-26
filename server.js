@@ -305,13 +305,16 @@ async function configureYemotStructure() {
     const qs=new URLSearchParams({token:apiKey,path,...params});
     const r=await fetch(`${base}/UpdateExtension?${qs}`);
     const text=await r.text();
-    if(!r.ok) throw new Error(`UpdateExtension HTTP ${r.status}: ${text}`);
+    if(!r.ok) throw new Error(`UpdateExtension HTTP ${r.status}`);
     let data; try{data=JSON.parse(text)}catch{data={raw:text}};
-    if(data.responseStatus && data.responseStatus!=='OK') throw new Error(`UpdateExtension failed: ${text}`);
+    if(data.responseStatus && data.responseStatus!=='OK') throw new Error('UpdateExtension failed: ' + String(data.responseStatus));
     return data;
   }
   const publicUrl=(process.env.PUBLIC_BASE_URL||'').replace(/\/$/,'');
   if(!publicUrl) { console.log('PUBLIC_BASE_URL missing; skipping automatic IVR URL setup'); return; }
+  let parsedBase;
+  try { parsedBase = new URL(publicUrl); } catch { throw new Error('PUBLIC_BASE_URL is invalid'); }
+  if(parsedBase.protocol !== 'https:') throw new Error('PUBLIC_BASE_URL must use HTTPS');
   await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl+'/yemot'});
   const voiceMap=(process.env.YEMOT_VOICE_OPTIONS||'1:Elik_2100,2:Jacob,3:ymMale').split(',');
   for(const item of voiceMap){
@@ -329,4 +332,9 @@ async function configureYemotStructure() {
 process.on('unhandledRejection',(reason)=>{if(!(reason instanceof ExitError)) logDetailedError('Unhandled Rejection',reason)});
 process.on('uncaughtException',(err)=>{if(!(err instanceof ExitError)) logDetailedError('Uncaught Exception',err)});
 const port=process.env.PORT||3000;
-app.listen(port,async()=>{console.log('server running on port '+port);await loadConversationLog();await configureYemotStructure();});
+app.listen(port,async()=>{
+  console.log('server running on port '+port);
+  await loadConversationLog();
+  try { await configureYemotStructure(); }
+  catch (e) { logDetailedError('Yemot automatic setup', e); }
+});
