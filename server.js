@@ -343,10 +343,15 @@ async function configureYemotStructure() {
   // Prefer the documented Login flow when username/password are supplied.
   // This avoids ambiguity around whether a long-lived API key is a login token.
   if(apiUser && apiPassword) {
-    const loginUrl=new URL(base + '/Login');
-    loginUrl.searchParams.set('username', apiUser);
-    loginUrl.searchParams.set('password', apiPassword);
-    const loginResponse=await fetch(loginUrl);
+    const loginBody=new URLSearchParams({
+      username: apiUser,
+      password: apiPassword
+    });
+    const loginResponse=await fetch(base + '/Login',{
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:loginBody.toString()
+    });
     const loginText=await loginResponse.text();
     let loginData;
     try { loginData=JSON.parse(loginText); } catch { loginData={}; }
