@@ -17,7 +17,7 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; frame-src https://www.youtube.com https://www.youtube-nocookie.com; frame-ancestors 'none'; img-src 'self' https://i.ytimg.com data:;");
   next();
 });
 
@@ -100,7 +100,7 @@ async function supabaseRequest(path, options = {}) {
     headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY,
       'Content-Type': 'application/json', ...(options.headers || {}) }
   });
-  if (!response.ok) throw new Error('Supabase HTTP ' + response.status + ': ' + await response.text());
+  if (!response.ok) throw new Error('Supabase HTTP ' + response.status);
   return response;
 }
 function normalizePhone(value) { const phone = String(value || '').trim(); return phone || 'לא מזוהה'; }
@@ -295,14 +295,48 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
   serverTime:new Date().toISOString()
 }));
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
+
+app.use('/dashboard', express.static(new URL('./public', import.meta.url).pathname));
+
+app.get('/api/youtube/search', rateLimit(20, 60 * 1000, 'youtube'), requireDashboardAuth, async (req,res)=>{
+  const key=(process.env.YOUTUBE_API_KEY||'').trim();
+  const q=String(req.query.q||'').trim().slice(0,120);
+  if(!key) return res.status(503).json({error:'YouTube search is not configured'});
+  if(!q) return res.status(400).json({error:'Missing query'});
+  try {
+    const url=new URL('https://www.googleapis.com/youtube/v3/search');
+    url.searchParams.set('part','snippet');
+    url.searchParams.set('q',q);
+    url.searchParams.set('type','video');
+    url.searchParams.set('maxResults','10');
+    url.searchParams.set('safeSearch','strict');
+    url.searchParams.set('regionCode',process.env.YOUTUBE_REGION_CODE||'IL');
+    url.searchParams.set('key',key);
+    const r=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'YouTube search');
+    const data=await r.json();
+    if(!r.ok) return res.status(r.status===403?502:400).json({error:'YouTube search failed'});
+    res.setHeader('Cache-Control','no-store');
+    return res.json({items:(data.items||[]).map(x=>({
+      videoId:x.id?.videoId||'',title:x.snippet?.title||'',description:x.snippet?.description||'',
+      channelTitle:x.snippet?.channelTitle||'',publishedAt:x.snippet?.publishedAt||'',
+      thumbnail:x.snippet?.thumbnails?.medium?.url||x.snippet?.thumbnails?.default?.url||''
+    })).filter(x=>x.videoId)});
+  } catch(e) {
+    logDetailedError('YouTube search',e);
+    return res.status(502).json({error:'YouTube search unavailable'});
+  }
+});
 app.get('/',(req,res)=>res.type('html').send('<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>AI Phone Line</title></head><body><h1>AI Phone Line Dashboard</h1><p>המערכת מחוברת וממתינה לשיחות</p></body></html>'));
 
 async function configureYemotStructure() {
+  const apiUser=process.env.YEMOT_API_USERNAME?.trim();
+  const apiPassword=process.env.YEMOT_API_PASSWORD?.trim();
   const apiKey=process.env.YEMOT_API_KEY?.trim();
-  if(!apiKey) { console.log('YEMOT_API_KEY not configured; skipping automatic setup'); return; }
+  const token=apiUser && apiPassword ? `${apiUser}:${apiPassword}` : apiKey;
+  if(!token) { console.log('Yemot management credentials not configured; skipping automatic setup'); return; }
   const base='https://www.call2all.co.il/ym/api';
   async function updateExtension(path,params) {
-    const qs=new URLSearchParams({token:apiKey,path,...params});
+    const qs=new URLSearchParams({token,path,...params});
     const r=await fetch(`${base}/UpdateExtension?${qs}`);
     const text=await r.text();
     if(!r.ok) throw new Error(`UpdateExtension HTTP ${r.status}`);
