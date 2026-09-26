@@ -1,11 +1,66 @@
 import express from 'express';
+import crypto from 'node:crypto';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import YemotApi from 'yemot-api';
 
 const app = express();
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use(express.urlencoded({ extended: true, limit: '64kb' }));
+app.use(express.json({ limit: '256kb' }));
+
+// Security headers and conservative request limits.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+  next();
+});
+
+const rateBuckets = new Map();
+function rateLimit(maxRequests, windowMs, label) {
+  return (req, res, next) => {
+    const now = Date.now();
+    const key = label + ':' + (req.ip || 'unknown');
+    let bucket = rateBuckets.get(key);
+    if (!bucket || now - bucket.startedAt >= windowMs) {
+      bucket = { startedAt: now, count: 0 };
+      rateBuckets.set(key, bucket);
+    }
+    bucket.count++;
+    if (bucket.count > maxRequests) {
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil((bucket.startedAt + windowMs - now) / 1000))));
+      return res.status(429).json({ error: 'Too many requests' });
+    }
+    next();
+  };
+}
+setInterval(() => {
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  for (const [key, bucket] of rateBuckets) {
+    if (bucket.startedAt < cutoff) rateBuckets.delete(key);
+  }
+}, 10 * 60 * 1000).unref();
+
+function safeTokenEquals(a, b) {
+  if (!a || !b) return false;
+  const aa = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
+}
+
+function requireDashboardAuth(req, res, next) {
+  const expected = (process.env.DASHBOARD_ACCESS_TOKEN || '').trim();
+  if (!expected) return res.status(503).json({ error: 'Dashboard authentication is not configured' });
+  const auth = req.get('authorization') || '';
+  const presented = auth.startsWith('Bearer ') ? auth.slice(7).trim() : (req.get('x-dashboard-token') || '').trim();
+  if (!safeTokenEquals(presented, expected)) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+}
 
 const apiKeys = (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '')
   .split(',').map(k => k.trim()).filter(Boolean);
@@ -229,17 +284,17 @@ async function callHandler(call) {
   }
 }
 
-router.get('/yemot',callHandler);
+router.get('/yemot', rateLimit(300, 5 * 60 * 1000, 'yemot'), callHandler);
 app.use(router);
 
-app.get('/api/conversations',(req,res)=>res.json({
+app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDashboardAuth, (req,res)=>res.json({
   conversations:conversationLog,
   activeCalls:Array.from(activeCalls.values()),
   totalMessages:conversationLog.length,
   totalCallers:new Set(conversationLog.map(x=>x.phone)).size,
   serverTime:new Date().toISOString()
 }));
-app.get('/health',(req,res)=>res.json({ok:true}));
+app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
 app.get('/',(req,res)=>res.type('html').send('<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>AI Phone Line</title></head><body><h1>AI Phone Line Dashboard</h1><p>המערכת מחוברת וממתינה לשיחות</p></body></html>'));
 
 async function configureYemotStructure() {
