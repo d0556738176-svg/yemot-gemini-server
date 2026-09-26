@@ -329,44 +329,16 @@ app.get('/api/youtube/search', rateLimit(20, 60 * 1000, 'youtube'), requireDashb
 app.get('/',(req,res)=>res.type('html').send('<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>AI Phone Line</title></head><body><h1>AI Phone Line Dashboard</h1><p>המערכת מחוברת וממתינה לשיחות</p></body></html>'));
 
 async function configureYemotStructure() {
-  const apiUser=process.env.YEMOT_API_USERNAME?.trim();
-  const apiPassword=process.env.YEMOT_API_PASSWORD?.trim();
-  const apiKey=process.env.YEMOT_API_KEY?.trim();
-  if((!apiUser || !apiPassword) && !apiKey) {
-    console.log('Yemot management credentials not configured; skipping automatic setup');
+  const token=process.env.YEMOT_API_KEY?.trim();
+  if(!token) {
+    console.log('Yemot API key not configured; skipping automatic setup');
     return;
   }
 
   const base='https://www.call2all.co.il/ym/api';
-  let token=apiKey || '';
-
-  // Prefer the documented Login flow when username/password are supplied.
-  // This avoids ambiguity around whether a long-lived API key is a login token.
-  if(apiUser && apiPassword) {
-    const loginBody=new URLSearchParams({
-      username: apiUser,
-      password: apiPassword
-    });
-    const loginResponse=await fetch(base + '/Login',{
-      method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:loginBody.toString()
-    });
-    const loginText=await loginResponse.text();
-    let loginData;
-    try { loginData=JSON.parse(loginText); } catch { loginData={}; }
-    if(!loginResponse.ok) {
-      throw new Error('Yemot Login HTTP ' + loginResponse.status);
-    }
-    if(!loginData.token) {
-      const status=loginData.responseStatus ? String(loginData.responseStatus) : 'NO_TOKEN';
-      throw new Error('Yemot Login failed: ' + status);
-    }
-    token=String(loginData.token);
-  }
 
   async function updateExtension(path,params) {
-    const qs=new URLSearchParams({path,...params});
+    const qs=new URLSearchParams({token,path,...params});
     const url=base + '/UpdateExtension?' + qs.toString();
     const r=await fetch(url);
     const responseText=await r.text();
@@ -398,15 +370,11 @@ async function configureYemotStructure() {
     throw new Error('PUBLIC_BASE_URL must use HTTPS');
   }
 
-  // The documented UpdateExtension format supports creating an API extension
-  // directly with type=api and api_link.
   await updateExtension('ivr2:/1',{
     type:'api',
     api_link:publicUrl + '/yemot'
   });
 
-  // Keep the existing voice-selection branches, but only attempt them after
-  // the main API extension has been created successfully.
   const voiceMap=(process.env.YEMOT_VOICE_OPTIONS||'1:Elik_2100,2:Jacob,3:ymMale').split(',');
   for(const item of voiceMap){
     const [extension,voice]=item.split(':');
