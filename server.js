@@ -366,7 +366,7 @@ async function configureYemotStructure() {
   }
 
   async function updateExtension(path,params) {
-    const qs=new URLSearchParams({token,path,...params});
+    const qs=new URLSearchParams({path,...params});
     const url=base + '/UpdateExtension?' + qs.toString();
     const r=await fetch(url);
     const responseText=await r.text();
