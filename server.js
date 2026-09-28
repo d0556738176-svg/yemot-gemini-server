@@ -329,12 +329,16 @@ app.get('/api/youtube/search', rateLimit(20, 60 * 1000, 'youtube'), requireDashb
 app.get('/',(req,res)=>res.type('html').send('<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>AI Phone Line</title></head><body><h1>AI Phone Line Dashboard</h1><p>המערכת מחוברת וממתינה לשיחות</p></body></html>'));
 
 async function configureYemotStructure() {
-  const token=process.env.YEMOT_API_KEY?.trim();
-  if(!token) {
-    console.log('Yemot API key not configured; skipping automatic setup');
+  const apiUser=(process.env.YEMOT_API_USERNAME||'').trim();
+  const apiPassword=(process.env.YEMOT_API_PASSWORD||'').trim();
+  if(!apiUser || !apiPassword) {
+    console.log('Yemot system number or management password missing; skipping automatic setup');
     return;
   }
 
+  // Yemot's documented API token format is system-number:management-password.
+  // YEMOT_API_KEY is not interchangeable with this session token.
+  const token=apiUser+':'+apiPassword;
   const base='https://www.call2all.co.il/ym/api';
 
   async function updateExtension(path,params) {
@@ -345,19 +349,16 @@ async function configureYemotStructure() {
     let data;
     try { data=JSON.parse(responseText); } catch { data={raw:responseText}; }
 
-    if(!r.ok) {
-      throw new Error('UpdateExtension HTTP ' + r.status + ' path=' + path);
-    }
-
+    if(!r.ok) throw new Error('UpdateExtension HTTP ' + r.status + ' path=' + path);
     if(data.responseStatus && data.responseStatus!=='OK') {
       const detail=data.message || data.error || data.responseStatus;
       throw new Error('UpdateExtension failed path=' + path + ': ' + String(detail).slice(0,180));
     }
-
+    console.log('[Yemot automatic setup] UpdateExtension OK path=' + path);
     return data;
   }
 
-  const publicUrl=(process.env.PUBLIC_BASE_URL||'').replace(/\/$/,'');
+  const publicUrl=(process.env.PUBLIC_BASE_URL||'').replace(/\\/$/,'');
   if(!publicUrl) {
     console.log('PUBLIC_BASE_URL missing; skipping automatic IVR URL setup');
     return;
@@ -366,17 +367,12 @@ async function configureYemotStructure() {
   let parsedBase;
   try { parsedBase = new URL(publicUrl); }
   catch { throw new Error('PUBLIC_BASE_URL is invalid'); }
-  if(parsedBase.protocol !== 'https:') {
-    throw new Error('PUBLIC_BASE_URL must use HTTPS');
-  }
+  if(parsedBase.protocol !== 'https:') throw new Error('PUBLIC_BASE_URL must use HTTPS');
 
-  await updateExtension('ivr2:/1',{
-    type:'api',
-    api_link:publicUrl + '/yemot'
-  });
+  await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
 
   const voiceMap=(process.env.YEMOT_VOICE_OPTIONS||'1:Elik_2100,2:Jacob,3:ymMale').split(',');
-  for(const item of voiceMap){
+  for(const item of voiceMap) {
     const [extension,voice]=item.split(':');
     if(!extension||!voice) continue;
     await updateExtension('ivr2:/2/' + extension,{
