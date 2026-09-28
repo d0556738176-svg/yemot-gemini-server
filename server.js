@@ -284,7 +284,7 @@ async function callHandler(call) {
   }
 }
 
-router.get('/yemot', rateLimit(300, 5 * 60 * 1000, 'yemot'), callHandler);
+router.get('/yemot', callHandler);
 app.use(router);
 
 app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDashboardAuth, (req,res)=>res.json({
