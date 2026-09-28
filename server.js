@@ -255,12 +255,14 @@ async function callHandler(call) {
       continue;
     }
     const audioBase64=Buffer.isBuffer(audioBuffer)?audioBuffer.toString('base64'):Buffer.from(audioBuffer).toString('base64');
+    console.info('[CALL_FLOW] recording_downloaded', { callId: activeKey, bytes: audioBuffer?.length || 0 });
 
     let replyText, transcript='';
     try {
       if(active) active.status='שולח Audio ל-Gemini וממתין לתשובה';
-      try { transcript=await transcribeForDashboard(audioBase64); } catch { transcript='לא ניתן היה לתמלל את ההקלטה'; }
+      try { transcript=await transcribeForDashboard(audioBase64); console.info('[CALL_FLOW] transcription_ok', { callId: activeKey, chars: transcript.length }); } catch(e) { transcript='לא ניתן היה לתמלל את ההקלטה'; console.warn('[CALL_FLOW] transcription_failed', { callId: activeKey, message: String(e?.message || e) }); }
       replyText=(await answerNormalQuestion(audioBase64)).trim();
+      console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length });
       if(replyText.startsWith('SEARCH_REQUEST')) replyText=await answerWithWebSearch(audioBase64);
     } catch(e) {
       logDetailedError('Gemini processing',e);
@@ -270,12 +272,17 @@ async function callHandler(call) {
     }
 
     replyText=sanitizeForYemot(replyText)||'מצטער לא הצלחתי לנסח תשובה נסה שוב';
+    console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length });
     await addConversationEntry({phone:callerPhone,callId,userText:transcript,geminiText:replyText});
+    console.info('[CALL_FLOW] conversation_saved', { callId: activeKey });
 
     try {
+      console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
       call.id_list_message([{type:'text',data:replyText}],{prependToNextAction:true});
+      console.info('[CALL_FLOW] yemot_handoff_returned', { callId: activeKey });
     } catch(e) {
-      if (!(e instanceof ExitError) && !e?.isExitError) throw e;
+      if (!(e instanceof ExitError) && !e?.isExitError) { logDetailedError('Yemot message handoff', e); throw e; }
+      console.info('[CALL_FLOW] yemot_handoff_exit', { callId: activeKey });
     }
     // id_list_message with prependToNextAction returns control to Yemot; the router
     // will continue the call on the next request, preserving the state.
