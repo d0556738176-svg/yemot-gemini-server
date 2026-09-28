@@ -69,7 +69,7 @@ if (!apiKeys.length) {
   console.warn('Gemini is not configured yet. Set GEMINI_API_KEYS.');
 }
 
-const MODEL_NAMES = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash')
+const MODEL_NAMES = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.5-flash')
   .split(',').map(x => x.trim()).filter(Boolean);
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
 
@@ -157,18 +157,45 @@ const genAIClients = apiKeys.map(key => new GoogleGenerativeAI(key));
 const modelsByName = MODEL_NAMES.map(name => genAIClients.map(ai => ai.getGenerativeModel({model:name})));
 const webModelsByName = MODEL_NAMES.map(name => genAIClients.map(ai => ai.getGenerativeModel({model:name, tools:[{googleSearch:{}}]})));
 
+function geminiErrorStatus(err) {
+  const status = Number(err?.status || err?.statusCode || err?.response?.status || 0);
+  if (status) return status;
+  const message = String(err?.message || err || '');
+  const match = message.match(/\b(429|500|503|404|408)\b/);
+  return match ? Number(match[1]) : 0;
+}
+
 async function generateWithRetry(contents, useWebSearch=false) {
   if (!modelsByName.length || !modelsByName[0]?.length)
     throw Object.assign(new Error('Gemini is not configured'), {status:400});
   const groups = useWebSearch ? webModelsByName : modelsByName;
   let lastError;
-  for (let mi=0; mi<groups.length; mi++) for (let ki=0; ki<groups[mi].length; ki++) {
-    try {
-      return await withTimeout(groups[mi][ki].generateContent(contents), REQUEST_TIMEOUT_MS, `${MODEL_NAMES[mi]} key #${ki+1}`);
-    } catch(e) {
-      lastError=e;
-      if (![404,503,429,500,408].includes(e.status)) throw e;
-      await new Promise(r=>setTimeout(r,300));
+  const retryable = new Set([404,429,500,503,408]);
+
+  for (let mi=0; mi<groups.length; mi++) {
+    for (let ki=0; ki<groups[mi].length; ki++) {
+      for (let attempt=1; attempt<=3; attempt++) {
+        try {
+          return await withTimeout(
+            groups[mi][ki].generateContent(contents),
+            REQUEST_TIMEOUT_MS,
+            MODEL_NAMES[mi] + ' key #' + (ki+1)
+          );
+        } catch(e) {
+          lastError=e;
+          const status=geminiErrorStatus(e);
+          if (!retryable.has(status)) throw e;
+          if (attempt < 3) {
+            const delay = status === 429 || status === 503
+              ? Math.min(5000, 1000 * (2 ** (attempt - 1)))
+              : 500;
+            console.warn('[Gemini] retry', { model: MODEL_NAMES[mi], key: ki + 1, attempt, status, delay });
+            await new Promise(r=>setTimeout(r, delay));
+          } else {
+            console.warn('[Gemini] switching model/key', { model: MODEL_NAMES[mi], key: ki + 1, status });
+          }
+        }
+      }
     }
   }
   throw lastError;
