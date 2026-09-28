@@ -358,7 +358,7 @@ async function configureYemotStructure() {
     return data;
   }
 
-  const publicUrl=(process.env.PUBLIC_BASE_URL||'').replace(/\\/$/,'');
+  const publicUrl=(process.env.PUBLIC_BASE_URL||'').replace(/\/$/,'');
   if(!publicUrl) {
     console.log('PUBLIC_BASE_URL missing; skipping automatic IVR URL setup');
     return;
