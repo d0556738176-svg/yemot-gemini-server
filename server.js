@@ -301,7 +301,7 @@ async function callHandler(call) {
 
     try {
       console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
-      call.id_list_message([{type:'text',data:replyText}],{prependToNextAction:true});
+      call.id_list_message([{type:'text',data:replyText}]);
       console.info('[CALL_FLOW] yemot_handoff_returned', { callId: activeKey });
     } catch(e) {
       if (!(e instanceof ExitError) && !e?.isExitError) { logDetailedError('Yemot message handoff', e); throw e; }
