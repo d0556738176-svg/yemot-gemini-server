@@ -72,6 +72,7 @@ if (!apiKeys.length) {
 const MODEL_NAMES = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.5-flash')
   .split(',').map(x => x.trim()).filter(Boolean);
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
+const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 6500);
 
 const CONTENT_FILTER_INSTRUCTION = `כלל סינון תוכן מחייב: אין לספק, לעודד או לפרט תוכן שאינו תואם ערכי צניעות וחינוך.
 
@@ -165,28 +166,36 @@ function geminiErrorStatus(err) {
   return match ? Number(match[1]) : 0;
 }
 
-async function generateWithRetry(contents, useWebSearch=false) {
+async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) {
   if (!modelsByName.length || !modelsByName[0]?.length)
     throw Object.assign(new Error('Gemini is not configured'), {status:400});
   const groups = useWebSearch ? webModelsByName : modelsByName;
+  const timeoutMs = fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+  const maxAttempts = fastPhone ? 1 : 2;
   let lastError;
   for (let mi=0; mi<groups.length; mi++) {
     for (let ki=0; ki<groups[mi].length; ki++) {
-      let attempt = 0;
-      while (attempt < 2) {
-        attempt++;
+      for (let attempt=1; attempt<=maxAttempts; attempt++) {
         try {
           return await withTimeout(
             groups[mi][ki].generateContent(contents),
-            REQUEST_TIMEOUT_MS,
+            timeoutMs,
             MODEL_NAMES[mi] + ' key #' + (ki+1)
           );
         } catch(e) {
           lastError=e;
           const status=geminiErrorStatus(e);
-          if (status === 404 || status === 429) {
-            console.warn('[Gemini] no retry', { model: MODEL_NAMES[mi], key: ki + 1, status });
-            throw e;
+          if (status === 429) {
+            console.warn('[Gemini] quota/rate limit; trying next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status });
+            break;
+          }
+          if (status === 404) {
+            console.warn('[Gemini] model unavailable; trying next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status });
+            break;
+          }
+          if (fastPhone) {
+            console.warn('[Gemini] phone fast-fail; trying next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status });
+            break;
           }
           if (status === 503 && attempt === 1) {
             const delay = 2000;
@@ -296,14 +305,14 @@ async function callHandler(call) {
     let replyText='';
     try {
       if(active) active.status='שולח Audio ל-Gemini וממתין לתשובה';
-      replyText=(await answerNormalQuestion(audioBase64)).trim();
+      replyText=(await generateWithRetry([...audioParts(audioBase64), {text:`${EXCLUSIVE_INSTRUCTION}\n\nזו הקלטה של שאלה מהמתקשר. האזן להקלטה, הבן את הדיבור בעצמך וענה על השאלה.\nענה בשפה שבה המתקשר דיבר. התשובה מיועדת להקראה בטלפון.\nאל תצטט תמלול.`}], false, true)).response.text().trim();
       console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length });
       if(replyText.startsWith('SEARCH_REQUEST')) replyText=await answerWithWebSearch(audioBase64);
     } catch(e) {
       logDetailedError('Gemini processing',e);
-      replyText=e.status===503||e.status===429?'מצטערים אני עמוס כרגע נסה שוב עוד מעט':
+      replyText=e.status===503||e.status===429?'מצטערים כרגע אין זמינות למנוע התשובות נסה שוב בעוד רגע':
         e.status===408?'מצטערים לקח יותר מדי זמן לענות נסה שוב':
-        'מצטער הייתה תקלה בעיבוד השאלה אפשר לנסות שוב';
+        'מצטער הייתה תקלה זמנית בעיבוד השאלה אפשר לנסות שוב';
     }
 
     replyText=sanitizeForYemot(replyText)||'מצטער לא הצלחתי לנסח תשובה נסה שוב';
