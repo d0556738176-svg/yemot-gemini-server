@@ -257,10 +257,9 @@ async function callHandler(call) {
     const audioBase64=Buffer.isBuffer(audioBuffer)?audioBuffer.toString('base64'):Buffer.from(audioBuffer).toString('base64');
     console.info('[CALL_FLOW] recording_downloaded', { callId: activeKey, bytes: audioBuffer?.length || 0 });
 
-    let replyText, transcript='';
+    let replyText='';
     try {
       if(active) active.status='שולח Audio ל-Gemini וממתין לתשובה';
-      try { transcript=await transcribeForDashboard(audioBase64); console.info('[CALL_FLOW] transcription_ok', { callId: activeKey, chars: transcript.length }); } catch(e) { transcript='לא ניתן היה לתמלל את ההקלטה'; console.warn('[CALL_FLOW] transcription_failed', { callId: activeKey, message: String(e?.message || e) }); }
       replyText=(await answerNormalQuestion(audioBase64)).trim();
       console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length });
       if(replyText.startsWith('SEARCH_REQUEST')) replyText=await answerWithWebSearch(audioBase64);
@@ -273,8 +272,32 @@ async function callHandler(call) {
 
     replyText=sanitizeForYemot(replyText)||'מצטער לא הצלחתי לנסח תשובה נסה שוב';
     console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length });
-    await addConversationEntry({phone:callerPhone,callId,userText:transcript,geminiText:replyText});
+    const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
+      phone:normalizePhone(callerPhone),callId:String(callId||''),user:'התמלול מתבצע',gemini:replyText};
+    conversationLog.push(entry);
+    if(conversationLog.length>MAX_CONVERSATION_LOG)
+      conversationLog.splice(0,conversationLog.length-MAX_CONVERSATION_LOG);
+    await persistConversationEntry(entry);
     console.info('[CALL_FLOW] conversation_saved', { callId: activeKey });
+
+    // Transcription is dashboard-only: run it after starting the caller's reply,
+    // so a slow transcript request cannot delay the phone response.
+    const transcriptTask=(async()=>{
+      try {
+        const transcript=await transcribeForDashboard(audioBase64);
+        entry.user=transcript || 'לא ניתן היה לתמלל את ההקלטה';
+        if(SUPABASE_ENABLED && entry.callId) {
+          await supabaseRequest('/rest/v1/conversations?call_id=eq.'+encodeURIComponent(entry.callId),{
+            method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({user_text:entry.user})
+          });
+        }
+        console.info('[CALL_FLOW] transcription_ok', { callId: activeKey, chars: entry.user.length });
+      } catch(e) {
+        entry.user='לא ניתן היה לתמלל את ההקלטה';
+        console.warn('[CALL_FLOW] transcription_failed', { callId: activeKey, message: String(e?.message || e) });
+      }
+    })();
+    transcriptTask.catch(e=>logDetailedError('Dashboard transcription',e));
 
     try {
       console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
@@ -284,8 +307,6 @@ async function callHandler(call) {
       if (!(e instanceof ExitError) && !e?.isExitError) { logDetailedError('Yemot message handoff', e); throw e; }
       console.info('[CALL_FLOW] yemot_handoff_exit', { callId: activeKey });
     }
-    // id_list_message with prependToNextAction returns control to Yemot; the router
-    // will continue the call on the next request, preserving the state.
     activeCalls.delete(activeKey);
     return;
   }
