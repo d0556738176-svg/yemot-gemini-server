@@ -170,9 +170,6 @@ async function generateWithRetry(contents, useWebSearch=false) {
     throw Object.assign(new Error('Gemini is not configured'), {status:400});
   const groups = useWebSearch ? webModelsByName : modelsByName;
   let lastError;
-  // Keep phone calls cheap and predictable. In particular, never retry 404/429
-  // because repeated quota/rate-limit requests can consume the remaining allowance.
-  // A 503 can be a short-lived capacity spike, so allow only one bounded retry.
   for (let mi=0; mi<groups.length; mi++) {
     for (let ki=0; ki<groups[mi].length; ki++) {
       let attempt = 0;
@@ -233,7 +230,7 @@ async function answerNormalQuestion(audioBase64) {
 }
 async function transcribeForDashboard(audioBase64) {
   const result = await generateWithRetry([...audioParts(audioBase64), {text:
-    'תמלל את ההקלטה בעברית לצורך תצוגה בלבד. אל תענה על השאלה. החזר רק את התמלול, ללא הסברים.'}]);
+    'תמלל את ההקלטה לצורך תצוגה בלבד. אל תענה על השאלה. החזר רק את התמלול, ללא הסברים.'}]);
   return sanitizeForYemot(result.response.text());
 }
 async function answerWithWebSearch(audioBase64) {
@@ -267,7 +264,8 @@ async function callHandler(call) {
     startedAt:new Date().toISOString(),status:'ממתין להקלטה'});
   let firstTurn=true;
   let openingPrompt=null;
-  if (conversationLog.some(x=>x.phone===callerPhone)) openingPrompt=await buildOpeningForCaller(callerPhone);
+  if (process.env.ENABLE_AI_OPENING !== 'false' && conversationLog.some(x=>x.phone===callerPhone))
+    openingPrompt=await buildOpeningForCaller(callerPhone);
 
   while(true) {
     const prompt=firstTurn?(openingPrompt || process.env.FIRST_CALL_MESSAGE ||
@@ -318,24 +316,27 @@ async function callHandler(call) {
     await persistConversationEntry(entry);
     console.info('[CALL_FLOW] conversation_saved', { callId: activeKey });
 
-    // Transcription is dashboard-only: run it after starting the caller's reply,
-    // so a slow transcript request cannot delay the phone response.
-    const transcriptTask=(async()=>{
-      try {
-        const transcript=await transcribeForDashboard(audioBase64);
-        entry.user=transcript || 'לא ניתן היה לתמלל את ההקלטה';
-        if(SUPABASE_ENABLED && entry.callId) {
-          await supabaseRequest('/rest/v1/conversations?call_id=eq.'+encodeURIComponent(entry.callId),{
-            method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({user_text:entry.user})
-          });
+    // Dashboard transcription is optional. When disabled, do not make a second Gemini request.
+    if (process.env.ENABLE_DASHBOARD_TRANSCRIPTION !== 'false') {
+      const transcriptTask=(async()=>{
+        try {
+          const transcript=await transcribeForDashboard(audioBase64);
+          entry.user=transcript || 'לא ניתן היה לתמלל את ההקלטה';
+          if(SUPABASE_ENABLED && entry.callId) {
+            await supabaseRequest('/rest/v1/conversations?call_id=eq.'+encodeURIComponent(entry.callId),{
+              method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({user_text:entry.user})
+            });
+          }
+          console.info('[CALL_FLOW] transcription_ok', { callId: activeKey, chars: entry.user.length });
+        } catch(e) {
+          entry.user='לא ניתן היה לתמלל את ההקלטה';
+          console.warn('[CALL_FLOW] transcription_failed', { callId: activeKey, message: String(e?.message || e) });
         }
-        console.info('[CALL_FLOW] transcription_ok', { callId: activeKey, chars: entry.user.length });
-      } catch(e) {
-        entry.user='לא ניתן היה לתמלל את ההקלטה';
-        console.warn('[CALL_FLOW] transcription_failed', { callId: activeKey, message: String(e?.message || e) });
-      }
-    })();
-    transcriptTask.catch(e=>logDetailedError('Dashboard transcription',e));
+      })();
+      transcriptTask.catch(e=>logDetailedError('Dashboard transcription',e));
+    } else {
+      console.info('[CALL_FLOW] dashboard_transcription_disabled', { callId: activeKey });
+    }
 
     try {
       console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
@@ -402,8 +403,6 @@ async function configureYemotStructure() {
     return;
   }
 
-  // Yemot's documented API token format is system-number:management-password.
-  // YEMOT_API_KEY is not interchangeable with this session token.
   const token=apiUser+':'+apiPassword;
   const base='https://www.call2all.co.il/ym/api';
 
@@ -441,7 +440,7 @@ async function configureYemotStructure() {
   for(const item of voiceMap) {
     const [extension,voice]=item.split(':');
     if(!extension||!voice) continue;
-    await updateExtension('ivr2:/2/' + extension,{
+    await updateExtension('ivr2:/' + '2/' + extension,{
       type:'add_id_to_list',
       add_id_to_list_location_list:'/ivr',
       add_id_to_list_key:'voice',
