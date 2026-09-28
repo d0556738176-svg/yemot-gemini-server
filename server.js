@@ -170,11 +170,14 @@ async function generateWithRetry(contents, useWebSearch=false) {
     throw Object.assign(new Error('Gemini is not configured'), {status:400});
   const groups = useWebSearch ? webModelsByName : modelsByName;
   let lastError;
-  const retryable = new Set([404,429,500,503,408]);
-
+  // Keep phone calls cheap and predictable. In particular, never retry 404/429
+  // because repeated quota/rate-limit requests can consume the remaining allowance.
+  // A 503 can be a short-lived capacity spike, so allow only one bounded retry.
   for (let mi=0; mi<groups.length; mi++) {
     for (let ki=0; ki<groups[mi].length; ki++) {
-      for (let attempt=1; attempt<=3; attempt++) {
+      let attempt = 0;
+      while (attempt < 2) {
+        attempt++;
         try {
           return await withTimeout(
             groups[mi][ki].generateContent(contents),
@@ -184,16 +187,24 @@ async function generateWithRetry(contents, useWebSearch=false) {
         } catch(e) {
           lastError=e;
           const status=geminiErrorStatus(e);
-          if (!retryable.has(status)) throw e;
-          if (attempt < 3) {
-            const delay = status === 429 || status === 503
-              ? Math.min(5000, 1000 * (2 ** (attempt - 1)))
-              : 500;
-            console.warn('[Gemini] retry', { model: MODEL_NAMES[mi], key: ki + 1, attempt, status, delay });
-            await new Promise(r=>setTimeout(r, delay));
-          } else {
-            console.warn('[Gemini] switching model/key', { model: MODEL_NAMES[mi], key: ki + 1, status });
+          if (status === 404 || status === 429) {
+            console.warn('[Gemini] no retry', { model: MODEL_NAMES[mi], key: ki + 1, status });
+            throw e;
           }
+          if (status === 503 && attempt === 1) {
+            const delay = 2000;
+            console.warn('[Gemini] one 503 retry', { model: MODEL_NAMES[mi], key: ki + 1, delay });
+            await new Promise(r=>setTimeout(r, delay));
+            continue;
+          }
+          if (status >= 500 && status < 600 && attempt === 1) {
+            const delay = 1500;
+            console.warn('[Gemini] one 5xx retry', { model: MODEL_NAMES[mi], key: ki + 1, status, delay });
+            await new Promise(r=>setTimeout(r, delay));
+            continue;
+          }
+          console.warn('[Gemini] moving to next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status });
+          break;
         }
       }
     }
