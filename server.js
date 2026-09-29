@@ -221,6 +221,29 @@ const router = YemotRouter({
 function audioParts(audioBase64) {
   return [{inlineData:{mimeType:process.env.YEMOT_AUDIO_MIME_TYPE || 'audio/wav', data:audioBase64}}];
 }
+
+// Resolve simple Israel-time questions in code, avoiding model arithmetic mistakes.
+function answerIsraelTimeQuestion(transcript) {
+  const q=String(transcript||'').toLowerCase().replace(/[״"'׳]/g,' ').replace(/\\s+/g,' ').trim();
+  if(!/(מה השעה|איזו שעה|מה תהיה השעה|השעה עכשיו)/.test(q)) return null;
+  const now=new Date();
+  let minutes=0;
+  const amount=(q.match(/\\b(\\d{1,3})\\b/)||[])[1];
+  if(/בעוד|עוד|אחרי/.test(q)) {
+    if(/חצי שעה/.test(q)) minutes=30;
+    else if(/רבע שעה/.test(q)) minutes=15;
+    else if(/שעתיים/.test(q)) minutes=120;
+    else if(amount && /דקות|דקה/.test(q)) minutes=Number(amount);
+    else if(amount && /שעות|שעה/.test(q)) minutes=Number(amount)*60;
+    else if(/שעה/.test(q)) minutes=60;
+    else return null;
+  } else if(/בעוד|עוד|אחרי/.test(q)) return null;
+  const target=new Date(now.getTime()+minutes*60*1000);
+  const time=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(target);
+  if(minutes===0) return 'השעה בישראל עכשיו '+time;
+  const date=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',weekday:'long',day:'numeric',month:'long'}).format(target);
+  return 'בעוד '+(minutes===30?'חצי שעה':minutes===15?'רבע שעה':minutes===60?'שעה':minutes===120?'שעתיים':minutes+' דקות')+' תהיה השעה בישראל '+time+' ביום '+date;
+}
 async function answerNormalQuestion(audioBase64, historyText='') {
   const prompt = `${EXCLUSIVE_INSTRUCTION}
 
@@ -319,7 +342,9 @@ async function callHandler(call) {
         userTranscript='';
       }
       console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length, transcriptReady: !!userTranscript });
-      if(replyText.startsWith('SEARCH_REQUEST')) replyText=await answerWithWebSearch(audioBase64, historyText);
+      const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
+      if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
+      else if(replyText.startsWith('SEARCH_REQUEST')) replyText=await answerWithWebSearch(audioBase64, historyText);
     } catch(e) {
       logDetailedError('Gemini processing',e);
       replyText=e.status===503||e.status===429?'מצטערים כרגע אין זמינות למנוע התשובות נסה שוב בעוד רגע':
