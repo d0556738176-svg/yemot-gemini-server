@@ -179,8 +179,9 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) 
           lastError=e;
           const status=geminiErrorStatus(e);
           if (status === 429) {
-            console.warn('[Gemini] quota/rate limit', { model: MODEL_NAMES[mi], key: ki + 1, status });
-            if (fastPhone) throw e;
+            console.warn('[Gemini] quota/rate limit; trying next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status, fastPhone });
+            // A 429 can be model-specific on the free tier. Keep the phone
+            // flow alive by trying the next configured model/key.
             break;
           }
           if (status === 404) {
