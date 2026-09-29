@@ -72,7 +72,7 @@ if (!apiKeys.length) {
 const MODEL_NAMES = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.5-flash')
   .split(',').map(x => x.trim()).filter(Boolean);
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
-const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 12000);
+const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 7000);
 
 const CONTENT_FILTER_INSTRUCTION = '';
 
@@ -179,7 +179,8 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) 
           lastError=e;
           const status=geminiErrorStatus(e);
           if (status === 429) {
-            console.warn('[Gemini] quota/rate limit; trying next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status });
+            console.warn('[Gemini] quota/rate limit', { model: MODEL_NAMES[mi], key: ki + 1, status });
+            if (fastPhone) throw e;
             break;
           }
           if (status === 404) {
@@ -187,8 +188,8 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) 
             break;
           }
           if (fastPhone) {
-            console.warn('[Gemini] phone fast-fail; trying next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status });
-            break;
+            console.warn('[Gemini] phone fast-fail', { model: MODEL_NAMES[mi], key: ki + 1, status });
+            throw e;
           }
           if (status === 503 && attempt === 1) {
             const delay = 2000;
@@ -467,7 +468,8 @@ async function callHandler(call) {
       }
     } catch(e) {
       logDetailedError('Gemini processing',e);
-      replyText=e.status===503||e.status===429?'מצטערים כרגע אין זמינות למנוע התשובות נסה שוב בעוד רגע':
+      replyText=e.status===429?'מצטערים מנוע התשובות הגיע כרגע למגבלת השימוש נסה שוב בעוד כמה רגעים':
+        e.status===503?'מצטערים מנוע התשובות אינו זמין כרגע נסה שוב בעוד רגע':
         e.status===408?'מצטערים לקח יותר מדי זמן לענות נסה שוב':
         'מצטער הייתה תקלה זמנית בעיבוד השאלה אפשר לנסות שוב';
     }
