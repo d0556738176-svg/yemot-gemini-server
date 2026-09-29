@@ -241,7 +241,7 @@ async function answerWithWebSearch(audioBase64, historyText='') {
 הקשר קודם של השיחה:
 ${historyText || 'אין עדיין הקשר קודם.'}
 המתקשר ביקש במפורש חיפוש באינטרנט. חפש מידע עדכני ורלוונטי באמצעות Google Search,
-ענה בשפה שבה המתקשר דיבר ובהתייחס להקשר הקודם. אם החיפוש נכשל, אמור שזו תקלה בחיפוש ואל תציג הודעת סינון. אל תציג כתובות אינטרנט.`}], true);
+ענה בשפה שבה המתקשר דיבר ובהתייחס להקשר הקודם. אם השאלה על סרטון YouTube, חפש קודם מידע על הסרטון לפי הכותרת, הערוץ והתיאור; אל תטען שצפית בסרטון או שקראת תמלול אם התוכן עצמו לא נגיש. אם אין מספיק מידע אמין, אמור זאת בקצרה. אם החיפוש נכשל, אמור שזו תקלה בחיפוש ואל תציג הודעת סינון. אל תציג כתובות אינטרנט.`}], true);
   return result.response.text();
 }
 async function buildOpeningForCaller(phone) {
@@ -269,7 +269,6 @@ async function callHandler(call) {
   let firstTurn=true;
   let openingPrompt=null;
   const turnHistory=[];
-  let pendingTurn=null;
   if (process.env.ENABLE_AI_OPENING !== 'false' && conversationLog.some(x=>x.phone===callerPhone))
     openingPrompt=await buildOpeningForCaller(callerPhone);
 
@@ -299,24 +298,27 @@ async function callHandler(call) {
     const audioBase64=Buffer.isBuffer(audioBuffer)?audioBuffer.toString('base64'):Buffer.from(audioBuffer).toString('base64');
     console.info('[CALL_FLOW] recording_downloaded', { callId: activeKey, bytes: audioBuffer?.length || 0 });
 
-    // Let the caller record the next question while the prior turn's optional
-    // transcription runs; wait only after recording, before building context.
-    if (pendingTurn) {
-      await pendingTurn.transcriptTask;
-      if (pendingTurn.entry.user && pendingTurn.entry.user !== 'לא ניתן היה לתמלל את ההקלטה') {
-        turnHistory.push({user:pendingTurn.entry.user, assistant:pendingTurn.replyText});
-        if (turnHistory.length > 8) turnHistory.shift();
-      }
-      pendingTurn=null;
-    }
     const historyText=turnHistory.map((t,i)=>'תור '+(i+1)+' — מתקשר: '+t.user+'\nתשובה: '+t.assistant).join('\n\n');
 
     let replyText='';
+    let userTranscript='';
     try {
       if(active) active.status='שולח Audio ל-Gemini וממתין לתשובה';
       const israelNow = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', dateStyle: 'full', timeStyle: 'short', hourCycle: 'h23' }).format(new Date());
-      replyText=(await generateWithRetry([...audioParts(audioBase64), {text:`${EXCLUSIVE_INSTRUCTION}\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: ${israelNow}. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק ואל תנחש או תסתמך על הידע הכללי שלך.\n\nהקשר קודם של השיחה, לפי הסדר:\n${historyText || 'אין עדיין הקשר קודם.'}\n\nזו הקלטה של השאלה הנוכחית. הבן אותה בהתייחס להקשר הקודם וענה על שאלת ההמשך בלי לבקש מידע שכבר נמסר.\nאם השאלה מבקשת במפורש חיפוש באינטרנט, או תלויה במידע שעשוי להשתנות לאחרונה (כגון חדשות, מחירים, זמינות, עדכונים או נתונים עכשוויים), החזר בדיוק SEARCH_REQUEST בלבד כדי להפעיל חיפוש Google Search לפני ניסוח התשובה. אל תשתמש בחיפוש לשאלות ידע כללי יציבות או לשעה ולתאריך שמופיעים בהנחיה.\nענה בשפה שבה המתקשר דיבר. התשובה מיועדת להקראה בטלפון.\nאל תצטט תמלול.`}], false, true)).response.text().trim();
-      console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length });
+      const firstPass=(await generateWithRetry([...audioParts(audioBase64), {text:`${EXCLUSIVE_INSTRUCTION}\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: ${israelNow}. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק ואל תנחש או תסתמך על הידע הכללי שלך.\n\nהקשר קודם של השיחה, לפי הסדר:\n${historyText || 'אין עדיין הקשר קודם.'}\n\nהאזן להקלטה והבן את השאלה. החזר אובייקט JSON בלבד עם שני שדות: "transcript" הוא תמלול קצר ומדויק של דברי המתקשר בשפתו; "answer" היא תשובה קצרה וברורה להקראה בטלפון. אם נדרש חיפוש אינטרנט מפורש או מידע עדכני, קבע answer לערך המדויק SEARCH_REQUEST והוסף transcript כרגיל. אל תבקש מידע שכבר מופיע בהקשר. אל תשתמש בחיפוש לשאלות ידע כללי יציבות או לשעה ולתאריך שמופיעים בהנחיה.`}], false, true)).response.text().trim();
+      let parsedTurn=null;
+      try { parsedTurn=JSON.parse(firstPass); } catch {
+        const match=firstPass.match(/\{[\s\S]*\}/);
+        if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} }
+      }
+      if(parsedTurn && typeof parsedTurn.answer==='string') {
+        replyText=parsedTurn.answer.trim();
+        userTranscript=sanitizeForYemot(parsedTurn.transcript||'');
+      } else {
+        replyText=firstPass;
+        userTranscript='';
+      }
+      console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length, transcriptReady: !!userTranscript });
       if(replyText.startsWith('SEARCH_REQUEST')) replyText=await answerWithWebSearch(audioBase64, historyText);
     } catch(e) {
       logDetailedError('Gemini processing',e);
@@ -328,24 +330,16 @@ async function callHandler(call) {
     replyText=sanitizeForYemot(replyText)||'מצטער לא הצלחתי לנסח תשובה נסה שוב';
     console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length });
     const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
-      phone:normalizePhone(callerPhone),callId:String(callId||''),user:'התמלול מתבצע',gemini:replyText};
+      phone:normalizePhone(callerPhone),callId:String(callId||''),user:userTranscript || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText};
     conversationLog.push(entry);
     if(conversationLog.length>MAX_CONVERSATION_LOG)
       conversationLog.splice(0,conversationLog.length-MAX_CONVERSATION_LOG);
     await persistConversationEntry(entry);
-    console.info('[CALL_FLOW] conversation_saved', { callId: activeKey });
-
-    // Transcription is retained for conversation context, even when dashboard display is disabled.
-    const transcriptTask=(async()=>{
-      try {
-        const transcript=await transcribeForDashboard(audioBase64);
-        entry.user=transcript || 'לא ניתן היה לתמלל את ההקלטה';
-        if(SUPABASE_ENABLED && entry.callId) await supabaseRequest('/rest/v1/conversations?id=eq.'+encodeURIComponent(entry.id),{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({user_text:entry.user})});
-        console.info('[CALL_FLOW] transcription_ok', { callId: activeKey, chars: entry.user.length });
-      } catch(e) { entry.user='לא ניתן היה לתמלל את ההקלטה'; console.warn('[CALL_FLOW] transcription_failed', {callId:activeKey,message:String(e?.message||e)}); }
-    })();
-    transcriptTask.catch(e=>logDetailedError('Dashboard transcription',e));
-    pendingTurn={entry,replyText,transcriptTask};
+    console.info('[CALL_FLOW] conversation_saved', { callId: activeKey, transcriptReady: !!userTranscript });
+    if(userTranscript) {
+      turnHistory.push({user:userTranscript,assistant:replyText});
+      if(turnHistory.length>8) turnHistory.shift();
+    }
     console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
     // Keep the IVR call alive: after playback, continue to the next read in this loop.
     call.id_list_message([{type:'text',data:replyText}], {prependToNextAction:true});
