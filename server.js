@@ -224,11 +224,11 @@ function audioParts(audioBase64) {
 
 // Resolve simple Israel-time questions in code, avoiding model arithmetic mistakes.
 function answerIsraelTimeQuestion(transcript) {
-  const q=String(transcript||'').toLowerCase().replace(/[״"'׳]/g,' ').replace(/\\s+/g,' ').trim();
+  const q=String(transcript||'').toLowerCase().replace(/[״"'׳]/g,' ').replace(/\s+/g,' ').trim();
   if(!/(מה השעה|איזו שעה|מה תהיה השעה|השעה עכשיו)/.test(q)) return null;
   const now=new Date();
   let minutes=0;
-  const amount=(q.match(/\\b(\\d{1,3})\\b/)||[])[1];
+  const amount=(q.match(/\b(\d{1,3})\b/)||[])[1];
   if(/בעוד|עוד|אחרי/.test(q)) {
     if(/חצי שעה/.test(q)) minutes=30;
     else if(/רבע שעה/.test(q)) minutes=15;
@@ -237,7 +237,7 @@ function answerIsraelTimeQuestion(transcript) {
     else if(amount && /שעות|שעה/.test(q)) minutes=Number(amount)*60;
     else if(/שעה/.test(q)) minutes=60;
     else return null;
-  } else if(/בעוד|עוד|אחרי/.test(q)) return null;
+  }
   const target=new Date(now.getTime()+minutes*60*1000);
   const time=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(target);
   if(minutes===0) return 'השעה בישראל עכשיו '+time;
