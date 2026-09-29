@@ -233,7 +233,7 @@ function audioParts(audioBase64) {
 async function answerNormalQuestion(audioBase64) {
   const prompt = `${EXCLUSIVE_INSTRUCTION}
 
-הקשר קודם של השיחה, לפי הסדר: ${historyText || 'אין עדיין הקשר קודם.'}\\n\\nזו הקלטה של שאלה מהמתקשר. האזן להקלטה, הבן את הדיבור בעצמך, התייחס להקשר הקודם וענה על השאלה.
+הקשר קודם של השיחה, לפי הסדר: ${historyText || 'אין עדיין הקשר קודם.'}\n\nזו הקלטה של שאלה מהמתקשר. האזן להקלטה, הבן את הדיבור בעצמך, התייחס להקשר הקודם וענה על השאלה.
 ענה בשפה שבה המתקשר דיבר. התשובה מיועדת להקראה בטלפון.
 אל תצטט תמלול.`;
   const result = await generateWithRetry([...audioParts(audioBase64), {text:prompt}]);
@@ -289,7 +289,7 @@ async function callHandler(call) {
       }
       pendingTurn=null;
     }
-    const historyText=turnHistory.map((t,i)=>'תור '+(i+1)+' — מתקשר: '+t.user+'\\nתשובה: '+t.assistant).join('\\n\\n');
+    const historyText=turnHistory.map((t,i)=>'תור '+(i+1)+' — מתקשר: '+t.user+'\nתשובה: '+t.assistant).join('\n\n');
     const prompt=firstTurn?(openingPrompt || process.env.FIRST_CALL_MESSAGE ||
       'שלום איך אפשר לעזור לך היום אמור בבקשה על מה תרצה לדבר אחרי הצפצוף ולסיום ההקלטה הקש סולמית'):
       'אמור שאלה נוספת ולסיום הקש סולמית או הקש כוכבית ליציאה';
