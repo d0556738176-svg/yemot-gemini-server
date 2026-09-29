@@ -264,6 +264,38 @@ function knownContactFallback(transcript, historyText='') {
     return 'מספר שירות הלקוחות של בנק פאגי הוא כוכבית 3360. לתמיכה טכנית באתר ובאפליקציה ניתן להתקשר לאפס שלוש, חמש אחת שלוש, אפס אפס אפס שלוש.';
   return null;
 }
+async function searchYouTubeForPhone(transcript) {
+  const key=(process.env.YOUTUBE_API_KEY||'').trim();
+  if(!key) return null;
+  const question=String(transcript||'').trim();
+  if(!question || !/(youtube|יוטיוב|סרטון|סרטונים|וידאו)/i.test(question)) return null;
+  const wantsNewest=/(הכי חדש|החדש ביותר|הכי חדש|אחרון|אחרונה|עדכני ביותר|חדש ביותר)/i.test(question);
+  const query=question.replace(/(תחפש לי באינטרנט|תחפש באינטרנט|חפש באינטרנט|ביוטיוב|ביויוטב|ביוטוב|ביוטיוב|ב youtube|youtube)/gi,' ').replace(/\\s+/g,' ').trim().slice(0,120);
+  const url=new URL('https://www.googleapis.com/youtube/v3/search');
+  url.searchParams.set('part','snippet');
+  url.searchParams.set('q',query||'');
+  url.searchParams.set('type','video');
+  url.searchParams.set('maxResults','5');
+  url.searchParams.set('safeSearch','strict');
+  url.searchParams.set('regionCode',process.env.YOUTUBE_REGION_CODE||'IL');
+  url.searchParams.set('order',wantsNewest?'date':'relevance');
+  url.searchParams.set('key',key);
+  const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'YouTube phone search');
+  const data=await response.json();
+  if(!response.ok) {
+    const err=new Error('YouTube API HTTP '+response.status); err.status=response.status===403?429:response.status; throw err;
+  }
+  const items=(data.items||[]).filter(x=>x.id?.videoId).slice(0,5);
+  if(!items.length) return 'לא מצאתי כרגע סרטונים מתאימים ביוטיוב.';
+  const spoken=items.map((x,i)=>{
+    const s=x.snippet||{};
+    const date=s.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',year:'numeric',month:'long',day:'numeric'}).format(new Date(s.publishedAt)):'תאריך לא זמין';
+    return 'תוצאה '+(i+1)+': '+sanitizeForYemot(s.title||'ללא כותרת')+'. הערוץ: '+sanitizeForYemot(s.channelTitle||'לא ידוע')+'. פורסם בתאריך '+date+'.';
+  }).join(' ');
+  const contentNote=/(תוכן הסרטון|מה אומרים בסרטון|על מה הסרטון|סכם|סיכום|תספר לי מה יש בסרטון)/i.test(question)
+    ? ' שים לב: החיפוש מצא פרטי סרטון בלבד ולא תמליל מלא, ולכן עדיין אין לי אפשרות לאמת את כל מה שנאמר בו.' : '';
+  return 'מצאתי ביוטיוב את התוצאות הבאות. '+spoken+contentNote+' כדי לבחור תוצאה, אמור את מספר התוצאה.';
+}
 async function answerWithWebSearch(transcript, historyText='') {
   const question=String(transcript||'').trim();
   if(!question) throw Object.assign(new Error('Search requested but transcript is empty'),{status:400});
@@ -361,8 +393,10 @@ async function callHandler(call) {
       const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
       if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
       else if(replyText.startsWith('SEARCH_REQUEST')) {
-        try { replyText=await answerWithWebSearch(userTranscript, historyText); }
-        catch(searchError) {
+        try {
+          const youtubeAnswer=await searchYouTubeForPhone(userTranscript);
+          replyText=youtubeAnswer || await answerWithWebSearch(userTranscript, historyText);
+        } catch(searchError) {
           const fallback=knownContactFallback(userTranscript, historyText);
           if(fallback && [429,503,408].includes(geminiErrorStatus(searchError))) {
             console.warn('[CALL_FLOW] web_search_unavailable_using_known_contact_fallback');
