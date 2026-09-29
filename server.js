@@ -287,6 +287,24 @@ async function searchYouTubeForPhone(transcript) {
   }
   const items=(data.items||[]).filter(x=>x.id?.videoId).slice(0,5);
   if(!items.length) return 'לא מצאתי כרגע סרטונים מתאימים ביוטיוב.';
+  const wantsContent=/(תוכן הסרטון|מה אומרים בסרטון|על מה הסרטון|סכם|סיכום|תספר לי מה יש בסרטון|תוכן של הסרטון)/i.test(question);
+  if(wantsContent) {
+    const selected=items[0];
+    const videoUrl='https://www.youtube.com/watch?v='+selected.id.videoId;
+    const title=sanitizeForYemot(selected.snippet?.title||'הסרטון שנמצא');
+    try {
+      const summaryResult=await generateWithRetry([
+        {fileData:{fileUri:videoUrl}},
+        {text:'נתח את תוכן סרטון YouTube הציבורי המצורף. תן סיכום נאמן בעברית, עד 5 משפטים, וציין מה לא ניתן לקבוע בוודאות. אל תמציא פרטים ואל תתייחס לתיאור או לכותרת כאילו הם תוכן הסרטון.'}
+      ],false,false);
+      const summary=summaryResult?.response?.text?.();
+      if(summary && String(summary).trim())
+        return 'מצאתי את הסרטון '+title+'. '+sanitizeForYemot(summary)+'';
+    } catch(e) {
+      console.warn('[YouTube] video understanding unavailable', {status:geminiErrorStatus(e),message:String(e?.message||'').slice(0,160)});
+    }
+    return 'מצאתי את הסרטון '+title+' אבל כרגע לא הצלחתי לקבל את תוכנו המלא. '+(sanitizeForYemot(selected.snippet?.description||'')||'אין תיאור זמין')+'.';
+  }
   const spoken=items.map((x,i)=>{
     const s=x.snippet||{};
     const date=s.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',year:'numeric',month:'long',day:'numeric'}).format(new Date(s.publishedAt)):'תאריך לא זמין';
