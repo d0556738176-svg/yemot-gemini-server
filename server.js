@@ -307,7 +307,8 @@ async function callHandler(call) {
     let replyText='';
     try {
       if(active) active.status='שולח Audio ל-Gemini וממתין לתשובה';
-      replyText=(await generateWithRetry([...audioParts(audioBase64), {text:`${EXCLUSIVE_INSTRUCTION}\n\nזו הקלטה של שאלה מהמתקשר. האזן להקלטה, הבן את הדיבור בעצמך וענה על השאלה.\nענה בשפה שבה המתקשר דיבר. התשובה מיועדת להקראה בטלפון.\nאל תצטט תמלול.`}], false, true)).response.text().trim();
+      const israelNow = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', dateStyle: 'full', timeStyle: 'short', hourCycle: 'h23' }).format(new Date());
+      replyText=(await generateWithRetry([...audioParts(audioBase64), {text:`${EXCLUSIVE_INSTRUCTION}\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: ${israelNow}. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק ואל תנחש או תסתמך על הידע הכללי שלך.\n\nזו הקלטה של שאלה מהמתקשר. האזן להקלטה, הבן את הדיבור בעצמך וענה על השאלה.\nענה בשפה שבה המתקשר דיבר. התשובה מיועדת להקראה בטלפון.\nאל תצטט תמלול.`}], false, true)).response.text().trim();
       console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length });
       if(replyText.startsWith('SEARCH_REQUEST')) replyText=await answerWithWebSearch(audioBase64);
     } catch(e) {
