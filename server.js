@@ -275,7 +275,7 @@ async function searchYouTubeForPhone(transcript) {
   url.searchParams.set('part','snippet');
   url.searchParams.set('q',query||'');
   url.searchParams.set('type','video');
-  url.searchParams.set('maxResults','5');
+  url.searchParams.set('maxResults','50');
   url.searchParams.set('safeSearch','strict');
   url.searchParams.set('regionCode',process.env.YOUTUBE_REGION_CODE||'IL');
   url.searchParams.set('order',wantsNewest?'date':'relevance');
@@ -285,7 +285,7 @@ async function searchYouTubeForPhone(transcript) {
   if(!response.ok) {
     const err=new Error('YouTube API HTTP '+response.status); err.status=response.status===403?429:response.status; throw err;
   }
-  const items=(data.items||[]).filter(x=>x.id?.videoId).slice(0,5);
+  const items=(data.items||[]).filter(x=>x.id?.videoId).slice(0,50);
   if(!items.length) return 'לא מצאתי כרגע סרטונים מתאימים ביוטיוב.';
   const wantsContent=/(תוכן הסרטון|מה אומרים בסרטון|על מה הסרטון|סכם|סיכום|תספר לי מה יש בסרטון|תוכן של הסרטון)/i.test(question);
   if(wantsContent) {
@@ -473,7 +473,7 @@ app.get('/api/youtube/search', rateLimit(20, 60 * 1000, 'youtube'), requireDashb
     url.searchParams.set('part','snippet');
     url.searchParams.set('q',q);
     url.searchParams.set('type','video');
-    url.searchParams.set('maxResults','10');
+    url.searchParams.set('maxResults','50');
     url.searchParams.set('safeSearch','strict');
     url.searchParams.set('regionCode',process.env.YOUTUBE_REGION_CODE||'IL');
     url.searchParams.set('key',key);
