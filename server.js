@@ -233,7 +233,7 @@ function audioParts(audioBase64) {
 async function answerNormalQuestion(audioBase64) {
   const prompt = `${EXCLUSIVE_INSTRUCTION}
 
-זו הקלטה של שאלה מהמתקשר. האזן להקלטה, הבן את הדיבור בעצמך וענה על השאלה.
+הקשר קודם של השיחה, לפי הסדר: ${historyText || 'אין עדיין הקשר קודם.'}\\n\\nזו הקלטה של שאלה מהמתקשר. האזן להקלטה, הבן את הדיבור בעצמך, התייחס להקשר הקודם וענה על השאלה.
 ענה בשפה שבה המתקשר דיבר. התשובה מיועדת להקראה בטלפון.
 אל תצטט תמלול.`;
   const result = await generateWithRetry([...audioParts(audioBase64), {text:prompt}]);
@@ -275,10 +275,21 @@ async function callHandler(call) {
     startedAt:new Date().toISOString(),status:'ממתין להקלטה'});
   let firstTurn=true;
   let openingPrompt=null;
+  const turnHistory=[];
+  let pendingTurn=null;
   if (process.env.ENABLE_AI_OPENING !== 'false' && conversationLog.some(x=>x.phone===callerPhone))
     openingPrompt=await buildOpeningForCaller(callerPhone);
 
   while(true) {
+    if (pendingTurn) {
+      await pendingTurn.transcriptTask;
+      if (pendingTurn.entry.user && pendingTurn.entry.user !== 'לא ניתן היה לתמלל את ההקלטה') {
+        turnHistory.push({user:pendingTurn.entry.user, assistant:pendingTurn.replyText});
+        if (turnHistory.length > 8) turnHistory.shift();
+      }
+      pendingTurn=null;
+    }
+    const historyText=turnHistory.map((t,i)=>'תור '+(i+1)+' — מתקשר: '+t.user+'\\nתשובה: '+t.assistant).join('\\n\\n');
     const prompt=firstTurn?(openingPrompt || process.env.FIRST_CALL_MESSAGE ||
       'שלום איך אפשר לעזור לך היום אמור בבקשה על מה תרצה לדבר אחרי הצפצוף ולסיום ההקלטה הקש סולמית'):
       'אמור שאלה נוספת ולסיום הקש סולמית או הקש כוכבית ליציאה';
@@ -310,7 +321,7 @@ async function callHandler(call) {
       const israelNow = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', dateStyle: 'full', timeStyle: 'short', hourCycle: 'h23' }).format(new Date());
       replyText=(await generateWithRetry([...audioParts(audioBase64), {text:`${EXCLUSIVE_INSTRUCTION}\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: ${israelNow}. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק ואל תנחש או תסתמך על הידע הכללי שלך.\n\nזו הקלטה של שאלה מהמתקשר. האזן להקלטה, הבן את הדיבור בעצמך וענה על השאלה.\nאם השאלה מבקשת במפורש חיפוש באינטרנט, או תלויה במידע שעשוי להשתנות לאחרונה (כגון חדשות, מחירים, זמינות, עדכונים או נתונים עכשוויים), החזר בדיוק SEARCH_REQUEST בלבד כדי להפעיל חיפוש Google Search לפני ניסוח התשובה. אל תשתמש בחיפוש לשאלות ידע כללי יציבות או לשעה ולתאריך שמופיעים בהנחיה.\nענה בשפה שבה המתקשר דיבר. התשובה מיועדת להקראה בטלפון.\nאל תצטט תמלול.`}], false, true)).response.text().trim();
       console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length });
-      if(replyText.startsWith('SEARCH_REQUEST')) replyText=await answerWithWebSearch(audioBase64);
+      if(replyText.startsWith('SEARCH_REQUEST')) replyText=await answerWithWebSearch(audioBase64, historyText);
     } catch(e) {
       logDetailedError('Gemini processing',e);
       replyText=e.status===503||e.status===429?'מצטערים כרגע אין זמינות למנוע התשובות נסה שוב בעוד רגע':
@@ -328,28 +339,17 @@ async function callHandler(call) {
     await persistConversationEntry(entry);
     console.info('[CALL_FLOW] conversation_saved', { callId: activeKey });
 
-    // Dashboard transcription is optional. When disabled, do not make a second Gemini request.
-    if (process.env.ENABLE_DASHBOARD_TRANSCRIPTION !== 'false') {
-      const transcriptTask=(async()=>{
-        try {
-          const transcript=await transcribeForDashboard(audioBase64);
-          entry.user=transcript || 'לא ניתן היה לתמלל את ההקלטה';
-          if(SUPABASE_ENABLED && entry.callId) {
-            await supabaseRequest('/rest/v1/conversations?call_id=eq.'+encodeURIComponent(entry.callId),{
-              method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({user_text:entry.user})
-            });
-          }
-          console.info('[CALL_FLOW] transcription_ok', { callId: activeKey, chars: entry.user.length });
-        } catch(e) {
-          entry.user='לא ניתן היה לתמלל את ההקלטה';
-          console.warn('[CALL_FLOW] transcription_failed', { callId: activeKey, message: String(e?.message || e) });
-        }
-      })();
-      transcriptTask.catch(e=>logDetailedError('Dashboard transcription',e));
-    } else {
-      console.info('[CALL_FLOW] dashboard_transcription_disabled', { callId: activeKey });
-    }
-
+    // Transcription is retained for conversation context, even when dashboard display is disabled.
+    const transcriptTask=(async()=>{
+      try {
+        const transcript=await transcribeForDashboard(audioBase64);
+        entry.user=transcript || 'לא ניתן היה לתמלל את ההקלטה';
+        if(SUPABASE_ENABLED && entry.callId) await supabaseRequest('/rest/v1/conversations?id=eq.'+encodeURIComponent(entry.id),{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({user_text:entry.user})});
+        console.info('[CALL_FLOW] transcription_ok', { callId: activeKey, chars: entry.user.length });
+      } catch(e) { entry.user='לא ניתן היה לתמלל את ההקלטה'; console.warn('[CALL_FLOW] transcription_failed', {callId:activeKey,message:String(e?.message||e)}); }
+    })();
+    transcriptTask.catch(e=>logDetailedError('Dashboard transcription',e));
+    pendingTurn={entry,replyText,transcriptTask};
     console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
     // Keep the IVR call alive: after playback, continue to the next read in this loop.
     call.id_list_message([{type:'text',data:replyText}], {prependToNextAction:true});
