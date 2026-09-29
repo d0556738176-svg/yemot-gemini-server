@@ -230,7 +230,7 @@ const router = YemotRouter({
 function audioParts(audioBase64) {
   return [{inlineData:{mimeType:process.env.YEMOT_AUDIO_MIME_TYPE || 'audio/wav', data:audioBase64}}];
 }
-async function answerNormalQuestion(audioBase64) {
+async function answerNormalQuestion(audioBase64, historyText='') {
   const prompt = `${EXCLUSIVE_INSTRUCTION}
 
 הקשר קודם של השיחה, לפי הסדר: ${historyText || 'אין עדיין הקשר קודם.'}\n\nזו הקלטה של שאלה מהמתקשר. האזן להקלטה, הבן את הדיבור בעצמך, התייחס להקשר הקודם וענה על השאלה.
@@ -244,11 +244,13 @@ async function transcribeForDashboard(audioBase64) {
     'תמלל את ההקלטה לצורך תצוגה בלבד. אל תענה על השאלה. החזר רק את התמלול, ללא הסברים.'}]);
   return sanitizeForYemot(result.response.text());
 }
-async function answerWithWebSearch(audioBase64) {
+async function answerWithWebSearch(audioBase64, historyText='') {
   const result = await generateWithRetry([...audioParts(audioBase64), {text:
     `${EXCLUSIVE_INSTRUCTION}
+הקשר קודם של השיחה:
+${historyText || 'אין עדיין הקשר קודם.'}
 המתקשר ביקש במפורש חיפוש באינטרנט. חפש מידע עדכני ורלוונטי באמצעות Google Search,
-ואז ענה בעברית על השאלה על סמך המידע שמצאת. אל תציג כתובות אינטרנט.`}], true);
+ענה בשפה שבה המתקשר דיבר ובהתייחס להקשר הקודם. אם החיפוש נכשל, אמור שזו תקלה בחיפוש ואל תציג הודעת סינון. אל תציג כתובות אינטרנט.`}], true);
   return result.response.text();
 }
 async function buildOpeningForCaller(phone) {
