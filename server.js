@@ -283,15 +283,6 @@ async function callHandler(call) {
     openingPrompt=await buildOpeningForCaller(callerPhone);
 
   while(true) {
-    if (pendingTurn) {
-      await pendingTurn.transcriptTask;
-      if (pendingTurn.entry.user && pendingTurn.entry.user !== 'לא ניתן היה לתמלל את ההקלטה') {
-        turnHistory.push({user:pendingTurn.entry.user, assistant:pendingTurn.replyText});
-        if (turnHistory.length > 8) turnHistory.shift();
-      }
-      pendingTurn=null;
-    }
-    const historyText=turnHistory.map((t,i)=>'תור '+(i+1)+' — מתקשר: '+t.user+'\nתשובה: '+t.assistant).join('\n\n');
     const prompt=firstTurn?(openingPrompt || process.env.FIRST_CALL_MESSAGE ||
       'שלום איך אפשר לעזור לך היום אמור בבקשה על מה תרצה לדבר אחרי הצפצוף ולסיום ההקלטה הקש סולמית'):
       'אמור שאלה נוספת ולסיום הקש סולמית או הקש כוכבית ליציאה';
@@ -316,6 +307,18 @@ async function callHandler(call) {
     }
     const audioBase64=Buffer.isBuffer(audioBuffer)?audioBuffer.toString('base64'):Buffer.from(audioBuffer).toString('base64');
     console.info('[CALL_FLOW] recording_downloaded', { callId: activeKey, bytes: audioBuffer?.length || 0 });
+
+    // Let the caller record the next question while the prior turn's optional
+    // transcription runs; wait only after recording, before building context.
+    if (pendingTurn) {
+      await pendingTurn.transcriptTask;
+      if (pendingTurn.entry.user && pendingTurn.entry.user !== 'לא ניתן היה לתמלל את ההקלטה') {
+        turnHistory.push({user:pendingTurn.entry.user, assistant:pendingTurn.replyText});
+        if (turnHistory.length > 8) turnHistory.shift();
+      }
+      pendingTurn=null;
+    }
+    const historyText=turnHistory.map((t,i)=>'תור '+(i+1)+' — מתקשר: '+t.user+'\nתשובה: '+t.assistant).join('\n\n');
 
     let replyText='';
     try {
