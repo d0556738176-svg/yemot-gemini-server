@@ -350,16 +350,10 @@ async function callHandler(call) {
       console.info('[CALL_FLOW] dashboard_transcription_disabled', { callId: activeKey });
     }
 
-    try {
-      console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
-      call.id_list_message([{type:'text',data:replyText}]);
-      console.info('[CALL_FLOW] yemot_handoff_returned', { callId: activeKey });
-    } catch(e) {
-      if (!(e instanceof ExitError) && !e?.isExitError) { logDetailedError('Yemot message handoff', e); throw e; }
-      console.info('[CALL_FLOW] yemot_handoff_exit', { callId: activeKey });
-    }
-    activeCalls.delete(activeKey);
-    return;
+    console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
+    // Keep the IVR call alive: after playback, continue to the next read in this loop.
+    call.id_list_message([{type:'text',data:replyText}], {prependToNextAction:true});
+    console.info('[CALL_FLOW] yemot_handoff_queued_next_read', { callId: activeKey });
   }
 }
 
