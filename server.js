@@ -188,15 +188,9 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) 
             console.warn('[Gemini] model unavailable; trying next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status });
             break;
           }
-          if (fastPhone) {
-            console.warn('[Gemini] phone fast-fail', { model: MODEL_NAMES[mi], key: ki + 1, status });
-            throw e;
-          }
-          if (status === 503 && attempt === 1) {
-            const delay = 2000;
-            console.warn('[Gemini] one 503 retry', { model: MODEL_NAMES[mi], key: ki + 1, delay });
-            await new Promise(r=>setTimeout(r, delay));
-            continue;
+          if (status === 408 || status === 503 || (status >= 500 && status < 600)) {
+            console.warn('[Gemini] transient error; trying next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status, fastPhone });
+            break;
           }
           if (status >= 500 && status < 600 && attempt === 1) {
             const delay = 1500;
