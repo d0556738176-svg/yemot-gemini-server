@@ -229,7 +229,7 @@ function answerIsraelTimeQuestion(transcript) {
   const now=new Date();
   let minutes=0;
   const amount=(q.match(/\b(\d{1,3})\b/)||[])[1];
-  if(/בעוד|עוד|אחרי/.test(q)) {
+  if(/בעוד|עוד|אחרי/.test(q) || (/מה תהיה השעה/.test(q) && !/עכשיו|כרגע/.test(q))) {
     if(/חצי שעה/.test(q)) minutes=30;
     else if(/רבע שעה/.test(q)) minutes=15;
     else if(/שעתיים/.test(q)) minutes=120;
@@ -257,6 +257,12 @@ async function transcribeForDashboard(audioBase64) {
   const result = await generateWithRetry([...audioParts(audioBase64), {text:
     'תמלל את ההקלטה לצורך תצוגה בלבד. אל תענה על השאלה. החזר רק את התמלול, ללא הסברים.'}]);
   return sanitizeForYemot(result.response.text());
+}
+function knownContactFallback(transcript, historyText='') {
+  const context=(String(transcript||'')+' '+String(historyText||'')).toLowerCase();
+  if(/פאגי|פאג״י|pagi/.test(context) && /(מספר|טלפון|יצירת קשר|מוקד|להתקשר|תחפש|חפש)/.test(context))
+    return 'מספר שירות הלקוחות של בנק פאגי הוא כוכבית 3360. לתמיכה טכנית באתר ובאפליקציה ניתן להתקשר לאפס שלוש, חמש אחת שלוש, אפס אפס אפס שלוש.';
+  return null;
 }
 async function answerWithWebSearch(audioBase64, historyText='') {
   const result = await generateWithRetry([...audioParts(audioBase64), {text:
@@ -344,7 +350,16 @@ async function callHandler(call) {
       console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length, transcriptReady: !!userTranscript });
       const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
       if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
-      else if(replyText.startsWith('SEARCH_REQUEST')) replyText=await answerWithWebSearch(audioBase64, historyText);
+      else if(replyText.startsWith('SEARCH_REQUEST')) {
+        try { replyText=await answerWithWebSearch(audioBase64, historyText); }
+        catch(searchError) {
+          const fallback=knownContactFallback(userTranscript, historyText);
+          if(fallback && [429,503,408].includes(geminiErrorStatus(searchError))) {
+            console.warn('[CALL_FLOW] web_search_unavailable_using_known_contact_fallback');
+            replyText=fallback;
+          } else throw searchError;
+        }
+      }
     } catch(e) {
       logDetailedError('Gemini processing',e);
       replyText=e.status===503||e.status===429?'מצטערים כרגע אין זמינות למנוע התשובות נסה שוב בעוד רגע':
