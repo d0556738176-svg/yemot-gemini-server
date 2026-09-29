@@ -264,6 +264,53 @@ function knownContactFallback(transcript, historyText='') {
     return 'מספר שירות הלקוחות של בנק פאגי הוא כוכבית 3360. לתמיכה טכנית באתר ובאפליקציה ניתן להתקשר לאפס שלוש, חמש אחת שלוש, אפס אפס אפס שלוש.';
   return null;
 }
+async function analyzePublicYouTubeVideo(videoUrl, question) {
+  const key = apiKeys[0] || '';
+  if (!key) throw Object.assign(new Error('Gemini key unavailable for YouTube video analysis'), {status:503});
+
+  // Use the current Interactions API because it supports passing a public YouTube URL
+  // directly as video input. The previous generateContent/fileData approach did not
+  // reliably analyze YouTube URLs.
+  const model = (process.env.YOUTUBE_GEMINI_MODEL || 'gemini-3.8-flash').trim();
+  const prompt = `נתח את סרטון YouTube הציבורי המצורף עצמו, לא רק את הכותרת או התיאור.
+השאלה של המתקשר: ${question}
+תן מידע מדויק בעברית שמתאים להקראה בטלפון:
+1. על מה הסרטון
+2. הנקודות המרכזיות שנאמרות בו
+3. מי מופיע או מדבר, רק אם ניתן לקבוע זאת מהסרטון
+4. אם המתקשר ביקש סיכום, תן סיכום קצר וברור
+אל תמציא פרטים. אם חלק מהמידע לא ניתן לקבוע מהסרטון, אמור זאת במפורש.`;
+
+  const response = await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+    method:'POST',
+    headers:{
+      'x-goog-api-key':key,
+      'Content-Type':'application/json'
+    },
+    body:JSON.stringify({
+      model,
+      store:false,
+      input:[
+        {type:'text',text:prompt},
+        {type:'video',uri:videoUrl}
+      ]
+    })
+  }), REQUEST_TIMEOUT_MS, 'Gemini YouTube video analysis');
+
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok) {
+    const err=new Error(data?.error?.message || ('Gemini YouTube analysis HTTP '+response.status));
+    err.status=response.status;
+    throw err;
+  }
+  const textOutput=String(data?.output_text || '').trim();
+  if(!textOutput) {
+    const blocks=(data?.steps||[]).flatMap(s=>s?.content||[]).filter(x=>x?.type==='text').map(x=>x.text||'');
+    return blocks.join(' ').trim();
+  }
+  return textOutput;
+}
+
 async function searchYouTubeForPhone(transcript) {
   const key=(process.env.YOUTUBE_API_KEY||'').trim();
   if(!key) return null;
@@ -293,17 +340,13 @@ async function searchYouTubeForPhone(transcript) {
     const videoUrl='https://www.youtube.com/watch?v='+selected.id.videoId;
     const title=sanitizeForYemot(selected.snippet?.title||'הסרטון שנמצא');
     try {
-      const summaryResult=await generateWithRetry([
-        {fileData:{fileUri:videoUrl}},
-        {text:'נתח את תוכן סרטון YouTube הציבורי המצורף. תן סיכום נאמן בעברית, עד 5 משפטים, וציין מה לא ניתן לקבוע בוודאות. אל תמציא פרטים ואל תתייחס לתיאור או לכותרת כאילו הם תוכן הסרטון.'}
-      ],false,false);
-      const summary=summaryResult?.response?.text?.();
+      const summary=await analyzePublicYouTubeVideo(videoUrl, question);
       if(summary && String(summary).trim())
-        return 'מצאתי את הסרטון '+title+'. '+sanitizeForYemot(summary)+'';
+        return 'מצאתי את הסרטון '+title+'. '+sanitizeForYemot(summary);
     } catch(e) {
-      console.warn('[YouTube] video understanding unavailable', {status:geminiErrorStatus(e),message:String(e?.message||'').slice(0,160)});
+      console.warn('[YouTube] video understanding unavailable', {status:geminiErrorStatus(e),message:String(e?.message||'').slice(0,240)});
     }
-    return 'מצאתי את הסרטון '+title+' אבל כרגע לא הצלחתי לקבל את תוכנו המלא. '+(sanitizeForYemot(selected.snippet?.description||'')||'אין תיאור זמין')+'.';
+    return 'מצאתי את הסרטון '+title+' אבל כרגע לא הצלחתי לנתח את תוכן הווידאו עצמו. '+(sanitizeForYemot(selected.snippet?.description||'')||'אין תיאור זמין')+'.';
   }
   const spoken=items.map((x,i)=>{
     const s=x.snippet||{};
