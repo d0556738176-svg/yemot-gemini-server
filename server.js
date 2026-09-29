@@ -264,14 +264,24 @@ function knownContactFallback(transcript, historyText='') {
     return 'מספר שירות הלקוחות של בנק פאגי הוא כוכבית 3360. לתמיכה טכנית באתר ובאפליקציה ניתן להתקשר לאפס שלוש, חמש אחת שלוש, אפס אפס אפס שלוש.';
   return null;
 }
-async function answerWithWebSearch(audioBase64, historyText='') {
-  const result = await generateWithRetry([...audioParts(audioBase64), {text:
-    `${EXCLUSIVE_INSTRUCTION}
+async function answerWithWebSearch(transcript, historyText='') {
+  const question=String(transcript||'').trim();
+  if(!question) throw Object.assign(new Error('Search requested but transcript is empty'),{status:400});
+  const prompt=`${EXCLUSIVE_INSTRUCTION}
 הקשר קודם של השיחה:
 ${historyText || 'אין עדיין הקשר קודם.'}
-המתקשר ביקש במפורש חיפוש באינטרנט. חפש מידע עדכני ורלוונטי באמצעות Google Search,
-ענה בשפה שבה המתקשר דיבר ובהתייחס להקשר הקודם. אם השאלה על סרטון YouTube, חפש קודם מידע על הסרטון לפי הכותרת, הערוץ והתיאור; אל תטען שצפית בסרטון או שקראת תמלול אם התוכן עצמו לא נגיש. אם אין מספיק מידע אמין, אמור זאת בקצרה. אם החיפוש נכשל, אמור שזו תקלה בחיפוש ואל תציג הודעת סינון. אל תציג כתובות אינטרנט.`}], true);
-  return result.response.text();
+
+השאלה המדויקת של המתקשר לחיפוש באינטרנט:
+${question}
+
+המתקשר ביקש במפורש חיפוש באינטרנט. השתמש בכלי Google Search המצורף לבקשה וחפש לפי השאלה המדויקת של המתקשר. אל תענה מהזיכרון בלבד.
+ענה בשפה שבה המתקשר דיבר, בתשובה קצרה וברורה שמתאימה להקראה בטלפון. כלול מספרי טלפון, כתובות, תאריכים ופרטים שימושיים אם נמצאו במקור אמין, והבחן בין מידע מאומת לבין מידע שלא נמצא.
+אם השאלה על סרטון YouTube, חפש לפי הנושא, הכותרת, הערוץ ותאריך הפרסום. אם המתקשר שואל על תוכן הסרטון, השתמש רק בתמליל או בתוכן מלא שנגיש בפועל דרך מקור מותר; אם אין גישה לתוכן עצמו, אמור זאת במפורש והצע סיכום של המידע הזמין בלבד. לעולם אל תטען שצפית בסרטון או קראת תמליל אם לא נגישו.
+אם החיפוש נכשל או לא החזיר מידע מספיק, אמור בקצרה שלא הצלחת להשיג מידע אמין כרגע. אל תציג כתובות אינטרנט ארוכות.`;
+  const result=await generateWithRetry([{text:prompt}],true,false);
+  const answer=result?.response?.text?.();
+  if(!answer || !String(answer).trim()) throw Object.assign(new Error('Web search returned an empty answer'),{status:503});
+  return String(answer).trim();
 }
 async function buildOpeningForCaller(phone) {
   const previous = conversationLog.filter(x=>x.phone===normalizePhone(phone)).slice(-8);
@@ -351,7 +361,7 @@ async function callHandler(call) {
       const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
       if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
       else if(replyText.startsWith('SEARCH_REQUEST')) {
-        try { replyText=await answerWithWebSearch(audioBase64, historyText); }
+        try { replyText=await answerWithWebSearch(userTranscript, historyText); }
         catch(searchError) {
           const fallback=knownContactFallback(userTranscript, historyText);
           if(fallback && [429,503,408].includes(geminiErrorStatus(searchError))) {
