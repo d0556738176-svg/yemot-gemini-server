@@ -13,7 +13,7 @@ export function normalizeYouTubeQuery(value) {
 
 function cleanedSearchText(original) {
   return normalizeYouTubeQuery(original)
-    .replace(/\b(הכי חדש|החדש ביותר|האחרון|האחרונה|אחרון|אחרונה|עדכני ביותר|חדש ביותר)\b/gi, ' ')
+    .replace(/\\b(הכי חדש|החדש ביותר|הכי חדשה|החדש|האחרון|האחרונה|אחרון|אחרונה|עדכני ביותר|חדש ביותר)\\b/gi, ' ')
     .replace(/\b(תביא לי|תביא|תן לי|תמצא לי|תמצא|תראה לי|אני רוצה|אני רוצה לראות|את הסרטון|סרטון|סרטונים)\b/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim()
