@@ -102,29 +102,45 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
 
   try {
     let lastError;
+    const failures = [];
 
-    for (const client of ['web_safari', 'mweb', 'web_embedded', 'android_vr', 'visionos', 'web', 'android']) {
+    // Use yt-dlp's maintained default client set first. Do not force android/android_vr:
+    // the installed bgutil provider does not support those clients, and doing so can
+    // hide the real error from the supported web clients.
+    for (const client of ['default', 'mweb']) {
       try {
         await tryDownload(url, output, client);
         lastError = null;
         break;
       } catch (error) {
         lastError = error;
+        const message = String(error?.message || error);
+        failures.push({ client, message: message.slice(0, 1500) });
         console.warn('[YouTube playback] client failed', {
           client,
           videoId: id,
-          message: String(error?.message || error).slice(0, 1000)
+          message: message.slice(0, 1500)
         });
         await fs.rm(output, { force: true }).catch(() => {});
+
+        // A country restriction is a property of the selected video. Retrying
+        // unrelated clients only wastes the caller's time.
+        if (/not made this video available in your country|not available in your country|geo.?restrict|country/i.test(message)) {
+          break;
+        }
       }
     }
 
     if (lastError) {
       const message = String(lastError?.message || lastError);
-      if (/sign in to confirm|not a bot|bot/i.test(message)) {
-        throw new Error('YouTube bot check blocked every playback client on Render');
+      if (/not made this video available in your country|not available in your country|geo.?restrict|country/i.test(message)) {
+        throw new Error('YouTube video is not available for playback in Israel');
       }
-      throw lastError;
+      if (/sign in to confirm|not a bot|bot/i.test(message)) {
+        throw new Error('YouTube bot check blocked playback on Render');
+      }
+      const summary = failures.map(x => x.client + ': ' + x.message).join(' | ');
+      throw new Error('YouTube playback failed: ' + summary.slice(0, 3500));
     }
 
     console.info('[YouTube playback] uploading to Yemot', {
