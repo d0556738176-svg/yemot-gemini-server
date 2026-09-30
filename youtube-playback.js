@@ -68,6 +68,7 @@ async function tryDownload(url, output, client) {
     extractAudio: true,
     audioFormat: 'mp3',
     audioQuality: '5',
+    format: 'bestaudio/best',
     noPlaylist: true,
     quiet: true,
     pluginDirs: YTDLP_PLUGIN_DIR,
@@ -100,7 +101,7 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
   try {
     let lastError;
 
-    for (const client of ['mweb', 'web_embedded', 'web_safari', 'android_vr', 'visionos', 'web', 'android']) {
+    for (const client of ['web_safari', 'mweb', 'web_embedded', 'android_vr', 'visionos', 'web', 'android']) {
       try {
         await tryDownload(url, output, client);
         lastError = null;
