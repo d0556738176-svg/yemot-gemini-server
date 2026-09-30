@@ -73,6 +73,7 @@ async function tryDownload(url, output, client) {
     noPlaylist: true,
     quiet: false,
     verbose: true,
+    jsRuntimes: 'node',
     pluginDirs: YTDLP_PLUGIN_ROOT,
     extractorArgs,
     maxFilesize: '49M',
@@ -104,9 +105,6 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
     let lastError;
     const failures = [];
 
-    // Use yt-dlp's maintained default client set first. Do not force android/android_vr:
-    // the installed bgutil provider does not support those clients, and doing so can
-    // hide the real error from the supported web clients.
     for (const client of ['web_safari', 'mweb', 'default']) {
       try {
         await tryDownload(url, output, client);
@@ -119,12 +117,10 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
         console.warn('[YouTube playback] client failed', {
           client,
           videoId: id,
-          message: message.slice(0, 1500)
+          message: message.replace(/\\s+/g, ' ').slice(0, 1500)
         });
         await fs.rm(output, { force: true }).catch(() => {});
 
-        // A country restriction is a property of the selected video. Retrying
-        // unrelated clients only wastes the caller's time.
         if (/not made this video available in your country|not available in your country|geo.?restrict|country/i.test(message)) {
           break;
         }
@@ -139,7 +135,7 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
       if (/sign in to confirm|not a bot|bot/i.test(message)) {
         throw new Error('YouTube bot check blocked playback on Render');
       }
-      const summary = failures.map(x => x.client + ': ' + x.message).join(' | ');
+      const summary = failures.map(x => x.client + ': ' + x.message.replace(/\\s+/g, ' ')).join(' | ');
       throw new Error('YouTube playback failed: ' + summary.slice(0, 3500));
     }
 
