@@ -100,7 +100,7 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
   try {
     let lastError;
 
-    for (const client of ['visionos', 'web_embedded', 'mweb', 'web', 'android_vr', 'android']) {
+    for (const client of ['mweb', 'web_embedded', 'web_safari', 'android_vr', 'visionos', 'web', 'android']) {
       try {
         await tryDownload(url, output, client);
         lastError = null;
