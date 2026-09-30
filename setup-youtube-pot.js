@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 const root = process.cwd();
 const providerRoot = path.join(root, '.bgutil-ytdlp-pot-provider');
 const serverDir = path.join(providerRoot, 'server');
-const pluginRoot = path.join(root, 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp-plugins');
+const pluginRoot = path.join(root, 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp-plugins', 'bgutil-ytdlp-pot-provider');
 const pluginTarget = path.join(pluginRoot, 'yt_dlp_plugins');
 
 async function exists(p) {
