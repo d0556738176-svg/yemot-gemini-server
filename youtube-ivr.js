@@ -10,7 +10,7 @@
 export function normalizeYouTubeQuery(value) {
   return String(value || '')
     .replace(/(תחפש לי באינטרנט|תחפש באינטרנט|חפש באינטרנט|ביוטיוב|ביויוטב|ביוטוב|ב youtube|youtube)/gi, ' ')
-    .replace(/\\s+/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 120);
 }
@@ -70,7 +70,7 @@ export function formatYouTubeChoices(videos) {
 
 export function getSelectedYouTubeVideo(videos, keypadValue) {
   const digits = String(keypadValue ?? '').trim();
-  if (!/^\\d{1,2}$/.test(digits)) return null;
+  if (!/^\d{1,2}$/.test(digits)) return null;
   const index = Number(digits) - 1;
   if (!Array.isArray(videos) || index < 0 || index >= videos.length) return null;
   return videos[index];
@@ -78,5 +78,5 @@ export function getSelectedYouTubeVideo(videos, keypadValue) {
 
 function cleanForSpeech(value) {
   return String(value || '').replace(/[.&"“”‘’']/g, ' ').replace(/[-–—]/g, ' ')
-    .replace(/\\s+/g, ' ').trim();
+    .replace(/\s+/g, ' ').trim();
 }
