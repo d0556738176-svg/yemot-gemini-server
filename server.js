@@ -524,14 +524,14 @@ async function youtubeCallHandler(call) {
       { text: 'תמלל רק את דברי המתקשר. החזר רק את התמלול בעברית, בלי הסברים ובלי לענות לשאלה.' }
     ], false, true);
 
-    const transcript = sanitizeForYemot(transcriptionResult.response.text());
-    console.info('[YouTube IVR] transcript', { chars: transcript.length, transcript });
+    const searchTranscript = sanitizeForYemot(transcriptionResult.response.text());
+    console.info('[YouTube IVR] transcript', { chars: searchTranscript.length, transcript: searchTranscript });
 
-    if (!transcript) {
+    if (!searchTranscript) {
       return call.id_list_message([{ type: 'text', data: 'לא הצלחתי להבין את החיפוש. נא לנסות שוב' }]);
     }
 
-    const videos = (await searchYouTubeVideos(transcript)).slice(0, 9);
+    const videos = (await searchYouTubeVideos(searchTranscript)).slice(0, 9);
     if (!videos.length) {
       return call.id_list_message([{ type: 'text', data: 'לא מצאתי סרטונים מתאימים. נא לנסות שוב במילים אחרות' }]);
     }
@@ -551,18 +551,18 @@ async function youtubeCallHandler(call) {
     const title = sanitizeForYemot(selected.title);
     console.info('[YouTube IVR] fetching transcript', { videoId: selected.videoId, title });
 
-    const transcript = await getYouTubeTranscript(selected.videoId);
+    const selectedTranscript = await getYouTubeTranscript(selected.videoId);
 
     console.info('[YouTube IVR] transcript ready', {
       videoId: selected.videoId,
-      language: transcript.language,
-      chars: transcript.text.length,
-      chunks: transcript.chunks.length
+      language: selectedTranscript.language,
+      chars: selectedTranscript.text.length,
+      chunks: selectedTranscript.chunks.length
     });
 
     return call.id_list_message([
       { type: 'text', data: 'בחרת את הסרטון ' + title + '. הנה הכתוביות של הסרטון.' },
-      ...transcript.chunks.map(chunk => ({ type: 'text', data: chunk }))
+      ...selectedTranscript.chunks.map(chunk => ({ type: 'text', data: chunk }))
     ]);
   } catch (error) {
     logDetailedError('YouTube IVR', error);
