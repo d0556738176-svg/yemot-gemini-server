@@ -563,11 +563,14 @@ async function youtubeCallHandler(call) {
   } catch (error) {
     logDetailedError('YouTube IVR', error);
     const status = geminiErrorStatus(error);
-    const message = status === 429
-      ? 'זיהוי הדיבור עמוס כרגע נא לנסות שוב'
-      : status === 503
-        ? 'שירות יוטיוב אינו זמין כרגע'
-        : 'אירעה תקלה בהשמעת הסרטון נא לנסות שוב';
+    const errorText = String(error?.message || error || '');
+    const message = /לא זמין.*בישראל|not available for playback in israel/i.test(errorText)
+      ? 'הסרטון שבחרת אינו זמין להשמעה בישראל. נא לבחור סרטון אחר.'
+      : status === 429
+        ? 'זיהוי הדיבור עמוס כרגע נא לנסות שוב'
+        : status === 503
+          ? 'שירות יוטיוב אינו זמין כרגע'
+          : 'אירעה תקלה בהשמעת הסרטון נא לנסות שוב';
     return call.id_list_message([{ type: 'text', data: message }]);
   }
 }
