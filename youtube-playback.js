@@ -73,7 +73,6 @@ async function tryDownload(url, output, client) {
     noPlaylist: true,
     quiet: false,
     verbose: true,
-    noWarnings: false,
     printTraffic: false,
     pluginDirs: YTDLP_PLUGIN_ROOT,
     extractorArgs,
