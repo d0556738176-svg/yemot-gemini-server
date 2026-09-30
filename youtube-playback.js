@@ -18,8 +18,6 @@ async function uploadToYemot(filePath, remotePath) {
     throw new Error('YouTube audio is too large for Yemot');
   }
 
-  // Yemot's UploadFile API is most reliable when the metadata is sent as
-  // query parameters and the actual audio is the multipart body.
   const url = new URL(YEMOT_UPLOAD_URL);
   url.searchParams.set('token', yemotApiKey());
   url.searchParams.set('path', remotePath);
@@ -53,7 +51,10 @@ async function uploadToYemot(filePath, remotePath) {
 }
 
 async function tryDownload(url, output, client) {
-  console.info('[YouTube playback] trying client', { client, videoId: path.basename(output, '.mp3') });
+  console.info('[YouTube playback] trying client', {
+    client,
+    videoId: path.basename(output, '.mp3')
+  });
 
   await youtubedl(url, {
     output,
@@ -62,9 +63,7 @@ async function tryDownload(url, output, client) {
     audioQuality: '5',
     noPlaylist: true,
     quiet: true,
-    noWarnings: true,
-    // YouTube changes client requirements frequently. Try clients in a
-    // controlled order instead of relying on a single hosted-server client.
+    noWarnings: false,
     extractorArgs: 'youtube:player_client=' + client,
     maxFilesize: '49M',
     ...(ffmpegPath ? { ffmpegLocation: ffmpegPath } : {})
@@ -72,6 +71,7 @@ async function tryDownload(url, output, client) {
 
   const stat = await fs.stat(output);
   if (!stat.size) throw new Error('yt-dlp produced an empty audio file');
+
   console.info('[YouTube playback] downloaded', {
     client,
     videoId: path.basename(output, '.mp3'),
@@ -92,10 +92,12 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
 
   try {
     let lastError;
-    // tv avoids the current android client GVS/Player enforcement when it is
-    // available. web_embedded works for embeddable videos. android is kept as
-    // a fallback because it has worked for some current YouTube responses.
-    for (const client of ['tv', 'web_embedded', 'android']) {
+
+    // Current YouTube enforcement is blocking some server IPs with the
+    // regular Android client. Try clients that currently avoid PO tokens
+    // before falling back to Android. android_vr can provide a muxed stream
+    // that ffmpeg can extract to audio even when other clients are blocked.
+    for (const client of ['tv', 'android_vr', 'web_embedded', 'android']) {
       try {
         await tryDownload(url, output, client);
         lastError = null;
@@ -105,15 +107,25 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
         console.warn('[YouTube playback] client failed', {
           client,
           videoId: id,
-          message: String(error?.message || error).slice(0, 500)
+          message: String(error?.message || error).slice(0, 800)
         });
         await fs.rm(output, { force: true }).catch(() => {});
       }
     }
 
-    if (lastError) throw lastError;
+    if (lastError) {
+      const message = String(lastError?.message || lastError);
+      if (/sign in to confirm|not a bot|bot/i.test(message)) {
+        throw new Error('YouTube blocked the Render server IP with a bot check after all playback clients failed');
+      }
+      throw lastError;
+    }
 
-    console.info('[YouTube playback] uploading to Yemot', { videoId: id, remotePath });
+    console.info('[YouTube playback] uploading to Yemot', {
+      videoId: id,
+      remotePath
+    });
+
     const uploadResult = await uploadToYemot(output, remotePath);
     console.info('[YouTube playback] upload complete', {
       videoId: id,
@@ -122,6 +134,7 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
       duration: uploadResult.duration ?? null
     });
 
+    // yemot-router2 expects a file path without the extension.
     return { remotePath, playbackPath: '/2/youtube/' + id };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
