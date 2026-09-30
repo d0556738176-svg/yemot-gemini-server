@@ -498,19 +498,42 @@ async function callHandler(call) {
  */
 async function youtubeCallHandler(call) {
   try {
-    // Use Yemot STT directly for the YouTube query so this flow does not
-    // depend on Gemini quota just to understand the search words.
-    const transcript = sanitizeForYemot(await call.read([
+    // Do not use Yemot's paid STT service here. The live account reported
+    // "אין מספיק יחידות", so this flow records the caller and uses the
+    // already-configured Gemini audio transcription path instead.
+    const recordPath = await call.read([
       { type: 'text', data: sanitizeForYemot('ברוכים הבאים לחיפוש ביוטיוב. אמור אחרי הצפצוף את הנושא או שם הערוץ שברצונך לחפש, ולסיום הקש סולמית.') }
-    ], 'stt', { min_length: 1, max_length: 120, sec_wait: 2 }));
+    ], 'record', { min_length: 1, max_length: 20, no_confirm_menu: true });
+
+    if (!recordPath || recordPath === 'None') {
+      return call.id_list_message([{ type: 'text', data: 'לא נקלט חיפוש. נא לנסות שוב' }]);
+    }
+
+    const audioResponse = await withTimeout(
+      yemotApi.download_file('ivr2:' + recordPath),
+      REQUEST_TIMEOUT_MS,
+      'youtube search recording download'
+    );
+    const audioBuffer = audioResponse.data;
+    const audioBase64 = Buffer.isBuffer(audioBuffer)
+      ? audioBuffer.toString('base64')
+      : Buffer.from(audioBuffer).toString('base64');
+
+    const transcriptionResult = await generateWithRetry([
+      ...audioParts(audioBase64),
+      { text: 'תמלל רק את דברי המתקשר. החזר רק את התמלול בעברית, בלי הסברים ובלי לענות לשאלה.' }
+    ], false, true);
+
+    const transcript = sanitizeForYemot(transcriptionResult.response.text());
+    console.info('[YouTube IVR] transcript', { chars: transcript.length, transcript });
 
     if (!transcript) {
-      return call.id_list_message([{ type: 'text', data: 'לא הצלחתי להבין את החיפוש. נא לנסות שוב.' }]);
+      return call.id_list_message([{ type: 'text', data: 'לא הצלחתי להבין את החיפוש. נא לנסות שוב' }]);
     }
 
     const videos = (await searchYouTubeVideos(transcript)).slice(0, 9);
     if (!videos.length) {
-      return call.id_list_message([{ type: 'text', data: 'לא מצאתי סרטונים מתאימים. נא לנסות שוב במילים אחרות.' }]);
+      return call.id_list_message([{ type: 'text', data: 'לא מצאתי סרטונים מתאימים. נא לנסות שוב במילים אחרות' }]);
     }
 
     const selectionPrompt = formatYouTubeChoices(videos);
@@ -522,7 +545,7 @@ async function youtubeCallHandler(call) {
 
     const selected = getSelectedYouTubeVideo(videos, keypad);
     if (!selected) {
-      return call.id_list_message([{ type: 'text', data: 'הבחירה לא תקינה. נא להקיש מספר בין אחת לתשע.' }]);
+      return call.id_list_message([{ type: 'text', data: 'הבחירה לא תקינה. נא להקיש מספר בין אחת לתשע' }]);
     }
 
     const title = sanitizeForYemot(selected.title);
@@ -539,9 +562,12 @@ async function youtubeCallHandler(call) {
     ]);
   } catch (error) {
     logDetailedError('YouTube IVR', error);
-    const message = error?.status === 503
-      ? 'חיפוש יוטיוב אינו מוגדר כרגע'
-      : 'אירעה תקלה בהשמעת הסרטון. נא לנסות שוב';
+    const status = geminiErrorStatus(error);
+    const message = status === 429
+      ? 'זיהוי הדיבור עמוס כרגע נא לנסות שוב'
+      : status === 503
+        ? 'שירות יוטיוב אינו זמין כרגע'
+        : 'אירעה תקלה בהשמעת הסרטון נא לנסות שוב';
     return call.id_list_message([{ type: 'text', data: message }]);
   }
 }
