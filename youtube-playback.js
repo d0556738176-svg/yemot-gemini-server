@@ -5,6 +5,7 @@ import youtubedl from 'youtube-dl-exec';
 import ffmpegPath from 'ffmpeg-static';
 
 const YEMOT_UPLOAD_URL = 'https://www.call2all.co.il/ym/api/UploadFile';
+const YTDLP_PLUGIN_DIR = path.join(process.cwd(), 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp-plugins');
 
 function yemotApiKey() {
   const key = String(process.env.YEMOT_API_KEY || '').trim();
@@ -53,8 +54,14 @@ async function uploadToYemot(filePath, remotePath) {
 async function tryDownload(url, output, client) {
   console.info('[YouTube playback] trying client', {
     client,
-    videoId: path.basename(output, '.mp3')
+    videoId: path.basename(output, '.mp3'),
+    pluginDir: YTDLP_PLUGIN_DIR
   });
+
+  const extractorArgs = [
+    'youtube:player_client=' + client,
+    'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416'
+  ].join(';');
 
   await youtubedl(url, {
     output,
@@ -64,7 +71,8 @@ async function tryDownload(url, output, client) {
     noPlaylist: true,
     quiet: true,
     noWarnings: false,
-    extractorArgs: 'youtube:player_client=' + client,
+    pluginDirs: YTDLP_PLUGIN_DIR,
+    extractorArgs,
     maxFilesize: '49M',
     ...(ffmpegPath ? { ffmpegLocation: ffmpegPath } : {})
   });
@@ -93,11 +101,7 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
   try {
     let lastError;
 
-    // Current YouTube enforcement is blocking some server IPs with the
-    // regular Android client. Try clients that currently avoid PO tokens
-    // before falling back to Android. android_vr can provide a muxed stream
-    // that ffmpeg can extract to audio even when other clients are blocked.
-    for (const client of ['tv', 'android_vr', 'web_embedded', 'android']) {
+    for (const client of ['mweb', 'tv', 'android_vr', 'web_embedded', 'android']) {
       try {
         await tryDownload(url, output, client);
         lastError = null;
@@ -107,7 +111,7 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
         console.warn('[YouTube playback] client failed', {
           client,
           videoId: id,
-          message: String(error?.message || error).slice(0, 800)
+          message: String(error?.message || error).slice(0, 1000)
         });
         await fs.rm(output, { force: true }).catch(() => {});
       }
@@ -116,7 +120,7 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
     if (lastError) {
       const message = String(lastError?.message || lastError);
       if (/sign in to confirm|not a bot|bot/i.test(message)) {
-        throw new Error('YouTube blocked the Render server IP with a bot check after all playback clients failed');
+        throw new Error('YouTube bot check blocked every playback client on Render');
       }
       throw lastError;
     }
@@ -134,7 +138,6 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
       duration: uploadResult.duration ?? null
     });
 
-    // yemot-router2 expects a file path without the extension.
     return { remotePath, playbackPath: '/2/youtube/' + id };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
