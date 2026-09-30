@@ -107,7 +107,7 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
     // Use yt-dlp's maintained default client set first. Do not force android/android_vr:
     // the installed bgutil provider does not support those clients, and doing so can
     // hide the real error from the supported web clients.
-    for (const client of ['default', 'mweb']) {
+    for (const client of ['web_safari', 'mweb', 'default']) {
       try {
         await tryDownload(url, output, client);
         lastError = null;
