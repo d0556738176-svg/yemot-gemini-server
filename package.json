@@ -4,10 +4,11 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "postinstall": "node setup-youtube-pot.js",
+    "start": "node start-with-youtube-pot.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "express": "^5.2.1",
