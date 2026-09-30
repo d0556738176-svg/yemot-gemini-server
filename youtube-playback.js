@@ -5,7 +5,7 @@ import youtubedl from 'youtube-dl-exec';
 import ffmpegPath from 'ffmpeg-static';
 
 const YEMOT_UPLOAD_URL = 'https://www.call2all.co.il/ym/api/UploadFile';
-const YTDLP_PLUGIN_DIR = path.join(process.cwd(), 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp-plugins');
+const YTDLP_PLUGIN_ROOT = path.join(process.cwd(), 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp-plugins');
 
 function yemotApiKey() {
   const key = String(process.env.YEMOT_API_KEY || '').trim();
@@ -55,12 +55,13 @@ async function tryDownload(url, output, client) {
   console.info('[YouTube playback] trying client', {
     client,
     videoId: path.basename(output, '.mp3'),
-    pluginDir: YTDLP_PLUGIN_DIR
+    pluginDir: YTDLP_PLUGIN_ROOT
   });
 
   const extractorArgs = [
     'youtube:player_client=' + client,
-    'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416'
+    'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416',
+    'pot_trace=true'
   ].join(';');
 
   await youtubedl(url, {
@@ -70,8 +71,11 @@ async function tryDownload(url, output, client) {
     audioQuality: '5',
     format: 'bestaudio/best',
     noPlaylist: true,
-    quiet: true,
-    pluginDirs: YTDLP_PLUGIN_DIR,
+    quiet: false,
+    verbose: true,
+    noWarnings: false,
+    printTraffic: false,
+    pluginDirs: YTDLP_PLUGIN_ROOT,
     extractorArgs,
     maxFilesize: '49M',
     ...(ffmpegPath ? { ffmpegLocation: ffmpegPath } : {})
