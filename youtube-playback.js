@@ -67,6 +67,9 @@ export async function downloadAndUploadYouTubeAudio(videoId) {
       noPlaylist: true,
       quiet: true,
       noWarnings: true,
+      // Current YouTube servers can reject the default extractor client on hosted IPs.
+      // The Android player client is a documented yt-dlp workaround for this failure mode.
+      extractorArgs: 'youtube:player_client=android',
       maxFilesize: '49M',
       ...(ffmpegPath ? { ffmpegLocation: ffmpegPath } : {})
     });
