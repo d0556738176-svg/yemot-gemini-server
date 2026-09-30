@@ -22,18 +22,27 @@ export async function searchYouTubeVideos(query, {
   timeoutMs = 15000
 } = {}) {
   const key = String(apiKey || '').trim();
-  const q = normalizeYouTubeQuery(query);
+  const original = String(query || '').trim();
+  const q = normalizeYouTubeQuery(original)
+    .replace(/\b(הכי חדש|החדש ביותר|האחרון|האחרונה|אחרון|אחרונה|עדכני ביותר|חדש ביותר)\b/gi, ' ')
+    .replace(/\b(תביא לי|תביא|תן לי|תמצא לי|תמצא|תראה לי|אני רוצה|אני רוצה לראות|את הסרטון|סרטון|סרטונים)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+
   if (!key) throw Object.assign(new Error('YouTube search is not configured'), { status: 503 });
   if (!q) return [];
+
+  const wantsNewest = /(הכי חדש|החדש ביותר|האחרון|האחרונה|אחרון|אחרונה|עדכני ביותר|חדש ביותר)/i.test(original);
 
   const url = new URL('https://www.googleapis.com/youtube/v3/search');
   url.searchParams.set('part', 'snippet');
   url.searchParams.set('q', q);
   url.searchParams.set('type', 'video');
-  url.searchParams.set('maxResults', '10');
-  url.searchParams.set('safeSearch', 'strict');
+  url.searchParams.set('maxResults', '50');
+  url.searchParams.set('safeSearch', 'none');
   url.searchParams.set('regionCode', regionCode);
-  url.searchParams.set('order', /(הכי חדש|החדש ביותר|אחרון|אחרונה|עדכני ביותר|חדש ביותר)/i.test(query) ? 'date' : 'relevance');
+  url.searchParams.set('order', wantsNewest ? 'date' : 'relevance');
   url.searchParams.set('key', key);
 
   const controller = new AbortController();
@@ -46,13 +55,26 @@ export async function searchYouTubeVideos(query, {
       error.status = response.status === 403 ? 502 : response.status;
       throw error;
     }
-    return (data.items || []).filter(item => item.id?.videoId).map(item => ({
-      videoId: item.id.videoId,
-      title: String(item.snippet?.title || 'ללא כותרת'),
-      channelTitle: String(item.snippet?.channelTitle || 'ערוץ לא ידוע'),
-      publishedAt: item.snippet?.publishedAt || null,
-      description: String(item.snippet?.description || '')
-    }));
+
+    const results = (data.items || [])
+      .filter(item => item.id?.videoId)
+      .map(item => ({
+        videoId: item.id.videoId,
+        title: String(item.snippet?.title || 'ללא כותרת'),
+        channelTitle: String(item.snippet?.channelTitle || 'ערוץ לא ידוע'),
+        publishedAt: item.snippet?.publishedAt || null,
+        description: String(item.snippet?.description || '')
+      }));
+
+    if (wantsNewest) {
+      results.sort((a, b) => {
+        const ad = a.publishedAt ? Date.parse(a.publishedAt) : 0;
+        const bd = b.publishedAt ? Date.parse(b.publishedAt) : 0;
+        return bd - ad;
+      });
+    }
+
+    return results;
   } finally {
     clearTimeout(timer);
   }
