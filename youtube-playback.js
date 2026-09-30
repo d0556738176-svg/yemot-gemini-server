@@ -70,7 +70,6 @@ async function tryDownload(url, output, client) {
     audioQuality: '5',
     noPlaylist: true,
     quiet: true,
-    noWarnings: false,
     pluginDirs: YTDLP_PLUGIN_DIR,
     extractorArgs,
     maxFilesize: '49M',
