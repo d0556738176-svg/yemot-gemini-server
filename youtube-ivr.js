@@ -1,10 +1,6 @@
 /**
  * Isolated YouTube IVR helpers.
- *
- * This module deliberately handles discovery and keypad selection only.
- * YouTube Data API search results are metadata, not playable audio streams.
- * Playback must be connected separately to a permitted audio source and a
- * playback method supported by the telephony provider.
+ * Search and keypad selection are kept independent from playback.
  */
 
 export function normalizeYouTubeQuery(value) {
@@ -15,6 +11,36 @@ export function normalizeYouTubeQuery(value) {
     .slice(0, 120);
 }
 
+function cleanedSearchText(original) {
+  return normalizeYouTubeQuery(original)
+    .replace(/\b(הכי חדש|החדש ביותר|האחרון|האחרונה|אחרון|אחרונה|עדכני ביותר|חדש ביותר)\b/gi, ' ')
+    .replace(/\b(תביא לי|תביא|תן לי|תמצא לי|תמצא|תראה לי|אני רוצה|אני רוצה לראות|את הסרטון|סרטון|סרטונים)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
+function wantsNewestQuery(original) {
+  return /(הכי חדש|החדש ביותר|האחרון|האחרונה|אחרון|אחרונה|עדכני ביותר|חדש ביותר)/i.test(String(original || ''));
+}
+
+async function fetchJson(url, fetchImpl, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(url, { signal: controller.signal });
+    const data = await response.json();
+    if (!response.ok) {
+      const error = new Error('YouTube search failed with HTTP ' + response.status);
+      error.status = response.status === 403 ? 502 : response.status;
+      throw error;
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function searchYouTubeVideos(query, {
   apiKey = process.env.YOUTUBE_API_KEY,
   regionCode = process.env.YOUTUBE_REGION_CODE || 'IL',
@@ -23,17 +49,61 @@ export async function searchYouTubeVideos(query, {
 } = {}) {
   const key = String(apiKey || '').trim();
   const original = String(query || '').trim();
-  const q = normalizeYouTubeQuery(original)
-    .replace(/\b(הכי חדש|החדש ביותר|האחרון|האחרונה|אחרון|אחרונה|עדכני ביותר|חדש ביותר)\b/gi, ' ')
-    .replace(/\b(תביא לי|תביא|תן לי|תמצא לי|תמצא|תראה לי|אני רוצה|אני רוצה לראות|את הסרטון|סרטון|סרטונים)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120);
+  const q = cleanedSearchText(original);
 
   if (!key) throw Object.assign(new Error('YouTube search is not configured'), { status: 503 });
   if (!q) return [];
 
-  const wantsNewest = /(הכי חדש|החדש ביותר|האחרון|האחרונה|אחרון|אחרונה|עדכני ביותר|חדש ביותר)/i.test(original);
+  const wantsNewest = wantsNewestQuery(original);
+
+  // For "הסרטון הכי חדש של X", first resolve X as a YouTube channel.
+  // A generic video search can return unrelated videos when the person's name
+  // is common or when the requested name is not present in the title.
+  if (wantsNewest) {
+    const channelUrl = new URL('https://www.googleapis.com/youtube/v3/search');
+    channelUrl.searchParams.set('part', 'snippet');
+    channelUrl.searchParams.set('q', q);
+    channelUrl.searchParams.set('type', 'channel');
+    channelUrl.searchParams.set('maxResults', '10');
+    channelUrl.searchParams.set('regionCode', regionCode);
+    channelUrl.searchParams.set('key', key);
+
+    const channelData = await fetchJson(channelUrl, fetchImpl, timeoutMs);
+    const channels = (channelData.items || []).filter(x => x.id?.channelId);
+
+    if (channels.length) {
+      // Prefer the channel whose title contains the requested words.
+      const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+      const ranked = channels.map((channel, index) => {
+        const title = String(channel.snippet?.channelTitle || '').toLowerCase();
+        const score = words.reduce((sum, word) => sum + (title.includes(word) ? 1 : 0), 0);
+        return { channel, score, index };
+      }).sort((a, b) => b.score - a.score || a.index - b.index);
+
+      const channelId = ranked[0].channel.id.channelId;
+      const videoUrl = new URL('https://www.googleapis.com/youtube/v3/search');
+      videoUrl.searchParams.set('part', 'snippet');
+      videoUrl.searchParams.set('channelId', channelId);
+      videoUrl.searchParams.set('type', 'video');
+      videoUrl.searchParams.set('order', 'date');
+      videoUrl.searchParams.set('maxResults', '9');
+      videoUrl.searchParams.set('regionCode', regionCode);
+      videoUrl.searchParams.set('key', key);
+
+      const videoData = await fetchJson(videoUrl, fetchImpl, timeoutMs);
+      const channelVideos = (videoData.items || [])
+        .filter(item => item.id?.videoId)
+        .map(item => ({
+          videoId: item.id.videoId,
+          title: String(item.snippet?.title || 'ללא כותרת'),
+          channelTitle: String(item.snippet?.channelTitle || 'ערוץ לא ידוע'),
+          publishedAt: item.snippet?.publishedAt || null,
+          description: String(item.snippet?.description || '')
+        }));
+
+      if (channelVideos.length) return channelVideos;
+    }
+  }
 
   const url = new URL('https://www.googleapis.com/youtube/v3/search');
   url.searchParams.set('part', 'snippet');
@@ -45,39 +115,22 @@ export async function searchYouTubeVideos(query, {
   url.searchParams.set('order', wantsNewest ? 'date' : 'relevance');
   url.searchParams.set('key', key);
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetchImpl(url, { signal: controller.signal });
-    const data = await response.json();
-    if (!response.ok) {
-      const error = new Error('YouTube search failed with HTTP ' + response.status);
-      error.status = response.status === 403 ? 502 : response.status;
-      throw error;
-    }
+  const data = await fetchJson(url, fetchImpl, timeoutMs);
+  const results = (data.items || [])
+    .filter(item => item.id?.videoId)
+    .map(item => ({
+      videoId: item.id.videoId,
+      title: String(item.snippet?.title || 'ללא כותרת'),
+      channelTitle: String(item.snippet?.channelTitle || 'ערוץ לא ידוע'),
+      publishedAt: item.snippet?.publishedAt || null,
+      description: String(item.snippet?.description || '')
+    }));
 
-    const results = (data.items || [])
-      .filter(item => item.id?.videoId)
-      .map(item => ({
-        videoId: item.id.videoId,
-        title: String(item.snippet?.title || 'ללא כותרת'),
-        channelTitle: String(item.snippet?.channelTitle || 'ערוץ לא ידוע'),
-        publishedAt: item.snippet?.publishedAt || null,
-        description: String(item.snippet?.description || '')
-      }));
-
-    if (wantsNewest) {
-      results.sort((a, b) => {
-        const ad = a.publishedAt ? Date.parse(a.publishedAt) : 0;
-        const bd = b.publishedAt ? Date.parse(b.publishedAt) : 0;
-        return bd - ad;
-      });
-    }
-
-    return results;
-  } finally {
-    clearTimeout(timer);
+  if (wantsNewest) {
+    results.sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
   }
+
+  return results;
 }
 
 export function formatYouTubeChoices(videos) {
