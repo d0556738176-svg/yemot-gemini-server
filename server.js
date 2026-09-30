@@ -4,6 +4,7 @@ import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos, formatYouTubeChoices, getSelectedYouTubeVideo } from './youtube-ivr.js';
+import { downloadAndUploadYouTubeAudio } from './youtube-playback.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -515,7 +516,12 @@ async function youtubeCallHandler(call) {
     if (!selected) return call.id_list_message([{ type: 'text', data: sanitizeForYemot('הבחירה לא תקינה. נא לנסות שוב.') }]);
     const title = sanitizeForYemot(selected.title);
     // Metadata search does not provide an authorized phone-playable audio stream.
-    return call.id_list_message([{ type: 'text', data: sanitizeForYemot('בחרת את הסרטון ') + title + '. השמעת הסרטון תבוצע לאחר חיבור מקור האודיו של ימות.' }]);
+    const playback = await downloadAndUploadYouTubeAudio(selected.videoId);
+    logCallEvent('youtube_playback_ready', { videoId: selected.videoId, path: playback.remotePath });
+    return call.id_list_message([
+      { type: 'text', data: sanitizeForYemot('בחרת את הסרטון ') + title + '.' },
+      { type: 'file', data: playback.playbackPath }
+    ]);
   } catch (error) {
     logDetailedError('YouTube IVR', error);
     const message = error?.status === 503 ? 'חיפוש יוטיוב אינו מוגדר כרגע.' :
