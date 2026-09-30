@@ -497,25 +497,25 @@ async function callHandler(call) {
  */
 async function youtubeCallHandler(call) {
   try {
-    const recordPath = await call.read([{ type: 'text', data: 'ברוכים הבאים לחיפוש ביוטיוב. אמור אחרי הצפצוף את הנושא או שם הערוץ שברצונך לחפש, ולסיום הקש סולמית.' }], 'record',
+    const recordPath = await call.read([{ type: 'text', data: sanitizeForYemot('ברוכים הבאים לחיפוש ביוטיוב. אמור אחרי הצפצוף את הנושא או שם הערוץ שברצונך לחפש, ולסיום הקש סולמית.') }], 'record',
       { min_length: 1, max_length: 45, no_confirm_menu: true });
     if (!recordPath || recordPath === 'None') {
-      return call.id_list_message([{ type: 'text', data: 'לא נקלטה בקשה. להתראות.' }]);
+      return call.id_list_message([{ type: 'text', data: sanitizeForYemot('לא נקלטה בקשה. להתראות.') }]);
     }
     const audioResponse = await withTimeout(yemotApi.download_file('ivr2:' + recordPath), REQUEST_TIMEOUT_MS, 'YouTube IVR recording download');
     const audio = Buffer.isBuffer(audioResponse.data) ? audioResponse.data : Buffer.from(audioResponse.data);
     const transcript = await transcribeForDashboard(audio.toString('base64'));
-    if (!transcript) return call.id_list_message([{ type: 'text', data: 'לא הצלחתי להבין את הבקשה. נסה שוב מאוחר יותר.' }]);
+    if (!transcript) return call.id_list_message([{ type: 'text', data: sanitizeForYemot('לא הצלחתי להבין את הבקשה. נסה שוב מאוחר יותר.') }]);
     const videos = (await searchYouTubeVideos(transcript)).slice(0, 9);
-    if (!videos.length) return call.id_list_message([{ type: 'text', data: 'לא מצאתי סרטונים מתאימים. נא להתקשר שוב ולנסות מילות חיפוש אחרות.' }]);
+    if (!videos.length) return call.id_list_message([{ type: 'text', data: sanitizeForYemot('לא מצאתי סרטונים מתאימים. נא להתקשר שוב ולנסות מילות חיפוש אחרות.') }]);
     const selectionPrompt = formatYouTubeChoices(videos) + ' להקשה על תוצאה אחת עד תשע.';
     const keypad = await call.read([{ type: 'text', data: sanitizeForYemot(selectionPrompt) }], 'tap',
       { min_digits: 1, max_digits: 1, digits_allowed: [1,2,3,4,5,6,7,8,9], sec_wait: 8 });
     const selected = getSelectedYouTubeVideo(videos, keypad);
-    if (!selected) return call.id_list_message([{ type: 'text', data: 'הבחירה לא תקינה. נא לנסות שוב.' }]);
+    if (!selected) return call.id_list_message([{ type: 'text', data: sanitizeForYemot('הבחירה לא תקינה. נא לנסות שוב.') }]);
     const title = sanitizeForYemot(selected.title);
     // Metadata search does not provide an authorized phone-playable audio stream.
-    return call.id_list_message([{ type: 'text', data: 'בחרת את הסרטון ' + title + '. כרגע החיפוש והבחירה פועלים, אך השמעת הסרטון בשיחה עדיין לא מחוברת.' }]);
+    return call.id_list_message([{ type: 'text', data: sanitizeForYemot('בחרת את הסרטון ') + title + '. כרגע החיפוש והבחירה פועלים, אך השמעת הסרטון בשיחה עדיין לא מחוברת.' }]);
   } catch (error) {
     logDetailedError('YouTube IVR', error);
     const message = error?.status === 503 ? 'חיפוש יוטיוב אינו מוגדר כרגע.' :
