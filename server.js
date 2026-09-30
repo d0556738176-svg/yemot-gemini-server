@@ -515,7 +515,7 @@ async function youtubeCallHandler(call) {
     if (!selected) return call.id_list_message([{ type: 'text', data: sanitizeForYemot('הבחירה לא תקינה. נא לנסות שוב.') }]);
     const title = sanitizeForYemot(selected.title);
     // Metadata search does not provide an authorized phone-playable audio stream.
-    return call.id_list_message([{ type: 'text', data: sanitizeForYemot('בחרת את הסרטון ') + title + '. כרגע החיפוש והבחירה פועלים, אך השמעת הסרטון בשיחה עדיין לא מחוברת.' }]);
+    return call.id_list_message([{ type: 'text', data: sanitizeForYemot('בחרת את הסרטון ') + title + '. השמעת הסרטון תבוצע לאחר חיבור מקור האודיו של ימות.' }]);
   } catch (error) {
     logDetailedError('YouTube IVR', error);
     const message = error?.status === 503 ? 'חיפוש יוטיוב אינו מוגדר כרגע.' :
