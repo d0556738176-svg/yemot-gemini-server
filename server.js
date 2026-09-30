@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import YemotApi from 'yemot-api';
+import { searchYouTubeVideos, formatYouTubeChoices, getSelectedYouTubeVideo } from './youtube-ivr.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -489,7 +490,42 @@ async function callHandler(call) {
   }
 }
 
+
+/**
+ * Isolated YouTube IVR flow. Results live only in this call's async context.
+ * Uses the same raw-recording -> Gemini transcription convention as the main robot.
+ */
+async function youtubeCallHandler(call) {
+  try {
+    const recordPath = await call.read([{ type: 'text', data: 'ברוכים הבאים לחיפוש ביוטיוב. אמור אחרי הצפצוף את הנושא או שם הערוץ שברצונך לחפש, ולסיום הקש סולמית.' }], 'record',
+      { min_length: 1, max_length: 45, no_confirm_menu: true });
+    if (!recordPath || recordPath === 'None') {
+      return call.id_list_message([{ type: 'text', data: 'לא נקלטה בקשה. להתראות.' }]);
+    }
+    const audioResponse = await withTimeout(yemotApi.download_file('ivr2:' + recordPath), REQUEST_TIMEOUT_MS, 'YouTube IVR recording download');
+    const audio = Buffer.isBuffer(audioResponse.data) ? audioResponse.data : Buffer.from(audioResponse.data);
+    const transcript = await transcribeForDashboard(audio.toString('base64'));
+    if (!transcript) return call.id_list_message([{ type: 'text', data: 'לא הצלחתי להבין את הבקשה. נסה שוב מאוחר יותר.' }]);
+    const videos = (await searchYouTubeVideos(transcript)).slice(0, 9);
+    if (!videos.length) return call.id_list_message([{ type: 'text', data: 'לא מצאתי סרטונים מתאימים. נא להתקשר שוב ולנסות מילות חיפוש אחרות.' }]);
+    const selectionPrompt = formatYouTubeChoices(videos) + ' להקשה על תוצאה אחת עד תשע.';
+    const keypad = await call.read([{ type: 'text', data: sanitizeForYemot(selectionPrompt) }], 'tap',
+      { min_digits: 1, max_digits: 1, digits_allowed: [1,2,3,4,5,6,7,8,9], sec_wait: 8 });
+    const selected = getSelectedYouTubeVideo(videos, keypad);
+    if (!selected) return call.id_list_message([{ type: 'text', data: 'הבחירה לא תקינה. נא לנסות שוב.' }]);
+    const title = sanitizeForYemot(selected.title);
+    // Metadata search does not provide an authorized phone-playable audio stream.
+    return call.id_list_message([{ type: 'text', data: 'בחרת את הסרטון ' + title + '. כרגע החיפוש והבחירה פועלים, אך השמעת הסרטון בשיחה עדיין לא מחוברת.' }]);
+  } catch (error) {
+    logDetailedError('YouTube IVR', error);
+    const message = error?.status === 503 ? 'חיפוש יוטיוב אינו מוגדר כרגע.' :
+      'אירעה תקלה בחיפוש. אפשר לנסות שוב מאוחר יותר.';
+    return call.id_list_message([{ type: 'text', data: message }]);
+  }
+}
+
 router.get('/yemot', callHandler);
+router.get('/yemot-youtube', youtubeCallHandler);
 app.use(router);
 
 app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDashboardAuth, (req,res)=>res.json({
@@ -573,12 +609,14 @@ async function configureYemotStructure() {
   if(parsedBase.protocol !== 'https:') throw new Error('PUBLIC_BASE_URL must use HTTPS');
 
   await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
+  // Extension 2 is the isolated YouTube robot; preserve voice selection under extension 3.
+  await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
 
   const voiceMap=(process.env.YEMOT_VOICE_OPTIONS||'1:Elik_2100,2:Jacob,3:ymMale').split(',');
   for(const item of voiceMap) {
     const [extension,voice]=item.split(':');
     if(!extension||!voice) continue;
-    await updateExtension('ivr2:/' + '2/' + extension,{
+    await updateExtension('ivr2:/' + '3/' + extension,{
       type:'add_id_to_list',
       add_id_to_list_location_list:'/ivr',
       add_id_to_list_key:'voice',
