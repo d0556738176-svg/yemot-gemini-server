@@ -5,7 +5,7 @@ import youtubedl from 'youtube-dl-exec';
 import ffmpegPath from 'ffmpeg-static';
 
 const YEMOT_UPLOAD_URL = 'https://www.call2all.co.il/ym/api/UploadFile';
-const YTDLP_PLUGIN_ROOT = path.join(process.cwd(), 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp-plugins');
+const YTDLP_PLUGIN_ROOT = path.join(process.cwd(), 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp-plugins', 'bgutil-ytdlp-pot-provider');
 
 function yemotApiKey() {
   const key = String(process.env.YEMOT_API_KEY || '').trim();
