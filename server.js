@@ -263,6 +263,80 @@ function knownContactFallback(transcript, historyText='') {
     return 'מספר שירות הלקוחות של בנק פאגי הוא כוכבית 3360. לתמיכה טכנית באתר ובאפליקציה ניתן להתקשר לאפס שלוש, חמש אחת שלוש, אפס אפס אפס שלוש.';
   return null;
 }
+
+function isWeatherQuestion(transcript) {
+  return /(מזג.?האוויר|מזג האוויר|תחזית|טמפרטורה|כמה מעלות|גשם היום|ירד גשם|יהיה גשם|חם היום|קר היום|רוח היום)/i.test(String(transcript||''));
+}
+
+function isNewsQuestion(transcript) {
+  return /(מה החדשות|חדשות היום|החדשות היום|מה חדש היום|מבזקי היום|חדשות עכשיו|מה קרה היום|חדשות אחרונות)/i.test(String(transcript||''));
+}
+
+function extractWeatherLocation(transcript) {
+  const q=String(transcript||'').replace(/[?.,!]/g,' ');
+  const match=q.match(/(?:ב|של|ל|עיר)s+([א-תA-Za-z][א-תA-Za-z' -]{1,35})/i);
+  if(match && match[1]) return match[1].trim();
+  const cities=['תל אביב','ירושלים','חיפה','באר שבע','נתניה','כפר סבא','רעננה','הרצליה','פתח תקווה','ראשון לציון','אשדוד','אשקלון','רחובות','מודיעין','אילת','נצרת','עכו','טבריה'];
+  return cities.find(city=>q.includes(city)) || null;
+}
+
+async function answerWeatherDirect(transcript) {
+  const location=extractWeatherLocation(transcript);
+  if(!location) return 'כדי לתת תחזית מדויקת, אמור בבקשה את שם העיר.';
+  const geoUrl=new URL('https://geocoding-api.open-meteo.com/v1/search');
+  geoUrl.searchParams.set('name',location);
+  geoUrl.searchParams.set('count','1');
+  geoUrl.searchParams.set('language','he');
+  geoUrl.searchParams.set('format','json');
+  const geoResponse=await withTimeout(fetch(geoUrl),REQUEST_TIMEOUT_MS,'weather geocoding');
+  if(!geoResponse.ok) throw Object.assign(new Error('Weather geocoding HTTP '+geoResponse.status),{status:503});
+  const geo=await geoResponse.json();
+  const place=geo?.results?.[0];
+  if(!place) return 'לא מצאתי את העיר שביקשת. אמור שם עיר אחר.';
+  const weatherUrl=new URL('https://api.open-meteo.com/v1/forecast');
+  weatherUrl.searchParams.set('latitude',String(place.latitude));
+  weatherUrl.searchParams.set('longitude',String(place.longitude));
+  weatherUrl.searchParams.set('current','temperature_2m,apparent_temperature,precipitation,rain,weather_code,wind_speed_10m');
+  weatherUrl.searchParams.set('timezone','Asia/Jerusalem');
+  const weatherResponse=await withTimeout(fetch(weatherUrl),REQUEST_TIMEOUT_MS,'current weather');
+  if(!weatherResponse.ok) throw Object.assign(new Error('Weather HTTP '+weatherResponse.status),{status:503});
+  const weather=await weatherResponse.json();
+  const current=weather?.current;
+  if(!current) throw Object.assign(new Error('Weather data missing'),{status:503});
+  const codes={
+    0:'שמיים בהירים',1:'בעיקר בהיר',2:'מעונן חלקית',3:'מעונן',
+    45:'ערפל',48:'ערפל',51:'טפטוף קל',53:'טפטוף',55:'טפטוף חזק',
+    61:'גשם קל',63:'גשם',65:'גשם חזק',71:'שלג קל',73:'שלג',75:'שלג כבד',
+    80:'ממטרים קלים',81:'ממטרים',82:'ממטרים חזקים',95:'סופת רעמים',96:'סופת רעמים',99:'סופת רעמים'
+  };
+  const temp=Math.round(Number(current.temperature_2m));
+  const feels=Math.round(Number(current.apparent_temperature));
+  const wind=Math.round(Number(current.wind_speed_10m));
+  const condition=codes[current.weather_code] || 'תנאי מזג אוויר לא ידועים';
+  return 'ב'+sanitizeForYemot(place.name||location)+' עכשיו '+condition+
+    ', הטמפרטורה '+temp+' מעלות, מרגיש כמו '+feels+' מעלות, והרוח במהירות של כ'+wind+' קילומטר לשעה.';
+}
+
+async function answerNewsDirect(transcript) {
+  const q=/(חדשות היום|מה החדשות|החדשות היום|חדשות עכשיו|חדשות אחרונות)/i.test(String(transcript||''))
+    ? 'חדשות ישראל היום'
+    : String(transcript||'').slice(0,100);
+  const url='https://news.google.com/rss/search?q='+encodeURIComponent(q)+'&hl=he&gl=IL&ceid=IL:he';
+  const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'news RSS');
+  if(!response.ok) throw Object.assign(new Error('News RSS HTTP '+response.status),{status:503});
+  const xml=await response.text();
+  const items=[...xml.matchAll(/<item>([\\s\\S]*?)<\\/item>/g)].slice(0,6).map(m=>{
+    const block=m[1];
+    const title=(block.match(/<title>([\\s\\S]*?)<\\/title>/i)?.[1]||'').replace(/<!\\[CDATA\\[|\\]\\]>/g,'').trim();
+    const pub=(block.match(/<pubDate>([\\s\\S]*?)<\\/pubDate>/i)?.[1]||'').trim();
+    return {title:title.replace(/&amp;/g,'&').replace(/&quot;/g,'"'),pub};
+  }).filter(x=>x.title);
+  if(!items.length) throw Object.assign(new Error('No news items'),{status:503});
+  return 'אלה כמה מהכותרות העדכניות שמצאתי: '+items.map((x,i)=>
+    'כותרת '+(i+1)+': '+sanitizeForYemot(x.title)
+  ).join('. ')+'.';
+}
+
 async function analyzePublicYouTubeVideo(videoUrl, question) {
   const key = apiKeys[0] || '';
   if (!key) throw Object.assign(new Error('Gemini key unavailable for YouTube video analysis'), {status:503});
@@ -332,9 +406,15 @@ async function searchYouTubeForPhone(transcript) {
   }
 
   if(!videos.length) {
-    const query=question
+    let query=question
       .replace(/(תחפש לי באינטרנט|תחפש באינטרנט|חפש באינטרנט|ביוטיוב|ביויוטב|ביוטוב|ב youtube|youtube)/gi,' ')
-      .replace(/\\s+/g,' ').trim().slice(0,120);
+      .replace(/\\s+/g,' ').trim();
+    // For natural requests such as "find a funny clip from X", remove
+    // conversational filler and retry with the strongest search terms.
+    query=query
+      .replace(/^(תן לי|תביא לי|תמצא לי|תראה לי|אני רוצה|אני מחפש|אני רוצה לראות)\\s+/i,'')
+      .replace(/^(בדיחה|בדיחות|קטע מצחיק|קטעים מצחיקים)\\s+(של|מ|בערוץ|בערוץ)\\s+/i,'')
+      .trim().slice(0,120);
     const url=new URL('https://www.googleapis.com/youtube/v3/search');
     url.searchParams.set('part','snippet');
     url.searchParams.set('q',query);
@@ -498,10 +578,19 @@ ${question}
 אם המתקשר מבקש הופעות, מופעים או אירועים בכל הארץ, חפש מידע עדכני ככל שניתן והחזר את שם האירוע, האמן או המופע, העיר, המקום, התאריך והשעה אם נמצאו. כשאפשר, ציין גם היכן רוכשים כרטיסים ומהי דרך הרכישה הרשמית או המקור שמצאת. אל תטען שכרטיסים זמינים אם המקור לא מציין זאת.
 אם השאלה על YouTube, סרטון או שיר, חפש לפי הנושא, הכותרת, הערוץ ותאריך הפרסום. כשנשאל 'הכי חדש' או 'האחרון', העדף תוצאת YouTube עם תאריך הפרסום העדכני ביותר שמתאימה לנושא. אם המתקשר שואל על תוכן הסרטון, השתמש רק בתמליל או בתוכן מלא שנגיש בפועל דרך מקור מותר; אם אין גישה לתוכן עצמו, אמור זאת במפורש והצע סיכום של המידע הזמין בלבד. לעולם אל תטען שצפית בסרטון או קראת תמליל אם לא נגישו.
 אם החיפוש נכשל או לא החזיר מידע מספיק, אמור בקצרה שלא הצלחת להשיג מידע אמין כרגע. אל תציג כתובות אינטרנט ארוכות.`;
-  const result=await generateWithRetry([{text:prompt}],true,false);
-  const answer=result?.response?.text?.();
-  if(!answer || !String(answer).trim()) throw Object.assign(new Error('Web search returned an empty answer'),{status:503});
-  return String(answer).trim();
+  try {
+    const result=await generateWithRetry([{text:prompt}],true,false);
+    const answer=result?.response?.text?.();
+    if(answer && String(answer).trim()) return String(answer).trim();
+    throw Object.assign(new Error('Web search returned an empty answer'),{status:503});
+  } catch(e) {
+    console.warn('[WEB_SEARCH] Gemini web grounding unavailable; using direct fallback', {
+      status:geminiErrorStatus(e), message:String(e?.message||e).slice(0,500)
+    });
+    if(isWeatherQuestion(question)) return await answerWeatherDirect(question);
+    if(isNewsQuestion(question)) return await answerNewsDirect(question);
+    throw e;
+  }
 }
 async function buildOpeningForCaller(phone) {
   const previous = conversationLog.filter(x=>x.phone===normalizePhone(phone)).slice(-8);
@@ -580,6 +669,14 @@ async function callHandler(call) {
       console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length, transcriptReady: !!userTranscript });
       const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
       if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
+      else if(isWeatherQuestion(userTranscript)) {
+        try { replyText=await answerWeatherDirect(userTranscript); }
+        catch(e) { replyText=await answerWithWebSearch(userTranscript, historyText); }
+      }
+      else if(isNewsQuestion(userTranscript)) {
+        try { replyText=await answerNewsDirect(userTranscript); }
+        catch(e) { replyText=await answerWithWebSearch(userTranscript, historyText); }
+      }
       else if(replyText.startsWith('SEARCH_REQUEST') || shouldForceWebSearch(userTranscript)) {
         try {
           const youtubeAnswer=await searchYouTubeForPhone(userTranscript);
