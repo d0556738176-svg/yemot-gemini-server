@@ -8,7 +8,7 @@ import ffmpegPath from 'ffmpeg-static';
 const YEMOT_UPLOAD_URL = 'https://www.call2all.co.il/ym/api/UploadFile';
 const YTDLP_PLUGIN_ROOT = path.join(process.cwd(), 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp-plugins', 'bgutil-ytdlp-pot-provider');
 const activeJobs = new Map();
-const CHUNK_SECONDS = 300;
+const CHUNK_SECONDS = 120;
 const MAX_SOURCE_BYTES = 180 * 1024 * 1024;
 
 function yemotApiKey() {
@@ -23,11 +23,11 @@ async function uploadToYemot(filePath, remotePath) {
   const url = new URL(YEMOT_UPLOAD_URL);
   url.searchParams.set('token', yemotApiKey());
   url.searchParams.set('path', remotePath);
-  url.searchParams.set('convertAudio', '1');
+  url.searchParams.set('convertAudio', '0');
   url.searchParams.set('autoNumbering', 'false');
 
   const form = new FormData();
-  form.append('file', new Blob([buffer], { type: 'audio/mpeg' }), path.basename(filePath));
+  form.append('file', new Blob([buffer], { type: 'audio/wav' }), path.basename(filePath));
   const response = await fetch(url, { method: 'POST', body: form });
   const body = await response.text();
   if (!response.ok) throw new Error('Yemot UploadFile HTTP ' + response.status + ': ' + body.slice(0, 400));
@@ -47,8 +47,9 @@ async function tryDownload(url, output, client) {
   console.info('[YouTube playback] trying client', { client, videoId: path.basename(output, '.source.mp3') });
   const extractorArgs = [
     'youtube:player_client=' + client,
-    'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416',
-    'pot_trace=true'
+    'youtube:fetch_pot=always',
+    'youtube:pot_trace=true',
+    'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416;disable_innertube=1'
   ].join(';');
 
   await youtubedl(url, {
@@ -86,16 +87,16 @@ function runFfmpeg(args) {
 
 async function makeChunks(source, chunkDir) {
   await fs.mkdir(chunkDir, { recursive: true });
-  const pattern = path.join(chunkDir, 'chunk-%03d.mp3');
+  const pattern = path.join(chunkDir, 'chunk-%03d.wav');
   await runFfmpeg([
     '-hide_banner', '-loglevel', 'error', '-y',
     '-i', source,
     '-vn', '-ac', '1', '-ar', '24000',
-    '-c:a', 'libmp3lame', '-b:a', '48k',
+    '-c:a', 'pcm_s16le', '-ar', '8000', '-ac', '1',
     '-f', 'segment', '-segment_time', String(CHUNK_SECONDS), '-reset_timestamps', '1',
     pattern
   ]);
-  const names = (await fs.readdir(chunkDir)).filter(n => /^chunk-\d{3}\.mp3$/.test(n)).sort();
+  const names = (await fs.readdir(chunkDir)).filter(n => /^chunk-\d{3}\.wav$/.test(n)).sort();
   if (!names.length) throw new Error('ffmpeg produced no audio chunks');
   return names.map(n => path.join(chunkDir, n));
 }
