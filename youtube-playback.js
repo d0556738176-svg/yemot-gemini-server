@@ -45,7 +45,7 @@ async function uploadToYemot(filePath, remotePath) {
 
 async function tryDownload(url, output, client) {
   console.info('[YouTube playback] trying client', { client, videoId: path.basename(output, '.source.mp3') });
-  const noPotClient = client === 'tv' || client === 'tv_simply' || client === 'web_embedded';
+  const noPotClient = ['android', 'android_vr', 'tv', 'tv_simply', 'web_embedded'].includes(client);
   const extractorArgs = noPotClient
     ? 'youtube:player_client=' + client
     : [
@@ -54,22 +54,34 @@ async function tryDownload(url, output, client) {
         'youtube:pot_trace=true',
         'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416;disable_innertube=1'
       ].join(';');
+  const format = client === 'android_vr' ? '18/bestaudio/best' : 'bestaudio/best';
 
-  await youtubedl(url, {
-    output,
-    extractAudio: true,
-    audioFormat: 'mp3',
-    audioQuality: '7',
-    format: 'bestaudio/best',
-    noPlaylist: true,
-    quiet: false,
-    verbose: true,
-    jsRuntimes: 'node',
-    pluginDirs: YTDLP_PLUGIN_ROOT,
-    extractorArgs,
-    maxFilesize: '180M',
-    ...(ffmpegPath ? { ffmpegLocation: ffmpegPath } : {})
-  });
+  try {
+    await youtubedl(url, {
+      output,
+      extractAudio: true,
+      audioFormat: 'mp3',
+      audioQuality: '7',
+      format,
+      noPlaylist: true,
+      quiet: false,
+      verbose: true,
+      jsRuntimes: 'node',
+      pluginDirs: YTDLP_PLUGIN_ROOT,
+      extractorArgs,
+      maxFilesize: '180M',
+      ...(ffmpegPath ? { ffmpegLocation: ffmpegPath } : {})
+    });
+  } catch (error) {
+    const stderr = String(error?.stderr || '').trim();
+    const stdout = String(error?.stdout || '').trim();
+    console.error('[YouTube playback] yt-dlp failure', {
+      client,
+      videoId: path.basename(output, '.source.mp3'),
+      details: (stderr || stdout || error?.message || String(error)).slice(-5000)
+    });
+    throw error;
+  }
 
   const stat = await fs.stat(output);
   if (!stat.size) throw new Error('yt-dlp produced an empty audio file');
@@ -94,8 +106,8 @@ async function makeChunks(source, chunkDir) {
   await runFfmpeg([
     '-hide_banner', '-loglevel', 'error', '-y',
     '-i', source,
-    '-vn', '-ac', '1', '-ar', '24000',
-    '-c:a', 'pcm_s16le', '-ar', '8000', '-ac', '1',
+    '-vn', '-ar', '8000', '-ac', '1',
+    '-c:a', 'pcm_s16le',
     '-f', 'segment', '-segment_time', String(CHUNK_SECONDS), '-reset_timestamps', '1',
     pattern
   ]);
@@ -117,27 +129,34 @@ async function buildYouTubePlayback(videoId) {
   try {
     let lastError;
     const failures = [];
-    for (const client of ['tv', 'tv_simply', 'web_embedded', 'web_safari', 'mweb', 'default']) {
+    for (const client of ['android', 'tv_downgraded', 'android_vr', 'tv', 'tv_simply', 'web_embedded', 'web_safari', 'mweb', 'default']) {
       try {
         await tryDownload(url, source, client);
         lastError = null;
         break;
       } catch (error) {
         lastError = error;
-        failures.push({ client, message: String(error?.message || error).slice(0, 1600) });
-        console.warn('[YouTube playback] client failed', { client, videoId: id, message: String(error?.message || error).slice(0, 1600) });
+        const stderr = String(error?.stderr || '').trim();
+        const stdout = String(error?.stdout || '').trim();
+        const message = String(error?.message || error);
+        failures.push({ client, message: (stderr || stdout || message).slice(0, 1800) });
+        console.warn('[YouTube playback] client failed', {
+          client,
+          videoId: id,
+          message: (stderr || stdout || message).slice(0, 1800)
+        });
         await fs.rm(source, { force: true }).catch(() => {});
-        if (/not made this video available in your country|not available in your country|geo.?restrict|country/i.test(String(error?.message || error))) break;
+        if (/not made this video available in your country|not available in your country|geo.?restrict|country/i.test(message)) break;
       }
     }
 
     if (lastError) {
-      const message = String(lastError?.message || lastError);
-      if (/not made this video available in your country|not available in your country|geo.?restrict|country/i.test(message))
+      const details = failures.map(x => x.client + ': ' + x.message).join(' | ').slice(0, 7000);
+      if (/not made this video available in your country|not available in your country|geo.?restrict|country/i.test(details))
         throw new Error('YouTube video is not available for playback in Israel');
-      if (/sign in to confirm|not a bot|bot/i.test(message))
-        throw new Error('YouTube bot check blocked playback on Render');
-      throw new Error('YouTube playback failed: ' + failures.map(x => x.client + ': ' + x.message).join(' | ').slice(0, 5000));
+      if (/sign in to confirm|not a bot|bot check|bot/i.test(details))
+        throw new Error('YouTube bot check blocked playback on Render: ' + details);
+      throw new Error('YouTube playback failed: ' + details);
     }
 
     const chunks = await makeChunks(source, chunkDir);
@@ -145,9 +164,15 @@ async function buildYouTubePlayback(videoId) {
 
     for (let i = 0; i < chunks.length; i++) {
       const remotePath = 'ivr2:/2/youtube/' + id + '-' + String(i + 1).padStart(3, '0') + '.wav';
-      await uploadToYemot(chunks[i], remotePath);
+      const uploadResult = await uploadToYemot(chunks[i], remotePath);
       playbackPaths.push('/2/youtube/' + id + '-' + String(i + 1).padStart(3, '0'));
-      console.info('[YouTube playback] uploaded chunk', { videoId: id, index: i + 1, total: chunks.length, remotePath });
+      console.info('[YouTube playback] uploaded chunk', {
+        videoId: id,
+        index: i + 1,
+        total: chunks.length,
+        remotePath,
+        responseStatus: uploadResult?.responseStatus || uploadResult?.success || 'unknown'
+      });
     }
 
     return { playbackPaths, chunkCount: playbackPaths.length };
