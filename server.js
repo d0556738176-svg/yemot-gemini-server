@@ -328,7 +328,7 @@ async function answerNewsDirect(transcript) {
   const items=[...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0,6).map(m=>{
     const block=m[1];
     const title=(block.match(/<title>([\s\S]*?)<\/title>/i)?.[1]||'').replace(/<!\\[CDATA\\[|\\]\\]>/g,'').trim();
-    const pub=(block.match(/<pubDate>([\\s\\S]*?)<\\/pubDate>/i)?.[1]||'').trim();
+    const pub=(block.match(/<pubDate>([\s\S]*?)<\/pubDate>/i)?.[1]||'').trim();
     return {title:title.replace(/&amp;/g,'&').replace(/&quot;/g,'"'),pub};
   }).filter(x=>x.title);
   if(!items.length) throw Object.assign(new Error('No news items'),{status:503});
@@ -397,8 +397,7 @@ async function searchYouTubeForPhone(transcript) {
   let videos=[];
   try {
     videos=await searchYouTubeVideos(question,{
-      apiKey:key,      regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
-      timeoutMs:REQUEST_TIMEOUT_MS
+      apiKey:key,      regionCode:process.env.YOUTUBE_REGION_CODE||'IL',      timeoutMs:REQUEST_TIMEOUT_MS
     });
   } catch(e) {
     console.warn('[YouTube] structured search failed', {status:geminiErrorStatus(e),message:String(e?.message||'').slice(0,500)});
@@ -797,8 +796,7 @@ async function youtubeCallHandler(call) {
         ? 'זיהוי הדיבור עמוס כרגע נא לנסות שוב'
         : status === 503
           ? 'שירות יוטיוב אינו זמין כרגע'          : 'אירעה תקלה בהשמעת הסרטון נא לנסות שוב';
-    return call.id_list_message([{ type: 'text', data: message }]);
-  }
+    return call.id_list_message([{ type: 'text', data: message }]);  }
 }
 
 router.get('/yemot', callHandler);
