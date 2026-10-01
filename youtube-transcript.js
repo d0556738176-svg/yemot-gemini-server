@@ -128,7 +128,7 @@ async function downloadCaption(url, tempDir, language, client) {
 
   const files = await fs.readdir(tempDir);
   const captionFile = files.find(file =>
-    /^caption\.(vtt|srt|srv3|srv2|ttml)$/i.test(file)
+    /^caption(?:\.[^.]+)?\.(vtt|srt|srv3|srv2|ttml)$/i.test(file)
   );
   if (!captionFile) {
     throw new Error('yt-dlp did not produce a caption file for language ' + language);
