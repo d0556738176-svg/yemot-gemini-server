@@ -415,16 +415,17 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   const key=(process.env.YOUTUBE_API_KEY||'').trim();
   if(!key) return null;
   const question=String(transcript||'').trim();
-  const explicitYouTube=/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(question);
-  if(!explicitYouTube) return null;
   if(!question) return null;
+  const explicitYouTube=/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(question);
+  const hasResultReference=/(?:תוצאה|סרטון|בדיחה)\s*(?:מספר\s*)?(ראשונה|שנייה|שלישית|רביעית|חמישית|שישית|שביעית|שמינית|תשיעית|1|2|3|4|5|6|7|8|9)/i.test(question);
+  if(!explicitYouTube && !hasResultReference) return null;
 
   const wantsNewest=/(הכי חדש|החדש ביותר|הכי חדשה|האחרון|האחרונה|אחרון|אחרונה|העדכני ביותר|חדש ביותר|מה יצא לאחרונה|מה עלה לאחרונה|הכי חדש שעלה)/i.test(question);
   const wantsContent=/(על מה|מה דיברו|מה דיבר|מה אמרו|מה נאמר|מה היה|מה קרה בסרטון|מה בדיוק|הדו.?שיח|השיחה|תוכן הסרטון|תוכן השיר|תוכן הבדיחה|מילים|סכם|סיכום|תספר לי מה יש)/i.test(question);
 
-  // Resolve references such as "תוצאה ראשונה ביוטיוב" against the
-  // previous YouTube results in this same phone conversation.
+  // Resolve references against the exact YouTube results already found in this call.
   let resolvedQuestion=question;
+  let videos=[];
   const resultMatch=question.match(/(?:תוצאה|סרטון|בדיחה)\s*(?:מספר\s*)?(ראשונה|שנייה|שלישית|רביעית|חמישית|שישית|שביעית|שמינית|תשיעית|1|2|3|4|5|6|7|8|9)/i);
   if(resultMatch) {
     const words={ראשונה:1,שנייה:2,שלישית:3,רביעית:4,חמישית:5,שישית:6,שביעית:7,שמינית:8,תשיעית:9};
@@ -445,9 +446,11 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   }
   const wantsStats=/(כמה צפיות|כמה צפיות יש|מספר צפיות|צפיות|כמה לייקים|לייקים|כמה תגובות|תגובות|מה אומרים בתגובות|מה כתבו בתגובות|תגובות על הסרטון)/i.test(question);
 
-  let videos=Array.isArray(context?.youtubeResults) && resultMatch && wantsContent
-    ? [context.youtubeResults[(Number(resultMatch[1]) || {ראשונה:1,שנייה:2,שלישית:3,רביעית:4,חמישית:5,שישית:6,שביעית:7,שמינית:8,תשיעית:9}[resultMatch[1]])-1]].filter(Boolean)
-    : [];
+  if (Array.isArray(context?.youtubeResults) && resultMatch && wantsContent) {
+    const words={ראשונה:1,שנייה:2,שלישית:3,רביעית:4,חמישית:5,שישית:6,שביעית:7,שמינית:8,תשיעית:9};
+    const n=Number(resultMatch[1]) || words[resultMatch[1]];
+    if(n && context.youtubeResults[n-1]) videos=[context.youtubeResults[n-1]];
+  }
   try {
     if (!videos.length) videos=await searchYouTubeVideos(resolvedQuestion,{
       apiKey:key,      regionCode:process.env.YOUTUBE_REGION_CODE||'IL',      timeoutMs:REQUEST_TIMEOUT_MS
@@ -490,7 +493,7 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   }
 
   if(!videos.length) return 'לא מצאתי כרגע תוצאה מתאימה ביוטיוב.';
-  if (context && Array.isArray(context.youtubeResults) && videos.length) {
+  if (context && Array.isArray(context.youtubeResults) && videos.length && !resultMatch) {
     context.youtubeResults = videos.slice(0, 15);
   }
   if(wantsStats) {
