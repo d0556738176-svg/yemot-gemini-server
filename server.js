@@ -275,7 +275,11 @@ function isWeatherQuestion(transcript) {
 }
 
 function isNewsQuestion(transcript) {
-  return /(מה החדשות|חדשות היום|החדשות היום|מה חדש היום|מבזקי היום|חדשות עכשיו|מה קרה היום|חדשות אחרונות)/i.test(String(transcript||''));
+  return /(מה החדשות|חדשות היום|החדשות היום|מה חדש היום|מבזקי היום|חדשות עכשיו|מה קרה היום|חדשות אחרונות|חדשות ב|חדשות של|כותרות של|כותרות ב|ערוץ 14|ערוץ c14|c14|חדשות 12|חדשות 13|כאן 11|כאן חדשות|וואלה חדשות|ynet|ווינט|מעריב|ישראל היום)/i.test(String(transcript||''));
+}
+
+function isComedySearchQuestion(transcript) {
+  return /(בדיחות|בדיחה|מצחיק|מצחיקים|סטנד.?אפ|קומיקאי|קומיקאים|קטע קומי|מערכון|מערכונים)/i.test(String(transcript||''));
 }
 
 function extractWeatherLocation(transcript) {
@@ -323,10 +327,32 @@ async function answerWeatherDirect(transcript) {
     ', הטמפרטורה '+temp+' מעלות, מרגיש כמו '+feels+' מעלות, והרוח במהירות של כ'+wind+' קילומטר לשעה.';
 }
 
-async function answerNewsDirect(transcript) {
-  const q=/(חדשות היום|מה החדשות|החדשות היום|חדשות עכשיו|חדשות אחרונות)/i.test(String(transcript||''))
-    ? 'חדשות ישראל היום'
-    : String(transcript||'').slice(0,100);
+async function answerNewsDirect(transcript, historyText='') {
+  const question=String(transcript||'').trim();
+  const history=String(historyText||'').trim();
+  const sourceMatch=question.match(/(?:ערוץ|חדשות|כותרות)\s*(14|c14|12|13|11)/i);
+  const source=sourceMatch ? String(sourceMatch[1]).toUpperCase()==='C14' ? 'ערוץ 14' : 'ערוץ '+sourceMatch[1] : '';
+  let q=source
+    ? source+' חדשות היום'
+    : /(חדשות היום|מה החדשות|החדשות היום|חדשות עכשיו|חדשות אחרונות)/i.test(question)
+      ? 'חדשות ישראל היום'
+      : question.slice(0,100);
+
+  // Follow-up questions such as "מה קרה בכותרת מספר 1?" must resolve against
+  // the headlines we just read, instead of starting a brand-new generic search.
+  const numberMatch=question.match(/(?:כותרת|הכותרת|חדשה)\s*(?:מספר\s*)?(\d+)/i);
+  if(numberMatch && history) {
+    const n=Number(numberMatch[1]);
+    const previousLines=history.split(/\n|\.\s+/).map(x=>x.trim()).filter(Boolean);
+    const candidates=previousLines.filter(x=>new RegExp('(?:כותרת|תוצאה)\\s*'+n+'\\s*[:.]','i').test(x));
+    const prior=candidates[0] || '';
+    if(prior) {
+      const cleaned=prior.replace(/^(?:מתקשר|AI):\s*/i,'');
+      const colon=cleaned.indexOf(':');
+      const title=colon>=0 ? cleaned.slice(colon+1).trim() : cleaned;
+      q=title.slice(0,180);
+    }
+  }
   const url='https://news.google.com/rss/search?q='+encodeURIComponent(q)+'&hl=he&gl=IL&ceid=IL:he';
   const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'news RSS');
   if(!response.ok) throw Object.assign(new Error('News RSS HTTP '+response.status),{status:503});
@@ -592,7 +618,7 @@ ${question}
       status:geminiErrorStatus(e), message:String(e?.message||e).slice(0,500)
     });
     if(isWeatherQuestion(question)) return await answerWeatherDirect(question);
-    if(isNewsQuestion(question)) return await answerNewsDirect(question);
+    if(isNewsQuestion(question)) return await answerNewsDirect(question, historyText);
     throw e;
   }
 }
@@ -678,10 +704,10 @@ async function callHandler(call) {
         catch(e) { replyText=await answerWithWebSearch(userTranscript, historyText); }
       }
       else if(isNewsQuestion(userTranscript)) {
-        try { replyText=await answerNewsDirect(userTranscript); }
+        try { replyText=await answerNewsDirect(userTranscript, historyText); }
         catch(e) { replyText=await answerWithWebSearch(userTranscript, historyText); }
       }
-      else if(replyText.startsWith('SEARCH_REQUEST') || shouldForceWebSearch(userTranscript)) {
+      else if(replyText.startsWith('SEARCH_REQUEST') || shouldForceWebSearch(userTranscript) || isComedySearchQuestion(userTranscript)) {
         try {
           const youtubeAnswer=await searchYouTubeForPhone(userTranscript);
           replyText=youtubeAnswer || await answerWithWebSearch(userTranscript, historyText);
