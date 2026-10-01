@@ -136,8 +136,14 @@ async function addConversationEntry({phone, callId, userText, geminiText}) {
 }
 function sanitizeForYemot(text) {
   if (!text) return '';
-  return String(text).replace(/[.&"“”‘’']/g, ' ').replace(/[-–—]/g, ' ')
-    .replace(/\s+/g, ' ').trim();
+  // Yemot response text cannot contain the pipe character; YouTube titles and
+  // search results commonly contain it, so normalize it before every handoff.
+  return String(text)
+    .replace(/[|]/g, ' ')
+    .replace(/[.&"“”‘’']/g, ' ')
+    .replace(/[-–—]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 function withTimeout(promise, ms, label) {
   let timeoutId;
