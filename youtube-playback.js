@@ -2,7 +2,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { Readable } from 'node:stream';
+import { Readable, pipeline as pipelineCallback } from 'node:stream';
+import { promisify } from 'node:util';
+const pipeline = promisify(pipelineCallback);
 import youtubedl from 'youtube-dl-exec';
 import ffmpegPath from 'ffmpeg-static';
 
@@ -11,6 +13,12 @@ const YTDLP_PLUGIN_ROOT = path.join(process.cwd(), 'node_modules', 'youtube-dl-e
 const activeJobs = new Map();
 const CHUNK_SECONDS = 120;
 const MAX_SOURCE_BYTES = 180 * 1024 * 1024;
+const PIPED_INSTANCES = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.reallyaweso.me',
+  'https://pipedapi.drgns.space'
+];
 const INVIDIOUS_INSTANCES = [
   'https://inv.nadeko.net',
   'https://invidious.nerdvpn.de',
@@ -123,6 +131,64 @@ async function makeChunks(source, chunkDir) {
   return names.map(n => path.join(chunkDir, n));
 }
 
+async function tryPipedDownload(videoId, output) {
+  let lastError;
+  for (const instance of PIPED_INSTANCES) {
+    try {
+      console.info('[YouTube playback] trying Piped fallback', { instance, videoId });
+      const response = await fetch(instance + '/streams/' + encodeURIComponent(videoId), {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(12000)
+      });
+      if (!response.ok) throw new Error('Piped HTTP ' + response.status);
+      const data = await response.json();
+      const candidates = Array.isArray(data.audioStreams)
+        ? data.audioStreams.filter(x => x && x.url && !x.videoOnly)
+        : [];
+      candidates.sort((a, b) => {
+        const ar = Number(a.bitrate || 0);
+        const br = Number(b.bitrate || 0);
+        return br - ar;
+      });
+      if (!candidates.length) throw new Error('Piped returned no audio streams');
+
+      let mediaError;
+      for (const media of candidates.slice(0, 3)) {
+        try {
+          const mediaResponse = await fetch(media.url, {
+            headers: { accept: '*/*' },
+            signal: AbortSignal.timeout(45000)
+          });
+          if (!mediaResponse.ok || !mediaResponse.body)
+            throw new Error('Piped media HTTP ' + mediaResponse.status);
+          await pipeline(Readable.fromWeb(mediaResponse.body), (await import('node:fs')).createWriteStream(output));
+          const stat = await fs.stat(output);
+          if (!stat.size) throw new Error('Piped produced an empty file');
+          if (stat.size > MAX_SOURCE_BYTES) throw new Error('Piped audio source is too large');
+          console.info('[YouTube playback] downloaded via Piped', {
+            instance,
+            bytes: stat.size,
+            type: media.mimeType || media.format || 'unknown'
+          });
+          return;
+        } catch (error) {
+          mediaError = error;
+          await fs.rm(output, { force: true }).catch(() => {});
+        }
+      }
+      throw mediaError || new Error('Piped audio download failed');
+    } catch (error) {
+      lastError = error;
+      console.warn('[YouTube playback] Piped instance failed', {
+        instance,
+        videoId,
+        message: String(error?.message || error).slice(0, 1200)
+      });
+    }
+  }
+  throw new Error('Piped fallback failed: ' + String(lastError?.message || lastError || 'unknown error'));
+}
+
 async function tryInvidiousDownload(videoId, output) {
   let lastError;
   for (const instance of INVIDIOUS_INSTANCES) {
@@ -148,23 +214,7 @@ async function tryInvidiousDownload(videoId, output) {
       const media = candidates[0];
       const mediaResponse = await fetch(media.url, { signal: AbortSignal.timeout(30000) });
       if (!mediaResponse.ok || !mediaResponse.body) throw new Error('Invidious media HTTP ' + mediaResponse.status);
-      const file = await fs.open(output, 'w');
-      try {
-        await new Promise((resolve, reject) => {
-          const stream = spawn(process.execPath, ['-e',
-            "const fs=require('fs');process.stdin.pipe(fs.createWriteStream(process.argv[1])).on('finish',()=>process.exit(0))",
-            output
-          ], { stdio: ['pipe', 'ignore', 'pipe'] });
-          let err = '';
-          stream.stderr.on('data', c => { err += c.toString(); });
-          stream.on('error', reject);
-          stream.on('close', code => code === 0 ? resolve() : reject(new Error('media writer failed: ' + err.slice(-500))));
-          stream.stdin.on('error', reject);
-          Readable.fromWeb(mediaResponse.body).pipe(stream.stdin);
-        });
-      } finally {
-        await file.close().catch(() => {});
-      }
+      await pipeline(Readable.fromWeb(mediaResponse.body), (await import('node:fs')).createWriteStream(output));
       const stat = await fs.stat(output);
       if (!stat.size) throw new Error('Invidious produced an empty file');
       if (stat.size > MAX_SOURCE_BYTES) throw new Error('Invidious audio source is too large');
@@ -210,6 +260,20 @@ async function buildYouTubePlayback(videoId) {
         });
         await fs.rm(source, { force: true }).catch(() => {});
         if (/not made this video available in your country|not available in your country|geo.?restrict|country/i.test(message)) break;
+      }
+    }
+
+    if (lastError) {
+      try {
+        await tryPipedDownload(id, source);
+        lastError = null;
+        console.info('[YouTube playback] primary extractor failed; Piped fallback succeeded', { videoId: id });
+      } catch (pipedError) {
+        failures.push({ client: 'piped', message: String(pipedError?.message || pipedError).slice(0, 1800) });
+        console.warn('[YouTube playback] Piped fallback failed', {
+          videoId: id,
+          message: String(pipedError?.message || pipedError).slice(0, 1800)
+        });
       }
     }
 
