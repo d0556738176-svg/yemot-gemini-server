@@ -314,47 +314,111 @@ async function searchYouTubeForPhone(transcript) {
   const key=(process.env.YOUTUBE_API_KEY||'').trim();
   if(!key) return null;
   const question=String(transcript||'').trim();
-  if(!question || !/(youtube|יוטיוב|סרטון|סרטונים|וידאו|שיר|שירים)/i.test(question)) return null;
-  const wantsNewest=/(הכי חדש|החדש ביותר|אחרון|אחרונה|העדכני ביותר|חדש ביותר|מה יצא לאחרונה|מה עלה לאחרונה)/i.test(question);
-  const query=question.replace(/(תחפש לי באינטרנט|תחפש באינטרנט|חפש באינטרנט|ביוטיוב|ביויוטב|ביוטוב|ביוטיוב|ב youtube|youtube)/gi,' ').replace(/\\s+/g,' ').trim().slice(0,120);
-  const url=new URL('https://www.googleapis.com/youtube/v3/search');
-  url.searchParams.set('part','snippet');
-  url.searchParams.set('q',query||'');
-  url.searchParams.set('type','video');
-  url.searchParams.set('maxResults','50');
-  url.searchParams.set('safeSearch','strict');
-  url.searchParams.set('regionCode',process.env.YOUTUBE_REGION_CODE||'IL');
-  url.searchParams.set('order',wantsNewest?'date':'relevance');
-  url.searchParams.set('key',key);
-  const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'YouTube phone search');
-  const data=await response.json();
-  if(!response.ok) {
-    const err=new Error('YouTube API HTTP '+response.status); err.status=response.status===403?429:response.status; throw err;
+  if(!question || !/(youtube|יוטיוב|סרטון|סרטונים|וידאו|שיר|שירים|ערוץ)/i.test(question)) return null;
+
+  const wantsNewest=/(הכי חדש|החדש ביותר|הכי חדשה|האחרון|האחרונה|אחרון|אחרונה|העדכני ביותר|חדש ביותר|מה יצא לאחרונה|מה עלה לאחרונה|הכי חדש שעלה)/i.test(question);
+  const wantsContent=/(על מה|מה דיברו|מה דיבר|מה אמרו|מה נאמר|מה היה|מה קרה בסרטון|מה בדיוק|הדו.?שיח|השיחה|תוכן הסרטון|תוכן השיר|מילים|סכם|סיכום|תספר לי מה יש)/i.test(question);
+
+  let videos=[];
+  try {
+    videos=await searchYouTubeVideos(question,{
+      apiKey:key,
+      regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
+      timeoutMs:REQUEST_TIMEOUT_MS
+    });
+  } catch(e) {
+    console.warn('[YouTube] structured search failed', {status:geminiErrorStatus(e),message:String(e?.message||'').slice(0,500)});
   }
-  const items=(data.items||[]).filter(x=>x.id?.videoId).slice(0,50);
-  if(!items.length) return 'לא מצאתי כרגע סרטונים מתאימים ביוטיוב.';
-  const wantsContent=/(תוכן הסרטון|מה אומרים בסרטון|על מה הסרטון|סכם|סיכום|תספר לי מה יש בסרטון|תוכן של הסרטון)/i.test(question);
+
+  if(!videos.length) {
+    const query=question
+      .replace(/(תחפש לי באינטרנט|תחפש באינטרנט|חפש באינטרנט|ביוטיוב|ביויוטב|ביוטוב|ב youtube|youtube)/gi,' ')
+      .replace(/\\s+/g,' ').trim().slice(0,120);
+    const url=new URL('https://www.googleapis.com/youtube/v3/search');
+    url.searchParams.set('part','snippet');
+    url.searchParams.set('q',query);
+    url.searchParams.set('type','video');
+    url.searchParams.set('maxResults','50');
+    url.searchParams.set('safeSearch','strict');
+    url.searchParams.set('regionCode',process.env.YOUTUBE_REGION_CODE||'IL');
+    url.searchParams.set('order',wantsNewest?'date':'relevance');
+    url.searchParams.set('key',key);
+    const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'YouTube phone search');
+    const data=await response.json();
+    if(!response.ok) {
+      const err=new Error('YouTube API HTTP '+response.status); err.status=response.status===403?429:response.status; throw err;
+    }
+    videos=(data.items||[]).filter(x=>x.id?.videoId).map(x=>({
+      videoId:x.id.videoId,
+      title:String(x.snippet?.title||'ללא כותרת'),
+      channelTitle:String(x.snippet?.channelTitle||'ערוץ לא ידוע'),
+      publishedAt:x.snippet?.publishedAt||null,
+      description:String(x.snippet?.description||'')
+    }));
+  }
+
+  if(!videos.length) return 'לא מצאתי כרגע תוצאה מתאימה ביוטיוב.';
+
   if(wantsContent) {
-    const selected=items[0];
-    const videoUrl='https://www.youtube.com/watch?v='+selected.id.videoId;
-    const title=sanitizeForYemot(selected.snippet?.title||'הסרטון שנמצא');
+    const selected=videos[0];
+    const videoUrl='https://www.youtube.com/watch?v='+selected.videoId;
+    const title=sanitizeForYemot(selected.title||'הסרטון שנמצא');
+
+    // Prefer an actual YouTube subtitle/auto-caption transcript so content
+    // questions are answered from the video's spoken words, not its title.
+    try {
+      const transcriptData=await getYouTubeTranscript(selected.videoId);
+      const transcriptText=String(transcriptData?.text||'').trim();
+      if(transcriptText) {
+        const prompt=`${EXCLUSIVE_INSTRUCTION}
+השאלה של המתקשר: ${question}
+זהו תמליל שהופק מהכתוביות/כתוביות האוטומטיות של סרטון YouTube:
+${transcriptText.slice(0,50000)}
+
+ענה בעברית, להקראה בטלפון, על בסיס התמליל בלבד.
+אם נשאל "על מה דיברו" או "על מה הסרטון" — תן סיכום ברור ומפורט של הנושאים.
+אם נשאל "מה בדיוק היה הדו-שיח" או שאלה דומה — תאר לפי סדר את עיקרי הדברים והטענות/השאלות והתשובות שנאמרו, בלי להמציא ובלי לטעון לציטוט מילה במילה אם התמליל אינו מלא.
+אם מדובר בשיר — הסבר על מה השיר ומה המסר שלו לפי המילים הזמינות.
+אם המידע בתמליל לא מספיק כדי לענות, אמור זאת במפורש.`;
+        const result=await generateWithRetry([{text:prompt}],false,false);
+        const answer=String(result?.response?.text?.()||'').trim();
+        if(answer) return 'מצאתי את הסרטון '+title+'. '+sanitizeForYemot(answer);
+      }
+    } catch(e) {
+      console.warn('[YouTube] transcript analysis unavailable', {
+        videoId:selected.videoId,
+        status:geminiErrorStatus(e),
+        message:String(e?.message||'').slice(0,700)
+      });
+    }
+
+    // Second fallback: direct public-video understanding by Gemini.
     try {
       const summary=await analyzePublicYouTubeVideo(videoUrl, question);
       if(summary && String(summary).trim())
         return 'מצאתי את הסרטון '+title+'. '+sanitizeForYemot(summary);
     } catch(e) {
-      console.warn('[YouTube] video understanding unavailable', {status:geminiErrorStatus(e),message:String(e?.message||'').slice(0,240)});
+      console.warn('[YouTube] video understanding unavailable', {status:geminiErrorStatus(e),message:String(e?.message||'').slice(0,500)});
     }
-    return 'מצאתי את הסרטון '+title+' אבל כרגע לא הצלחתי לנתח את תוכן הווידאו עצמו. '+(sanitizeForYemot(selected.snippet?.description||'')||'אין תיאור זמין')+'.';
+
+    return 'מצאתי את הסרטון '+title+' אבל לא הצלחתי כרגע לקבל תמליל או ניתוח אמין של התוכן.';
   }
-  const spoken=items.map((x,i)=>{
-    const s=x.snippet||{};
-    const date=s.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',year:'numeric',month:'long',day:'numeric'}).format(new Date(s.publishedAt)):'תאריך לא זמין';
-    return 'תוצאה '+(i+1)+': '+sanitizeForYemot(s.title||'ללא כותרת')+'. הערוץ: '+sanitizeForYemot(s.channelTitle||'לא ידוע')+'. פורסם בתאריך '+date+'.';
+
+  const list=videos.slice(0,wantsNewest?9:15);
+  const spoken=list.map((x,i)=>{
+    const date=x.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',year:'numeric',month:'long',day:'numeric'}).format(new Date(x.publishedAt)):'תאריך לא זמין';
+    return 'תוצאה '+(i+1)+': '+sanitizeForYemot(x.title||'ללא כותרת')+'. הערוץ: '+sanitizeForYemot(x.channelTitle||'לא ידוע')+'. פורסם בתאריך '+date+'.';
   }).join(' ');
-  const contentNote=/(תוכן הסרטון|מה אומרים בסרטון|על מה הסרטון|סכם|סיכום|תספר לי מה יש בסרטון)/i.test(question)
-    ? ' שים לב: החיפוש מצא פרטי סרטון בלבד ולא תמליל מלא, ולכן עדיין אין לי אפשרות לאמת את כל מה שנאמר בו.' : '';
-  return 'מצאתי ביוטיוב את התוצאות הבאות. '+spoken+contentNote+' כדי לבחור תוצאה, אמור את מספר התוצאה.';
+
+  if(wantsNewest) {
+    const newest=list[0];
+    return 'הסרטון החדש ביותר שמצאתי הוא '+sanitizeForYemot(newest.title||'ללא כותרת')+
+      ', בערוץ '+sanitizeForYemot(newest.channelTitle||'לא ידוע')+
+      '. הוא פורסם בתאריך '+(newest.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full'}).format(new Date(newest.publishedAt)):'תאריך לא זמין')+
+      '. אם תרצה, שאל אותי על מה הסרטון ואני אנסה לנתח את התוכן שלו.';
+  }
+
+  return 'מצאתי ביוטיוב את התוצאות הבאות. '+spoken+' כדי לבחור תוצאה, אמור את מספר התוצאה.';
 }
 function shouldForceWebSearch(transcript) {
   const t = String(transcript || '').toLowerCase();
