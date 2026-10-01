@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
 import youtubedl from 'youtube-dl-exec';
 import ffmpegPath from 'ffmpeg-static';
 
@@ -10,6 +11,12 @@ const YTDLP_PLUGIN_ROOT = path.join(process.cwd(), 'node_modules', 'youtube-dl-e
 const activeJobs = new Map();
 const CHUNK_SECONDS = 120;
 const MAX_SOURCE_BYTES = 180 * 1024 * 1024;
+const INVIDIOUS_INSTANCES = [
+  'https://inv.nadeko.net',
+  'https://invidious.nerdvpn.de',
+  'https://yt.chocolatemoo53.com',
+  'https://invidious.tiekoetter.com'
+];
 
 function yemotApiKey() {
   const key = String(process.env.YEMOT_API_KEY || '').trim();
@@ -116,6 +123,62 @@ async function makeChunks(source, chunkDir) {
   return names.map(n => path.join(chunkDir, n));
 }
 
+async function tryInvidiousDownload(videoId, output) {
+  let lastError;
+  for (const instance of INVIDIOUS_INSTANCES) {
+    try {
+      const api = instance + '/api/v1/videos/' + encodeURIComponent(videoId) + '?fields=videoId,title,adaptiveFormats,formatStreams';
+      console.info('[YouTube playback] trying Invidious fallback', { instance, videoId });
+      const response = await fetch(api, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw new Error('Invidious HTTP ' + response.status);
+      const data = await response.json();
+
+      const candidates = [
+        ...(Array.isArray(data.adaptiveFormats) ? data.adaptiveFormats.filter(x => /^audio\\//i.test(String(x.type || '')) && x.url) : []),
+        ...(Array.isArray(data.formatStreams) ? data.formatStreams.filter(x => /^(audio|video)\\//i.test(String(x.type || '')) && x.url) : [])
+      ];
+      candidates.sort((a, b) => {
+        const aa = /^audio\\//i.test(String(a.type || '')) ? 0 : 1;
+        const bb = /^audio\\//i.test(String(b.type || '')) ? 0 : 1;
+        if (aa !== bb) return aa - bb;
+        return Number(a.bitrate || 0) - Number(b.bitrate || 0);
+      });
+      if (!candidates.length) throw new Error('Invidious returned no playable formats');
+
+      const media = candidates[0];
+      const mediaResponse = await fetch(media.url, { signal: AbortSignal.timeout(30000) });
+      if (!mediaResponse.ok || !mediaResponse.body) throw new Error('Invidious media HTTP ' + mediaResponse.status);
+      const file = await fs.open(output, 'w');
+      try {
+        await new Promise((resolve, reject) => {
+          const stream = spawn(process.execPath, ['-e',
+            "const fs=require('fs');process.stdin.pipe(fs.createWriteStream(process.argv[1])).on('finish',()=>process.exit(0))",
+            output
+          ], { stdio: ['pipe', 'ignore', 'pipe'] });
+          let err = '';
+          stream.stderr.on('data', c => { err += c.toString(); });
+          stream.on('error', reject);
+          stream.on('close', code => code === 0 ? resolve() : reject(new Error('media writer failed: ' + err.slice(-500))));
+          stream.stdin.on('error', reject);
+          Readable.fromWeb(mediaResponse.body).pipe(stream.stdin);
+        });
+      } finally {
+        await file.close().catch(() => {});
+      }
+      const stat = await fs.stat(output);
+      if (!stat.size) throw new Error('Invidious produced an empty file');
+      if (stat.size > MAX_SOURCE_BYTES) throw new Error('Invidious audio source is too large');
+      console.info('[YouTube playback] downloaded via Invidious', { instance, bytes: stat.size, type: media.type || 'unknown' });
+      return;
+    } catch (error) {
+      lastError = error;
+      console.warn('[YouTube playback] Invidious instance failed', { instance, videoId, message: String(error?.message || error).slice(0, 1200) });
+      await fs.rm(output, { force: true }).catch(() => {});
+    }
+  }
+  throw new Error('Invidious fallback failed: ' + String(lastError?.message || lastError || 'unknown error'));
+}
+
 async function buildYouTubePlayback(videoId) {
   const id = String(videoId || '').trim();
   if (!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
@@ -147,6 +210,16 @@ async function buildYouTubePlayback(videoId) {
         });
         await fs.rm(source, { force: true }).catch(() => {});
         if (/not made this video available in your country|not available in your country|geo.?restrict|country/i.test(message)) break;
+      }
+    }
+
+    if (lastError) {
+      try {
+        await tryInvidiousDownload(id, source);
+        lastError = null;
+        console.info('[YouTube playback] primary extractor failed; Invidious fallback succeeded', { videoId: id });
+      } catch (fallbackError) {
+        failures.push({ client: 'invidious', message: String(fallbackError?.message || fallbackError).slice(0, 1800) });
       }
     }
 
