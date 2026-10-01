@@ -68,6 +68,8 @@ function requireDashboardAuth(req, res, next) {
 const apiKeys = (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '')
   .split(',').map(k => k.trim()).filter(Boolean);
 
+console.log('[Gemini] configured key count:', apiKeys.length);
+
 if (!apiKeys.length) {
   console.warn('Gemini is not configured yet. Set GEMINI_API_KEYS.');
 }
