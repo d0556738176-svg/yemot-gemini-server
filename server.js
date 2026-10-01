@@ -318,6 +318,7 @@ async function searchYouTubeForPhone(transcript) {
 
   const wantsNewest=/(הכי חדש|החדש ביותר|הכי חדשה|האחרון|האחרונה|אחרון|אחרונה|העדכני ביותר|חדש ביותר|מה יצא לאחרונה|מה עלה לאחרונה|הכי חדש שעלה)/i.test(question);
   const wantsContent=/(על מה|מה דיברו|מה דיבר|מה אמרו|מה נאמר|מה היה|מה קרה בסרטון|מה בדיוק|הדו.?שיח|השיחה|תוכן הסרטון|תוכן השיר|מילים|סכם|סיכום|תספר לי מה יש)/i.test(question);
+  const wantsStats=/(כמה צפיות|כמה צפיות יש|מספר צפיות|צפיות|כמה לייקים|לייקים|כמה תגובות|תגובות|מה אומרים בתגובות|מה כתבו בתגובות|תגובות על הסרטון)/i.test(question);
 
   let videos=[];
   try {
@@ -358,6 +359,32 @@ async function searchYouTubeForPhone(transcript) {
   }
 
   if(!videos.length) return 'לא מצאתי כרגע תוצאה מתאימה ביוטיוב.';
+  if(wantsStats) {
+    try {
+      const stats=await getYouTubeStats(videos.slice(0,10).map(v=>v.videoId));
+      const target=videos[0];
+      const item=stats.get(target.videoId);
+      if(!item) return 'מצאתי את הסרטון אבל לא הצלחתי לקבל כרגע את נתוני YouTube.';
+      const s=item.statistics||{};
+      let answer='הסרטון '+sanitizeForYemot(item.snippet?.title||target.title||'')+
+        ' קיבל '+Number(s.viewCount||0).toLocaleString('he-IL')+' צפיות';
+      if(s.likeCount!=null) answer+=', '+Number(s.likeCount).toLocaleString('he-IL')+' לייקים';
+      if(s.commentCount!=null) answer+=' ו-'+Number(s.commentCount).toLocaleString('he-IL')+' תגובות';
+      if(/תגובות|מה אומרים בתגובות|מה כתבו בתגובות/i.test(question)) {
+        const comments=await getYouTubeComments(target.videoId,8).catch(()=>[]);
+        if(comments.length) {
+          const digest=comments.map((x,i)=>(i+1)+'. '+sanitizeForYemot(x.textDisplay||x.textOriginal||'')).join(' ');
+          answer+='. הנה כמה מהתגובות הבולטות: '+digest;
+        } else {
+          answer+=' . לא הצלחתי לקבל את טקסט התגובות כרגע.';
+        }
+      }
+      return answer+'.';
+    } catch(e) {
+      console.warn('[YouTube] statistics/comments unavailable',{message:String(e?.message||e).slice(0,500)});
+      return 'מצאתי את הסרטון אבל נתוני הצפיות והתגובות אינם זמינים כרגע.';
+    }
+  }
 
   if(wantsContent) {
     const selected=videos[0];
@@ -420,6 +447,36 @@ ${transcriptText.slice(0,50000)}
 
   return 'מצאתי ביוטיוב את התוצאות הבאות. '+spoken+' כדי לבחור תוצאה, אמור את מספר התוצאה.';
 }
+async function getYouTubeStats(videoIds) {
+  const key=String(process.env.YOUTUBE_API_KEY||'').trim();
+  const ids=[...new Set((videoIds||[]).filter(Boolean))].slice(0,50);
+  if(!key || !ids.length) return new Map();
+  const url=new URL('https://www.googleapis.com/youtube/v3/videos');
+  url.searchParams.set('part','snippet,statistics,contentDetails,liveStreamingDetails');
+  url.searchParams.set('id',ids.join(','));
+  url.searchParams.set('key',key);
+  const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'YouTube video statistics');
+  const data=await response.json();
+  if(!response.ok) throw Object.assign(new Error('YouTube statistics HTTP '+response.status),{status:response.status});
+  return new Map((data.items||[]).map(v=>[v.id,v]));
+}
+
+async function getYouTubeComments(videoId, maxResults=10) {
+  const key=String(process.env.YOUTUBE_API_KEY||'').trim();
+  if(!key || !videoId) return [];
+  const url=new URL('https://www.googleapis.com/youtube/v3/commentThreads');
+  url.searchParams.set('part','snippet');
+  url.searchParams.set('videoId',videoId);
+  url.searchParams.set('maxResults',String(Math.min(100,Math.max(1,maxResults))));
+  url.searchParams.set('order','relevance');
+  url.searchParams.set('textFormat','plainText');
+  url.searchParams.set('key',key);
+  const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'YouTube comments');
+  const data=await response.json();
+  if(!response.ok) throw Object.assign(new Error('YouTube comments HTTP '+response.status),{status:response.status});
+  return (data.items||[]).map(x=>x.snippet?.topLevelComment?.snippet).filter(Boolean);
+}
+
 function shouldForceWebSearch(transcript) {
   const t = String(transcript || '').toLowerCase();
   return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|פתוח עכשיו|עדכון אחרון|מה חדש|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם)/i.test(t);
