@@ -5,6 +5,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos, formatYouTubeChoices, getSelectedYouTubeVideo } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
+import { downloadAndUploadYouTubeAudio } from './youtube-playback.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -549,20 +550,18 @@ async function youtubeCallHandler(call) {
     }
 
     const title = sanitizeForYemot(selected.title);
-    console.info('[YouTube IVR] fetching transcript', { videoId: selected.videoId, title });
+    console.info('[YouTube IVR] preparing audio playback', { videoId: selected.videoId, title });
 
-    const selectedTranscript = await getYouTubeTranscript(selected.videoId);
-
-    console.info('[YouTube IVR] transcript ready', {
+    const playback = await downloadAndUploadYouTubeAudio(selected.videoId);
+    console.info('[YouTube IVR] audio ready', {
       videoId: selected.videoId,
-      language: selectedTranscript.language,
-      chars: selectedTranscript.text.length,
-      chunks: selectedTranscript.chunks.length
+      title,
+      chunkCount: playback.chunkCount
     });
 
     return call.id_list_message([
-      { type: 'text', data: 'בחרת את הסרטון ' + title + '. הנה הכתוביות של הסרטון.' },
-      ...selectedTranscript.chunks.map(chunk => ({ type: 'text', data: chunk }))
+      { type: 'text', data: 'בחרת את הסרטון ' + title + '. מתחיל את השמעת הסרטון.' },
+      ...playback.playbackPaths.map(file => ({ type: 'file', data: file }))
     ]);
   } catch (error) {
     logDetailedError('YouTube IVR', error);
