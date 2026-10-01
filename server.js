@@ -327,7 +327,7 @@ async function answerNewsDirect(transcript) {
   const xml=await response.text();
   const items=[...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0,6).map(m=>{
     const block=m[1];
-    const title=(block.match(/<title>([\s\S]*?)<\/title>/i)?.[1]||'').replace(/<!\\[CDATA\\[|\\]\\]>/g,'').trim();
+    const title=(block.match(/<title>([\s\S]*?)<\/title>/i)?.[1]||'').replace(/<!\[CDATA\[|\]\]>/g,'').trim();
     const pub=(block.match(/<pubDate>([\s\S]*?)<\/pubDate>/i)?.[1]||'').trim();
     return {title:title.replace(/&amp;/g,'&').replace(/&quot;/g,'"'),pub};
   }).filter(x=>x.title);
