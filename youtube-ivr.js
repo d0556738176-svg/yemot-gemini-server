@@ -56,9 +56,9 @@ export async function searchYouTubeVideos(query, {
 
   const wantsNewest = wantsNewestQuery(original);
 
-  // For "הסרטון הכי חדש של X", first resolve X as a YouTube channel.
-  // A generic video search can return unrelated videos when the person's name
-  // is common or when the requested name is not present in the title.
+  // For "הסרטון הכי חדש של X", resolve the channel and then read its
+  // dedicated uploads playlist. This is more precise than a generic video
+  // search because YouTube exposes the uploads playlist on the channel.
   if (wantsNewest) {
     const channelUrl = new URL('https://www.googleapis.com/youtube/v3/search');
     channelUrl.searchParams.set('part', 'snippet');
@@ -72,8 +72,7 @@ export async function searchYouTubeVideos(query, {
     const channels = (channelData.items || []).filter(x => x.id?.channelId);
 
     if (channels.length) {
-      // Prefer the channel whose title contains the requested words.
-      const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+      const words = q.toLowerCase().split(/\\s+/).filter(Boolean);
       const ranked = channels.map((channel, index) => {
         const title = String(channel.snippet?.channelTitle || '').toLowerCase();
         const score = words.reduce((sum, word) => sum + (title.includes(word) ? 1 : 0), 0);
@@ -81,27 +80,34 @@ export async function searchYouTubeVideos(query, {
       }).sort((a, b) => b.score - a.score || a.index - b.index);
 
       const channelId = ranked[0].channel.id.channelId;
-      const videoUrl = new URL('https://www.googleapis.com/youtube/v3/search');
-      videoUrl.searchParams.set('part', 'snippet');
-      videoUrl.searchParams.set('channelId', channelId);
-      videoUrl.searchParams.set('type', 'video');
-      videoUrl.searchParams.set('order', 'date');
-      videoUrl.searchParams.set('maxResults', '9');
-      videoUrl.searchParams.set('regionCode', regionCode);
-      videoUrl.searchParams.set('key', key);
 
-      const videoData = await fetchJson(videoUrl, fetchImpl, timeoutMs);
-      const channelVideos = (videoData.items || [])
-        .filter(item => item.id?.videoId)
-        .map(item => ({
-          videoId: item.id.videoId,
-          title: String(item.snippet?.title || 'ללא כותרת'),
-          channelTitle: String(item.snippet?.channelTitle || 'ערוץ לא ידוע'),
-          publishedAt: item.snippet?.publishedAt || null,
-          description: String(item.snippet?.description || '')
-        }));
+      const channelDetailsUrl = new URL('https://www.googleapis.com/youtube/v3/channels');
+      channelDetailsUrl.searchParams.set('part', 'contentDetails,snippet');
+      channelDetailsUrl.searchParams.set('id', channelId);
+      channelDetailsUrl.searchParams.set('key', key);
+      const channelDetails = await fetchJson(channelDetailsUrl, fetchImpl, timeoutMs);
+      const uploadsPlaylistId = channelDetails.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
 
-      if (channelVideos.length) return channelVideos;
+      if (uploadsPlaylistId) {
+        const uploadsUrl = new URL('https://www.googleapis.com/youtube/v3/playlistItems');
+        uploadsUrl.searchParams.set('part', 'snippet,contentDetails');
+        uploadsUrl.searchParams.set('playlistId', uploadsPlaylistId);
+        uploadsUrl.searchParams.set('maxResults', '10');
+        uploadsUrl.searchParams.set('key', key);
+        const uploadsData = await fetchJson(uploadsUrl, fetchImpl, timeoutMs);
+
+        const channelVideos = (uploadsData.items || [])
+          .filter(item => item.contentDetails?.videoId)
+          .map(item => ({
+            videoId: item.contentDetails.videoId,
+            title: String(item.snippet?.title || 'ללא כותרת'),
+            channelTitle: String(item.snippet?.channelTitle || channelDetails.items?.[0]?.snippet?.title || 'ערוץ לא ידוע'),
+            publishedAt: item.contentDetails?.videoPublishedAt || item.snippet?.publishedAt || null,
+            description: String(item.snippet?.description || '')
+          }));
+
+        if (channelVideos.length) return channelVideos;
+      }
     }
   }
 
