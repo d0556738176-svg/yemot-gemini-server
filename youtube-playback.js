@@ -45,12 +45,15 @@ async function uploadToYemot(filePath, remotePath) {
 
 async function tryDownload(url, output, client) {
   console.info('[YouTube playback] trying client', { client, videoId: path.basename(output, '.source.mp3') });
-  const extractorArgs = [
-    'youtube:player_client=' + client,
-    'youtube:fetch_pot=always',
-    'youtube:pot_trace=true',
-    'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416;disable_innertube=1'
-  ].join(';');
+  const noPotClient = client === 'tv' || client === 'tv_simply' || client === 'web_embedded';
+  const extractorArgs = noPotClient
+    ? 'youtube:player_client=' + client
+    : [
+        'youtube:player_client=' + client,
+        'youtube:fetch_pot=always',
+        'youtube:pot_trace=true',
+        'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416;disable_innertube=1'
+      ].join(';');
 
   await youtubedl(url, {
     output,
@@ -114,7 +117,7 @@ async function buildYouTubePlayback(videoId) {
   try {
     let lastError;
     const failures = [];
-    for (const client of ['web_safari', 'mweb', 'default']) {
+    for (const client of ['tv', 'tv_simply', 'web_embedded', 'web_safari', 'mweb', 'default']) {
       try {
         await tryDownload(url, source, client);
         lastError = null;
