@@ -325,9 +325,9 @@ async function answerNewsDirect(transcript) {
   const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'news RSS');
   if(!response.ok) throw Object.assign(new Error('News RSS HTTP '+response.status),{status:503});
   const xml=await response.text();
-  const items=[...xml.matchAll(/<item>([\\s\\S]*?)<\\/item>/g)].slice(0,6).map(m=>{
+  const items=[...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0,6).map(m=>{
     const block=m[1];
-    const title=(block.match(/<title>([\\s\\S]*?)<\\/title>/i)?.[1]||'').replace(/<!\\[CDATA\\[|\\]\\]>/g,'').trim();
+    const title=(block.match(/<title>([\s\S]*?)<\/title>/i)?.[1]||'').replace(/<!\\[CDATA\\[|\\]\\]>/g,'').trim();
     const pub=(block.match(/<pubDate>([\\s\\S]*?)<\\/pubDate>/i)?.[1]||'').trim();
     return {title:title.replace(/&amp;/g,'&').replace(/&quot;/g,'"'),pub};
   }).filter(x=>x.title);
@@ -397,8 +397,7 @@ async function searchYouTubeForPhone(transcript) {
   let videos=[];
   try {
     videos=await searchYouTubeVideos(question,{
-      apiKey:key,
-      regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
+      apiKey:key,      regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
       timeoutMs:REQUEST_TIMEOUT_MS
     });
   } catch(e) {
@@ -797,8 +796,7 @@ async function youtubeCallHandler(call) {
       : status === 429
         ? 'זיהוי הדיבור עמוס כרגע נא לנסות שוב'
         : status === 503
-          ? 'שירות יוטיוב אינו זמין כרגע'
-          : 'אירעה תקלה בהשמעת הסרטון נא לנסות שוב';
+          ? 'שירות יוטיוב אינו זמין כרגע'          : 'אירעה תקלה בהשמעת הסרטון נא לנסות שוב';
     return call.id_list_message([{ type: 'text', data: message }]);
   }
 }
