@@ -356,6 +356,11 @@ async function searchYouTubeForPhone(transcript) {
     ? ' שים לב: החיפוש מצא פרטי סרטון בלבד ולא תמליל מלא, ולכן עדיין אין לי אפשרות לאמת את כל מה שנאמר בו.' : '';
   return 'מצאתי ביוטיוב את התוצאות הבאות. '+spoken+contentNote+' כדי לבחור תוצאה, אמור את מספר התוצאה.';
 }
+function shouldForceWebSearch(transcript) {
+  const t = String(transcript || '').toLowerCase();
+  return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|פתוח עכשיו|עדכון אחרון|מה חדש)/i.test(t);
+}
+
 async function answerWithWebSearch(transcript, historyText='') {
   const question=String(transcript||'').trim();
   if(!question) throw Object.assign(new Error('Search requested but transcript is empty'),{status:400});
@@ -452,7 +457,7 @@ async function callHandler(call) {
       console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length, transcriptReady: !!userTranscript });
       const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
       if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
-      else if(replyText.startsWith('SEARCH_REQUEST')) {
+      else if(replyText.startsWith('SEARCH_REQUEST') || shouldForceWebSearch(userTranscript)) {
         try {
           const youtubeAnswer=await searchYouTubeForPhone(userTranscript);
           replyText=youtubeAnswer || await answerWithWebSearch(userTranscript, historyText);
