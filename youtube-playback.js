@@ -67,7 +67,7 @@ async function tryDownload(url, output, client) {
         'youtube:player_client=' + client,
         'youtube:fetch_pot=always',
         'youtube:pot_trace=true',
-        'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416;disable_innertube=1'
+        'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416'
       ].join(';');
   const format = client === 'android_vr' ? '18/bestaudio/best' : 'bestaudio/best';
 
