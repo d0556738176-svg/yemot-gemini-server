@@ -343,15 +343,10 @@ async function answerNewsDirect(transcript, historyText='') {
   const numberMatch=question.match(/(?:כותרת|הכותרת|חדשה)\s*(?:מספר\s*)?(\d+)/i);
   if(numberMatch && history) {
     const n=Number(numberMatch[1]);
-    const previousLines=history.split(/\n|\.\s+/).map(x=>x.trim()).filter(Boolean);
-    const candidates=previousLines.filter(x=>new RegExp('(?:כותרת|תוצאה)\\s*'+n+'\\s*[:.]','i').test(x));
-    const prior=candidates[0] || '';
-    if(prior) {
-      const cleaned=prior.replace(/^(?:מתקשר|AI):\s*/i,'');
-      const colon=cleaned.indexOf(':');
-      const title=colon>=0 ? cleaned.slice(colon+1).trim() : cleaned;
-      q=title.slice(0,180);
-    }
+    const marker=new RegExp('(?:כותרת|תוצאה)\\s*'+n+'\\s*[:.]\\s*([\\s\\S]*?)(?=(?:כותרת|תוצאה)\\s*\\d+\\s*[:.]|$)','i');
+    const matches=history.match(marker);
+    const title=matches?.[1]?.trim();
+    if(title) q=title.slice(0,180);
   }
   const url='https://news.google.com/rss/search?q='+encodeURIComponent(q)+'&hl=he&gl=IL&ceid=IL:he';
   const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'news RSS');
