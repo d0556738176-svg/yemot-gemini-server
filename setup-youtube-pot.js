@@ -12,8 +12,9 @@ async function exists(p) {
   try { await fs.access(p); return true; } catch { return false; }
 }
 
+await fs.rm(providerRoot, { recursive: true, force: true });
+
 if (!(await exists(path.join(serverDir, 'build', 'main.js')))) {
-  await fs.rm(providerRoot, { recursive: true, force: true });
   execFileSync('git', [
     'clone', '--depth', '1', '--branch', '2.0.0',
     'https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git',
@@ -28,4 +29,7 @@ await fs.rm(pluginRoot, { recursive: true, force: true });
 await fs.mkdir(pluginTarget, { recursive: true });
 await fs.cp(path.join(providerRoot, 'plugin', 'yt_dlp_plugins'), pluginTarget, { recursive: true });
 
-console.info('[YouTube POT] provider and plugin ready');
+for (const file of [path.join(serverDir, 'build', 'main.js'), path.join(serverDir, 'build', 'generate_once.js')]) {
+  if (!(await exists(file))) throw new Error('[YouTube POT] missing compiled provider file: ' + file);
+}
+console.info('[YouTube POT] provider and plugin ready', { version: '2.0.0' });
