@@ -101,7 +101,6 @@ async function getInfo(url, client) {
   return parseDumpedJson(await youtubedl(url, {
     dumpSingleJson: true,
     skipDownload: true,
-    noWarnings: false,
     quiet: true,
     jsRuntimes: 'node',
     pluginDirs: YTDLP_PLUGIN_ROOT,
