@@ -241,7 +241,13 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) 
 const yemotApi = new YemotApi(process.env.YEMOT_API_USERNAME, process.env.YEMOT_API_PASSWORD);
 const router = YemotRouter({
   printLog: true,
-  defaults: { removeInvalidChars: true },
+  // Keep the same Call state alive for a long time so a caller can have
+  // many back-and-forth turns without Yemot-router2 expiring the call.
+  timeout: 15 * 60 * 1000,
+  defaults: {
+    removeInvalidChars: true,
+    read: { timeout: 10 * 60 * 1000 }
+  },
   uncaughtErrorHandler: e => logDetailedError('call handler', e)
 });
 
@@ -447,7 +453,8 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   const question=String(transcript||'').trim();
   if(!question) return null;
   const explicitYouTube=/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(question);
-  const hasResultReference=/(?:תוצאה|סרטון|בדיחה)\s*(?:מספר\s*)?(ראשונה|שנייה|שלישית|רביעית|חמישית|שישית|שביעית|שמינית|תשיעית|1|2|3|4|5|6|7|8|9)/i.test(question);
+  const hasResultReference=/(?:תוצאה|סרטון|בדיחה)\s*(?:מספר\s*)?(ראשונה|שנייה|שלישית|רביעית|חמישית|שישית|שביעית|שמינית|תשיעית|1|2|3|4|5|6|7|8|9)/i.test(question) ||
+    /(?:הראשונה|השנייה|השלישית|הרביעית|החמישית|הראשון|השני|השלישי|הרביעי|החמישי)/i.test(question);
   if(!explicitYouTube && !hasResultReference) return null;
 
   const wantsNewest=/(הכי חדש|החדש ביותר|הכי חדשה|האחרון|האחרונה|אחרון|אחרונה|העדכני ביותר|חדש ביותר|מה יצא לאחרונה|מה עלה לאחרונה|הכי חדש שעלה)/i.test(question);
@@ -681,6 +688,7 @@ ${question}
 אם המתקשר מבקש הופעות, מופעים או אירועים בישראל או בעולם, חפש מידע עדכני ככל שניתן והחזר את שם האירוע, האמן או המופע, העיר והמדינה, המקום, התאריך והשעה אם נמצאו. כשאפשר, ציין גם היכן רוכשים כרטיסים ומהי דרך הרכישה הרשמית או המקור שמצאת. אל תטען שכרטיסים זמינים אם המקור לא מציין זאת.
 אם המתקשר מבקש שעות פתיחה של עסק, בית מרקחת, חנות או סניף, חפש את הסניף המדויק ואת שעות הפעילות של היום המבוקש, והבחן בין שעות רגילות לבין שעות חג/חריגות. אם לא נמצא סניף מדויק, בקש עיר או כתובת.
 אם השאלה על YouTube, סרטון או שיר, חפש לפי הנושא, הכותרת, הערוץ ותאריך הפרסום. כשנשאל 'הכי חדש' או 'האחרון', העדף תוצאת YouTube עם תאריך הפרסום העדכני ביותר שמתאימה לנושא. אם המתקשר שואל על תוכן הסרטון, השתמש רק בתמליל או בתוכן מלא שנגיש בפועל דרך מקור מותר; אם אין גישה לתוכן עצמו, אמור זאת במפורש והצע סיכום של המידע הזמין בלבד. לעולם אל תטען שצפית בסרטון או קראת תמליל אם לא נגישו.
+אם המתקשר נותן כתובת אתר, שם דומיין או מבקש מידע מאתר מסוים, נסה לפתוח ולקרוא את המקור עצמו או לחפש בתוך האתר, ולא להסתפק בתוצאות כלליות. מותר להשתמש במידע ציבורי נגיש מהאתר גם אם הוא ארוך, ולסכם אותו לפי בקשת המתקשר. אל תטען שקראת עמוד אם הוא לא היה נגיש בפועל. אין לעקוף התחברות, CAPTCHA, חומת תשלום, הגבלת גישה או אמצעי אבטחה; במקרה כזה אמור שהחומר לא נגיש. המטרה היא חיפוש רחב ככל האפשר במקורות ציבוריים ונגישים.
 אם החיפוש נכשל או לא החזיר מידע מספיק, אמור בקצרה שלא הצלחת להשיג מידע אמין כרגע. אל תציג כתובות אינטרנט ארוכות.`;
   try {
     const result=await generateWithRetry([{text:prompt}],true,false);
@@ -720,22 +728,34 @@ async function callHandler(call) {
     startedAt:new Date().toISOString(),status:'ממתין להקלטה'});
   let firstTurn=true;
   let openingPrompt=null;
+  let nextPrompt=null;
+  let emptyRecordAttempts=0;
   const turnHistory=[];
   const turnContext={youtubeResults:[]};
   if (process.env.ENABLE_AI_OPENING !== 'false' && conversationLog.some(x=>x.phone===callerPhone))
     openingPrompt=await buildOpeningForCaller(callerPhone);
 
   while(true) {
-    const prompt=firstTurn?(openingPrompt || process.env.FIRST_CALL_MESSAGE ||
+    // IMPORTANT: send the previous answer and request the next turn in ONE read.
+    // This avoids ending the Yemot action between turns and keeps the Call object,
+    // turnHistory and YouTube result context alive.
+    const prompt=nextPrompt || (firstTurn?(openingPrompt || process.env.FIRST_CALL_MESSAGE ||
       'שלום איך אפשר לעזור לך היום אמור בבקשה על מה תרצה לדבר אחרי הצפצוף ולסיום ההקלטה הקש סולמית'):
-      'אמור שאלה נוספת ולסיום הקש סולמית או הקש כוכבית ליציאה';
+      'אמור שאלה נוספת ולסיום הקש סולמית או הקש כוכבית ליציאה');
     firstTurn=false;
     const recordPath=await call.read([{type:'text',data:prompt}],'record',
-      {min_length:1,max_length:60,no_confirm_menu:true});
+      {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
     if(!recordPath || recordPath==='None') {
+      emptyRecordAttempts++;
+      if(emptyRecordAttempts < 3) {
+        nextPrompt='לא שמעתי אותך. אמור שוב את השאלה ולסיום הקש סולמית';
+        continue;
+      }
       activeCalls.delete(activeKey);
-      return call.id_list_message([{type:'text',data:'לא נקלט דבר להתראות'}]);
+      return call.id_list_message([{type:'text',data:'לא התקבלה תשובה. להתראות'}]);
     }
+    emptyRecordAttempts=0;
+    nextPrompt=null;
 
     const active=activeCalls.get(activeKey);
     if(active) active.status='הקלטה התקבלה — מעבד';
@@ -827,9 +847,16 @@ async function callHandler(call) {
       if(turnHistory.length>8) turnHistory.shift();
     }
     console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
-    // Keep the IVR call alive: after playback, continue to the next read in this loop.
-    call.id_list_message([{type:'text',data:replyText}], {prependToNextAction:true});
-    console.info('[CALL_FLOW] yemot_handoff_queued_next_read', { callId: activeKey });
+    // Do NOT call id_list_message here. It normally exits the action unless it is
+    // queued with prependToNextAction. Instead, put the answer directly into the
+    // next read: Yemot will play the answer and immediately collect the next turn.
+    // This keeps the same phone call and the same in-memory conversation context.
+    nextPrompt=replyText+' אמור עכשיו את השאלה הבאה ולסיום הקש סולמית';
+    console.info('[CALL_FLOW] next_turn_armed', {
+      callId: activeKey,
+      historyTurns: turnHistory.length,
+      youtubeContextResults: turnContext.youtubeResults.length
+    });
   }
 }
 
