@@ -79,6 +79,12 @@ const MODEL_NAMES = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gemini-3.5-f
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
 const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 7000);
 
+// Avoid repeatedly hammering Gemini after the API has explicitly reported quota exhaustion.
+// This is especially important on phone calls, where a second fallback request can turn one
+// quota event into several consecutive failures.
+let geminiQuotaCooldownUntil = 0;
+let lastGeminiQuotaError = null;
+
 const CONTENT_FILTER_INSTRUCTION = '';
 
 const EXCLUSIVE_INSTRUCTION = [CONTENT_FILTER_INSTRUCTION, process.env.AI_SYSTEM_INSTRUCTION || '']
@@ -173,6 +179,14 @@ function geminiErrorStatus(err) {
 async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) {
   if (!modelsByName.length || !modelsByName[0]?.length)
     throw Object.assign(new Error('Gemini is not configured'), {status:400});
+  if (geminiQuotaCooldownUntil > Date.now() && lastGeminiQuotaError) {
+    const retryAfter = Math.max(1, Math.ceil((geminiQuotaCooldownUntil - Date.now()) / 1000));
+    const e = Object.assign(new Error('Gemini quota cooldown; retry after ' + retryAfter + 's'), {
+      status: 429,
+      retryAfter
+    });
+    throw e;
+  }
   const groups = useWebSearch ? webModelsByName : modelsByName;
   const timeoutMs = fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
   const maxAttempts = fastPhone ? 1 : 2;
@@ -190,9 +204,15 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) 
           lastError=e;
           const status=geminiErrorStatus(e);
           if (status === 429) {
-            console.warn('[Gemini] quota/rate limit; trying next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status, fastPhone });
-            // A 429 can be model-specific on the free tier. Keep the phone
-            // flow alive by trying the next configured model/key.
+            lastGeminiQuotaError = e;
+            // Give the current request a chance to try the other configured
+            // model/key combinations, but prevent an immediate second API
+            // request (for example web grounding after phone transcription)
+            // from multiplying the same quota failure.
+            geminiQuotaCooldownUntil = Math.max(geminiQuotaCooldownUntil, Date.now() + 15000);
+            console.warn('[Gemini] quota/rate limit; trying next configured model/key', {
+              model: MODEL_NAMES[mi], key: ki + 1, status, fastPhone
+            });
             break;
           }
           if (status === 404) {
@@ -742,7 +762,16 @@ async function callHandler(call) {
         /(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript)) {
         try {
           const youtubeAnswer=await searchYouTubeForPhone(userTranscript, historyText, turnContext);
-          replyText=youtubeAnswer || await answerWithWebSearch(userTranscript, historyText);
+          if (youtubeAnswer) {
+            replyText=youtubeAnswer;
+          } else if (/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript)) {
+            // Do not immediately fall back to another Gemini web-grounding call.
+            // If YouTube search itself is unavailable, that second Gemini call
+            // can consume the remaining quota and make the phone call fail twice.
+            replyText='לא הצלחתי כרגע לקבל תוצאות מיוטיוב. נא לנסות שוב בעוד כמה רגעים.';
+          } else {
+            replyText=await answerWithWebSearch(userTranscript, historyText);
+          }
         } catch(searchError) {
           const fallback=knownContactFallback(userTranscript, historyText);
           if(fallback && [429,503,408].includes(geminiErrorStatus(searchError))) {
