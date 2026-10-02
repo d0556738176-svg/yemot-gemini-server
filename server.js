@@ -476,6 +476,11 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   }
   const wantsStats=/(כמה צפיות|כמה צפיות יש|מספר צפיות|צפיות|כמה לייקים|לייקים|כמה תגובות|תגובות|מה אומרים בתגובות|מה כתבו בתגובות|תגובות על הסרטון)/i.test(question);
   const wantsDetails=/(פרטי הסרטון|פרטי סירטון|פרטים על הסרטון|פרטים על סירטון|מידע על הסרטון|מידע על סירטון|מתי עלה|מתי פורסם|תאריך הפרסום|תיאור הסרטון|תיאור של הסרטון|מי העלה|באיזה ערוץ|שם הערוץ)/i.test(question);
+  if (context && Array.isArray(context.youtubeResults) && resultMatch && (wantsStats || wantsDetails)) {
+    const words={ראשונה:1,שנייה:2,שלישית:3,רביעית:4,חמישית:5,שישית:6,שביעית:7,שמינית:8,תשיעית:9};
+    const n=Number(resultMatch[1]) || words[resultMatch[1]];
+    if (n && context.youtubeResults[n-1]) videos=[context.youtubeResults[n-1]];
+  }
 
   if (Array.isArray(context?.youtubeResults) && resultMatch && wantsContent) {
     const words={ראשונה:1,שנייה:2,שלישית:3,רביעית:4,חמישית:5,שישית:6,שביעית:7,שמינית:8,תשיעית:9};
