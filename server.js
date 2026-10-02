@@ -305,8 +305,8 @@ function isComedySearchQuestion(transcript) {
 }
 
 function extractWeatherLocation(transcript) {
-  const q=String(transcript||'').replace(/[?.,!]/g,' ');
-  const match=q.match(/(?:ב|של|ל|עיר)s+([א-תA-Za-z][א-תA-Za-z' -]{1,35})/i);
+  const q=String(transcript||'').replace(/[?.,!]/g,' ').replace(/\s+/g,' ').trim();
+  const match=q.match(/(?:ב|של|ל|בעיר)\s+([א-תA-Za-z][א-תA-Za-z' -]{1,35})(?=\s+(?:היום|עכשיו|מחר|למחר|בסוף|בלילה|בבוקר|בערב)|$)/i);
   if(match && match[1]) return match[1].trim();
   const cities=['תל אביב','ירושלים','חיפה','באר שבע','נתניה','כפר סבא','רעננה','הרצליה','פתח תקווה','ראשון לציון','אשדוד','אשקלון','רחובות','מודיעין','אילת','נצרת','עכו','טבריה'];
   return cities.find(city=>q.includes(city)) || null;
@@ -374,15 +374,23 @@ async function answerNewsDirect(transcript, historyText='') {
   const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'news RSS');
   if(!response.ok) throw Object.assign(new Error('News RSS HTTP '+response.status),{status:503});
   const xml=await response.text();
-  const items=[...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0,6).map(m=>{
+  const decodeXml=(value)=>String(value||'')
+    .replace(/<!\[CDATA\[|\]\]>/g,'')
+    .replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'")
+    .replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+  const items=[...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0,8).map(m=>{
     const block=m[1];
-    const title=(block.match(/<title>([\s\S]*?)<\/title>/i)?.[1]||'').replace(/<!\[CDATA\[|\]\]>/g,'').trim();
+    const title=decodeXml(block.match(/<title>([\s\S]*?)<\/title>/i)?.[1]||'').trim();
     const pub=(block.match(/<pubDate>([\s\S]*?)<\/pubDate>/i)?.[1]||'').trim();
-    return {title:title.replace(/&amp;/g,'&').replace(/&quot;/g,'"'),pub};
+    const description=decodeXml((block.match(/<description>([\s\S]*?)<\/description>/i)?.[1]||'').replace(/<[^>]+>/g,' ')).trim();
+    const source=decodeXml(block.match(/<source[^>]*>([\s\S]*?)<\/source>/i)?.[1]||'').trim();
+    return {title,pub,description,source};
   }).filter(x=>x.title);
   if(!items.length) throw Object.assign(new Error('No news items'),{status:503});
-  return 'אלה כמה מהכותרות העדכניות שמצאתי: '+items.map((x,i)=>
-    'כותרת '+(i+1)+': '+sanitizeForYemot(x.title)
+  return 'אלה הכותרות והעדכונים העיקריים שמצאתי כרגע: '+items.map((x,i)=>
+    'כותרת '+(i+1)+': '+sanitizeForYemot(x.title)+
+    (x.source ? '. מקור: '+sanitizeForYemot(x.source) : '')+
+    (x.description ? '. תקציר: '+sanitizeForYemot(x.description).slice(0,420) : '')
   ).join('. ')+'.';
 }
 
@@ -467,6 +475,7 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
     }
   }
   const wantsStats=/(כמה צפיות|כמה צפיות יש|מספר צפיות|צפיות|כמה לייקים|לייקים|כמה תגובות|תגובות|מה אומרים בתגובות|מה כתבו בתגובות|תגובות על הסרטון)/i.test(question);
+  const wantsDetails=/(פרטי הסרטון|פרטי סירטון|פרטים על הסרטון|פרטים על סירטון|מידע על הסרטון|מידע על סירטון|מתי עלה|מתי פורסם|תאריך הפרסום|תיאור הסרטון|תיאור של הסרטון|מי העלה|באיזה ערוץ|שם הערוץ)/i.test(question);
 
   if (Array.isArray(context?.youtubeResults) && resultMatch && wantsContent) {
     const words={ראשונה:1,שנייה:2,שלישית:3,רביעית:4,חמישית:5,שישית:6,שביעית:7,שמינית:8,תשיעית:9};
@@ -518,17 +527,27 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   if (context && Array.isArray(context.youtubeResults) && videos.length && !resultMatch) {
     context.youtubeResults = videos.slice(0, 15);
   }
-  if(wantsStats) {
+  if(wantsStats || wantsDetails) {
     try {
       const stats=await getYouTubeStats(videos.slice(0,10).map(v=>v.videoId));
       const target=videos[0];
       const item=stats.get(target.videoId);
       if(!item) return 'מצאתי את הסרטון אבל לא הצלחתי לקבל כרגע את נתוני YouTube.';
       const s=item.statistics||{};
-      let answer='הסרטון '+sanitizeForYemot(item.snippet?.title||target.title||'')+
-        ' קיבל '+Number(s.viewCount||0).toLocaleString('he-IL')+' צפיות';
+      const snippet=item.snippet||{};
+      const details=item.contentDetails||{};
+      const live=item.liveStreamingDetails||{};
+      let answer='הסרטון '+sanitizeForYemot(snippet.title||target.title||'')+
+        '. הערוץ: '+sanitizeForYemot(snippet.channelTitle||target.channelTitle||'לא ידוע');
+      if(snippet.publishedAt) answer+=', פורסם בתאריך '+new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full'}).format(new Date(snippet.publishedAt));
+      if(details.duration) {
+        const m=String(details.duration).match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
+        if(m) answer+=', אורך הסרטון '+[m[1]?m[1]+' שעות':'',m[2]?m[2]+' דקות':'',m[3]?m[3]+' שניות':''].filter(Boolean).join(' ו');
+      }
+      if(s.viewCount!=null) answer+=', '+Number(s.viewCount).toLocaleString('he-IL')+' צפיות';
       if(s.likeCount!=null) answer+=', '+Number(s.likeCount).toLocaleString('he-IL')+' לייקים';
       if(s.commentCount!=null) answer+=' ו-'+Number(s.commentCount).toLocaleString('he-IL')+' תגובות';
+      if(snippet.description && wantsDetails) answer+='. תיאור: '+sanitizeForYemot(snippet.description).slice(0,900);
       if(/תגובות|מה אומרים בתגובות|מה כתבו בתגובות/i.test(question)) {
         const comments=await getYouTubeComments(target.videoId,8).catch(()=>[]);
         if(comments.length) {
@@ -638,7 +657,7 @@ async function getYouTubeComments(videoId, maxResults=10) {
 
 function shouldForceWebSearch(transcript) {
   const t = String(transcript || '').toLowerCase();
-  return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|פתוח עכשיו|יצירת קשר|אתר רשמי|רשתות חברתיות|רשת חברתית|אינסטגרם|פייסבוק|טיקטוק|טוויטר|עדכון אחרון|מה חדש|הופעה|הופעות|מופע|מופעים|אירוע|אירועים|כרטיסים|רכישת כרטיסים|לקנות כרטיסים|איפה קונים|מחיר כרטיס|מכירת כרטיסים|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם)/i.test(t);
+  return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|שעות פעילות|פתוח עכשיו|סגור היום|מתי נסגר|מתי סוגר|מתי פתוח|יצירת קשר|איך יוצרים קשר|אתר רשמי|רשתות חברתיות|רשת חברתית|אינסטגרם|פייסבוק|טיקטוק|טוויטר|עדכון אחרון|מה חדש|הופעה|הופעות|מופע|מופעים|אירוע|אירועים|כרטיסים|רכישת כרטיסים|לקנות כרטיסים|איפה קונים|מחיר כרטיס|מכירת כרטיסים|בית מרקחת|בתי מרקחת|חנות|חנויות|עסק|עסקים|סניף|סניפים|כתובת של|מייל של|דוא.?ל|אימייל|קישור|האתר של|מידע מהאתר|חפש באתר|תחפש באתר|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם)/i.test(t);
 }
 
 async function answerWithWebSearch(transcript, historyText='') {
@@ -653,8 +672,9 @@ ${question}
 
 עליך להשתמש בחיפוש אינטרנט חי כשזו שאלה על מידע עדכני, חדשות, תוצאות ספורט, מונדיאל או גביע העולם, לוחות שידורים, תוכניות, רשתות חברתיות, או אירועים שהתרחשו לאחרונה. השתמש בכלי Google Search המצורף וחפש לפי השאלה המדויקת. אל תענה מהזיכרון בלבד.
 ענה בשפה שבה המתקשר דיבר, בתשובה קצרה וברורה שמתאימה להקראה בטלפון. כלול מספרי טלפון, כתובות, תאריכים ופרטים שימושיים אם נמצאו במקור אמין, והבחן בין מידע מאומת לבין מידע שלא נמצא.
-אם המתקשר מבקש יצירת קשר עם אתר, חברה, גוף ציבורי, ערוץ, תוכנית או גורם תקשורתי, חפש פרטי קשר ציבוריים ורשמיים ככל שניתן, כולל אתר רשמי, טלפון וחשבונות רשתות חברתיות ציבוריים ורלוונטיים. אל תמציא פרטי קשר.
-אם המתקשר מבקש הופעות, מופעים או אירועים בכל הארץ, חפש מידע עדכני ככל שניתן והחזר את שם האירוע, האמן או המופע, העיר, המקום, התאריך והשעה אם נמצאו. כשאפשר, ציין גם היכן רוכשים כרטיסים ומהי דרך הרכישה הרשמית או המקור שמצאת. אל תטען שכרטיסים זמינים אם המקור לא מציין זאת.
+אם המתקשר מבקש יצירת קשר עם אתר, חברה, גוף ציבורי, ערוץ, תוכנית או גורם תקשורתי, חפש פרטי קשר ציבוריים ורשמיים ככל שניתן, כולל אתר רשמי, טלפון, דוא"ל, כתובת עסקית וחשבונות רשתות חברתיות ציבוריים ורלוונטיים. אם מדובר באדם פרטי, אל תחשוף כתובת מגורים פרטית או פרטי קשר פרטיים; חפש רק פרטי קשר מקצועיים או ציבוריים שפורסמו רשמית. אל תמציא פרטי קשר.
+אם המתקשר מבקש הופעות, מופעים או אירועים בישראל או בעולם, חפש מידע עדכני ככל שניתן והחזר את שם האירוע, האמן או המופע, העיר והמדינה, המקום, התאריך והשעה אם נמצאו. כשאפשר, ציין גם היכן רוכשים כרטיסים ומהי דרך הרכישה הרשמית או המקור שמצאת. אל תטען שכרטיסים זמינים אם המקור לא מציין זאת.
+אם המתקשר מבקש שעות פתיחה של עסק, בית מרקחת, חנות או סניף, חפש את הסניף המדויק ואת שעות הפעילות של היום המבוקש, והבחן בין שעות רגילות לבין שעות חג/חריגות. אם לא נמצא סניף מדויק, בקש עיר או כתובת.
 אם השאלה על YouTube, סרטון או שיר, חפש לפי הנושא, הכותרת, הערוץ ותאריך הפרסום. כשנשאל 'הכי חדש' או 'האחרון', העדף תוצאת YouTube עם תאריך הפרסום העדכני ביותר שמתאימה לנושא. אם המתקשר שואל על תוכן הסרטון, השתמש רק בתמליל או בתוכן מלא שנגיש בפועל דרך מקור מותר; אם אין גישה לתוכן עצמו, אמור זאת במפורש והצע סיכום של המידע הזמין בלבד. לעולם אל תטען שצפית בסרטון או קראת תמליל אם לא נגישו.
 אם החיפוש נכשל או לא החזיר מידע מספיק, אמור בקצרה שלא הצלחת להשיג מידע אמין כרגע. אל תציג כתובות אינטרנט ארוכות.`;
   try {
