@@ -944,7 +944,41 @@ async function youtubeCallHandler(call) {
     return call.id_list_message([{ type: 'text', data: message }]);  }
 }
 
-router.get('/yemot', callHandler);
+
+const BACKUP_GEMINI_API_KEY = (process.env.YEMOT_BACKUP_GEMINI_API_KEY || process.env.GEMINI_BACKUP_API_KEY || '').trim();
+const backupGeminiClient = BACKUP_GEMINI_API_KEY ? new GoogleGenerativeAI(BACKUP_GEMINI_API_KEY) : null;
+const backupGeminiModel = backupGeminiClient ? backupGeminiClient.getGenerativeModel({model:(process.env.GEMINI_BACKUP_MODEL || MODEL_NAMES[0] || 'gemini-3.8-flash')}) : null;
+
+async function backupCallHandler(call) {
+  if (!backupGeminiModel) return call.id_list_message([{type:'text',data:'שלוחת הגיבוי עדיין אינה מוגדרת'}]);
+  let history=[];
+  let prompt='שלום הגעת למערכת הגיבוי אמור אחרי הצפצוף את השאלה שלך ולסיום הקש סולמית';
+  while(true) {
+    const recordPath=await call.read([{type:'text',data:sanitizeForYemot(prompt)}],'record',{min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
+    if(!recordPath || recordPath==='None') return call.id_list_message([{type:'text',data:'לא נקלט דבר להתראות'}]);
+    try {
+      const response=await withTimeout(yemotApi.download_file('ivr2:'+recordPath),REQUEST_TIMEOUT_MS,'backup recording');
+      const audio=Buffer.isBuffer(response.data)?response.data:Buffer.from(response.data);
+      const context=history.slice(-8).map((x,i)=>'תור '+(i+1)+' — מתקשר: '+x.user+'\\nתשובה: '+x.answer).join('\\n\\n');
+      const result=await withTimeout(backupGeminiModel.generateContent([
+        ...audioParts(audio.toString('base64')),
+        {text:EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.'}
+      ]),REQUEST_TIMEOUT_MS,'backup Gemini');
+      const raw=result.response.text().trim();
+      let parsed=null;
+      try { parsed=JSON.parse(raw); } catch { const m=raw.match(/\\{[\\s\\S]*\\}/); if(m){try{parsed=JSON.parse(m[0]);}catch{}} }
+      const user=sanitizeForYemot(parsed?.transcript||raw);
+      const answer=sanitizeForYemot(parsed?.answer||raw)||'לא הצלחתי לענות כרגע';
+      history.push({user,answer}); if(history.length>8) history=history.slice(-8);
+      prompt=answer+' אמור עכשיו את השאלה הבאה ולסיום הקש סולמית';
+    } catch(e) {
+      logDetailedError('Backup Gemini',e);
+      prompt='אירעה תקלה זמנית במערכת הגיבוי. אמור שוב את השאלה ולסיום הקש סולמית';
+    }
+  }
+}
+
+router.get('/yemot', callHandler);\nrouter.get('/yemot-backup', backupCallHandler);
 router.get('/yemot-youtube', youtubeCallHandler);
 app.use(router);
 
@@ -1030,7 +1064,7 @@ async function configureYemotStructure() {
 
   await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
   // Extension 2 is the isolated YouTube robot; preserve voice selection under extension 3.
-  await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
+  await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});\n  if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});\n  else console.log('[Yemot automatic setup] Backup key missing; /3 was not changed');
 
   const voiceMap=(process.env.YEMOT_VOICE_OPTIONS||'1:Elik_2100,2:Jacob,3:ymMale').split(',');
   for(const item of voiceMap) {
