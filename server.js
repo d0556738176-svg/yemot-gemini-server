@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import YemotApi from 'yemot-api';
-import { searchYouTubeVideos, formatYouTubeChoices, getSelectedYouTubeVideo } from './youtube-ivr.js';
+import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAndUploadYouTubeAudio } from './youtube-playback.js';
 
@@ -320,7 +320,7 @@ function extractWeatherLocation(transcript) {
 
 async function answerWeatherDirect(transcript) {
   const location=extractWeatherLocation(transcript);
-  if(!location) return 'כדי לתת תחזית מדויקת, אמור בבקשה את שם העיר.';
+  if(!location) return 'כדי לתת תמונת מזג אוויר מדויקת, אמור בבקשה את שם העיר.';
   const geoUrl=new URL('https://geocoding-api.open-meteo.com/v1/search');
   geoUrl.searchParams.set('name',location);
   geoUrl.searchParams.set('count','1');
@@ -331,43 +331,40 @@ async function answerWeatherDirect(transcript) {
   const geo=await geoResponse.json();
   const place=geo?.results?.[0];
   if(!place) return 'לא מצאתי את העיר שביקשת. אמור שם עיר אחר.';
+
   const weatherUrl=new URL('https://api.open-meteo.com/v1/forecast');
   weatherUrl.searchParams.set('latitude',String(place.latitude));
   weatherUrl.searchParams.set('longitude',String(place.longitude));
   weatherUrl.searchParams.set('current','temperature_2m,apparent_temperature,precipitation,rain,weather_code,wind_speed_10m');
+  weatherUrl.searchParams.set('daily','weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max');
+  weatherUrl.searchParams.set('forecast_days','2');
   weatherUrl.searchParams.set('timezone','Asia/Jerusalem');
   const weatherResponse=await withTimeout(fetch(weatherUrl),REQUEST_TIMEOUT_MS,'current weather');
   if(!weatherResponse.ok) throw Object.assign(new Error('Weather HTTP '+weatherResponse.status),{status:503});
   const weather=await weatherResponse.json();
   const current=weather?.current;
-  if(!current) throw Object.assign(new Error('Weather data missing'),{status:503});
-  const codes={
-    0:'שמיים בהירים',1:'בעיקר בהיר',2:'מעונן חלקית',3:'מעונן',
-    45:'ערפל',48:'ערפל',51:'טפטוף קל',53:'טפטוף',55:'טפטוף חזק',
-    61:'גשם קל',63:'גשם',65:'גשם חזק',71:'שלג קל',73:'שלג',75:'שלג כבד',
-    80:'ממטרים קלים',81:'ממטרים',82:'ממטרים חזקים',95:'סופת רעמים',96:'סופת רעמים',99:'סופת רעמים'
-  };
+  const daily=weather?.daily;
+  if(!current || !daily) throw Object.assign(new Error('Weather data missing'),{status:503});
+
+  const codes={0:'שמיים בהירים',1:'בעיקר בהיר',2:'מעונן חלקית',3:'מעונן',45:'ערפל',48:'ערפל',51:'טפטוף קל',53:'טפטוף',55:'טפטוף חזק',61:'גשם קל',63:'גשם',65:'גשם חזק',71:'שלג קל',73:'שלג',75:'שלג כבד',80:'ממטרים קלים',81:'ממטרים',82:'ממטרים חזקים',95:'סופת רעמים',96:'סופת רעמים',99:'סופת רעמים'};
   const temp=Math.round(Number(current.temperature_2m));
   const feels=Math.round(Number(current.apparent_temperature));
   const wind=Math.round(Number(current.wind_speed_10m));
   const condition=codes[current.weather_code] || 'תנאי מזג אוויר לא ידועים';
-  return 'ב'+sanitizeForYemot(place.name||location)+' עכשיו '+condition+
-    ', הטמפרטורה '+temp+' מעלות, מרגיש כמו '+feels+' מעלות, והרוח במהירות של כ'+wind+' קילומטר לשעה.';
+  let answer='ב'+sanitizeForYemot(place.name||location)+' כרגע '+condition+', הטמפרטורה '+temp+' מעלות ומרגיש כמו '+feels+' מעלות, עם רוח של כ'+wind+' קילומטר לשעה.';
+  const max=Number(daily.temperature_2m_max?.[0]), min=Number(daily.temperature_2m_min?.[0]), rainChance=Number(daily.precipitation_probability_max?.[0]);
+  const todayCondition=codes[daily.weather_code?.[0]] || condition;
+  if(Number.isFinite(min)&&Number.isFinite(max)) answer+=' לאורך היום צפויות בערך '+min+' עד '+max+' מעלות, ובאופן כללי צפוי '+todayCondition+'.';
+  if(Number.isFinite(rainChance)) answer+=' הסיכוי המרבי למשקעים היום הוא כ'+rainChance+' אחוזים.';
+  return answer;
 }
-
 async function answerNewsDirect(transcript, historyText='') {
   const question=String(transcript||'').trim();
   const history=String(historyText||'').trim();
   const sourceMatch=question.match(/(?:ערוץ|חדשות|כותרות)\s*(14|c14|12|13|11)/i);
   const source=sourceMatch ? String(sourceMatch[1]).toUpperCase()==='C14' ? 'ערוץ 14' : 'ערוץ '+sourceMatch[1] : '';
-  let q=source
-    ? source+' חדשות היום'
-    : /(חדשות היום|מה החדשות|החדשות היום|חדשות עכשיו|חדשות אחרונות)/i.test(question)
-      ? 'חדשות ישראל היום'
-      : question.slice(0,100);
+  let q=source ? source+' חדשות היום' : /(חדשות היום|מה החדשות|החדשות היום|חדשות עכשיו|חדשות אחרונות|מה המצב בישראל|מה קורה בישראל)/i.test(question) ? 'חדשות ישראל היום' : question.slice(0,100);
 
-  // Follow-up questions such as "מה קרה בכותרת מספר 1?" must resolve against
-  // the headlines we just read, instead of starting a brand-new generic search.
   const numberMatch=question.match(/(?:כותרת|הכותרת|חדשה)\s*(?:מספר\s*)?(\d+)/i);
   if(numberMatch && history) {
     const n=Number(numberMatch[1]);
@@ -376,30 +373,45 @@ async function answerNewsDirect(transcript, historyText='') {
     const title=matches?.[1]?.trim();
     if(title) q=title.slice(0,180);
   }
+
   const url='https://news.google.com/rss/search?q='+encodeURIComponent(q)+'&hl=he&gl=IL&ceid=IL:he';
   const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'news RSS');
   if(!response.ok) throw Object.assign(new Error('News RSS HTTP '+response.status),{status:503});
   const xml=await response.text();
-  const decodeXml=(value)=>String(value||'')
-    .replace(/<!\[CDATA\[|\]\]>/g,'')
-    .replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'")
-    .replace(/&lt;/g,'<').replace(/&gt;/g,'>');
-  const items=[...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0,8).map(m=>{
+  const decodeXml=(value)=>String(value||'').replace(/<!\\[CDATA\\[|\\]\\]>/g,'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+  const items=[...xml.matchAll(/<item>([\\s\\S]*?)<\\/item>/g)].slice(0,12).map(m=>{
     const block=m[1];
-    const title=decodeXml(block.match(/<title>([\s\S]*?)<\/title>/i)?.[1]||'').trim();
-    const pub=(block.match(/<pubDate>([\s\S]*?)<\/pubDate>/i)?.[1]||'').trim();
-    const description=decodeXml((block.match(/<description>([\s\S]*?)<\/description>/i)?.[1]||'').replace(/<[^>]+>/g,' ')).trim();
-    const source=decodeXml(block.match(/<source[^>]*>([\s\S]*?)<\/source>/i)?.[1]||'').trim();
+    const title=decodeXml(block.match(/<title>([\\s\\S]*?)<\\/title>/i)?.[1]||'').trim();
+    const pub=(block.match(/<pubDate>([\\s\\S]*?)<\\/pubDate>/i)?.[1]||'').trim();
+    const description=decodeXml((block.match(/<description>([\\s\\S]*?)<\\/description>/i)?.[1]||'').replace(/<[^>]+>/g,' ')).trim();
+    const source=decodeXml(block.match(/<source[^>]*>([\\s\\S]*?)<\\/source>/i)?.[1]||'').trim();
     return {title,pub,description,source};
   }).filter(x=>x.title);
   if(!items.length) throw Object.assign(new Error('No news items'),{status:503});
-  return 'אלה הכותרות והעדכונים העיקריים שמצאתי כרגע: '+items.map((x,i)=>
-    'כותרת '+(i+1)+': '+sanitizeForYemot(x.title)+
-    (x.source ? '. מקור: '+sanitizeForYemot(x.source) : '')+
-    (x.description ? '. תקציר: '+sanitizeForYemot(x.description).slice(0,420) : '')
-  ).join('. ')+'.';
-}
 
+  const raw=items.map((x,i)=>'מקור '+(i+1)+': '+x.title+(x.source?' | '+x.source:'')+(x.description?' | '+x.description.slice(0,700):'')).join('\\n');
+  try {
+    const prompt=`${EXCLUSIVE_INSTRUCTION}
+אתה מסכם חדשות עדכניות למענה קולי בטלפון.
+השאלה: ${question}
+להלן עדכוני חדשות שנאספו עכשיו ממקורות חדשות:
+${raw}
+
+ענה בעברית ובצורה כללית, לא כרשימת כותרות.
+אם נשאלת "מה החדשות היום" או "מה המצב בישראל" — תן תמונת מצב כללית של 3 עד 5 נושאים מרכזיים, עם משפט או שניים לכל נושא, בלי למנות כותרות אחת אחרי השנייה ובלי להעמיס פרטים.
+אם נשאלת שאלה על נושא מסוים או מבקשים "יותר פרטים", התמקד רק בנושא הזה והרחב.
+הפרד בין עובדות שדווחו לבין טענות או דיווחים שעדיין אינם מאומתים.
+אל תמציא מידע שאינו מופיע בחומר.
+התשובה מיועדת להקראה בטלפון, ולכן קצרה, טבעית וברורה.`;
+    const result=await generateWithRetry([{text:prompt}],false,false);
+    const answer=String(result?.response?.text?.()||'').trim();
+    if(answer) return answer;
+  } catch(e) {
+    console.warn('[News] synthesis unavailable', {status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,400)});
+  }
+  const compact=items.slice(0,5).map(x=>sanitizeForYemot(x.title)).join('. ');
+  return 'תמונת המצב העיקרית בחדשות כרגע כוללת כמה נושאים מרכזיים: '+compact+'. אם תרצה, שאל אותי על אחד מהם ואפרט.';
+}
 async function analyzePublicYouTubeVideo(videoUrl, question) {
   const key = apiKeys[0] || '';
   if (!key) throw Object.assign(new Error('Gemini key unavailable for YouTube video analysis'), {status:503});
@@ -705,21 +717,16 @@ ${question}
   }
 }
 async function buildOpeningForCaller(phone) {
-  const previous = conversationLog.filter(x=>x.phone===normalizePhone(phone)).slice(-8);
-  if (!previous.length) return process.env.FIRST_CALL_MESSAGE ||
-    'שלום איך אפשר לעזור לך היום אמור בבקשה על מה תרצה לדבר אחרי הצפצוף ולסיום ההקלטה הקש סולמית';
-  const history = previous.map(x=>'המתקשר: '+x.user+'\nAI: '+x.gemini).join('\n\n');
-  try {
-    const r = await generateWithRetry([{text:`${EXCLUSIVE_INSTRUCTION}
-אתה בתחילת שיחה חדשה עם מתקשר שכבר דיבר איתך בעבר.
-הנה קטעים מהשיחות הקודמות:
-${history}
-צור פתיח קצר בעברית שמזכיר בקצרה את הנושא האחרון, מאפשר להמשיך משם,
-ושואל על מה המתקשר רוצה לדבר עכשיו. אל תמציא פרטים. בלי נקודות ובלי מרכאות.`}]);
-    return sanitizeForYemot(r.response.text()) || 'שלום שוב שמח לשמוע ממך על מה תרצה לדבר עכשיו';
-  } catch { return 'שלום שוב שמח לשמוע ממך על מה תרצה לדבר עכשיו'; }
+  const previous=conversationLog.filter(x=>x.phone===normalizePhone(phone)).filter(x=>x.user && x.user!=='לא ניתן היה לתמלל את ההקלטה').slice(-3);
+  if(!previous.length) return process.env.FIRST_CALL_MESSAGE || 'שלום איך אפשר לעזור לך היום אמור בבקשה על מה תרצה לדבר אחרי הצפצוף ולסיום ההקלטה הקש סולמית';
+  const last=previous[previous.length-1];
+  const topic=sanitizeForYemot(String(last.user||'').slice(0,220));
+  const answer=sanitizeForYemot(String(last.gemini||'').slice(0,220));
+  let opening='שלום שוב. בפעם הקודמת דיברנו על '+(topic||'הנושא האחרון')+'.';
+  if(answer) opening+=' עניתי לך אז בקצרה: '+answer+'.';
+  opening+=' מה עוד אוכל לעזור לך? אפשר להמשיך בדיוק מאותה נקודה או לדבר על נושא אחר. אחרי הצפצוף אמור את מה שתרצה ולסיום הקש סולמית';
+  return opening;
 }
-
 async function callHandler(call) {
   const callerPhone = getCallerNumber(call);
   const callId = call?.callId || call?.values?.ApiCallId || '';
@@ -730,6 +737,7 @@ async function callHandler(call) {
   let openingPrompt=null;
   let nextPrompt=null;
   let emptyRecordAttempts=0;
+  let feedbackPending=false;
   const turnHistory=[];
   const turnContext={youtubeResults:[]};
   if (process.env.ENABLE_AI_OPENING !== 'false' && conversationLog.some(x=>x.phone===callerPhone))
@@ -792,6 +800,11 @@ async function callHandler(call) {
         userTranscript='';
       }
       console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length, transcriptReady: !!userTranscript });
+      if (userTranscript && feedbackPending && /^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר|לא|לא עזר|לא ממש|לא כל כך)\\s*$/i.test(userTranscript)) {
+        if (/^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר)/i.test(userTranscript)) replyText='מצוין. שמח שעזרתי לך. מה עוד תרצה שאעשה עבורך?';
+        else replyText='בסדר. מה לא היה ברור או מה חסר לך? אמור לי ואנסה לעזור בצורה אחרת.';
+        feedbackPending=false;
+      }
       const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
       if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
       else if(isWeatherQuestion(userTranscript)) {
@@ -851,7 +864,8 @@ async function callHandler(call) {
     // queued with prependToNextAction. Instead, put the answer directly into the
     // next read: Yemot will play the answer and immediately collect the next turn.
     // This keeps the same phone call and the same in-memory conversation context.
-    nextPrompt=replyText+' אמור עכשיו את השאלה הבאה ולסיום הקש סולמית';
+    nextPrompt=replyText+' האם זה עזר לך? אם תרצה עוד מידע, אפשר להמשיך מאותו נושא, ואם תרצה משהו אחר פשוט אמור לי. ולסיום הקש סולמית';
+    feedbackPending=true;
     console.info('[CALL_FLOW] next_turn_armed', {
       callId: activeKey,
       historyTurns: turnHistory.length,
@@ -866,84 +880,71 @@ async function callHandler(call) {
  * Uses the same raw-recording -> Gemini transcription convention as the main robot.
  */
 async function youtubeCallHandler(call) {
+  let currentVideo=null;
+  let currentQuery='';
+  let nextPrompt=null;
   try {
-    // Do not use Yemot's paid STT service here. The live account reported
-    // "אין מספיק יחידות", so this flow records the caller and uses the
-    // already-configured Gemini audio transcription path instead.
-    const recordPath = await call.read([
-      { type: 'text', data: sanitizeForYemot('ברוכים הבאים לחיפוש ביוטיוב. אמור אחרי הצפצוף את הנושא או שם הערוץ שברצונך לחפש, ולסיום הקש סולמית.') }
-    ], 'record', { min_length: 1, max_length: 20, no_confirm_menu: true });
+    while(true) {
+      const basePrompt=!currentVideo
+        ? 'ברוכים הבאים לחיפוש ביוטיוב. אמור אחרי הצפצוף את שם האדם, הערוץ, השיר או הנושא שתרצה למצוא. אני אחזיר לך תוצאה אחת בלבד ונמשיך בשיחה בלי מקשים. לסיום ההקלטה הקש סולמית'
+        : 'האם תרצה יותר פרטים על הסרטון הזה, או לראות משהו נוסף על אותו אדם או נושא? אמור מה אתה רוצה. ולסיום ההקלטה הקש סולמית';
+      const prompt=nextPrompt || basePrompt;
+      nextPrompt=null;
 
-    if (!recordPath || recordPath === 'None') {
-      return call.id_list_message([{ type: 'text', data: 'לא נקלט חיפוש. נא לנסות שוב' }]);
+      const recordPath=await call.read([{type:'text',data:sanitizeForYemot(prompt)}],'record',{min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
+      if(!recordPath || recordPath==='None') return call.id_list_message([{type:'text',data:'לא נקלטה בקשה. להתראות'}]);
+
+      const audioResponse=await withTimeout(yemotApi.download_file('ivr2:'+recordPath),REQUEST_TIMEOUT_MS,'youtube conversational recording download');
+      const audioBuffer=audioResponse.data;
+      const audioBase64=Buffer.isBuffer(audioBuffer)?audioBuffer.toString('base64'):Buffer.from(audioBuffer).toString('base64');
+      const transcriptionResult=await generateWithRetry([...audioParts(audioBase64),{text:'תמלל רק את דברי המתקשר. החזר רק את התמלול בעברית, בלי הסברים ובלי לענות לשאלה.'}],false,true);
+      const transcript=sanitizeForYemot(transcriptionResult.response.text());
+      console.info('[YouTube IVR] transcript',{chars:transcript.length,transcript});
+      if(!transcript) return call.id_list_message([{type:'text',data:'לא הצלחתי להבין את הבקשה. נא לנסות שוב'}]);
+
+      const affirmative=/^(כן|כן בהחלט|בוודאי|בטח|מעולה|אני רוצה)\s*$/i.test(transcript);
+      const negative=/^(לא|לא תודה|לא רוצה|סיימתי|זה מספיק|תודה)\s*$/i.test(transcript);
+      const asksDetails=/(פרטים|יותר פרטים|תפרט|תסביר|על מה הסרטון|מה יש בסרטון|מה דיברו|מה אמרו|מה נאמר|סיכום|סכם|תוכן הסרטון|מילים של השיר|מילות השיר|מילים)/i.test(transcript);
+
+      if(currentVideo && negative) return call.id_list_message([{type:'text',data:'בסדר. להתראות'}]);
+
+      if(currentVideo && (asksDetails || affirmative)) {
+        const detailQuery=asksDetails?transcript:('תן לי יותר פרטים על הסרטון '+currentVideo.title);
+        const result=await searchYouTubeForPhone(detailQuery,'תוצאה 1: '+currentVideo.title,{youtubeResults:[currentVideo]});
+        const answer=result || ('מצאתי את הסרטון '+sanitizeForYemot(currentVideo.title)+' אבל לא הצלחתי כרגע לקבל עליו פרטים נוספים.');
+        nextPrompt=sanitizeForYemot(answer)+' האם תרצה לשמוע עוד פרטים על הסרטון, או לראות משהו נוסף על אותו אדם או נושא? ולסיום ההקלטה הקש סולמית';
+        continue;
+      }
+
+      if(!currentVideo) {
+        currentQuery=transcript;
+        const videos=await searchYouTubeVideos(transcript,{apiKey:process.env.YOUTUBE_API_KEY,regionCode:process.env.YOUTUBE_REGION_CODE||'IL',timeoutMs:REQUEST_TIMEOUT_MS});
+        if(!videos.length) return call.id_list_message([{type:'text',data:'לא מצאתי כרגע סרטון מתאים ביוטיוב. אפשר לנסות חיפוש אחר'}]);
+        currentVideo=videos[0];
+        const date=currentVideo.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full'}).format(new Date(currentVideo.publishedAt)):'תאריך לא זמין';
+        nextPrompt=sanitizeForYemot('מצאתי סרטון אחד שמתאים לבקשה שלך: '+currentVideo.title+'. הערוץ הוא '+currentVideo.channelTitle+'. הוא פורסם ב'+date+'. האם תרצה יותר פרטים עליו, או לראות משהו נוסף על אותו אדם או נושא? ולסיום ההקלטה הקש סולמית');
+        continue;
+      }
+
+      // Any other spoken request becomes a new YouTube search, still returning only one result.
+      currentQuery=transcript;
+      let videos=await searchYouTubeVideos(transcript,{apiKey:process.env.YOUTUBE_API_KEY,regionCode:process.env.YOUTUBE_REGION_CODE||'IL',timeoutMs:REQUEST_TIMEOUT_MS});
+      videos=videos.filter(v=>v.videoId!==currentVideo.videoId);
+      if(!videos.length) {
+        nextPrompt='לא מצאתי כרגע תוצאה מתאימה. אמור חיפוש אחר אם תרצה. ולסיום ההקלטה הקש סולמית';
+        continue;
+      }
+      currentVideo=videos[0];
+      const date=currentVideo.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full'}).format(new Date(currentVideo.publishedAt)):'תאריך לא זמין';
+      nextPrompt=sanitizeForYemot('מצאתי תוצאה אחת: '+currentVideo.title+'. הערוץ הוא '+currentVideo.channelTitle+'. הוא פורסם ב'+date+'. רוצה יותר פרטים על הסרטון? ולסיום ההקלטה הקש סולמית');
     }
-
-    const audioResponse = await withTimeout(
-      yemotApi.download_file('ivr2:' + recordPath),
-      REQUEST_TIMEOUT_MS,
-      'youtube search recording download'
-    );
-    const audioBuffer = audioResponse.data;
-    const audioBase64 = Buffer.isBuffer(audioBuffer)
-      ? audioBuffer.toString('base64')
-      : Buffer.from(audioBuffer).toString('base64');
-
-    const transcriptionResult = await generateWithRetry([
-      ...audioParts(audioBase64),
-      { text: 'תמלל רק את דברי המתקשר. החזר רק את התמלול בעברית, בלי הסברים ובלי לענות לשאלה.' }
-    ], false, true);
-
-    const searchTranscript = sanitizeForYemot(transcriptionResult.response.text());
-    console.info('[YouTube IVR] transcript', { chars: searchTranscript.length, transcript: searchTranscript });
-
-    if (!searchTranscript) {
-      return call.id_list_message([{ type: 'text', data: 'לא הצלחתי להבין את החיפוש. נא לנסות שוב' }]);
-    }
-
-    const videos = (await searchYouTubeVideos(searchTranscript)).slice(0, 9);
-    if (!videos.length) {
-      return call.id_list_message([{ type: 'text', data: 'לא מצאתי סרטונים מתאימים. נא לנסות שוב במילים אחרות' }]);
-    }
-
-    const selectionPrompt = formatYouTubeChoices(videos);
-    const keypad = await call.read(
-      [{ type: 'text', data: sanitizeForYemot(selectionPrompt) }],
-      'tap',
-      { min_digits: 1, max_digits: 1, digits_allowed: [1,2,3,4,5,6,7,8,9], sec_wait: 12 }
-    );
-
-    const selected = getSelectedYouTubeVideo(videos, keypad);
-    if (!selected) {
-      return call.id_list_message([{ type: 'text', data: 'הבחירה לא תקינה. נא להקיש מספר בין אחת לתשע' }]);
-    }
-
-    const title = sanitizeForYemot(selected.title);
-    console.info('[YouTube IVR] preparing audio playback', { videoId: selected.videoId, title });
-
-    const playback = await downloadAndUploadYouTubeAudio(selected.videoId);
-    console.info('[YouTube IVR] audio ready', {
-      videoId: selected.videoId,
-      title,
-      chunkCount: playback.chunkCount
-    });
-
-    return call.id_list_message([
-      { type: 'text', data: 'בחרת את הסרטון ' + title + '. מתחיל את השמעת הסרטון.' },
-      ...playback.playbackPaths.map(file => ({ type: 'file', data: file }))
-    ]);
-  } catch (error) {
-    logDetailedError('YouTube IVR', error);
-    const status = geminiErrorStatus(error);
-    const errorText = String(error?.message || error || '');
-    const message = /לא זמין.*בישראל|not available for playback in israel/i.test(errorText)
-      ? 'הסרטון שבחרת אינו זמין להשמעה בישראל. נא לבחור סרטון אחר.'
-      : status === 429
-        ? 'זיהוי הדיבור עמוס כרגע נא לנסות שוב'
-        : status === 503
-          ? 'שירות יוטיוב אינו זמין כרגע'          : 'אירעה תקלה בהשמעת הסרטון נא לנסות שוב';
-    return call.id_list_message([{ type: 'text', data: message }]);  }
+  } catch(error) {
+    logDetailedError('YouTube IVR',error);
+    const status=geminiErrorStatus(error);
+    const message=status===429?'החיפוש עמוס כרגע. נא לנסות שוב':status===503?'שירות יוטיוב אינו זמין כרגע':'אירעה תקלה זמנית בחיפוש ביוטיוב. נא לנסות שוב';
+    return call.id_list_message([{type:'text',data:message}]);
+  }
 }
-
 
 const BACKUP_GEMINI_API_KEY = (process.env.YEMOT_BACKUP_GEMINI_API_KEY || process.env.GEMINI_BACKUP_API_KEY || '').trim();
 const backupGeminiClient = BACKUP_GEMINI_API_KEY ? new GoogleGenerativeAI(BACKUP_GEMINI_API_KEY) : null;
