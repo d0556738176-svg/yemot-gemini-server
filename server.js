@@ -882,11 +882,15 @@ async function callHandler(call) {
 async function youtubeCallHandler(call) {
   let currentVideo=null;
   let currentQuery='';
+  let nextPrompt=null;
   try {
     while(true) {
-      const prompt=!currentVideo
+      const basePrompt=!currentVideo
         ? 'ברוכים הבאים לחיפוש ביוטיוב. אמור אחרי הצפצוף את שם האדם, הערוץ, השיר או הנושא שתרצה למצוא. אני אחזיר לך תוצאה אחת בלבד ונמשיך בשיחה בלי מקשים. לסיום ההקלטה הקש סולמית'
         : 'האם תרצה יותר פרטים על הסרטון הזה, או לראות משהו נוסף על אותו אדם או נושא? אמור מה אתה רוצה. ולסיום ההקלטה הקש סולמית';
+      const prompt=nextPrompt || basePrompt;
+      nextPrompt=null;
+
       const recordPath=await call.read([{type:'text',data:sanitizeForYemot(prompt)}],'record',{min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
       if(!recordPath || recordPath==='None') return call.id_list_message([{type:'text',data:'לא נקלטה בקשה. להתראות'}]);
 
@@ -898,8 +902,8 @@ async function youtubeCallHandler(call) {
       console.info('[YouTube IVR] transcript',{chars:transcript.length,transcript});
       if(!transcript) return call.id_list_message([{type:'text',data:'לא הצלחתי להבין את הבקשה. נא לנסות שוב'}]);
 
-      const affirmative=/^(כן|כן בהחלט|בוודאי|בטח|מעולה|אני רוצה)\\s*$/i.test(transcript);
-      const negative=/^(לא|לא תודה|לא רוצה|סיימתי|זה מספיק|תודה)\\s*$/i.test(transcript);
+      const affirmative=/^(כן|כן בהחלט|בוודאי|בטח|מעולה|אני רוצה)\s*$/i.test(transcript);
+      const negative=/^(לא|לא תודה|לא רוצה|סיימתי|זה מספיק|תודה)\s*$/i.test(transcript);
       const asksDetails=/(פרטים|יותר פרטים|תפרט|תסביר|על מה הסרטון|מה יש בסרטון|מה דיברו|מה אמרו|מה נאמר|סיכום|סכם|תוכן הסרטון|מילים של השיר|מילות השיר|מילים)/i.test(transcript);
 
       if(currentVideo && negative) return call.id_list_message([{type:'text',data:'בסדר. להתראות'}]);
@@ -908,7 +912,7 @@ async function youtubeCallHandler(call) {
         const detailQuery=asksDetails?transcript:('תן לי יותר פרטים על הסרטון '+currentVideo.title);
         const result=await searchYouTubeForPhone(detailQuery,'תוצאה 1: '+currentVideo.title,{youtubeResults:[currentVideo]});
         const answer=result || ('מצאתי את הסרטון '+sanitizeForYemot(currentVideo.title)+' אבל לא הצלחתי כרגע לקבל עליו פרטים נוספים.');
-        await call.read([{type:'text',data:sanitizeForYemot(answer)}],'play',{});
+        nextPrompt=sanitizeForYemot(answer)+' האם תרצה לשמוע עוד פרטים על הסרטון, או לראות משהו נוסף על אותו אדם או נושא? ולסיום ההקלטה הקש סולמית';
         continue;
       }
 
@@ -918,8 +922,7 @@ async function youtubeCallHandler(call) {
         if(!videos.length) return call.id_list_message([{type:'text',data:'לא מצאתי כרגע סרטון מתאים ביוטיוב. אפשר לנסות חיפוש אחר'}]);
         currentVideo=videos[0];
         const date=currentVideo.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full'}).format(new Date(currentVideo.publishedAt)):'תאריך לא זמין';
-        const responseText='מצאתי סרטון אחד שמתאים לבקשה שלך: '+sanitizeForYemot(currentVideo.title)+'. הערוץ הוא '+sanitizeForYemot(currentVideo.channelTitle)+'. הוא פורסם ב'+date+'. האם תרצה יותר פרטים עליו, או לראות משהו נוסף על אותו אדם או נושא? ולסיום ההקלטה הקש סולמית';
-        await call.read([{type:'text',data:sanitizeForYemot(responseText)}],'play',{});
+        nextPrompt=sanitizeForYemot('מצאתי סרטון אחד שמתאים לבקשה שלך: '+currentVideo.title+'. הערוץ הוא '+currentVideo.channelTitle+'. הוא פורסם ב'+date+'. האם תרצה יותר פרטים עליו, או לראות משהו נוסף על אותו אדם או נושא? ולסיום ההקלטה הקש סולמית');
         continue;
       }
 
@@ -928,12 +931,12 @@ async function youtubeCallHandler(call) {
       let videos=await searchYouTubeVideos(transcript,{apiKey:process.env.YOUTUBE_API_KEY,regionCode:process.env.YOUTUBE_REGION_CODE||'IL',timeoutMs:REQUEST_TIMEOUT_MS});
       videos=videos.filter(v=>v.videoId!==currentVideo.videoId);
       if(!videos.length) {
-        await call.read([{type:'text',data:'לא מצאתי כרגע תוצאה מתאימה. אמור חיפוש אחר אם תרצה.'}],'play',{});
+        nextPrompt='לא מצאתי כרגע תוצאה מתאימה. אמור חיפוש אחר אם תרצה. ולסיום ההקלטה הקש סולמית';
         continue;
       }
       currentVideo=videos[0];
       const date=currentVideo.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full'}).format(new Date(currentVideo.publishedAt)):'תאריך לא זמין';
-      await call.read([{type:'text',data:sanitizeForYemot('מצאתי תוצאה אחת: '+currentVideo.title+'. הערוץ הוא '+currentVideo.channelTitle+'. הוא פורסם ב'+date+'. רוצה יותר פרטים על הסרטון? ולסיום ההקלטה הקש סולמית')}],'play',{});
+      nextPrompt=sanitizeForYemot('מצאתי תוצאה אחת: '+currentVideo.title+'. הערוץ הוא '+currentVideo.channelTitle+'. הוא פורסם ב'+date+'. רוצה יותר פרטים על הסרטון? ולסיום ההקלטה הקש סולמית');
     }
   } catch(error) {
     logDetailedError('YouTube IVR',error);
