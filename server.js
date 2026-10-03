@@ -778,17 +778,17 @@ async function callHandler(call) {
     try {
       if(active) active.status='שולח Audio ל-Gemini וממתין לתשובה';
       const israelNow = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', dateStyle: 'full', timeStyle: 'short', hourCycle: 'h23' }).format(new Date());
-      const firstPass=(await generateWithRetry([...audioParts(audioBase64), {text:`${EXCLUSIVE_INSTRUCTION}\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: ${israelNow}. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק ואל תנחש או תסתמך על הידע הכללי שלך.\n\nהקשר קודם של השיחה, לפי הסדר:\n${historyText || 'אין עדיין הקשר קודם.'}\n\nהאזן להקלטה והבן את השאלה. החזר אובייקט JSON בלבד עם שני שדות: "transcript" הוא תמלול קצר ומדויק של דברי המתקשר בשפתו; "answer" היא תשובה קצרה וברורה להקראה בטלפון. אם נדרש חיפוש אינטרנט מפורש או מידע עדכני, או אם המתקשר מבקש לאתר סרטון, למצוא סרטון חדש ביוטיוב או לברר פרטי סרטון, קבע answer לערך המדויק SEARCH_REQUEST והוסף transcript כרגיל. אל תבקש מידע שכבר מופיע בהקשר. אל תשתמש בחיפוש לשאלות ידע כללי יציבות או לשעה ולתאריך שמופיעים בהנחיה.`}], false, true)).response.text().trim();
+      const firstPass=(await generateWithRetry([...audioParts(audioBase64), {text:`${EXCLUSIVE_INSTRUCTION}\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: ${israelNow}. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק ואל תנחש או תסתמך על הידע הכללי שלך.\n\nהקשר קודם של השיחה, לפי הסדר:\n${historyText || 'אין עדיין הקשר קודם.'}\n\nהאזן להקלטה והבן את השאלה. החזר אובייקט JSON תקין בלבד, ללא Markdown או טקסט מסביב, עם שני שדות: "transcript" הוא תמלול מדויק וקצר של דברי המתקשר בלבד, בשפה שבה דיבר; "answer" היא תשובה תמציתית של עד שני משפטים, המתאימה להקראה בטלפון ועונה ישירות לתמלול. אם ההקלטה לא ברורה, חסרה או שאינך בטוח מה נשאל, כתוב ב-answer בקשה קצרה לחזור על השאלה ואל תנחש. אם נדרש חיפוש אינטרנט מפורש או מידע עדכני, או אם המתקשר מבקש לאתר סרטון, למצוא סרטון חדש ביוטיוב או לברר פרטי סרטון, קבע answer לערך המדויק SEARCH_REQUEST והוסף transcript כרגיל. אל תבקש מידע שכבר מופיע בהקשר. אל תשתמש בחיפוש לשאלות ידע כללי יציבות או לשעה ולתאריך שמופיעים בהנחיה.`}], false, true)).response.text().trim();
       let parsedTurn=null;
       try { parsedTurn=JSON.parse(firstPass); } catch {
         const match=firstPass.match(/\{[\s\S]*\}/);
         if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} }
       }
-      if(parsedTurn && typeof parsedTurn.answer==='string') {
+      if(parsedTurn && typeof parsedTurn.answer==='string' && typeof parsedTurn.transcript==='string' && parsedTurn.transcript.trim()) {
         replyText=parsedTurn.answer.trim();
-        userTranscript=sanitizeForYemot(parsedTurn.transcript||'');
+        userTranscript=sanitizeForYemot(parsedTurn.transcript);
       } else {
-        replyText=firstPass;
+        replyText='לא הצלחתי להבין את השאלה בבירור. נא לחזור עליה בבקשה';
         userTranscript='';
       }
       console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length, transcriptReady: !!userTranscript });
