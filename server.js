@@ -378,18 +378,31 @@ async function answerNewsDirect(transcript, historyText='') {
   const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'news RSS');
   if(!response.ok) throw Object.assign(new Error('News RSS HTTP '+response.status),{status:503});
   const xml=await response.text();
-  const decodeXml=(value)=>String(value||'').replace(/<!\\[CDATA\\[|\\]\\]>/g,'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>');
-  const items=[...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0,12).map(m=>{\\s\\S]*?)<\\/item>/g)].slice(0,12).map(m=>{
-    const block=m[1];
-        const title=decodeXml(block.match(/<title>([\s\S]*?)<\/title>/i)?.[1]||'').trim();\\s\\S]*?)<\\/title>/i)?.[1]||'').trim();
-        const pub=(block.match(/<pubDate>([\s\S]*?)<\/pubDate>/i)?.[1]||'').trim();\\s\\S]*?)<\\/pubDate>/i)?.[1]||'').trim();
-        const description=decodeXml((block.match(/<description>([\s\S]*?)<\/description>/i)?.[1]||'').replace(/<[^>]+>/g,' ')).trim();n>([\\s\\S]*?)<\\/description>/i)?.[1]||'').replace(/<[^>]+>/g,' ')).trim();
-        const source=decodeXml(block.match(/<source[^>]*>([\s\S]*?)<\/source>/i)?.[1]||'').trim();\\s\\S]*?)<\\/source>/i)?.[1]||'').trim();
-    return {title,pub,description,source};
-  }).filter(x=>x.title);
+
+  function decodeXml(value) {
+    return String(value||'')
+      .replace(/<!\[CDATA\[|\]\]>/g,'')
+      .replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'")
+      .replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+  }
+  function tagValue(block,tag) {
+    const open='<'+tag;
+    const start=block.indexOf('>',block.indexOf(open));
+    if(start<0) return '';
+    const end=block.indexOf('</'+tag+'>',start+1);
+    if(end<0) return '';
+    return decodeXml(block.slice(start+1,end).replace(/<[^>]+>/g,' ').trim());
+  }
+
+  const items=xml.split('<item>').slice(1,13).map(block=>({
+    title:tagValue(block,'title'),
+    pub:tagValue(block,'pubDate'),
+    description:tagValue(block,'description'),
+    source:tagValue(block,'source')
+  })).filter(x=>x.title);
   if(!items.length) throw Object.assign(new Error('No news items'),{status:503});
 
-  const raw=items.map((x,i)=>'מקור '+(i+1)+': '+x.title+(x.source?' | '+x.source:'')+(x.description?' | '+x.description.slice(0,700):'')).join('\\n');
+  const raw=items.map((x,i)=>'מקור '+(i+1)+': '+x.title+(x.source?' | '+x.source:'')+(x.description?' | '+x.description.slice(0,700):'')).join('\n');
   try {
     const prompt=`${EXCLUSIVE_INSTRUCTION}
 אתה מסכם חדשות עדכניות למענה קולי בטלפון.
@@ -407,7 +420,7 @@ ${raw}
     const answer=String(result?.response?.text?.()||'').trim();
     if(answer) return answer;
   } catch(e) {
-    console.warn('[News] synthesis unavailable', {status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,400)});
+    console.warn('[News] synthesis unavailable',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,400)});
   }
   const compact=items.slice(0,5).map(x=>sanitizeForYemot(x.title)).join('. ');
   return 'תמונת המצב העיקרית בחדשות כרגע כוללת כמה נושאים מרכזיים: '+compact+'. אם תרצה, שאל אותי על אחד מהם ואפרט.';
