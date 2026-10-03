@@ -1066,7 +1066,8 @@ async function configureYemotStructure() {
   await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
   // Extension 2 is the isolated YouTube robot; preserve voice selection under extension 3.
   await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
-  if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});\n  else console.log('[Yemot automatic setup] Backup key missing; /3 was not changed');
+  if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
+  else console.log('[Yemot automatic setup] Backup key missing; /3 was not changed');
 
   const voiceMap=(process.env.YEMOT_VOICE_OPTIONS||'1:Elik_2100,2:Jacob,3:ymMale').split(',');
   for(const item of voiceMap) {
