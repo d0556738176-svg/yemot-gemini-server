@@ -991,9 +991,9 @@ async function backupCallHandler(call) {
       const response=await withTimeout(yemotApi.download_file('ivr2:'+recordPath),REQUEST_TIMEOUT_MS,'backup recording');
       const audio=Buffer.isBuffer(response.data)?response.data:Buffer.from(response.data);
       const context=history.slice(-8).map((x,i)=>'תור '+(i+1)+' — מתקשר: '+x.user+'\\nתשובה: '+x.answer).join('\\n\\n');
-      const result=await withTimeout(backupGeminiModel.generateContent([
-        ...audioContents(audio.toString('base64'), EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.'}
-      ]),REQUEST_TIMEOUT_MS,'backup Gemini');
+      const result=await withTimeout(backupGeminiModel.generateContent(
+        audioContents(audio.toString('base64'), EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.')
+      ),REQUEST_TIMEOUT_MS,'backup Gemini');
       const raw=result.response.text().trim();
       let parsed=null;
       try { parsed=JSON.parse(raw); } catch { const m=raw.match(/\\{[\\s\\S]*\\}/); if(m){try{parsed=JSON.parse(m[0]);}catch{}} }
