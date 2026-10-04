@@ -334,20 +334,40 @@ function answerIsraelTimeQuestion(transcript) {
   const date=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',weekday:'long',day:'numeric',month:'long'}).format(target);
   return 'בעוד '+(minutes===30?'חצי שעה':minutes===15?'רבע שעה':minutes===60?'שעה':minutes===120?'שעתיים':minutes+' דקות')+' תהיה השעה בישראל '+time+' ביום '+date;
 }
-async function answerNormalQuestion(audioBase64, historyText='') {
-  const prompt = `${EXCLUSIVE_INSTRUCTION}
+async function transcribePhoneAudio(audioBuffer) {
+  const mimeType=(process.env.YEMOT_AUDIO_MIME_TYPE || 'audio/wav').trim();
+  const vocabulary=(process.env.GEMINI_TRANSCRIBE_VOCABULARY || 'Gemini,YouTube,יוטיוב,גוגל,ימות המשיח,פאגי').split(',').map(function(x){return x.trim();}).filter(Boolean).slice(0,100);
+  let lastError;
+  for (let ki=0; ki<apiKeys.length; ki++) {
+    const key=apiKeys[ki];
+    try {
+      const bytes=Buffer.isBuffer(audioBuffer)?audioBuffer:Buffer.from(audioBuffer);
+      const start=await withTimeout(fetch('https://generativelanguage.googleapis.com/upload/v1beta/files',{method:'POST',headers:{'x-goog-api-key':key,'X-Goog-Upload-Protocol':'resumable','X-Goog-Upload-Command':'start','X-Goog-Upload-Header-Content-Length':String(bytes.length),'X-Goog-Upload-Header-Content-Type':mimeType,'Content-Type':'application/json'},body:JSON.stringify({file:{display_name:'yemot-phone-audio'}})}),REQUEST_TIMEOUT_MS,'Gemini transcription upload start');
+      if(!start.ok) throw Object.assign(new Error('Gemini transcription upload start HTTP '+start.status),{status:start.status});
+      const uploadUrl=start.headers.get('x-goog-upload-url');
+      if(!uploadUrl) throw Object.assign(new Error('Gemini transcription upload URL missing'),{status:503});
+      const upload=await withTimeout(fetch(uploadUrl,{method:'POST',headers:{'Content-Length':String(bytes.length),'X-Goog-Upload-Offset':'0','X-Goog-Upload-Command':'upload, finalize','Content-Type':mimeType},body:bytes}),REQUEST_TIMEOUT_MS,'Gemini transcription upload');
+      const fileInfo=await upload.json().catch(function(){return {};});
+      if(!upload.ok || !fileInfo.file || !fileInfo.file.uri) throw Object.assign(new Error((fileInfo.error && fileInfo.error.message) || 'Gemini transcription file upload failed'),{status:upload.status || 503});
+      const response=await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:generateContent',{method:'POST',headers:{'x-goog-api-key':key,'Content-Type':'application/json'},body:JSON.stringify({contents:[{role:'user',parts:[{fileData:{fileUri:fileInfo.file.uri,mimeType:mimeType}}]}],generationConfig:{audioTranscriptionConfig:{languageCodes:['he-IL'],mode:'SMART',customVocabulary:vocabulary}}})}),PHONE_GEMINI_TIMEOUT_MS,'Gemini phone transcription');
+      const data=await response.json().catch(function(){return {};});
+      if(!response.ok) throw Object.assign(new Error((data.error && data.error.message) || 'Gemini transcription HTTP '+response.status),{status:response.status});
+      const parts=data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+      const text=String((parts || []).map(function(p){return p && p.text || '';}).join(' ')).trim();
+      if(!text) throw Object.assign(new Error('Gemini transcription returned empty text'),{status:503});
+      console.info('[TRANSCRIBE] dedicated_transcription_ok',{key:ki+1,chars:text.length});
+      return sanitizeForYemot(text);
+    } catch(err) { lastError=err; console.warn('[TRANSCRIBE] dedicated transcription failed',{key:ki+1,status:geminiErrorStatus(err),message:String(err.message || err).slice(0,300)}); }
+  }
+  throw lastError || Object.assign(new Error('Gemini transcription unavailable'),{status:503});
+}
 
-הקשר קודם של השיחה, לפי הסדר: ${historyText || 'אין עדיין הקשר קודם.'}\n\nזו הקלטה של שאלה מהמתקשר. האזן להקלטה, הבן את הדיבור בעצמך, התייחס להקשר הקודם וענה על השאלה.
-ענה בשפה שבה המתקשר דיבר. התשובה מיועדת להקראה בטלפון.
-אל תצטט תמלול.`;
-  const result = await generateWithRetry(audioContents(audioBase64, prompt));
+async function answerNormalQuestion(transcript, historyText='') {
+  const prompt=EXCLUSIVE_INSTRUCTION+'\n\nהקשר קודם של השיחה, לפי הסדר: '+(historyText || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המתומללת של המתקשר:\n'+transcript+'\n\nענה על השאלה. ענה בשפה שבה המתקשר דיבר. התשובה מיועדת להקראה בטלפון.';
+  const result=await generateWithRetry([{role:'user',parts:[{text:prompt}]}]);
   return result.response.text();
 }
-async function transcribeForDashboard(audioBase64) {
-  const result = await generateWithRetry(audioContents(audioBase64,
-    'תמלל את ההקלטה לצורך תצוגה בלבד. אל תענה על השאלה. החזר רק את התמלול, ללא הסברים.'));
-  return sanitizeForYemot(result.response.text());
-}
+async function transcribeForDashboard(audioBase64) { return transcribePhoneAudio(Buffer.from(audioBase64,'base64')); }
 function knownContactFallback(transcript, historyText='') {
   const context=(String(transcript||'')+' '+String(historyText||'')).toLowerCase();
   if(/פאגי|פאג״י|pagi/.test(context) && /(מספר|טלפון|יצירת קשר|מוקד|להתקשר|תחפש|חפש)/.test(context))
@@ -873,31 +893,22 @@ async function callHandler(call) {
     let replyText='';
     let userTranscript='';
     try {
-      if(active) active.status='שולח Audio ל-Gemini וממתין לתשובה';
-      const israelNow = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', dateStyle: 'full', timeStyle: 'short', hourCycle: 'h23' }).format(new Date());
-      const firstPass=(await generateWithRetry(audioContents(audioBase64, `${EXCLUSIVE_INSTRUCTION}\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: ${israelNow}. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק ואל תנחש או תסתמך על הידע הכללי שלך.\n\nהקשר קודם של השיחה, לפי הסדר:\n${historyText || 'אין עדיין הקשר קודם.'}\n\nהאזן להקלטה והבן את השאלה. החזר אובייקט JSON תקין בלבד, ללא Markdown או טקסט מסביב, עם שני שדות: "transcript" הוא תמלול מדויק וקצר של דברי המתקשר בלבד, בשפה שבה דיבר; "answer" היא תשובה טבעית, אישית וזורמת שמתאימה להקראה בטלפון, בדרך כלל 1 עד 4 משפטים קצרים. התייחס להקשר הקודם כשזה רלוונטי. אם ההקלטה לא ברורה, חסרה או שאינך בטוח מה נשאל, כתוב ב-answer בקשה קצרה לחזור על השאלה ואל תנחש. אם נדרש חיפוש אינטרנט מפורש או מידע עדכני, או אם המתקשר מבקש לאתר סרטון, למצוא סרטון חדש ביוטיוב או לברר פרטי סרטון, קבע answer לערך המדויק SEARCH_REQUEST והוסף transcript כרגיל. אל תבקש מידע שכבר מופיע בהקשר. אל תשתמש בחיפוש לשאלות ידע כללי יציבות או לשעה ולתאריך שמופיעים בהנחיה.`), false, true)).response.text().trim();
-      let parsedTurn=null;
-      try { parsedTurn=JSON.parse(firstPass); } catch {
-        const match=firstPass.match(/\{[\s\S]*\}/);
-        if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} }
-      }
-      if(parsedTurn && typeof parsedTurn.answer==='string' && typeof parsedTurn.transcript==='string' && parsedTurn.transcript.trim()) {
+      if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
+      const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
+      userTranscript=await transcribePhoneAudio(audioBuffer);
+      console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcript:userTranscript});
+      if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
+      const answerPrompt=EXCLUSIVE_INSTRUCTION+'\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\n\nהקשר קודם של השיחה, לפי הסדר:\n'+(historyText || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\n'+userTranscript+'\n\nענה על השאלה בלבד. החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית וזורמת ומתאימה להקראה בטלפון, בדרך כלל 1 עד 4 משפטים קצרים. אם השאלה דורשת חיפוש אינטרנט מפורש או מידע עדכני, או אם המתקשר מבקש למצוא סרטון או YouTube, החזר answer בדיוק SEARCH_REQUEST. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
+      const firstPass=(await generateWithRetry([{role:'user',parts:[{text:answerPrompt}]}],false,true)).response.text().trim();      let parsedTurn=null;
+      try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\{[\s\S]*\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
+      if(parsedTurn && typeof parsedTurn.answer==='string') {
         replyText=parsedTurn.answer.trim();
-        userTranscript=sanitizeForYemot(parsedTurn.transcript);
       } else {
-        const cleaned=String(firstPass||'').replace(/^\s*```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim();
-        const transcriptMatch=cleaned.match(/"transcript"\s*:\s*"([^"]*)"/i);
+        const cleaned=String(firstPass||'').trim();
         const answerMatch=cleaned.match(/"answer"\s*:\s*"([\s\S]*?)"\s*(?:,|})/i);
-        if(transcriptMatch && transcriptMatch[1] && answerMatch && answerMatch[1]) {
-          userTranscript=sanitizeForYemot(transcriptMatch[1]);
-          replyText=answerMatch[1].replace(/\\n/g,' ').replace(/\\"/g,'"').trim();
-        } else if(cleaned && !/^SEARCH_REQUEST$/i.test(cleaned) && cleaned.length<700) {
-          replyText=cleaned;
-          userTranscript='לא זוהה תמלול מלא';
-        } else {
-          replyText='לא הצלחתי להבין את השאלה בבירור. נא לחזור עליה בבקשה';
-          userTranscript='';
-        }
+        if(answerMatch && answerMatch[1]) replyText=answerMatch[1].replace(/\\n/g,' ').replace(/\\"/g,'"').trim();
+        else if(cleaned && !/^SEARCH_REQUEST$/i.test(cleaned) && cleaned.length<700) replyText=cleaned;
+        else replyText='לא הצלחתי להבין את השאלה בבירור. נא לחזור עליה בבקשה';
       }
       console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length, transcriptReady: !!userTranscript });
       if (userTranscript && feedbackPending && /^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר|לא|לא עזר|לא ממש|לא כל כך)\\s*$/i.test(userTranscript)) {
