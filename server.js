@@ -349,6 +349,7 @@ async function transcribePhoneAudio(audioBuffer) {
 
   for (let ki=0; ki<apiKeys.length; ki++) {
     const key=apiKeys[ki];
+    let uploadedFileUri='';
     try {
       const startUpload=await withTimeout(fetch(
         'https://generativelanguage.googleapis.com/upload/v1beta/files',
@@ -391,6 +392,7 @@ async function transcribePhoneAudio(audioBuffer) {
         );
       }
 
+      uploadedFileUri=fileInfo.file.uri;
       const endpoint='https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:generateContent';
 
       // First try the dedicated transcription model directly. Google documents
@@ -462,7 +464,7 @@ async function transcribePhoneAudio(audioBuffer) {
           },
           body:JSON.stringify({
             model:'gemini-3.5-transcribe',
-            input:[{type:'audio',uri:fileInfo?.file?.uri,mime_type:mimeType}],
+            input:[{type:'audio',uri:uploadedFileUri,mime_type:mimeType}],
             generation_config:{
               transcription_config:{
                 language_codes:['he-IL'],
@@ -738,6 +740,10 @@ async function analyzePublicYouTubeVideo(videoUrl, question) {
   return textOutput;
 }
 
+function wantsYouTubeVideoFollowUp(text) {
+  return /(על מה|מה דיברו|מה דיבר|מה אמרו|מה נאמר|מה היה|מה קרה בסרטון|מה בדיוק|תוכן הסרטון|תוכן השיר|מילים|סכם|סיכום|תספר לי מה יש|כמה צפיות|מספר צפיות|צפיות|כמה לייקים|לייקים|כמה תגובות|תגובות|מה אומרים בתגובות|מה כתבו בתגובות|פרטי הסרטון|פרטים על הסרטון|מידע על הסרטון|מתי עלה|מתי פורסם|תאריך הפרסום|תיאור הסרטון|מי העלה|באיזה ערוץ|שם הערוץ)/i.test(String(text||''));
+}
+
 async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   const key=(process.env.YOUTUBE_API_KEY||'').trim();
   if(!key) return null;
@@ -746,7 +752,8 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   const explicitYouTube=/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(question);
   const hasResultReference=/(?:תוצאה|סרטון|בדיחה)\s*(?:מספר\s*)?(ראשונה|שנייה|שלישית|רביעית|חמישית|שישית|שביעית|שמינית|תשיעית|1|2|3|4|5|6|7|8|9)/i.test(question) ||
     /(?:הראשונה|השנייה|השלישית|הרביעית|החמישית|הראשון|השני|השלישי|הרביעי|החמישי)/i.test(question);
-  if(!explicitYouTube && !hasResultReference) return null;
+  const hasPinnedVideo=!!(context?.currentVideo?.videoId);
+  if(!explicitYouTube && !hasResultReference && !hasPinnedVideo) return null;
 
   const wantsNewest=/(הכי חדש|החדש ביותר|הכי חדשה|האחרון|האחרונה|אחרון|אחרונה|העדכני ביותר|חדש ביותר|מה יצא לאחרונה|מה עלה לאחרונה|הכי חדש שעלה)/i.test(question);
   const wantsContent=/(על מה|מה דיברו|מה דיבר|מה אמרו|מה נאמר|מה היה|מה קרה בסרטון|מה בדיוק|הדו.?שיח|השיחה|תוכן הסרטון|תוכן השיר|תוכן הבדיחה|מילים|סכם|סיכום|תספר לי מה יש)/i.test(question);
@@ -779,6 +786,10 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
     const words={ראשונה:1,שנייה:2,שלישית:3,רביעית:4,חמישית:5,שישית:6,שביעית:7,שמינית:8,תשיעית:9};
     const n=Number(resultMatch[1]) || words[resultMatch[1]];
     if (n && context.youtubeResults[n-1]) videos=[context.youtubeResults[n-1]];
+  }
+
+  if (hasPinnedVideo && (wantsContent || wantsStats || wantsDetails || wantsCommentDetails)) {
+    videos=[context.currentVideo];
   }
 
   if (Array.isArray(context?.youtubeResults) && resultMatch && wantsContent) {
@@ -1215,9 +1226,7 @@ async function youtubeCallHandler(call) {
 
       const audioResponse=await withTimeout(yemotApi.download_file('ivr2:'+recordPath),REQUEST_TIMEOUT_MS,'youtube conversational recording download');
       const audioBuffer=audioResponse.data;
-      const audioBase64=Buffer.isBuffer(audioBuffer)?audioBuffer.toString('base64'):Buffer.from(audioBuffer).toString('base64');
-      const transcriptionResult=await generateWithRetry(audioContents(audioBase64,'תמלל רק את דברי המתקשר. החזר רק את התמלול בעברית, בלי הסברים ובלי לענות לשאלה.'),false,true);
-      const transcript=sanitizeForYemot(transcriptionResult.response.text());
+      const transcript=await transcribePhoneAudio(audioBuffer);
       console.info('[YouTube IVR] transcript',{chars:transcript.length,transcript});
       if(!transcript) return call.id_list_message([{type:'text',data:'לא הצלחתי להבין את הבקשה. נא לנסות שוב'}]);
 
