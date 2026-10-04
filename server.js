@@ -179,14 +179,8 @@ function geminiErrorStatus(err) {
 async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) {
   if (!modelsByName.length || !modelsByName[0]?.length)
     throw Object.assign(new Error('Gemini is not configured'), {status:400});
-  if (geminiQuotaCooldownUntil > Date.now() && lastGeminiQuotaError) {
-    const retryAfter = Math.max(1, Math.ceil((geminiQuotaCooldownUntil - Date.now()) / 1000));
-    const e = Object.assign(new Error('Gemini quota cooldown; retry after ' + retryAfter + 's'), {
-      status: 429,
-      retryAfter
-    });
-    throw e;
-  }
+  // Do not block a new phone turn during the short quota cooldown.
+  // Branch 1 must always be allowed to try the next configured Gemini key.
   const groups = useWebSearch ? webModelsByName : modelsByName;
   const timeoutMs = fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
   const maxAttempts = fastPhone ? 1 : 2;
