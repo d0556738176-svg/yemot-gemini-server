@@ -334,7 +334,75 @@ function answerIsraelTimeQuestion(transcript) {
   const date=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',weekday:'long',day:'numeric',month:'long'}).format(target);
   return 'בעוד '+(minutes===30?'חצי שעה':minutes===15?'רבע שעה':minutes===60?'שעה':minutes===120?'שעתיים':minutes+' דקות')+' תהיה השעה בישראל '+time+' ביום '+date;
 }
+async function transcribeWithDeepgram(audioBuffer) {
+  const key=(process.env.DEEPGRAM_API_KEY||'').trim();
+  if(!key) return null;
+
+  const bytes=Buffer.isBuffer(audioBuffer)?audioBuffer:Buffer.from(audioBuffer);
+  const mimeType=(process.env.YEMOT_AUDIO_MIME_TYPE||detectAudioMime(bytes)||'audio/wav').trim();
+  const vocabulary=(process.env.DEEPGRAM_KEYTERMS ||
+    'יוטיוב,YouTube,גוגל,Google,אילן גוזל,רנולד,ימות,רנולד שוורצנגר')
+    .split(',').map(x=>x.trim()).filter(Boolean).slice(0,100);
+
+  const url=new URL('https://api.deepgram.com/v1/listen');
+  url.searchParams.set('model','nova-3');
+  url.searchParams.set('language','he');
+  url.searchParams.set('smart_format','true');
+  url.searchParams.set('punctuate','true');
+  url.searchParams.set('filler_words','false');
+  for(const term of vocabulary) url.searchParams.append('keyterm',term);
+
+  const response=await withTimeout(fetch(url,{
+    method:'POST',
+    headers:{
+      'Authorization':'Token '+key,
+      'Content-Type':mimeType
+    },
+    body:bytes
+  }),PHONE_GEMINI_TIMEOUT_MS,'Deepgram Nova-3 Hebrew transcription');
+
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok) {
+    throw Object.assign(
+      new Error(data?.err_msg || data?.message || 'Deepgram transcription HTTP '+response.status),
+      {status:response.status}
+    );
+  }
+
+  const transcript=String(
+    data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || ''
+  ).trim();
+
+  if(!transcript) throw Object.assign(new Error('Deepgram returned empty transcription'),{status:503});
+
+  const cleaned=sanitizeForYemot(transcript);
+  if(cleaned) {
+    console.info('[TRANSCRIBE] deepgram_nova3_he_ok',{
+      mimeType,chars:cleaned.length,text:cleaned
+    });
+    return cleaned;
+  }
+  throw Object.assign(new Error('Deepgram transcription became empty after cleanup'),{status:503});
+}
+
 async function transcribePhoneAudio(audioBuffer) {
+  // Primary path for Israeli Hebrew phone speech: Deepgram Nova-3 when configured.
+  // It is purpose-built for speech-to-text, supports Hebrew in production, and
+  // supports keyterm prompting for names and YouTube/channel terminology.
+  if((process.env.DEEPGRAM_API_KEY||'').trim()) {
+    try {
+      const deepgramText=await transcribeWithDeepgram(audioBuffer);
+      if(deepgramText) return deepgramText;
+    } catch(err) {
+      console.warn('[TRANSCRIBE] Deepgram primary failed',{
+        status:geminiErrorStatus(err),
+        message:String(err?.message||err).slice(0,500)
+      });
+    }
+  }
+
+  // Existing Gemini transcription chain remains intact as the fallback, so
+  // adding the better Hebrew ASR cannot break the current working system.
   // Primary path: Gemini 3.5 Transcribe through the documented GenerateContent
   // endpoint. This is intentionally kept separate from the answer models so a
   // transcription problem cannot damage the rest of the call flow.
