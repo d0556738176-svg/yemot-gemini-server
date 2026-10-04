@@ -87,7 +87,15 @@ let lastGeminiQuotaError = null;
 
 const CONTENT_FILTER_INSTRUCTION = '';
 
-const EXCLUSIVE_INSTRUCTION = [CONTENT_FILTER_INSTRUCTION, process.env.AI_SYSTEM_INSTRUCTION || '']
+const DIALOGUE_STYLE_INSTRUCTION = [
+  'דבר בעברית טבעית, חמה, אישית וזורמת, כאילו אתה מכיר את המתקשר משיחות קודמות.',
+  'כשיש שיחה קודמת זמינה, התייחס אליה באופן טבעי וקצר בתחילת השיחה, בלי להמציא פרטים.',
+  'אל תחזור על הוראות שימוש שהמתקשר כבר מכיר, ואל תגיד לו להקיש סולמית.',
+  'אל תשאל בסוף כל תשובה אם זה עזר ואל תוסיף משפטי נימוס קבועים באופן אוטומטי.',
+  'אם המתקשר מבקש מידע עדכני, חדשות או YouTube, השתמש בגישה האינטרנטית של המערכת ונסה להביא את המידע בעצמך.',
+  'בתשובה קולית העדף משפטים קצרים וברורים, בקצב נעים, עם ייעוץ הגיוני וטבעי כשזה מתאים.'
+].join('\n');
+const EXCLUSIVE_INSTRUCTION = [CONTENT_FILTER_INSTRUCTION, DIALOGUE_STYLE_INSTRUCTION, process.env.AI_SYSTEM_INSTRUCTION || '']
   .filter(Boolean).join('\n\n');
 
 const conversationLog = [];
@@ -725,13 +733,13 @@ ${question}
 }
 async function buildOpeningForCaller(phone) {
   const previous=conversationLog.filter(x=>x.phone===normalizePhone(phone)).filter(x=>x.user && x.user!=='לא ניתן היה לתמלל את ההקלטה').slice(-3);
-  if(!previous.length) return process.env.FIRST_CALL_MESSAGE || 'שלום איך אפשר לעזור לך היום אמור בבקשה על מה תרצה לדבר אחרי הצפצוף ולסיום ההקלטה הקש סולמית';
+  if(!previous.length) return process.env.FIRST_CALL_MESSAGE || 'שלום, איזה כיף לשמוע אותך. אני כאן איתך. מה מתחשק לך לבדוק או לעשות עכשיו?';
   const last=previous[previous.length-1];
   const topic=sanitizeForYemot(String(last.user||'').slice(0,220));
   const answer=sanitizeForYemot(String(last.gemini||'').slice(0,220));
-  let opening='שלום שוב. בפעם הקודמת דיברנו על '+(topic||'הנושא האחרון')+'.';
-  if(answer) opening+=' עניתי לך אז בקצרה: '+answer+'.';
-  opening+=' מה עוד אוכל לעזור לך? אפשר להמשיך בדיוק מאותה נקודה או לדבר על נושא אחר. אחרי הצפצוף אמור את מה שתרצה ולסיום הקש סולמית';
+  let opening='שלום שוב. איזה כיף לשמוע ממך. בפעם הקודמת דיברנו על '+(topic||'הנושא האחרון')+'.';
+  if(answer) opening+=' אני זוכר את הכיוון של השיחה ואת התשובה שנתתי לך אז: '+answer+'.';
+  opening+=' מה תרצה לעשות עכשיו? אפשר להמשיך בדיוק מאותה נקודה, או לעבור לכל נושא אחר שמעניין אותך.';
   return opening;
 }
 async function callHandler(call) {
@@ -763,7 +771,7 @@ async function callHandler(call) {
     if(!recordPath || recordPath==='None') {
       emptyRecordAttempts++;
       if(emptyRecordAttempts < 3) {
-        nextPrompt='לא שמעתי אותך. אמור שוב את השאלה ולסיום הקש סולמית';
+        nextPrompt='לא הצלחתי לשמוע אותך. נסה שוב.';
         continue;
       }
       activeCalls.delete(activeKey);
@@ -793,7 +801,7 @@ async function callHandler(call) {
     try {
       if(active) active.status='שולח Audio ל-Gemini וממתין לתשובה';
       const israelNow = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', dateStyle: 'full', timeStyle: 'short', hourCycle: 'h23' }).format(new Date());
-      const firstPass=(await generateWithRetry([...audioParts(audioBase64), {text:`${EXCLUSIVE_INSTRUCTION}\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: ${israelNow}. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק ואל תנחש או תסתמך על הידע הכללי שלך.\n\nהקשר קודם של השיחה, לפי הסדר:\n${historyText || 'אין עדיין הקשר קודם.'}\n\nהאזן להקלטה והבן את השאלה. החזר אובייקט JSON תקין בלבד, ללא Markdown או טקסט מסביב, עם שני שדות: "transcript" הוא תמלול מדויק וקצר של דברי המתקשר בלבד, בשפה שבה דיבר; "answer" היא תשובה תמציתית של עד שני משפטים, המתאימה להקראה בטלפון ועונה ישירות לתמלול. אם ההקלטה לא ברורה, חסרה או שאינך בטוח מה נשאל, כתוב ב-answer בקשה קצרה לחזור על השאלה ואל תנחש. אם נדרש חיפוש אינטרנט מפורש או מידע עדכני, או אם המתקשר מבקש לאתר סרטון, למצוא סרטון חדש ביוטיוב או לברר פרטי סרטון, קבע answer לערך המדויק SEARCH_REQUEST והוסף transcript כרגיל. אל תבקש מידע שכבר מופיע בהקשר. אל תשתמש בחיפוש לשאלות ידע כללי יציבות או לשעה ולתאריך שמופיעים בהנחיה.`}], false, true)).response.text().trim();
+      const firstPass=(await generateWithRetry([...audioParts(audioBase64), {text:`${EXCLUSIVE_INSTRUCTION}\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: ${israelNow}. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק ואל תנחש או תסתמך על הידע הכללי שלך.\n\nהקשר קודם של השיחה, לפי הסדר:\n${historyText || 'אין עדיין הקשר קודם.'}\n\nהאזן להקלטה והבן את השאלה. החזר אובייקט JSON תקין בלבד, ללא Markdown או טקסט מסביב, עם שני שדות: "transcript" הוא תמלול מדויק וקצר של דברי המתקשר בלבד, בשפה שבה דיבר; "answer" היא תשובה טבעית, אישית וזורמת שמתאימה להקראה בטלפון, בדרך כלל 1 עד 4 משפטים קצרים. התייחס להקשר הקודם כשזה רלוונטי. אם ההקלטה לא ברורה, חסרה או שאינך בטוח מה נשאל, כתוב ב-answer בקשה קצרה לחזור על השאלה ואל תנחש. אם נדרש חיפוש אינטרנט מפורש או מידע עדכני, או אם המתקשר מבקש לאתר סרטון, למצוא סרטון חדש ביוטיוב או לברר פרטי סרטון, קבע answer לערך המדויק SEARCH_REQUEST והוסף transcript כרגיל. אל תבקש מידע שכבר מופיע בהקשר. אל תשתמש בחיפוש לשאלות ידע כללי יציבות או לשעה ולתאריך שמופיעים בהנחיה.`}], false, true)).response.text().trim();
       let parsedTurn=null;
       try { parsedTurn=JSON.parse(firstPass); } catch {
         const match=firstPass.match(/\{[\s\S]*\}/);
@@ -871,7 +879,7 @@ async function callHandler(call) {
     // queued with prependToNextAction. Instead, put the answer directly into the
     // next read: Yemot will play the answer and immediately collect the next turn.
     // This keeps the same phone call and the same in-memory conversation context.
-    nextPrompt=replyText+' האם זה עזר לך? אם תרצה עוד מידע, אפשר להמשיך מאותו נושא, ואם תרצה משהו אחר פשוט אמור לי. ולסיום הקש סולמית';
+    nextPrompt=replyText;
     feedbackPending=true;
     console.info('[CALL_FLOW] next_turn_armed', {
       callId: activeKey,
