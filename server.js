@@ -766,7 +766,7 @@ ${raw}
 הפרד בין עובדות שדווחו לבין טענות או דיווחים שעדיין אינם מאומתים.
 אל תמציא מידע שאינו מופיע בחומר.
 התשובה מיועדת להקראה בטלפון, ולכן קצרה, טבעית וברורה.`;
-    const result=await generateWithRetry([{text:prompt}],false,false);
+    const result=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,false);
     const answer=String(result?.response?.text?.()||'').trim();
     if(answer) return answer;
   } catch(e) {
@@ -993,7 +993,7 @@ ${transcriptText.slice(0,50000)}
 אם נשאל "מה בדיוק היה הדו-שיח" או שאלה דומה — תאר לפי סדר את עיקרי הדברים והטענות/השאלות והתשובות שנאמרו, בלי להמציא ובלי לטעון לציטוט מילה במילה אם התמליל אינו מלא.
 אם מדובר בשיר — הסבר על מה השיר ומה המסר שלו לפי המילים הזמינות.
 אם המידע בתמליל לא מספיק כדי לענות, אמור זאת במפורש.`;
-        const result=await generateWithRetry([{text:prompt}],false,false);
+        const result=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,false);
         const answer=String(result?.response?.text?.()||'').trim();
         if(answer) return 'מצאתי את הסרטון '+title+'. '+sanitizeForYemot(answer);
       }
@@ -1102,7 +1102,7 @@ ${question}
 אם המתקשר נותן כתובת אתר, שם דומיין או מבקש מידע מאתר מסוים, נסה לפתוח ולקרוא את המקור עצמו או לחפש בתוך האתר, ולא להסתפק בתוצאות כלליות. מותר להשתמש במידע ציבורי נגיש מהאתר גם אם הוא ארוך, ולסכם אותו לפי בקשת המתקשר. אל תטען שקראת עמוד אם הוא לא היה נגיש בפועל. אין לעקוף התחברות, CAPTCHA, חומת תשלום, הגבלת גישה או אמצעי אבטחה; במקרה כזה אמור שהחומר לא נגיש. המטרה היא חיפוש רחב ככל האפשר במקורות ציבוריים ונגישים.
 אם החיפוש נכשל או לא החזיר מידע מספיק, אמור בקצרה שלא הצלחת להשיג מידע אמין כרגע. אל תציג כתובות אינטרנט ארוכות.`;
   try {
-    const result=await generateWithRetry([{text:prompt}],true,false);
+    const result=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],true,false);
     const answer=result?.response?.text?.();
     if(answer && String(answer).trim()) return String(answer).trim();
     throw Object.assign(new Error('Web search returned an empty answer'),{status:503});
