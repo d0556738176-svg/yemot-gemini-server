@@ -1189,19 +1189,35 @@ async function callHandler(call) {
       userTranscript=await transcribePhoneAudio(audioBuffer);
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcript:userTranscript});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
-      const answerPrompt=EXCLUSIVE_INSTRUCTION+'\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\n\nהקשר קודם של השיחה, לפי הסדר:\n'+(historyText || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\n'+userTranscript+'\n\nענה על השאלה בלבד. החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית וזורמת ומתאימה להקראה בטלפון, בדרך כלל 1 עד 4 משפטים קצרים. אם השאלה דורשת חיפוש אינטרנט מפורש או מידע עדכני, או אם המתקשר מבקש למצוא סרטון או YouTube, החזר answer בדיוק SEARCH_REQUEST. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
-      const firstPass=(await generateWithRetry([{role:'user',parts:[{text:answerPrompt}]}],false,true)).response.text().trim();      let parsedTurn=null;
-      try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\{[\s\S]*\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
-      if(parsedTurn && typeof parsedTurn.answer==='string') {
-        replyText=parsedTurn.answer.trim();
+      // Avoid spending a Gemini generation call on requests that are already
+      // handled by deterministic/direct data paths below. This reduces quota use,
+      // improves phone latency, and leaves more capacity for real conversation/advice.
+      const directDataRequest =
+        !!answerIsraelTimeQuestion(userTranscript) ||
+        isWeatherQuestion(userTranscript) ||
+        isNewsQuestion(userTranscript) ||
+        shouldForceWebSearch(userTranscript) ||
+        /(חפש|תחפש|תמצא|חיפוש|באינטרנט|בגוגל|מה קורה עכשיו|מידע עדכני)/i.test(userTranscript) ||
+        /(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript);
+
+      if(!directDataRequest) {
+        const answerPrompt=EXCLUSIVE_INSTRUCTION+'\\n\\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\\n\\nהקשר קודם של השיחה, לפי הסדר:\\n'+(historyText || 'אין עדיין הקשר קודם.')+'\\n\\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\\n'+userTranscript+'\\n\\nענה על השאלה בלבד. החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. בדרך כלל 1 עד 4 משפטים קצרים; כשמדובר בהתייעצות או הסבר מורכב אפשר להרחיב בהדרגה. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
+        const firstPass=(await generateWithRetry([{role:'user',parts:[{text:answerPrompt}]}],false,true)).response.text().trim();
+        let parsedTurn=null;
+        try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\\{[\\s\\S]*\\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
+        if(parsedTurn && typeof parsedTurn.answer==='string') {
+          replyText=parsedTurn.answer.trim();
+        } else {
+          const cleaned=String(firstPass||'').trim();
+          const answerMatch=cleaned.match(/"answer"\\s*:\\s*"([\\s\\S]*?)"\\s*(?:,|})/i);
+          if(answerMatch && answerMatch[1]) replyText=answerMatch[1].replace(/\\\\n/g,' ').replace(/\\\\\"/g,'"').trim();
+          else if(cleaned && cleaned.length<700) replyText=cleaned;
+          else replyText='לא הצלחתי להבין את השאלה בבירור. נא לחזור עליה בבקשה';
+        }
+        console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length, transcriptReady: !!userTranscript });
       } else {
-        const cleaned=String(firstPass||'').trim();
-        const answerMatch=cleaned.match(/"answer"\s*:\s*"([\s\S]*?)"\s*(?:,|})/i);
-        if(answerMatch && answerMatch[1]) replyText=answerMatch[1].replace(/\\n/g,' ').replace(/\\"/g,'"').trim();
-        else if(cleaned && !/^SEARCH_REQUEST$/i.test(cleaned) && cleaned.length<700) replyText=cleaned;
-        else replyText='לא הצלחתי להבין את השאלה בבירור. נא לחזור עליה בבקשה';
+        console.info('[CALL_FLOW] direct_data_path_skip_initial_gemini', { callId: activeKey });
       }
-      console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length, transcriptReady: !!userTranscript });
       if (userTranscript && feedbackPending && /^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר|לא|לא עזר|לא ממש|לא כל כך)\\s*$/i.test(userTranscript)) {
         if (/^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר)/i.test(userTranscript)) replyText='מצוין. שמח שעזרתי לך. מה עוד תרצה שאעשה עבורך?';
         else replyText='בסדר. מה לא היה ברור או מה חסר לך? אמור לי ואנסה לעזור בצורה אחרת.';
