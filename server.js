@@ -959,7 +959,7 @@ async function youtubeCallHandler(call) {
   }
 }
 
-const BACKUP_GEMINI_API_KEY = (process.env.YEMOT_BACKUP_GEMINI_API_KEY || process.env.GEMINI_BACKUP_API_KEY || '').trim();
+const BACKUP_GEMINI_API_KEY = (process.env.YEMOT_BACKUP_GEMINI_API_KEY || process.env.GEMINI_BACKUP_API_KEY || apiKeys[1] || '').trim();
 const backupGeminiClient = BACKUP_GEMINI_API_KEY ? new GoogleGenerativeAI(BACKUP_GEMINI_API_KEY) : null;
 const backupGeminiModel = backupGeminiClient ? backupGeminiClient.getGenerativeModel({model:(process.env.GEMINI_BACKUP_MODEL || MODEL_NAMES[0] || 'gemini-3.8-flash')}) : null;
 
