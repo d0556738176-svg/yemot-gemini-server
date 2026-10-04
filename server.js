@@ -531,7 +531,7 @@ function detectAudioMime(bytes) {
   if(bytes.subarray(0,3).toString('ascii') === 'ID3') return 'audio/mp3';
   if(bytes.subarray(0,4).toString('ascii') === 'OggS') return 'audio/ogg';
   if(bytes.subarray(0,4).toString('ascii') === 'fLaC') return 'audio/flac';
-  if(bytes.subarray(0,4).toString('ascii') === '\\xFF\\xFB' || bytes.subarray(0,2).toString('hex') === 'fff3' || bytes.subarray(0,2).toString('hex') === 'fff2') return 'audio/mpeg';
+  if(bytes[0]===0xFF && (bytes[1]===0xFB || bytes[1]===0xF3 || bytes[1]===0xF2)) return 'audio/mpeg';
   // Yemot normally supplies WAV. Keep the explicit environment variable as
   // an override for deployments using another recording format.
   return 'audio/wav';
