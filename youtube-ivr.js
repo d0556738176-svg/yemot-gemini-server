@@ -122,7 +122,7 @@ export async function searchYouTubeVideos(query, {
   url.searchParams.set('key', key);
 
   const data = await fetchJson(url, fetchImpl, timeoutMs);
-  const results = (data.items || [])
+  let results = (data.items || [])
     .filter(item => item.id?.videoId)
     .map(item => ({
       videoId: item.id.videoId,
@@ -133,7 +133,17 @@ export async function searchYouTubeVideos(query, {
     }));
 
   if (wantsNewest) {
-    results.sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
+    // Prefer results whose channel title actually contains the requested
+    // person's/channel words. This is a fallback only; uploads-playlist
+    // resolution above remains the authoritative path.
+    const words = q.toLowerCase().split(/\\s+/).filter(w => w.length > 1);
+    results.sort((a, b) => {
+      const ac = String(a.channelTitle||'').toLowerCase();
+      const bc = String(b.channelTitle||'').toLowerCase();
+      const as = words.reduce((n,w)=>n+(ac.includes(w)?1:0),0);
+      const bs = words.reduce((n,w)=>n+(bc.includes(w)?1:0),0);
+      return bs-as || Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0);
+    });
   }
 
   return results;
