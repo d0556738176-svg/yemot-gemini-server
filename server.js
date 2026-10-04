@@ -74,15 +74,25 @@ if (!apiKeys.length) {
   console.warn('Gemini is not configured yet. Set GEMINI_API_KEYS.');
 }
 
-const MODEL_NAMES = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.5-flash')
+const configuredModelNames = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.5-flash')
   .split(',').map(x => x.trim()).filter(Boolean);
+// Keep the user's configured order, but always have a current high-volume audio-capable
+// fallback available. Gemini 3.1 Flash-Lite is designed for high-volume, low-latency
+// multimodal work and supports audio input.
+const MODEL_NAMES = [...new Set([
+  ...configuredModelNames,
+  'gemini-3.1-flash-lite'
+])];
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
 const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 12000);
 
 // Avoid repeatedly hammering Gemini after the API has explicitly reported quota exhaustion.
 // This is especially important on phone calls, where a second fallback request can turn one
 // quota event into several consecutive failures.
-let geminiQuotaCooldownUntil = 0;
+const GEMINI_QUOTA_COOLDOWN_MS = Number(process.env.GEMINI_QUOTA_COOLDOWN_MS || 60000);
+// Cool down a specific model/key after a 429 so every new phone turn does not
+// repeatedly hit the same exhausted bucket before moving to a healthy fallback.
+const geminiQuotaCooldowns = new Map();
 let lastGeminiQuotaError = null;
 
 const CONTENT_FILTER_INSTRUCTION = '';
@@ -212,14 +222,23 @@ function geminiErrorStatus(err) {
 async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) {
   if (!modelsByName.length || !modelsByName[0]?.length)
     throw Object.assign(new Error('Gemini is not configured'), {status:400});
-  // Do not block a new phone turn during the short quota cooldown.
-  // Branch 1 must always be allowed to try the next configured Gemini key.
   const groups = useWebSearch ? webModelsByName : modelsByName;
   const timeoutMs = fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
   const maxAttempts = fastPhone ? 1 : 2;
   let lastError;
+
   for (let mi=0; mi<groups.length; mi++) {
     for (let ki=0; ki<groups[mi].length; ki++) {
+      const cooldownKey = MODEL_NAMES[mi] + ':key:' + (ki + 1);
+      const cooldownUntil = geminiQuotaCooldowns.get(cooldownKey) || 0;
+      if (cooldownUntil > Date.now()) {
+        console.warn('[Gemini] skipping model/key during quota cooldown', {
+          model: MODEL_NAMES[mi], key: ki + 1,
+          remainingMs: cooldownUntil - Date.now(), fastPhone
+        });
+        continue;
+      }
+
       for (let attempt=1; attempt<=maxAttempts; attempt++) {
         try {
           const request = fastPhone ? {
@@ -236,31 +255,28 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) 
           const status=geminiErrorStatus(e);
           if (status === 429) {
             lastGeminiQuotaError = e;
-            // Give the current request a chance to try the other configured
-            // model/key combinations, but prevent an immediate second API
-            // request (for example web grounding after phone transcription)
-            // from multiplying the same quota failure.
-            geminiQuotaCooldownUntil = Math.max(geminiQuotaCooldownUntil, Date.now() + 15000);
-            console.warn('[Gemini] quota/rate limit; trying next configured model/key', {
-              model: MODEL_NAMES[mi], key: ki + 1, status, fastPhone
+            geminiQuotaCooldowns.set(cooldownKey, Date.now() + GEMINI_QUOTA_COOLDOWN_MS);
+            console.warn('[Gemini] quota/rate limit; cooling down this model/key and trying next', {
+              model: MODEL_NAMES[mi], key: ki + 1, status, fastPhone,
+              cooldownMs: GEMINI_QUOTA_COOLDOWN_MS
             });
             break;
           }
           if (status === 404) {
-            console.warn('[Gemini] model unavailable; trying next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status });
+            console.warn('[Gemini] model unavailable; trying next configured model/key', {
+              model: MODEL_NAMES[mi], key: ki + 1, status
+            });
             break;
           }
           if (status === 408 || status === 503 || (status >= 500 && status < 600)) {
-            console.warn('[Gemini] transient error; trying next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status, fastPhone });
+            console.warn('[Gemini] transient error; trying next configured model/key', {
+              model: MODEL_NAMES[mi], key: ki + 1, status, fastPhone
+            });
             break;
           }
-          if (status >= 500 && status < 600 && attempt === 1) {
-            const delay = 1500;
-            console.warn('[Gemini] one 5xx retry', { model: MODEL_NAMES[mi], key: ki + 1, status, delay });
-            await new Promise(r=>setTimeout(r, delay));
-            continue;
-          }
-          console.warn('[Gemini] moving to next configured model/key', { model: MODEL_NAMES[mi], key: ki + 1, status });
+          console.warn('[Gemini] moving to next configured model/key', {
+            model: MODEL_NAMES[mi], key: ki + 1, status
+          });
           break;
         }
       }
