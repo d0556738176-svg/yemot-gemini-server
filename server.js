@@ -132,8 +132,8 @@ function normalizePhone(value) {
   return digits;
 }
 function getCallerNumber(call) {
-  const candidates=[call?.ApiPhone,call?.values?.ApiPhone,call?.values?.apiPhone,
-    call?.req?.query?.ApiPhone,call?.req?.body?.ApiPhone,call?.body?.ApiPhone];
+  const candidates=[call?.values?.ApiPhone,call?.values?.apiPhone,
+    call?.req?.query?.ApiPhone,call?.req?.body?.ApiPhone];
   for(const candidate of candidates) {
     if(candidate!==undefined && candidate!==null && String(candidate).trim()) return normalizePhone(candidate);
   }
