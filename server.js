@@ -349,14 +349,51 @@ async function transcribePhoneAudio(audioBuffer) {
       const upload=await withTimeout(fetch(uploadUrl,{method:'POST',headers:{'Content-Length':String(bytes.length),'X-Goog-Upload-Offset':'0','X-Goog-Upload-Command':'upload, finalize','Content-Type':mimeType},body:bytes}),REQUEST_TIMEOUT_MS,'Gemini transcription upload');
       const fileInfo=await upload.json().catch(function(){return {};});
       if(!upload.ok || !fileInfo.file || !fileInfo.file.uri) throw Object.assign(new Error((fileInfo.error && fileInfo.error.message) || 'Gemini transcription file upload failed'),{status:upload.status || 503});
-      const response=await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:generateContent',{method:'POST',headers:{'x-goog-api-key':key,'Content-Type':'application/json'},body:JSON.stringify({contents:[{role:'user',parts:[{fileData:{fileUri:fileInfo.file.uri,mimeType:mimeType}}]}],generationConfig:{audioTranscriptionConfig:{languageCodes:['he-IL'],mode:'SMART',customVocabulary:vocabulary}}})}),PHONE_GEMINI_TIMEOUT_MS,'Gemini phone transcription');
-      const data=await response.json().catch(function(){return {};});
-      if(!response.ok) throw Object.assign(new Error((data.error && data.error.message) || 'Gemini transcription HTTP '+response.status),{status:response.status});
-      const parts=data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
-      const text=String((parts || []).map(function(p){return p && p.text || '';}).join(' ')).trim();
-      if(!text) throw Object.assign(new Error('Gemini transcription returned empty text'),{status:503});
-      console.info('[TRANSCRIBE] dedicated_transcription_ok',{key:ki+1,chars:text.length});
-      return sanitizeForYemot(text);
+      const endpoint='https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:generateContent';
+      const contents={contents:[{role:'user',parts:[{fileData:{fileUri:fileInfo.file.uri,mimeType:mimeType}}]}]};
+      const configs=[
+        {generationConfig:{audioTranscriptionConfig:{languageCodes:['he-IL'],customVocabulary:vocabulary}}},
+        {generationConfig:{audioTranscriptionConfig:{languageCodes:['he-IL']}}},
+        {}
+      ];
+      let text='';
+      let lastTranscriptionError=null;
+      for(const config of configs){
+        try{
+          const response=await withTimeout(fetch(endpoint,{method:'POST',headers:{'x-goog-api-key':key,'Content-Type':'application/json'},body:JSON.stringify({...contents,...config})}),PHONE_GEMINI_TIMEOUT_MS,'Gemini phone transcription');
+          const data=await response.json().catch(function(){return {};});
+          if(!response.ok) throw Object.assign(new Error((data.error && data.error.message) || 'Gemini transcription HTTP '+response.status),{status:response.status});
+          const parts=data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
+          text=String((parts || []).map(function(p){return p && p.text || '';}).join(' ')).trim();
+          if(text) break;
+          lastTranscriptionError=Object.assign(new Error('Gemini transcription returned empty text'),{status:503});
+        }catch(err){ lastTranscriptionError=err; }
+      }
+      if(text){
+        console.info('[TRANSCRIBE] dedicated_transcription_ok',{key:ki+1,chars:text.length});
+        return sanitizeForYemot(text);
+      }
+
+      // Final safety net: the legacy Gemini audio path can still understand the
+      // same phone recording even when the dedicated transcription endpoint
+      // returns an empty candidate. This keeps the call usable instead of
+      // immediately returning a 503 to the caller.
+      try{
+        const legacy=await generateWithRetry(
+          audioContents(bytes.toString('base64'), 'תמלל רק את דברי המתקשר. החזר רק את התמלול בעברית, בלי הסברים ובלי לענות לשאלה.'),
+          false,
+          true
+        );
+        const legacyText=String(legacy?.response?.text?.() || '').trim();
+        if(legacyText){
+          console.info('[TRANSCRIBE] legacy_audio_fallback_ok',{key:ki+1,chars:legacyText.length});
+          return sanitizeForYemot(legacyText);
+        }
+      }catch(legacyError){
+        lastTranscriptionError=legacyError;
+        console.warn('[TRANSCRIBE] legacy audio fallback failed',{key:ki+1,status:geminiErrorStatus(legacyError),message:String(legacyError.message || legacyError).slice(0,300)});
+      }
+      throw lastTranscriptionError || Object.assign(new Error('Gemini transcription returned empty text'),{status:503});
     } catch(err) { lastError=err; console.warn('[TRANSCRIBE] dedicated transcription failed',{key:ki+1,status:geminiErrorStatus(err),message:String(err.message || err).slice(0,300)}); }
   }
   throw lastError || Object.assign(new Error('Gemini transcription unavailable'),{status:503});
