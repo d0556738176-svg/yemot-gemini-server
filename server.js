@@ -759,6 +759,7 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
     }
   }
   const wantsStats=/(כמה צפיות|כמה צפיות יש|מספר צפיות|צפיות|כמה לייקים|לייקים|כמה תגובות|תגובות|מה אומרים בתגובות|מה כתבו בתגובות|תגובות על הסרטון)/i.test(question);
+  const wantsCommentDetails=/(יותר.*תגובות|פרטים.*תגובות|פירוט.*תגובות|בפירוט.*תגובות|דעות.*תגובות|מה אנשים חושבים|מה אנשים אומרים|מה חוזר בתגובות|מגמה בתגובות|תנתח.*תגובות|ניתוח.*תגובות)/i.test(question);
   const wantsDetails=/(פרטי הסרטון|פרטי סירטון|פרטים על הסרטון|פרטים על סירטון|מידע על הסרטון|מידע על סירטון|מתי עלה|מתי פורסם|תאריך הפרסום|תיאור הסרטון|תיאור של הסרטון|מי העלה|באיזה ערוץ|שם הערוץ)/i.test(question);
   if (context && Array.isArray(context.youtubeResults) && resultMatch && (wantsStats || wantsDetails)) {
     const words={ראשונה:1,שנייה:2,שלישית:3,רביעית:4,חמישית:5,שישית:6,שביעית:7,שמינית:8,תשיעית:9};
@@ -838,10 +839,21 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
       if(s.commentCount!=null) answer+=' ו-'+Number(s.commentCount).toLocaleString('he-IL')+' תגובות';
       if(snippet.description && wantsDetails) answer+='. תיאור: '+sanitizeForYemot(snippet.description).slice(0,900);
       if(/תגובות|מה אומרים בתגובות|מה כתבו בתגובות/i.test(question)) {
-        const comments=await getYouTubeComments(target.videoId,8).catch(()=>[]);
+        const comments=await getYouTubeComments(target.videoId,wantsCommentDetails?15:8).catch(()=>[]);
         if(comments.length) {
-          const digest=comments.map((x,i)=>(i+1)+'. '+sanitizeForYemot(x.textDisplay||x.textOriginal||'')).join(' ');
-          answer+='. הנה כמה מהתגובות הבולטות: '+digest;
+          const digest=comments.map((x,i)=>{
+            const text=sanitizeForYemot(x.textDisplay||x.textOriginal||'');
+            const likes=Number(x.likeCount||0);
+            const replies=Number(x.totalReplyCount||0);
+            const meta=[
+              likes>0 ? likes.toLocaleString('he-IL')+' לייקים' : '',
+              replies>0 ? replies.toLocaleString('he-IL')+' תגובות המשך' : ''
+            ].filter(Boolean).join(', ');
+            return (i+1)+'. '+text+(meta?' ('+meta+')':'');
+          }).join(' ');
+          answer+= (wantsCommentDetails
+            ? '. הנה פירוט רחב יותר של התגובות הבולטות, כולל לייקים ותגובות המשך: '
+            : '. הנה כמה מהתגובות הבולטות: ') + digest;
         } else {
           answer+=' . לא הצלחתי לקבל את טקסט התגובות כרגע.';
         }
@@ -941,7 +953,14 @@ async function getYouTubeComments(videoId, maxResults=10) {
   const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'YouTube comments');
   const data=await response.json();
   if(!response.ok) throw Object.assign(new Error('YouTube comments HTTP '+response.status),{status:response.status});
-  return (data.items||[]).map(x=>x.snippet?.topLevelComment?.snippet).filter(Boolean);
+  return (data.items||[]).map(x=>{
+    const s=x.snippet?.topLevelComment?.snippet;
+    if(!s) return null;
+    return {
+      ...s,
+      totalReplyCount:Number(x.snippet?.totalReplyCount||0)
+    };
+  }).filter(Boolean);
 }
 
 function shouldForceWebSearch(transcript) {
