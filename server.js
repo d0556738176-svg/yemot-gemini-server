@@ -260,8 +260,10 @@ const router = YemotRouter({
   uncaughtErrorHandler: e => logDetailedError('call handler', e)
 });
 
-function audioParts(audioBase64) {
-  return [{inlineData:{mimeType:process.env.YEMOT_AUDIO_MIME_TYPE || 'audio/wav', data:audioBase64}}];
+function audioContents(audioBase64, text) {
+  const parts = [{inlineData:{mimeType:process.env.YEMOT_AUDIO_MIME_TYPE || 'audio/wav', data:audioBase64}}];
+  if (text) parts.push({text});
+  return [{role:'user', parts}];
 }
 
 // Resolve simple Israel-time questions in code, avoiding model arithmetic mistakes.
@@ -292,12 +294,12 @@ async function answerNormalQuestion(audioBase64, historyText='') {
 הקשר קודם של השיחה, לפי הסדר: ${historyText || 'אין עדיין הקשר קודם.'}\n\nזו הקלטה של שאלה מהמתקשר. האזן להקלטה, הבן את הדיבור בעצמך, התייחס להקשר הקודם וענה על השאלה.
 ענה בשפה שבה המתקשר דיבר. התשובה מיועדת להקראה בטלפון.
 אל תצטט תמלול.`;
-  const result = await generateWithRetry([...audioParts(audioBase64), {text:prompt}]);
+  const result = await generateWithRetry(audioContents(audioBase64, prompt));
   return result.response.text();
 }
 async function transcribeForDashboard(audioBase64) {
-  const result = await generateWithRetry([...audioParts(audioBase64), {text:
-    'תמלל את ההקלטה לצורך תצוגה בלבד. אל תענה על השאלה. החזר רק את התמלול, ללא הסברים.'}]);
+  const result = await generateWithRetry(audioContents(audioBase64,
+    'תמלל את ההקלטה לצורך תצוגה בלבד. אל תענה על השאלה. החזר רק את התמלול, ללא הסברים.'));
   return sanitizeForYemot(result.response.text());
 }
 function knownContactFallback(transcript, historyText='') {
@@ -925,7 +927,7 @@ async function youtubeCallHandler(call) {
       const audioResponse=await withTimeout(yemotApi.download_file('ivr2:'+recordPath),REQUEST_TIMEOUT_MS,'youtube conversational recording download');
       const audioBuffer=audioResponse.data;
       const audioBase64=Buffer.isBuffer(audioBuffer)?audioBuffer.toString('base64'):Buffer.from(audioBuffer).toString('base64');
-      const transcriptionResult=await generateWithRetry([...audioParts(audioBase64),{text:'תמלל רק את דברי המתקשר. החזר רק את התמלול בעברית, בלי הסברים ובלי לענות לשאלה.'}],false,true);
+      const transcriptionResult=await generateWithRetry(audioContents(audioBase64,'תמלל רק את דברי המתקשר. החזר רק את התמלול בעברית, בלי הסברים ובלי לענות לשאלה.'),false,true);
       const transcript=sanitizeForYemot(transcriptionResult.response.text());
       console.info('[YouTube IVR] transcript',{chars:transcript.length,transcript});
       if(!transcript) return call.id_list_message([{type:'text',data:'לא הצלחתי להבין את הבקשה. נא לנסות שוב'}]);
@@ -990,8 +992,7 @@ async function backupCallHandler(call) {
       const audio=Buffer.isBuffer(response.data)?response.data:Buffer.from(response.data);
       const context=history.slice(-8).map((x,i)=>'תור '+(i+1)+' — מתקשר: '+x.user+'\\nתשובה: '+x.answer).join('\\n\\n');
       const result=await withTimeout(backupGeminiModel.generateContent([
-        ...audioParts(audio.toString('base64')),
-        {text:EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.'}
+        ...audioContents(audio.toString('base64'), EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.'}
       ]),REQUEST_TIMEOUT_MS,'backup Gemini');
       const raw=result.response.text().trim();
       let parsed=null;
