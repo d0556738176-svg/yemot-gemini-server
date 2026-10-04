@@ -89,7 +89,7 @@ const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 12
 // Avoid repeatedly hammering Gemini after the API has explicitly reported quota exhaustion.
 // This is especially important on phone calls, where a second fallback request can turn one
 // quota event into several consecutive failures.
-const GEMINI_QUOTA_COOLDOWN_MS = Number(process.env.GEMINI_QUOTA_COOLDOWN_MS || 60000);
+const GEMINI_QUOTA_COOLDOWN_MS = Number(process.env.GEMINI_QUOTA_COOLDOWN_MS || 15000);
 // Cool down a specific model/key after a 429 so every new phone turn does not
 // repeatedly hit the same exhausted bucket before moving to a healthy fallback.
 const geminiQuotaCooldowns = new Map();
@@ -241,10 +241,15 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) 
 
       for (let attempt=1; attempt<=maxAttempts; attempt++) {
         try {
-          const request = fastPhone ? {
+          // Always pass the legacy SDK an explicit GenerateContentRequest object.
+          // Passing a bare Content[] is ambiguous in @google/generative-ai and has
+          // caused malformed REST payloads such as "Unknown name inlineData at contents[0]".
+          const request = {
             contents,
-            generationConfig: { thinkingConfig: { thinkingLevel: 'low' } }
-          } : contents;
+            ...(fastPhone ? {
+              generationConfig: { thinkingConfig: { thinkingLevel: 'low' } }
+            } : {})
+          };
           return await withTimeout(
             groups[mi][ki].generateContent(request),
             timeoutMs,
@@ -282,6 +287,9 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) 
       }
     }
   }
+  // All API keys in the same Google Cloud project share the project's
+  // quota. If every configured model/key was rejected with 429, do not
+  // manufacture a different answer or hammer the same exhausted bucket.
   throw lastError;
 }
 
