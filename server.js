@@ -335,17 +335,18 @@ function answerIsraelTimeQuestion(transcript) {
   return 'בעוד '+(minutes===30?'חצי שעה':minutes===15?'רבע שעה':minutes===60?'שעה':minutes===120?'שעתיים':minutes+' דקות')+' תהיה השעה בישראל '+time+' ביום '+date;
 }
 async function transcribePhoneAudio(audioBuffer) {
-  // Use Gemini 3.5 Transcribe through the current Interactions API.
-  // We deliberately use VERBATIM mode: the phone assistant must understand
-  // exactly what the caller said, not silently rewrite or "improve" the request.
+  // Primary path: Gemini 3.5 Transcribe through the documented GenerateContent
+  // endpoint. This is intentionally kept separate from the answer models so a
+  // transcription problem cannot damage the rest of the call flow.
   const configuredMime=(process.env.YEMOT_AUDIO_MIME_TYPE || '').trim();
   const bytes=Buffer.isBuffer(audioBuffer)?audioBuffer:Buffer.from(audioBuffer);
   const mimeType=configuredMime || detectAudioMime(bytes);
   const vocabulary=(process.env.GEMINI_TRANSCRIBE_VOCABULARY ||
-    'Gemini,YouTube,יוטיוב,גוגל,ימות המשיח,פאגי,Google,YouTube,API,Render,Supabase')
+    'Gemini,YouTube,יוטיוב,גוגל,Google,YouTube,API,Render,Supabase')
     .split(',').map(x=>x.trim()).filter(Boolean).slice(0,100);
 
   let lastError;
+
   for (let ki=0; ki<apiKeys.length; ki++) {
     const key=apiKeys[ki];
     try {
@@ -390,100 +391,124 @@ async function transcribePhoneAudio(audioBuffer) {
         );
       }
 
-      const endpoint='https://generativelanguage.googleapis.com/v1beta/interactions';
-      const configs=[
-        {
-          transcription_config:{
-            language_codes:['he-IL'],
-            mode:{type:'verbatim'},
-            custom_vocabulary:vocabulary
-          }
+      const endpoint='https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:generateContent';
+
+      // First try the dedicated transcription model directly. Google documents
+      // this route specifically for file-based transcription and it avoids the
+      // Interactions response-shape/API compatibility issue we were seeing.
+      const directResponse=await withTimeout(fetch(endpoint,{
+        method:'POST',
+        headers:{
+          'x-goog-api-key':key,
+          'Content-Type':'application/json'
         },
-        {
-          transcription_config:{
-            language_codes:['he-IL'],
-            mode:{type:'verbatim'}
-          }
-        },
-        {
-          transcription_config:{
-            language_codes:[],
-            mode:{type:'verbatim'}
-          }
-        }
-      ];
+        body:JSON.stringify({
+          contents:[{
+            role:'user',
+            parts:[
+              {fileData:{mimeType,fileUri:fileInfo.file.uri}},
+              {text:[
+                'תמלל בדיוק את כל דברי המתקשר בעברית.',
+                'אל תשנה שמות, מספרים, שמות ערוצים, שמות סרטונים או מילים באנגלית.',
+                'אל תשלים מילים שלא נשמעו.',
+                'החזר רק את התמלול, בלי הסבר ובלי לענות לשאלה.',
+                'מונחים ושמות שעשויים להופיע: '+vocabulary.join(', ')+'.'
+              ].join(' ')}
+            ]
+          }]
+        })
+      }),PHONE_GEMINI_TIMEOUT_MS,'Gemini 3.5 Transcribe direct');
 
-      let text='';
-      let lastTranscriptionError=null;
-
-      for(const transcriptionConfig of configs) {
-        try {
-          const response=await withTimeout(fetch(endpoint,{
-            method:'POST',
-            headers:{
-              'x-goog-api-key':key,
-              'Content-Type':'application/json'
-            },
-            body:JSON.stringify({
-              model:'gemini-3.5-transcribe',
-              input:[{
-                type:'audio',
-                uri:fileInfo.file.uri,
-                mime_type:mimeType
-              }],
-              generation_config:{transcription_config:transcriptionConfig.transcription_config}
-            })
-          }),PHONE_GEMINI_TIMEOUT_MS,'Gemini 3.5 Transcribe');
-
-          const data=await response.json().catch(()=>({}));
-          if(!response.ok) {
-            throw Object.assign(
-              new Error(data.error?.message || 'Gemini 3.5 Transcribe HTTP '+response.status),
-              {status:response.status}
-            );
-          }
-
-          // Interactions returns output_text on the interaction object.
-          // Keep a second parser for SDK-shaped responses to be resilient to
-          // minor API response-format changes.
-          text=String(
-            data.output_text ||
-            data.outputText ||
-            (Array.isArray(data.output)
-              ? data.output.map(item => item?.text || item?.content?.map?.(p => p?.text || '').join(' ') || '').join(' ')
-              : '')
-          ).trim();
-
-          if(text) break;
-          lastTranscriptionError=Object.assign(
-            new Error('Gemini 3.5 Transcribe returned empty text'),
-            {status:503}
-          );
-        } catch(err) {
-          lastTranscriptionError=err;
-          console.warn('[TRANSCRIBE] primary attempt failed',{
-            key:ki+1,
-            status:geminiErrorStatus(err),
-            message:String(err.message || err).slice(0,300)
-          });
-        }
+      const directData=await directResponse.json().catch(()=>({}));
+      if(!directResponse.ok) {
+        throw Object.assign(
+          new Error(directData.error?.message || 'Gemini 3.5 Transcribe direct HTTP '+directResponse.status),
+          {status:directResponse.status}
+        );
       }
 
-      if(text) {
-        const cleaned=sanitizeForYemot(text);
+      const directText=String(
+        directData.candidates?.[0]?.content?.parts?.map(p=>p?.text||'').join(' ') ||
+        directData.output_text ||
+        ''
+      ).trim();
+
+      if(directText) {
+        const cleaned=sanitizeForYemot(directText);
         if(cleaned) {
-          console.info('[TRANSCRIBE] gemini_35_verbatim_ok',{
-            key:ki+1,
-            mimeType,
-            chars:cleaned.length,
-            text:cleaned
+          console.info('[TRANSCRIBE] gemini_35_direct_ok',{
+            key:ki+1,mimeType,chars:cleaned.length,text:cleaned
           });
           return cleaned;
         }
       }
 
-      // Final safety net: keep the call usable if the dedicated endpoint is
-      // temporarily unavailable. This fallback is intentionally last.
+      throw Object.assign(new Error('Gemini 3.5 Transcribe direct returned empty text'),{status:503});
+    } catch(err) {
+      lastError=err;
+      console.warn('[TRANSCRIBE] dedicated direct attempt failed',{
+        key:ki+1,status:geminiErrorStatus(err),
+        message:String(err?.message||err).slice(0,500)
+      });
+
+      // Secondary path: Interactions API, retained as a compatibility fallback.
+      try {
+        const endpoint='https://generativelanguage.googleapis.com/v1beta/interactions';
+        const response=await withTimeout(fetch(endpoint,{
+          method:'POST',
+          headers:{
+            'x-goog-api-key':key,
+            'Content-Type':'application/json'
+          },
+          body:JSON.stringify({
+            model:'gemini-3.5-transcribe',
+            input:[{type:'audio',uri:fileInfo?.file?.uri,mime_type:mimeType}],
+            generation_config:{
+              transcription_config:{
+                language_codes:['he-IL'],
+                mode:{type:'verbatim'},
+                custom_vocabulary:vocabulary
+              }
+            }
+          })
+        }),PHONE_GEMINI_TIMEOUT_MS,'Gemini 3.5 Transcribe Interactions');
+
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok) {
+          throw Object.assign(
+            new Error(data.error?.message || 'Gemini Transcribe Interactions HTTP '+response.status),
+            {status:response.status}
+          );
+        }
+
+        const text=String(
+          data.output_text ||
+          data.outputText ||
+          (Array.isArray(data.output)
+            ? data.output.map(item => item?.text || item?.content?.map?.(p => p?.text || '').join(' ') || '').join(' ')
+            : '')
+        ).trim();
+
+        if(text) {
+          const cleaned=sanitizeForYemot(text);
+          if(cleaned) {
+            console.info('[TRANSCRIBE] gemini_35_interactions_ok',{
+              key:ki+1,mimeType,chars:cleaned.length,text:cleaned
+            });
+            return cleaned;
+          }
+        }
+        throw Object.assign(new Error('Gemini Transcribe Interactions returned empty text'),{status:503});
+      } catch(interactionsError) {
+        lastError=interactionsError;
+        console.warn('[TRANSCRIBE] interactions fallback failed',{
+          key:ki+1,status:geminiErrorStatus(interactionsError),
+          message:String(interactionsError?.message||interactionsError).slice(0,500)
+        });
+      }
+
+      // Final safety net: preserve the old working audio path so this change
+      // cannot turn a previously usable call into a dead call.
       try {
         const legacy=await generateWithRetry(
           audioContents(
@@ -499,30 +524,19 @@ async function transcribePhoneAudio(audioBuffer) {
           console.info('[TRANSCRIBE] legacy_audio_fallback_ok',{
             key:ki+1,chars:cleaned.length,text:cleaned
           });
-          return cleaned;
+          if(cleaned) return cleaned;
         }
-      } catch(legacyError) {
-        lastTranscriptionError=legacyError;
-        console.warn('[TRANSCRIBE] legacy audio fallback failed',{
-          key:ki+1,
-          status:geminiErrorStatus(legacyError),
-          message:String(legacyError.message || legacyError).slice(0,300)
+      } catch(fallbackError) {
+        lastError=fallbackError;
+        console.warn('[TRANSCRIBE] legacy fallback failed',{
+          key:ki+1,status:geminiErrorStatus(fallbackError),
+          message:String(fallbackError?.message||fallbackError).slice(0,500)
         });
       }
-
-      throw lastTranscriptionError ||
-        Object.assign(new Error('Gemini transcription returned empty text'),{status:503});
-    } catch(err) {
-      lastError=err;
-      console.warn('[TRANSCRIBE] key failed',{
-        key:ki+1,
-        status:geminiErrorStatus(err),
-        message:String(err.message || err).slice(0,300)
-      });
     }
   }
 
-  throw lastError || Object.assign(new Error('Gemini transcription unavailable'),{status:503});
+  throw lastError || Object.assign(new Error('Phone transcription unavailable'),{status:503});
 }
 
 function detectAudioMime(bytes) {
