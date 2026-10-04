@@ -85,6 +85,10 @@ const MODEL_NAMES = [...new Set([
 ])];
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
 const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 12000);
+// Deepgram is the primary Hebrew phone ASR. Keep its timeout separate from Gemini so
+// a slow Deepgram request does not inherit Gemini's tighter phone-answer timeout.
+// 18s is only a safety ceiling; successful requests should return much sooner.
+const PHONE_DEEPGRAM_TIMEOUT_MS = Number(process.env.PHONE_DEEPGRAM_TIMEOUT_MS || 18000);
 
 // Avoid repeatedly hammering Gemini after the API has explicitly reported quota exhaustion.
 // This is especially important on phone calls, where a second fallback request can turn one
@@ -359,7 +363,7 @@ async function transcribeWithDeepgram(audioBuffer) {
       'Content-Type':mimeType
     },
     body:bytes
-  }),PHONE_GEMINI_TIMEOUT_MS,'Deepgram Nova-3 Hebrew transcription');
+  }),PHONE_DEEPGRAM_TIMEOUT_MS,'Deepgram Nova-3 Hebrew transcription');
 
   const data=await response.json().catch(()=>({}));
   if(!response.ok) {
