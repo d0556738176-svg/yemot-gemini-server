@@ -133,7 +133,7 @@ function normalizePhone(value) {
 }
 function getCallerNumber(call) {
   const candidates=[call?.ApiPhone,call?.values?.ApiPhone,call?.values?.apiPhone,
-    call?.req?.query?.ApiPhone,call?.req?.body?.ApiPhone,call?.query?.ApiPhone,call?.body?.ApiPhone];
+    call?.req?.query?.ApiPhone,call?.req?.body?.ApiPhone,call?.body?.ApiPhone];
   for(const candidate of candidates) {
     if(candidate!==undefined && candidate!==null && String(candidate).trim()) return normalizePhone(candidate);
   }
