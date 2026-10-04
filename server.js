@@ -118,11 +118,29 @@ async function supabaseRequest(path, options = {}) {
   if (!response.ok) throw new Error('Supabase HTTP ' + response.status);
   return response;
 }
-function normalizePhone(value) { const phone = String(value || '').trim(); return phone || 'לא מזוהה'; }
+function normalizePhone(value) {
+  const raw=String(value || '').trim();
+  if(!raw) return 'לא מזוהה';
+  const digits=raw.replace(/[^0-9]/g,'');
+  if(!digits) return raw;
+  if(digits.startsWith('972') && digits.length >= 11) return '0' + digits.slice(3);
+  if(digits.startsWith('00972') && digits.length >= 13) return '0' + digits.slice(5);
+  return digits;
+}
 function getCallerNumber(call) {
-  // yemot-router2 injects Api* parameters directly on Call.
-  return normalizePhone(call?.ApiPhone ?? call?.values?.ApiPhone ?? call?.req?.query?.ApiPhone ??
-    call?.req?.body?.ApiPhone ?? call?.query?.ApiPhone);
+  const candidates=[call?.ApiPhone,call?.values?.ApiPhone,call?.values?.apiPhone,
+    call?.req?.query?.ApiPhone,call?.req?.body?.ApiPhone,call?.query?.ApiPhone,call?.body?.ApiPhone];
+  for(const candidate of candidates) {
+    if(candidate!==undefined && candidate!==null && String(candidate).trim()) return normalizePhone(candidate);
+  }
+  const containers=[call?.values,call?.req?.query,call?.req?.body];
+  for(const obj of containers) {
+    if(!obj || typeof obj!=='object') continue;
+    for(const [key,value] of Object.entries(obj)) {
+      if(/^(api)?phone$|caller.*(phone|number)|(phone|number).*caller/i.test(String(key)) && value!==undefined && value!==null && String(value).trim()) return normalizePhone(value);
+    }
+  }
+  return 'לא מזוהה';
 }
 async function loadConversationLog() {
   if (!SUPABASE_ENABLED) return;
@@ -743,14 +761,25 @@ ${question}
   }
 }
 async function buildOpeningForCaller(phone) {
-  const previous=conversationLog.filter(x=>x.phone===normalizePhone(phone)).filter(x=>x.user && x.user!=='לא ניתן היה לתמלל את ההקלטה').slice(-3);
+  const key=normalizePhone(phone);
+  const previous=conversationLog.filter(x=>normalizePhone(x.phone)===key).filter(x=>x.user && x.user!=='לא ניתן היה לתמלל את ההקלטה').slice(-6);
   if(!previous.length) return process.env.FIRST_CALL_MESSAGE || 'שלום, איזה כיף לשמוע אותך. אני כאן איתך. מה מתחשק לך לבדוק או לעשות עכשיו?';
+  const recent=previous.slice().reverse();
+  const topics=[];
+  for(const item of recent) {
+    const topic=sanitizeForYemot(String(item.user||'').replace(/\\s+/g,' ').trim().slice(0,180));
+    if(!topic) continue;
+    if(!topics.some(x=>x.toLowerCase()===topic.toLowerCase())) topics.push(topic);
+    if(topics.length>=3) break;
+  }
   const last=previous[previous.length-1];
-  const topic=sanitizeForYemot(String(last.user||'').slice(0,220));
-  const answer=sanitizeForYemot(String(last.gemini||'').slice(0,220));
-  let opening='שלום שוב. איזה כיף לשמוע ממך. בפעם הקודמת דיברנו על '+(topic||'הנושא האחרון')+'.';
-  if(answer) opening+=' בפעם הקודמת הגענו בערך לנקודה הזאת: '+answer+'.';
-  opening+=' מה תרצה לעשות עכשיו? אפשר להמשיך בדיוק מאותה נקודה, או לעבור לכל נושא אחר שמעניין אותך.';
+  const lastAnswer=sanitizeForYemot(String(last && last.gemini || '').replace(/\\s+/g,' ').trim().slice(0,260));
+  let opening='שלום שוב. איזה כיף לשמוע אותך.';
+  if(topics.length===1) opening+=' בפעם האחרונה דיברנו על '+topics[0]+'.';
+  else if(topics.length===2) opening+=' בפעם האחרונה דיברנו על '+topics[0]+', ולפני זה על '+topics[1]+'.';
+  else if(topics.length>=3) opening+=' לאחרונה דיברנו על כמה דברים, בין השאר על '+topics[0]+', '+topics[1]+' וגם '+topics[2]+'.';
+  if(lastAnswer) opening+=' עצרנו בערך כאן: '+lastAnswer+'.';
+  opening+=' מה בא לך לעשות עכשיו? אפשר להמשיך בדיוק משם, או לפתוח נושא חדש.';
   return opening;
 }
 async function callHandler(call) {
