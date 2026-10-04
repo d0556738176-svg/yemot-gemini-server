@@ -77,7 +77,7 @@ if (!apiKeys.length) {
 const MODEL_NAMES = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.5-flash')
   .split(',').map(x => x.trim()).filter(Boolean);
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
-const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 7000);
+const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 12000);
 
 // Avoid repeatedly hammering Gemini after the API has explicitly reported quota exhaustion.
 // This is especially important on phone calls, where a second fallback request can turn one
@@ -88,7 +88,9 @@ let lastGeminiQuotaError = null;
 const CONTENT_FILTER_INSTRUCTION = '';
 
 const DIALOGUE_STYLE_INSTRUCTION = [
-  'דבר בעברית טבעית, חמה, אישית וזורמת, כאילו אתה מכיר את המתקשר משיחות קודמות.',
+  'דבר בעברית טבעית, חמה, אישית וזורמת, כאילו אתה מכיר את המתקשר משיחות קודמות. אם אין זיכרון אמיתי אל תמציא היכרות.',
+  'כשמתקשרים אליך להתייעצות, חשוב על הבעיה, שקול אפשרויות, יתרונות וחסרונות, והצע המלצה מעשית והגיונית. אל תסתפק במשפט כללי.',
+  'לשאלות עובדתיות שאין לך ודאות לגביהן, אל תמציא. אם יש צורך במידע עדכני, חפש אותו באינטרנט.'
   'כשיש שיחה קודמת זמינה, התייחס אליה באופן טבעי וקצר בתחילת השיחה, בלי להמציא פרטים.',
   'אל תחזור על הוראות שימוש שהמתקשר כבר מכיר, ואל תגיד לו להקיש סולמית.',
   'אל תשאל בסוף כל תשובה אם זה עזר ואל תוסיף משפטי נימוס קבועים באופן אוטומטי.',
@@ -118,7 +120,8 @@ async function supabaseRequest(path, options = {}) {
 }
 function normalizePhone(value) { const phone = String(value || '').trim(); return phone || 'לא מזוהה'; }
 function getCallerNumber(call) {
-  return normalizePhone(call?.values?.ApiPhone ?? call?.req?.query?.ApiPhone ??
+  // yemot-router2 injects Api* parameters directly on Call.
+  return normalizePhone(call?.ApiPhone ?? call?.values?.ApiPhone ?? call?.req?.query?.ApiPhone ??
     call?.req?.body?.ApiPhone ?? call?.query?.ApiPhone);
 }
 async function loadConversationLog() {
@@ -197,8 +200,12 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) 
     for (let ki=0; ki<groups[mi].length; ki++) {
       for (let attempt=1; attempt<=maxAttempts; attempt++) {
         try {
+          const request = fastPhone ? {
+            contents,
+            generationConfig: { thinkingConfig: { thinkingLevel: 'low' } }
+          } : contents;
           return await withTimeout(
-            groups[mi][ki].generateContent(contents),
+            groups[mi][ki].generateContent(request),
             timeoutMs,
             MODEL_NAMES[mi] + ' key #' + (ki+1)
           );
@@ -709,6 +716,8 @@ ${historyText || 'אין עדיין הקשר קודם.'}
 השאלה המדויקת של המתקשר לחיפוש באינטרנט:
 ${question}
 
+בצע חיפוש אינטרנטי מעמיק כשנדרש: פרק את הבקשה לכמה חיפושים ממוקדים אם זה יעזור, בדוק מקורות בלתי תלויים, העדף מקורות רשמיים וראשוניים ומקורות עדכניים, והשווה בין מקורות לפני הסקת מסקנה. אל תסתפק בתוצאה הראשונה ואל תמציא פרט שלא נמצא.
+
 עליך להשתמש בחיפוש אינטרנט חי כשזו שאלה על מידע עדכני, חדשות, תוצאות ספורט, מונדיאל או גביע העולם, לוחות שידורים, תוכניות, רשתות חברתיות, או אירועים שהתרחשו לאחרונה. השתמש בכלי Google Search המצורף וחפש לפי השאלה המדויקת. אל תענה מהזיכרון בלבד.
 ענה בשפה שבה המתקשר דיבר, בתשובה קצרה וברורה שמתאימה להקראה בטלפון. כלול מספרי טלפון, כתובות, תאריכים ופרטים שימושיים אם נמצאו במקור אמין, והבחן בין מידע מאומת לבין מידע שלא נמצא.
 אם המתקשר מבקש יצירת קשר עם אתר, חברה, גוף ציבורי, ערוץ, תוכנית או גורם תקשורתי, חפש פרטי קשר ציבוריים ורשמיים ככל שניתן, כולל אתר רשמי, טלפון, דוא"ל, כתובת עסקית וחשבונות רשתות חברתיות ציבוריים ורלוונטיים. אם מדובר באדם פרטי, אל תחשוף כתובת מגורים פרטית או פרטי קשר פרטיים; חפש רק פרטי קשר מקצועיים או ציבוריים שפורסמו רשמית. אל תמציא פרטי קשר.
@@ -738,7 +747,7 @@ async function buildOpeningForCaller(phone) {
   const topic=sanitizeForYemot(String(last.user||'').slice(0,220));
   const answer=sanitizeForYemot(String(last.gemini||'').slice(0,220));
   let opening='שלום שוב. איזה כיף לשמוע ממך. בפעם הקודמת דיברנו על '+(topic||'הנושא האחרון')+'.';
-  if(answer) opening+=' אני זוכר את הכיוון של השיחה ואת התשובה שנתתי לך אז: '+answer+'.';
+  if(answer) opening+=' בפעם הקודמת הגענו בערך לנקודה הזאת: '+answer+'.';
   opening+=' מה תרצה לעשות עכשיו? אפשר להמשיך בדיוק מאותה נקודה, או לעבור לכל נושא אחר שמעניין אותך.';
   return opening;
 }
@@ -755,8 +764,12 @@ async function callHandler(call) {
   let feedbackPending=false;
   const turnHistory=[];
   const turnContext={youtubeResults:[]};
-  if (process.env.ENABLE_AI_OPENING !== 'false' && conversationLog.some(x=>x.phone===callerPhone))
+  if (process.env.ENABLE_AI_OPENING !== 'false' && callerPhone !== 'לא מזוהה' && conversationLog.some(x=>x.phone===callerPhone)) {
     openingPrompt=await buildOpeningForCaller(callerPhone);
+    console.info('[CALL_FLOW] returning_caller_memory_found', { callId: activeKey, hasMemory: !!openingPrompt });
+  } else {
+    console.info('[CALL_FLOW] caller_memory_status', { callId: activeKey, callerKnown: callerPhone !== 'לא מזוהה', hasMemory: false });
+  }
 
   while(true) {
     // IMPORTANT: send the previous answer and request the next turn in ONE read.
