@@ -1517,6 +1517,25 @@ async function youtubeCallHandler(call) {
 const BACKUP_GEMINI_API_KEY = (process.env.YEMOT_BACKUP_GEMINI_API_KEY || process.env.GEMINI_BACKUP_API_KEY || apiKeys[1] || '').trim();
 const backupGeminiClient = BACKUP_GEMINI_API_KEY ? new GoogleGenerativeAI(BACKUP_GEMINI_API_KEY) : null;
 const backupGeminiModel = backupGeminiClient ? backupGeminiClient.getGenerativeModel({model:(process.env.GEMINI_BACKUP_MODEL || MODEL_NAMES[0] || 'gemini-3.8-flash')}) : null;
+// Separate grounded model for branch 3. It is only selected when the caller explicitly
+// asks to search the internet, so the normal backup conversation stays unchanged.
+const backupGeminiWebModel = backupGeminiClient ? backupGeminiClient.getGenerativeModel({
+  model:(process.env.GEMINI_BACKUP_MODEL || MODEL_NAMES[0] || 'gemini-3.8-flash'),
+  tools:[{googleSearch:{}}]
+}) : null;
+
+function isDeepWebSearchRequest(text) {
+  const q=String(text||'').toLowerCase().replace(/[״"'׳]/g,' ').replace(/\\s+/g,' ').trim();
+  return /(?:תחפש|חפש|חיפוש).{0,20}(?:באינטרנט|ברשת|בגוגל)|(?:בדוק|תבדוק).{0,20}(?:באינטרנט|ברשת|בגוגל)|חיפוש\\s+(?:עמוק|יסודי)|תחפש\\s+עמוק|חפש\\s+עמוק|מחקר\\s+(?:עמוק|יסודי)/.test(q);
+}
+
+function extractWebSearchQuery(text) {
+  return String(text||'')
+    .replace(/^(?:אז\\s+)?(?:תחפש|חפש|בדוק|תבדוק)(?:\\s+לי)?(?:\\s+באינטרנט|\\s+ברשת|\\s+בגוגל)?/i,'')
+    .replace(/^(?:באינטרנט|ברשת|בגוגל)\\s*/i,'')
+    .replace(/^(?:עמוק|יסודי|וממש\\s+יסודי)\\s*/i,'')
+    .trim() || String(text||'').trim();
+}
 
 async function backupCallHandler(call) {
   if (!backupGeminiModel) return call.id_list_message([{type:'text',data:'שלוחת הגיבוי עדיין אינה מוגדרת'}]);
@@ -1529,8 +1548,15 @@ async function backupCallHandler(call) {
       const response=await withTimeout(yemotApi.download_file('ivr2:'+recordPath),REQUEST_TIMEOUT_MS,'backup recording');
       const audio=Buffer.isBuffer(response.data)?response.data:Buffer.from(response.data);
       const context=history.slice(-8).map((x,i)=>'תור '+(i+1)+' — מתקשר: '+x.user+'\\nתשובה: '+x.answer).join('\\n\\n');
-      const result=await withTimeout(backupGeminiModel.generateContent(
-        audioContents(audio.toString('base64'), EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.')
+      const webSearchRequested=isDeepWebSearchRequest(user);
+      const webQuery=extractWebSearchQuery(user);
+      const selectedModel=webSearchRequested && backupGeminiWebModel ? backupGeminiWebModel : backupGeminiModel;
+      const searchInstruction=webSearchRequested
+        ? '\\nזהו חיפוש אינטרנט עמוק ויסודי. חפש בפועל באינטרנט באמצעות כלי החיפוש. בצע חיפוש רחב בכמה ניסוחים וכיוונים רלוונטיים, העדף מקורות אמינים ועדכניים, השווה בין מקורות ויישב סתירות לפני המסקנה. אל תסתמך על זיכרון בלבד. החזר את המידע העיקרי בצורה ברורה, וציין בקצרה על אילו מקורות הסתמכת. אם אין מספיק מידע אמין, אמור זאת במפורש. שאילתת החיפוש: '+webQuery+'\\n'
+        : '';
+      console.info('[Backup IVR] web search mode', { enabled:webSearchRequested, query:webSearchRequested ? webQuery : '' });
+      const result=await withTimeout(selectedModel.generateContent(
+        audioContents(audio.toString('base64'), EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+searchInstruction+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.')
       ),REQUEST_TIMEOUT_MS,'backup Gemini');
       const raw=result.response.text().trim();
       let parsed=null;
