@@ -209,7 +209,11 @@ function withTimeout(promise, ms, label) {
   });
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
 }
-function logDetailedError(context, err) { console.error(`[${context}]`, err?.message || err); }
+function logDetailedError(context, err) {
+  const clean = String(err?.message || err || 'Unknown error')
+    .replace(/[\\u001b\\u009b][[\\]()#;?]*(?:(?:(?:[a-zA-Z\\d]*(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*)?\\u0007)|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-nq-uy=><~]))/g, '');
+  console.error(`[${context}]`, clean);
+}
 
 const genAIClients = apiKeys.map(key => new GoogleGenerativeAI(key));
 const modelsByName = MODEL_NAMES.map(name => genAIClients.map(ai => ai.getGenerativeModel({model:name})));
@@ -1404,7 +1408,12 @@ async function youtubeCallHandler(call) {
           // explicitly mapped to this selected video ID. No YouTube extraction
           // or hidden stream discovery is performed.
           try {
-            const playback = await downloadAuthorizedAudioToYemot(selectedVideo.videoId);
+            console.info('[YouTube IVR] playback requested', { videoId: selectedVideo.videoId });
+            const playback = await withTimeout(
+              downloadAuthorizedAudioToYemot(selectedVideo.videoId),
+              Number(process.env.YOUTUBE_AUTHORIZED_PLAYBACK_TIMEOUT_MS || 90000),
+              'authorized YouTube playback preparation'
+            );
             if (!playback?.playbackPaths?.length) throw new Error('No playback files generated');
 
             console.info('[YouTube IVR] authorized playback ready', {
@@ -1421,7 +1430,8 @@ async function youtubeCallHandler(call) {
             // Yemot-router2 supports file messages directly. This makes the
             // phone call play the uploaded WAV chunks instead of waiting for
             // another HTTP request or trying to stream a remote YouTube URL.
-            return call.id_list_message(messages);
+            console.info('[YouTube IVR] playback response ready', { videoId: selectedVideo?.videoId || null, files: playback.playbackPaths.length });
+            return call.id_list_message(messages, { removeInvalidChars: true });
           } catch (playbackError) {
             logDetailedError('YouTube authorized playback', playbackError);
             selectedVideo=null;
