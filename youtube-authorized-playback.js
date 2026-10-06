@@ -15,16 +15,34 @@ function yemotApiKey() {
   return key;
 }
 
-function authorizedSources() {
+async function authorizedSourceFromSupabase(videoId) {
+  const base = String(process.env.SUPABASE_URL || '').replace(/\\/$/, '');
+  const key = String(process.env.SUPABASE_KEY || '').trim();
+  if (!base || !key) return null;
+  const url = new URL(base + '/rest/v1/authorized_audio_sources');
+  url.searchParams.set('select', 'source_url');
+  url.searchParams.set('video_id', 'eq.' + String(videoId || '').trim());
+  url.searchParams.set('enabled', 'eq.true');
+  const response = await fetch(url, {
+    headers: { apikey: key, Authorization: 'Bearer ' + key },
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!response.ok) throw new Error('Authorized source registry HTTP ' + response.status);
+  const rows = await response.json();
+  return rows?.[0]?.source_url || null;
+}
+
+function authorizedSourceFromEnv(videoId) {
   const raw = String(process.env.AUTHORIZED_AUDIO_SOURCES_JSON || '').trim();
-  if (!raw) return {};
+  if (!raw) return null;
   let parsed;
   try { parsed = JSON.parse(raw); }
   catch { throw new Error('AUTHORIZED_AUDIO_SOURCES_JSON is invalid JSON'); }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('AUTHORIZED_AUDIO_SOURCES_JSON must be an object');
   }
-  return parsed;
+  const entry = parsed[String(videoId || '').trim()];
+  return typeof entry === 'string' ? entry : entry?.url || null;
 }
 
 function validateSourceUrl(value) {
@@ -32,18 +50,19 @@ function validateSourceUrl(value) {
   if (url.protocol !== 'https:') throw new Error('Authorized audio source must use HTTPS');
   const allowedHosts = String(process.env.AUTHORIZED_AUDIO_HOSTS || '')
     .split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
-  if (allowedHosts.length && !allowedHosts.includes(url.hostname.toLowerCase())) {
+  if (!allowedHosts.length) throw new Error('AUTHORIZED_AUDIO_HOSTS is not configured');
+  if (!allowedHosts.includes(url.hostname.toLowerCase())) {
     throw new Error('Audio source host is not allowlisted');
   }
   return url;
 }
 
 async function fetchAuthorizedSource(videoId, output) {
-  const sources = authorizedSources();
-  const entry = sources[String(videoId || '').trim()];
-  if (!entry) throw new Error('No authorized audio source mapped to this video');
+  const id = String(videoId || '').trim();
+  const mapped = await authorizedSourceFromSupabase(id) || authorizedSourceFromEnv(id);
+  if (!mapped) throw new Error('No authorized audio source mapped to this video');
 
-  const sourceUrl = validateSourceUrl(typeof entry === 'string' ? entry : entry?.url);
+  const sourceUrl = validateSourceUrl(mapped);
   const response = await fetch(sourceUrl, {
     headers: { accept: 'audio/*,application/octet-stream;q=0.9,*/*;q=0.1' },
     signal: AbortSignal.timeout(20000)

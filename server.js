@@ -1552,6 +1552,91 @@ app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}))
 
 app.use('/dashboard', express.static(new URL('./public', import.meta.url).pathname));
 
+app.get('/api/youtube/authorized-source', rateLimit(60, 60 * 1000, 'youtube-authorized-source'), requireDashboardAuth, async (req,res)=>{
+  const videoId=String(req.query.videoId||'').trim();
+  if(!/^[A-Za-z0-9_-]{6,20}$/.test(videoId))
+    return res.status(400).json({error:'Invalid videoId'});
+  if(!SUPABASE_ENABLED)
+    return res.status(503).json({error:'Supabase is not configured'});
+  try {
+    const url=new URL(SUPABASE_URL+'/rest/v1/authorized_audio_sources');
+    url.searchParams.set('select','video_id,source_url,enabled,created_at,updated_at');
+    url.searchParams.set('video_id','eq.'+videoId);
+    const response=await fetch(url,{
+      headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY},
+      signal:AbortSignal.timeout(10000)
+    });
+    if(!response.ok) return res.status(502).json({error:'Authorized source registry unavailable'});
+    const rows=await response.json();
+    return res.json({source:rows?.[0]||null});
+  } catch(e) {
+    logDetailedError('Authorized source lookup',e);
+    return res.status(502).json({error:'Authorized source lookup failed'});
+  }
+});
+
+app.post('/api/youtube/authorized-source', rateLimit(30, 60 * 1000, 'youtube-authorized-source-write'), requireDashboardAuth, async (req,res)=>{
+  const videoId=String(req.body?.videoId||'').trim();
+  const sourceUrl=String(req.body?.sourceUrl||'').trim();
+  if(!/^[A-Za-z0-9_-]{6,20}$/.test(videoId))
+    return res.status(400).json({error:'Invalid videoId'});
+  if(!sourceUrl) return res.status(400).json({error:'Missing sourceUrl'});
+  if(!SUPABASE_ENABLED) return res.status(503).json({error:'Supabase is not configured'});
+
+  try {
+    const parsed=new URL(sourceUrl);
+    const allowedHosts=String(process.env.AUTHORIZED_AUDIO_HOSTS||'')
+      .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
+    if(parsed.protocol!=='https:' || !allowedHosts.length || !allowedHosts.includes(parsed.hostname.toLowerCase()))
+      return res.status(400).json({error:'Source URL must be HTTPS and use an allowlisted host'});
+
+    const url=new URL(SUPABASE_URL+'/rest/v1/authorized_audio_sources');
+    const response=await fetch(url,{
+      method:'POST',
+      headers:{
+        apikey:SUPABASE_KEY,
+        Authorization:'Bearer '+SUPABASE_KEY,
+        'Content-Type':'application/json',
+        Prefer:'resolution=merge-duplicates,return=representation'
+      },
+      body:JSON.stringify({
+        video_id:videoId,
+        source_url:parsed.toString(),
+        enabled:true,
+        updated_at:new Date().toISOString()
+      })
+    });
+    const body=await response.text();
+    if(!response.ok) return res.status(502).json({error:'Authorized source registry write failed'});
+    let data=[]; try { data=JSON.parse(body); } catch {}
+    return res.json({ok:true,source:data?.[0]||{video_id:videoId,source_url:parsed.toString(),enabled:true}});
+  } catch(e) {
+    logDetailedError('Authorized source registration',e);
+    return res.status(400).json({error:'Invalid source URL'});
+  }
+});
+
+app.delete('/api/youtube/authorized-source', rateLimit(30, 60 * 1000, 'youtube-authorized-source-delete'), requireDashboardAuth, async (req,res)=>{
+  const videoId=String(req.query.videoId||'').trim();
+  if(!/^[A-Za-z0-9_-]{6,20}$/.test(videoId))
+    return res.status(400).json({error:'Invalid videoId'});
+  if(!SUPABASE_ENABLED) return res.status(503).json({error:'Supabase is not configured'});
+  try {
+    const url=new URL(SUPABASE_URL+'/rest/v1/authorized_audio_sources');
+    url.searchParams.set('video_id','eq.'+videoId);
+    const response=await fetch(url,{
+      method:'DELETE',
+      headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY},
+      signal:AbortSignal.timeout(10000)
+    });
+    if(!response.ok) return res.status(502).json({error:'Authorized source registry delete failed'});
+    return res.json({ok:true,videoId});
+  } catch(e) {
+    logDetailedError('Authorized source deletion',e);
+    return res.status(502).json({error:'Authorized source deletion failed'});
+  }
+});
+
 app.get('/api/youtube/search', rateLimit(20, 60 * 1000, 'youtube'), requireDashboardAuth, async (req,res)=>{
   const key=(process.env.YOUTUBE_API_KEY||'').trim();
   const q=String(req.query.q||'').trim().slice(0,120);
