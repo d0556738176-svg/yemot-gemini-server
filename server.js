@@ -1548,6 +1548,8 @@ async function backupCallHandler(call) {
       const response=await withTimeout(yemotApi.download_file('ivr2:'+recordPath),REQUEST_TIMEOUT_MS,'backup recording');
       const audio=Buffer.isBuffer(response.data)?response.data:Buffer.from(response.data);
       const context=history.slice(-8).map((x,i)=>'תור '+(i+1)+' — מתקשר: '+x.user+'\\nתשובה: '+x.answer).join('\\n\\n');
+      const user=await transcribePhoneAudio(audio);
+      console.info('[Backup IVR] transcript ready', { chars:user.length, transcript:user });
       const webSearchRequested=isDeepWebSearchRequest(user);
       const webQuery=extractWebSearchQuery(user);
       const selectedModel=webSearchRequested && backupGeminiWebModel ? backupGeminiWebModel : backupGeminiModel;
@@ -1561,9 +1563,9 @@ async function backupCallHandler(call) {
       const raw=result.response.text().trim();
       let parsed=null;
       try { parsed=JSON.parse(raw); } catch { const m=raw.match(/\\{[\\s\\S]*\\}/); if(m){try{parsed=JSON.parse(m[0]);}catch{}} }
-      const user=sanitizeForYemot(parsed?.transcript||raw);
+      const finalUser=sanitizeForYemot(parsed?.transcript||user||raw);
       const answer=sanitizeForYemot(parsed?.answer||raw)||'לא הצלחתי לענות כרגע';
-      history.push({user,answer}); if(history.length>8) history=history.slice(-8);
+      history.push({user:finalUser,answer}); if(history.length>8) history=history.slice(-8);
       prompt=answer+' אמור עכשיו את השאלה הבאה ולסיום הקש סולמית';
     } catch(e) {
       logDetailedError('Backup Gemini',e);
