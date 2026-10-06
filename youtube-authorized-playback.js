@@ -4,7 +4,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
 
-const YEMOT_UPLOAD_URL = 'https://www.call2all.co.il/ym/api/UploadFile';
+const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
+const YEMOT_UPLOAD_URL = YEMOT_API_BASE + '/UploadFile';
 const MAX_SOURCE_BYTES = 120 * 1024 * 1024;
 const activeJobs = new Map();
 
@@ -125,6 +126,38 @@ async function uploadToYemot(filePath, remotePath) {
   return result;
 }
 
+async function getYemotFile(remotePath) {
+  const url = new URL(YEMOT_API_BASE + '/GetFile');
+  url.searchParams.set('token', yemotApiKey());
+  url.searchParams.set('what', remotePath);
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  const body = await response.text();
+  let data;
+  try { data = JSON.parse(body); } catch { data = null; }
+  if (!response.ok) throw new Error('Yemot GetFile HTTP ' + response.status);
+  return data;
+}
+
+async function ensureUploadedAndVerified(filePath, remotePath) {
+  const existing = await getYemotFile(remotePath).catch(() => null);
+  if (existing?.responseStatus === 'OK') {
+    console.info('[YouTube IVR] cached Yemot audio verified', { remotePath });
+    return;
+  }
+
+  await uploadToYemot(filePath, remotePath);
+
+  const verified = await getYemotFile(remotePath);
+  if (verified?.responseStatus !== 'OK') {
+    throw new Error('Yemot file upload was not verified: ' + (verified?.message || 'file missing after upload'));
+  }
+  console.info('[YouTube IVR] Yemot audio verified', {
+    remotePath,
+    size: verified.size || null,
+    fileType: verified.fileType || null
+  });
+}
+
 async function build(videoId) {
   const id=String(videoId||'').trim();
   if(!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
@@ -137,7 +170,7 @@ async function build(videoId) {
     const chunks=await makeChunks(source,chunksDir);
     for(let i=0;i<chunks.length;i++) {
       const remote='ivr2:/2/youtube-authorized/'+id+'-'+String(i+1).padStart(3,'0')+'.wav';
-      await uploadToYemot(chunks[i],remote);
+      await ensureUploadedAndVerified(chunks[i],remote);
       paths.push('/2/youtube-authorized/'+id+'-'+String(i+1).padStart(3,'0'));
     }
     return {playbackPaths:paths,chunkCount:paths.length};
