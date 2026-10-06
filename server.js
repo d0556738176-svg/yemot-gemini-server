@@ -1312,61 +1312,166 @@ async function callHandler(call) {
  * Uses the same raw-recording -> Gemini transcription convention as the main robot.
  */
 async function youtubeCallHandler(call) {
-  let currentVideo=null;
+  // Conversational YouTube discovery only. We keep search/selection separate from
+  // playback so the phone flow never waits on an unsupported media extraction job.
   let currentQuery='';
+  let results=[];
+  let resultOffset=0;
+  let selectedVideo=null;
   let nextPrompt=null;
+
+  const numberWords = {
+    'אחד':1,'אחת':1,'ראשון':1,'ראשונה':1,
+    'שתיים':2,'שניים':2,'שתי':2,'שני':2,'שניה':2,'שנייה':2,
+    'שלוש':3,'שלושה':3,'שלישי':3,'שלישית':3,
+    'ארבע':4,'ארבעה':4,'רביעי':4,'רביעית':4,
+    'חמש':5,'חמישה':5,'חמישי':5,'חמישית':5,
+    'שש':6,'שישה':6,'שישי':6,'שישית':6,
+    'שבע':7,'שבעה':7,'שביעי':7,'שביעית':7,
+    'שמונה':8,'שמיני':8,'שמינית':8,
+    'תשע':9,'תשעה':9,'תשיעי':9,'תשיעית':9,
+    'עשר':10,'עשרה':10,'עשירי':10,'עשירית':10
+  };
+
+  function spokenNumber(text) {
+    const t=String(text||'').trim().toLowerCase();
+    const digit=t.match(/\\b(\\d{1,2})\\b/);
+    if(digit) return Number(digit[1]);
+    for(const [word,n] of Object.entries(numberWords)) {
+      if(new RegExp('(^|\\s)'+word+'($|\\s)','i').test(t)) return n;
+    }
+    return null;
+  }
+
+  function isMoreRequest(text) {
+    return /(עוד|תוצאות נוספות|עוד תוצאות|הבא|הבאה|דף הבא|תראה עוד|תביא עוד)/i.test(String(text||''));
+  }
+
+  function isNewSearch(text) {
+    return /(חפש|תחפש|תמצא|תאתר|חיפוש|נושא חדש|חיפוש חדש|משהו אחר)/i.test(String(text||''));
+  }
+
+  function isYes(text) {
+    return /^(כן|כן בהחלט|בוודאי|בטח|אני רוצה|רוצה|כן אני רוצה|תשמיע|להשמיע|כן תשמיע)\\s*$/i.test(String(text||'').trim());
+  }
+
+  function isNo(text) {
+    return /^(לא|לא תודה|לא רוצה|סיימתי|זה מספיק|תודה)\\s*$/i.test(String(text||'').trim());
+  }
+
+  function formatResultsPage() {
+    const page=results.slice(resultOffset,resultOffset+5);
+    if(!page.length) return 'אין עוד תוצאות זמינות לחיפוש הזה. אמור חיפוש חדש אם תרצה.';
+    const lines=page.map((v,i) => {
+      const n=resultOffset+i+1;
+      return 'תוצאה מספר '+n+': '+sanitizeForYemot(v.title)+'. הערוץ: '+sanitizeForYemot(v.channelTitle)+'.';
+    });
+    resultOffset += page.length;
+    return 'מצאתי כמה תוצאות. '+lines.join(' ')+' אמור את מספר התוצאה שאתה רוצה, או אמור עוד לעוד תוצאות.';
+  }
+
   try {
     while(true) {
-      const basePrompt=!currentVideo
-        ? 'ברוכים הבאים לחיפוש ביוטיוב. אמור אחרי הצפצוף את שם האדם, הערוץ, השיר או הנושא שתרצה למצוא. אני אחזיר לך תוצאה אחת בלבד ונמשיך בשיחה בלי מקשים. לסיום ההקלטה הקש סולמית'
-        : 'האם תרצה יותר פרטים על הסרטון הזה, או לראות משהו נוסף על אותו אדם או נושא? אמור מה אתה רוצה. ולסיום ההקלטה הקש סולמית';
+      const basePrompt = selectedVideo
+        ? 'האם אתה רוצה לשמוע את הסרטון הזה? אמור כן או לא. ולסיום ההקלטה הקש סולמית'
+        : (!results.length
+          ? 'ברוכים הבאים לחיפוש ביוטיוב. אמור כל מה שאתה מחפש: נושא, אדם, ערוץ, שם סרטון, הסרטון הכי חדש, סרטונים בנושא מסוים או כל ניסוח אחר. אפשר גם לבקש עוד תוצאות. ולסיום ההקלטה הקש סולמית'
+          : 'אמור את מספר התוצאה הרצויה, או אמור עוד כדי לקבל תוצאות נוספות, או חיפוש חדש כדי להתחיל חיפוש אחר. ולסיום ההקלטה הקש סולמית');
+
       const prompt=nextPrompt || basePrompt;
       nextPrompt=null;
+      const recordPath=await call.read(
+        [{type:'text',data:sanitizeForYemot(prompt)}],
+        'record',
+        {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000}
+      );
+      if(!recordPath || recordPath==='None')
+        return call.id_list_message([{type:'text',data:'לא נקלטה בקשה. להתראות'}]);
 
-      const recordPath=await call.read([{type:'text',data:sanitizeForYemot(prompt)}],'record',{min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
-      if(!recordPath || recordPath==='None') return call.id_list_message([{type:'text',data:'לא נקלטה בקשה. להתראות'}]);
-
-      const audioResponse=await withTimeout(yemotApi.download_file('ivr2:'+recordPath),REQUEST_TIMEOUT_MS,'youtube conversational recording download');
-      const audioBuffer=audioResponse.data;
-      const transcript=await transcribePhoneAudio(audioBuffer);
+      const audioResponse=await withTimeout(
+        yemotApi.download_file('ivr2:'+recordPath),
+        REQUEST_TIMEOUT_MS,
+        'youtube conversational recording download'
+      );
+      const transcript=await transcribePhoneAudio(audioResponse.data);
       console.info('[YouTube IVR] transcript',{chars:transcript.length,transcript});
-      if(!transcript) return call.id_list_message([{type:'text',data:'לא הצלחתי להבין את הבקשה. נא לנסות שוב'}]);
+      if(!transcript)
+        return call.id_list_message([{type:'text',data:'לא הצלחתי להבין את הבקשה. נא לנסות שוב'}]);
 
-      const affirmative=/^(כן|כן בהחלט|בוודאי|בטח|מעולה|אני רוצה)\s*$/i.test(transcript);
-      const negative=/^(לא|לא תודה|לא רוצה|סיימתי|זה מספיק|תודה)\s*$/i.test(transcript);
-      const asksDetails=/(פרטים|יותר פרטים|תפרט|תסביר|על מה הסרטון|מה יש בסרטון|מה דיברו|מה אמרו|מה נאמר|סיכום|סכם|תוכן הסרטון|מילים של השיר|מילות השיר|מילים)/i.test(transcript);
-
-      if(currentVideo && negative) return call.id_list_message([{type:'text',data:'בסדר. להתראות'}]);
-
-      if(currentVideo && (asksDetails || affirmative)) {
-        const detailQuery=asksDetails?transcript:('תן לי יותר פרטים על הסרטון '+currentVideo.title);
-        const result=await searchYouTubeForPhone(detailQuery,'תוצאה 1: '+currentVideo.title,{youtubeResults:[currentVideo]});
-        const answer=result || ('מצאתי את הסרטון '+sanitizeForYemot(currentVideo.title)+' אבל לא הצלחתי כרגע לקבל עליו פרטים נוספים.');
-        nextPrompt=sanitizeForYemot(answer)+' האם תרצה לשמוע עוד פרטים על הסרטון, או לראות משהו נוסף על אותו אדם או נושא? ולסיום ההקלטה הקש סולמית';
+      if(selectedVideo) {
+        if(isYes(transcript)) {
+          // YouTube's official API provides the video/player identity, not a
+          // telephone audio stream. Do not extract or separate arbitrary YouTube
+          // audio here. The caller gets a clear result instead of a long timeout.
+          nextPrompt='הסרטון שבחרת נמצא ביוטיוב, אבל אי אפשר להשמיע אודיו של סרטון יוטיוב ישירות דרך קו הטלפון באמצעות ה API הרשמי. אפשר לבחור סרטון אחר או להעלות תוכן שיש לך הרשאה להשמיע בקו. ולסיום ההקלטה הקש סולמית';
+          selectedVideo=null;
+          continue;
+        }
+        if(isNo(transcript) || isNewSearch(transcript)) {
+          selectedVideo=null;
+          results=[];
+          resultOffset=0;
+          currentQuery='';
+          nextPrompt='בסדר. אמור עכשיו מה תרצה לחפש ביוטיוב. ולסיום ההקלטה הקש סולמית';
+          continue;
+        }
+        nextPrompt='לא הבנתי אם אתה רוצה לשמוע את הסרטון. אמור כן או לא. ולסיום ההקלטה הקש סולמית';
         continue;
       }
 
-      if(!currentVideo) {
+      if(isMoreRequest(transcript) && results.length) {
+        if(resultOffset>=results.length) {
+          nextPrompt='אין עוד תוצאות שכבר נטענו. אמור חיפוש חדש כדי לבצע חיפוש נוסף. ולסיום ההקלטה הקש סולמית';
+        } else {
+          nextPrompt=formatResultsPage();
+        }
+        continue;
+      }
+
+      const selectedNumber=spokenNumber(transcript);
+      if(results.length && selectedNumber!==null) {
+        const idx=selectedNumber-1;
+        if(idx>=0 && idx<results.length) {
+          selectedVideo=results[idx];
+          nextPrompt='בחרת את '+sanitizeForYemot(selectedVideo.title)+'. הערוץ הוא '+sanitizeForYemot(selectedVideo.channelTitle)+'. האם אתה רוצה לשמוע את הסרטון הזה? אמור כן או לא. ולסיום ההקלטה הקש סולמית';
+          continue;
+        }
+        nextPrompt='המספר הזה לא נמצא ברשימה. אמור מספר מתוך התוצאות או אמור עוד. ולסיום ההקלטה הקש סולמית';
+        continue;
+      }
+
+      if(isNewSearch(transcript) || !results.length) {
         currentQuery=transcript;
-        const videos=await searchYouTubeVideos(transcript,{apiKey:process.env.YOUTUBE_API_KEY,regionCode:process.env.YOUTUBE_REGION_CODE||'IL',timeoutMs:REQUEST_TIMEOUT_MS});
-        if(!videos.length) return call.id_list_message([{type:'text',data:'לא מצאתי כרגע סרטון מתאים ביוטיוב. אפשר לנסות חיפוש אחר'}]);
-        currentVideo=videos[0];
-        const date=currentVideo.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full'}).format(new Date(currentVideo.publishedAt)):'תאריך לא זמין';
-        nextPrompt=sanitizeForYemot('מצאתי סרטון אחד שמתאים לבקשה שלך: '+currentVideo.title+'. הערוץ הוא '+currentVideo.channelTitle+'. הוא פורסם ב'+date+'. האם תרצה יותר פרטים עליו, או לראות משהו נוסף על אותו אדם או נושא? ולסיום ההקלטה הקש סולמית');
+        results=await searchYouTubeVideos(currentQuery,{
+          apiKey:process.env.YOUTUBE_API_KEY,
+          regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
+          timeoutMs:REQUEST_TIMEOUT_MS
+        });
+        resultOffset=0;
+        selectedVideo=null;
+
+        if(!results.length) {
+          nextPrompt='לא מצאתי תוצאות מתאימות ביוטיוב. נסה נושא, אדם, ערוץ או שם סרטון אחר. ולסיום ההקלטה הקש סולמית';
+          continue;
+        }
+
+        nextPrompt=formatResultsPage();
         continue;
       }
 
-      // Any other spoken request becomes a new YouTube search, still returning only one result.
+      // If the caller gives a natural-language request while results are shown,
+      // treat it as a fresh YouTube search rather than forcing keypad interaction.
       currentQuery=transcript;
-      let videos=await searchYouTubeVideos(transcript,{apiKey:process.env.YOUTUBE_API_KEY,regionCode:process.env.YOUTUBE_REGION_CODE||'IL',timeoutMs:REQUEST_TIMEOUT_MS});
-      videos=videos.filter(v=>v.videoId!==currentVideo.videoId);
-      if(!videos.length) {
-        nextPrompt='לא מצאתי כרגע תוצאה מתאימה. אמור חיפוש אחר אם תרצה. ולסיום ההקלטה הקש סולמית';
-        continue;
-      }
-      currentVideo=videos[0];
-      const date=currentVideo.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full'}).format(new Date(currentVideo.publishedAt)):'תאריך לא זמין';
-      nextPrompt=sanitizeForYemot('מצאתי תוצאה אחת: '+currentVideo.title+'. הערוץ הוא '+currentVideo.channelTitle+'. הוא פורסם ב'+date+'. רוצה יותר פרטים על הסרטון? ולסיום ההקלטה הקש סולמית');
+      results=await searchYouTubeVideos(currentQuery,{
+        apiKey:process.env.YOUTUBE_API_KEY,
+        regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
+        timeoutMs:REQUEST_TIMEOUT_MS
+      });
+      resultOffset=0;
+      selectedVideo=null;
+      nextPrompt=results.length
+        ? formatResultsPage()
+        : 'לא מצאתי תוצאות מתאימות. אמור חיפוש חדש. ולסיום ההקלטה הקש סולמית';
     }
   } catch(error) {
     logDetailedError('YouTube IVR',error);
