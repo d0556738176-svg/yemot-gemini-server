@@ -5,7 +5,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
-import { downloadAndUploadYouTubeAudio } from './youtube-playback.js';
+import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -1400,12 +1400,34 @@ async function youtubeCallHandler(call) {
 
       if(selectedVideo) {
         if(isYes(transcript)) {
-          // YouTube's official API provides the video/player identity, not a
-          // telephone audio stream. Do not extract or separate arbitrary YouTube
-          // audio here. The caller gets a clear result instead of a long timeout.
-          nextPrompt='הסרטון שבחרת נמצא ביוטיוב, אבל אי אפשר להשמיע אודיו של סרטון יוטיוב ישירות דרך קו הטלפון באמצעות ה API הרשמי. אפשר לבחור סרטון אחר או להעלות תוכן שיש לך הרשאה להשמיע בקו. ולסיום ההקלטה הקש סולמית';
-          selectedVideo=null;
-          continue;
+          // Playback is allowed only when this exact YouTube video is mapped
+          // to an independently authorized audio source. There is deliberately
+          // no YouTube extraction, scraping, background-player, or stream URL
+          // discovery here.
+          try {
+            const playback = await downloadAuthorizedAudioToYemot(selectedVideo.videoId);
+            if (playback?.playbackPaths?.length) {
+              const firstPath = playback.playbackPaths[0];
+              const announcement = 'מתחיל להשמיע את התוכן המאושר. ';
+              console.info('[YouTube IVR] authorized playback ready', {
+                videoId: selectedVideo.videoId,
+                chunks: playback.chunkCount,
+                firstPath
+              });
+              selectedVideo=null;
+              // Yemot-router2 can hand the call to a playfile branch, but the
+              // current branch is conversational. Return a clear next step
+              // instead of pretending a remote URL is directly playable.
+              nextPrompt=announcement+'ההשמעה הוכנה במערכת. כדי להמשיך לשיחה אמור חזרה. ולסיום ההקלטה הקש סולמית';
+              continue;
+            }
+            throw new Error('Authorized audio source produced no playback files');
+          } catch (playbackError) {
+            logDetailedError('YouTube authorized playback', playbackError);
+            nextPrompt='אין מקור שמע מורשה זמין לסרטון הזה. אפשר לבחור סרטון אחר. ולסיום ההקלטה הקש סולמית';
+            selectedVideo=null;
+            continue;
+          }
         }
         if(isNo(transcript) || isNewSearch(transcript)) {
           selectedVideo=null;
