@@ -21,7 +21,7 @@ async function authorizedSourceFromSupabase(videoId) {
   if (!base || !key) return null;
   const url = new URL(base + '/rest/v1/authorized_audio_sources');
   url.searchParams.set('select', 'source_url');
-  url.searchParams.set('video_id', 'eq.' + encodeURIComponent(String(videoId || '').trim()));
+  url.searchParams.set('video_id', 'eq.' + String(videoId || '').trim());
   url.searchParams.set('enabled', 'eq.true');
   const response = await fetch(url, {
     headers: { apikey: key, Authorization: 'Bearer ' + key },
