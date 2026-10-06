@@ -16,7 +16,7 @@ function yemotApiKey() {
 }
 
 async function authorizedSourceFromSupabase(videoId) {
-  const base = String(process.env.SUPABASE_URL || '').replace(/\\/$/, '');
+  const base = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
   const key = String(process.env.SUPABASE_KEY || '').trim();
   if (!base || !key) return null;
   const url = new URL(base + '/rest/v1/authorized_audio_sources');
