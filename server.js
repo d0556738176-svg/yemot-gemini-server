@@ -1400,35 +1400,36 @@ async function youtubeCallHandler(call) {
 
       if(selectedVideo) {
         if(isYes(transcript)) {
-          // Playback is allowed only when this exact YouTube video is mapped
-          // to an independently authorized audio source. There is deliberately
-          // no YouTube extraction, scraping, background-player, or stream URL
-          // discovery here.
+          // Only play an exact, independently authorized audio source that was
+          // explicitly mapped to this selected video ID. No YouTube extraction
+          // or hidden stream discovery is performed.
           try {
             const playback = await downloadAuthorizedAudioToYemot(selectedVideo.videoId);
-            if (playback?.playbackPaths?.length) {
-              const firstPath = playback.playbackPaths[0];
-              const announcement = 'מתחיל להשמיע את התוכן המאושר. ';
-              console.info('[YouTube IVR] authorized playback ready', {
-                videoId: selectedVideo.videoId,
-                chunks: playback.chunkCount,
-                firstPath
-              });
-              selectedVideo=null;
-              // Yemot-router2 can hand the call to a playfile branch, but the
-              // current branch is conversational. Return a clear next step
-              // instead of pretending a remote URL is directly playable.
-              nextPrompt=announcement+'ההשמעה הוכנה במערכת. כדי להמשיך לשיחה אמור חזרה. ולסיום ההקלטה הקש סולמית';
-              continue;
-            }
-            throw new Error('Authorized audio source produced no playback files');
+            if (!playback?.playbackPaths?.length) throw new Error('No playback files generated');
+
+            console.info('[YouTube IVR] authorized playback ready', {
+              videoId: selectedVideo.videoId,
+              chunks: playback.chunkCount
+            });
+
+            const messages = [
+              { type: 'text', data: 'מתחיל להשמיע את הסרטון המאושר.' },
+              ...playback.playbackPaths.map(file => ({ type: 'file', data: file }))
+            ];
+
+            selectedVideo = null;
+            // Yemot-router2 supports file messages directly. This makes the
+            // phone call play the uploaded WAV chunks instead of waiting for
+            // another HTTP request or trying to stream a remote YouTube URL.
+            return call.id_list_message(messages);
           } catch (playbackError) {
             logDetailedError('YouTube authorized playback', playbackError);
-            nextPrompt='אין מקור שמע מורשה זמין לסרטון הזה. אפשר לבחור סרטון אחר. ולסיום ההקלטה הקש סולמית';
             selectedVideo=null;
+            nextPrompt='אין מקור שמע מורשה זמין לסרטון הזה. אפשר לבחור סרטון אחר. ולסיום ההקלטה הקש סולמית';
             continue;
           }
         }
+
         if(isNo(transcript) || isNewSearch(transcript)) {
           selectedVideo=null;
           results=[];
