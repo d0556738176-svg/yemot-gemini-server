@@ -7,6 +7,10 @@ import ffmpegPath from 'ffmpeg-static';
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const YEMOT_UPLOAD_URL = YEMOT_API_BASE + '/UploadFile';
 const MAX_SOURCE_BYTES = 120 * 1024 * 1024;
+const SOURCE_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_SOURCE_TIMEOUT_MS || 12000);
+const FFMPEG_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_FFMPEG_TIMEOUT_MS || 30000);
+const UPLOAD_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_UPLOAD_TIMEOUT_MS || 20000);
+const VERIFY_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_VERIFY_TIMEOUT_MS || 8000);
 const activeJobs = new Map();
 
 function yemotApiKey() {
@@ -65,7 +69,7 @@ async function fetchAuthorizedSource(videoId, output) {
   const sourceUrl = validateSourceUrl(mapped);
   const response = await fetch(sourceUrl, {
     headers: { accept: 'audio/*,application/octet-stream;q=0.9,*/*;q=0.1' },
-    signal: AbortSignal.timeout(20000)
+    signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS)
   });
   if (!response.ok || !response.body) {
     throw new Error('Authorized audio source HTTP ' + response.status);
@@ -96,15 +100,16 @@ function runFfmpeg(args) {
   return new Promise((resolve, reject) => {
     if (!ffmpegPath) return reject(new Error('ffmpeg-static is unavailable'));
     const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('ffmpeg timed out')); }, FFMPEG_TIMEOUT_MS);
     let stderr = '';
     child.stderr.on('data', chunk => {
       stderr += chunk.toString();
       if (stderr.length > 5000) stderr = stderr.slice(-5000);
     });
-    child.on('error', reject);
-    child.on('close', code => code === 0
+    child.on('error', err => { clearTimeout(timer); reject(err); });
+    child.on('close', code => { clearTimeout(timer); code === 0
       ? resolve()
-      : reject(new Error('ffmpeg failed (' + code + '): ' + stderr.slice(-1800))));
+      : reject(new Error('ffmpeg failed (' + code + '): ' + stderr.slice(-1800))); });
   });
 }
 
@@ -133,7 +138,7 @@ async function uploadToYemot(filePath, remotePath) {
   url.searchParams.set('autoNumbering','false');
   const form=new FormData();
   form.append('file',new Blob([buffer],{type:'audio/wav'}),path.basename(filePath));
-  const response=await fetch(url,{method:'POST',body:form});
+  const response=await fetch(url,{method:'POST',body:form,signal:AbortSignal.timeout(UPLOAD_TIMEOUT_MS)});
   const body=await response.text();
   if(!response.ok) throw new Error('Yemot UploadFile HTTP '+response.status+': '+body.slice(0,300));
   let result;
@@ -149,7 +154,7 @@ async function getYemotFile(remotePath) {
   const url = new URL(YEMOT_API_BASE + '/GetFile');
   url.searchParams.set('token', yemotApiKey());
   url.searchParams.set('what', remotePath);
-  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  const response = await fetch(url, { signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS) });
   const body = await response.text();
   let data;
   try { data = JSON.parse(body); } catch { data = null; }
