@@ -63,8 +63,13 @@ function validateSourceUrl(value) {
 
 async function fetchAuthorizedSource(videoId, output) {
   const id = String(videoId || '').trim();
+  console.info('[YouTube IVR] playback step 1: looking up authorized source', { videoId: id });
   const mapped = await authorizedSourceFromSupabase(id) || authorizedSourceFromEnv(id);
-  if (!mapped) throw new Error('No authorized audio source mapped to this video');
+  if (!mapped) {
+    console.warn('[YouTube IVR] playback stopped: no authorized source mapping', { videoId: id });
+    throw new Error('No authorized audio source mapped to this video');
+  }
+  console.info('[YouTube IVR] playback step 2: authorized source found', { videoId: id, host: new URL(mapped).hostname });
 
   const sourceUrl = validateSourceUrl(mapped);
   const response = await fetch(sourceUrl, {
@@ -93,6 +98,7 @@ async function fetchAuthorizedSource(videoId, output) {
     await file.close();
   }
   if (!total) throw new Error('Authorized audio source is empty');
+  console.info('[YouTube IVR] playback step 3: source downloaded', { videoId: id, bytes: total });
   return total;
 }
 
@@ -122,10 +128,12 @@ async function makeChunks(source, dir) {
     '-vn','-ar','8000','-ac','1','-c:a','pcm_s16le',
     '-f','segment','-segment_time','120','-reset_timestamps','1',pattern
   ]);
+  console.info('[YouTube IVR] playback step 4: starting ffmpeg', { source });
   const names=(await fs.readdir(dir))
     .filter(n => /^chunk-\d{3}\.wav$/.test(n))
     .sort();
   if(!names.length) throw new Error('ffmpeg produced no audio chunks');
+  console.info('[YouTube IVR] playback step 5: ffmpeg finished', { chunks: names.length });
   return names.map(n=>path.join(dir,n));
 }
 
@@ -138,6 +146,7 @@ async function uploadToYemot(filePath, remotePath) {
   url.searchParams.set('autoNumbering','false');
   const form=new FormData();
   form.append('file',new Blob([buffer],{type:'audio/wav'}),path.basename(filePath));
+  console.info('[YouTube IVR] playback step 6: uploading to Yemot', { remotePath, bytes: buffer.length });
   const response=await fetch(url,{method:'POST',body:form,signal:AbortSignal.timeout(UPLOAD_TIMEOUT_MS)});
   const body=await response.text();
   if(!response.ok) throw new Error('Yemot UploadFile HTTP '+response.status+': '+body.slice(0,300));
@@ -147,6 +156,7 @@ async function uploadToYemot(filePath, remotePath) {
     throw new Error('Yemot UploadFile failed: '+(result.message||result.responseStatus));
   }
   if(result.success===false) throw new Error('Yemot UploadFile failed');
+  console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted', { remotePath, convertedSize: result.convertedSize || null, duration: result.duration || null });
   return result;
 }
 
@@ -171,6 +181,7 @@ async function ensureUploadedAndVerified(filePath, remotePath) {
 
   await uploadToYemot(filePath, remotePath);
 
+  console.info('[YouTube IVR] playback step 8: verifying Yemot file', { remotePath });
   const verified = await getYemotFile(remotePath);
   if (verified?.responseStatus !== 'OK') {
     throw new Error('Yemot file upload was not verified: ' + (verified?.message || 'file missing after upload'));
@@ -192,6 +203,7 @@ async function build(videoId) {
   try {
     await fetchAuthorizedSource(id,source);
     const chunks=await makeChunks(source,chunksDir);
+    console.info('[YouTube IVR] playback step 9: uploading chunks', { videoId: id, chunks: chunks.length });
     for(let i=0;i<chunks.length;i++) {
       const remote='ivr2:/2/youtube-authorized/'+id+'-'+String(i+1).padStart(3,'0')+'.wav';
       await ensureUploadedAndVerified(chunks[i],remote);
