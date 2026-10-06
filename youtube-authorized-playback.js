@@ -134,7 +134,7 @@ async function uploadToYemot(filePath, remotePath) {
   const url=new URL(YEMOT_UPLOAD_URL);
   url.searchParams.set('token',yemotApiKey());
   url.searchParams.set('path',remotePath);
-  url.searchParams.set('convertAudio','0');
+  url.searchParams.set('convertAudio','1');
   url.searchParams.set('autoNumbering','false');
   const form=new FormData();
   form.append('file',new Blob([buffer],{type:'audio/wav'}),path.basename(filePath));
