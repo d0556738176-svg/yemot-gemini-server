@@ -14,3 +14,16 @@ create index if not exists conversations_created_at_idx
 -- Server-side access should use the Supabase service-role key. No public policies are created.
 alter table public.conversations enable row level security;
 revoke all on table public.conversations from anon, authenticated;
+
+-- Authorized audio source registry.
+-- Only server-side code should read/write this table; no public policies are created.
+create table if not exists public.authorized_audio_sources (
+ video_id text primary key,
+ source_url text not null,
+ enabled boolean not null default true,
+ created_at timestamptz not null default now(),
+ updated_at timestamptz not null default now()
+);
+alter table public.authorized_audio_sources enable row level security;
+revoke all on table public.authorized_audio_sources from anon, authenticated;
+
