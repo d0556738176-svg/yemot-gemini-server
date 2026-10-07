@@ -1124,76 +1124,6 @@ function shouldForceWebSearch(transcript) {
   return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|שעות פעילות|פתוח עכשיו|סגור היום|מתי נסגר|מתי סוגר|מתי פתוח|יצירת קשר|איך יוצרים קשר|אתר רשמי|רשתות חברתיות|רשת חברתית|אינסטגרם|פייסבוק|טיקטוק|טוויטר|עדכון אחרון|מה חדש|הופעה|הופעות|מופע|מופעים|אירוע|אירועים|כרטיסים|רכישת כרטיסים|לקנות כרטיסים|איפה קונים|מחיר כרטיס|מכירת כרטיסים|בית מרקחת|בתי מרקחת|חנות|חנויות|עסק|עסקים|סניף|סניפים|כתובת של|מייל של|דוא.?ל|אימייל|קישור|האתר של|מידע מהאתר|חפש באתר|תחפש באתר|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם|אוטובוס|אוטובוסים|תחנת אוטובוס|תחבורה ציבורית|קו אוטובוס|קווי אוטובוס|רכבת|תחנת רכבת|מסלול נסיעה|איך מגיעים|איך להגיע|הגעה ל|טיול|טיולים|מסלול טיול|אירוע היום|אירועים היום|פעילות היום|פעילויות היום|פעילות קהילתית|פעילויות קהילתיות|מה יש היום|מה יש בסוף השבוע|מה יש בעיר)/i.test(t);
 }
 
-function decodeHtmlEntities(value) {
-  return String(value || '')
-    .replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'")
-    .replace(/&lt;/g,'<').replace(/&gt;/g,'>')
-    .replace(/&#x27;/gi,"'").replace(/&#x2F;/gi,'/')
-    .replace(/&#(\\d+);/g,(_,n)=>String.fromCharCode(Number(n)));
-}
-
-async function answerDirectWebSearchFallback(transcript) {
-  const question=String(transcript||'').trim();
-  if(!question) throw Object.assign(new Error('Direct web fallback received empty query'),{status:400});
-
-  if(isWeatherQuestion(question)) return await answerWeatherDirect(question);
-  if(isNewsQuestion(question)) return await answerNewsDirect(question);
-
-  // Gemini Search Grounding can be unavailable because of project quota. Keep
-  // a provider-independent public search path so a quota event does not make
-  // the phone branch silent. DuckDuckGo documents an HTML non-JavaScript
-  // search interface and its traditional results are sourced largely from Bing.
-  const queries=[
-    question,
-    question+' כתובת טלפון שעות פתיחה',
-    question+' official'
-  ];
-  const all=[];
-  const seen=new Set();
-
-  for(const query of queries) {
-    const url='https://html.duckduckgo.com/html/?kp=1&q='+encodeURIComponent(query);
-    const response=await withTimeout(fetch(url,{
-      headers:{
-        'User-Agent':'Mozilla/5.0 (compatible; YemotGeminiServer/1.0; +https://yemot-gemini-server.onrender.com)'
-      }
-    }),10000,'DuckDuckGo HTML search');
-    if(!response.ok) continue;
-    const html=await response.text();
-
-    const blocks=html.match(/<div[^>]+class="result[^"]*"[^>]*>[\\s\\S]*?<\\/div>\\s*<\\/div>/gi) || [];
-    for(const block of blocks) {
-      const linkMatch=block.match(/<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\\s\\S]*?)<\\/a>/i);
-      if(!linkMatch) continue;
-      const href=decodeHtmlEntities(linkMatch[1]);
-      const title=decodeHtmlEntities(linkMatch[2].replace(/<[^>]+>/g,' ')).replace(/\\s+/g,' ').trim();
-      const snippetMatch=block.match(/class="result__snippet"[^>]*>([\\s\\S]*?)<\\/a>|class="result__snippet"[^>]*>([\\s\\S]*?)<\\/div>/i);
-      const snippet=decodeHtmlEntities((snippetMatch?.[1]||snippetMatch?.[2]||'').replace(/<[^>]+>/g,' ')).replace(/\\s+/g,' ').trim();
-      const key=href+'|'+title;
-      if(!title || seen.has(key)) continue;
-      seen.add(key);
-      all.push({title,url:href,snippet});
-      if(all.length>=8) break;
-    }
-    if(all.length>=8) break;
-  }
-
-  if(!all.length) {
-    throw Object.assign(new Error('Direct web search returned no results'),{status:503});
-  }
-
-  const businessLike=/(כתובת|שעות|טלפון|מספר טלפון|סניף|חנות|בית מרקחת|עסק|מקום|אירוע|פעילות|מה יש היום|מה יש בסוף השבוע)/i.test(question);
-  const selected=all.slice(0,businessLike?5:4);
-  let answer='מצאתי מידע עדכני בחיפוש אינטרנט חלופי, כי מנוע החיפוש הראשי של המערכת כרגע במגבלת מכסה. ';
-  answer+=selected.map((x,i)=>{
-    let s='תוצאה '+(i+1)+': '+x.title;
-    if(x.snippet) s+=' — '+x.snippet.slice(0,350);
-    return s;
-  }).join('. ');
-  answer+=' אם תרצה, אמור לי לבדוק תוצאה מסוימת לעומק.';
-  return sanitizeForYemot(answer);
-}
-
 async function answerWithWebSearch(transcript, historyText='') {
   const question=String(transcript||'').trim();
   if(!question) throw Object.assign(new Error('Search requested but transcript is empty'),{status:400});
@@ -1226,15 +1156,9 @@ ${question}
     console.warn('[WEB_SEARCH] Gemini web grounding unavailable; using direct fallback', {
       status:geminiErrorStatus(e), message:String(e?.message||e).slice(0,500)
     });
-    try {
-      return await answerDirectWebSearchFallback(question);
-    } catch(fallbackError) {
-      console.warn('[WEB_SEARCH] direct fallback failed', {
-        status:geminiErrorStatus(fallbackError),
-        message:String(fallbackError?.message||fallbackError).slice(0,500)
-      });
-      throw e;
-    }
+    if(isWeatherQuestion(question)) return await answerWeatherDirect(question);
+    if(isNewsQuestion(question)) return await answerNewsDirect(question, historyText);
+    throw e;
   }
 }
 async function buildOpeningForCaller(phone) {
