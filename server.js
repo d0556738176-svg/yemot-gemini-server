@@ -1611,51 +1611,151 @@ function extractWebSearchQuery(text) {
 }
 
 async function backupCallHandler(call) {
-  if (!backupGeminiModel) return call.id_list_message([{type:'text',data:'שלוחת הגיבוי עדיין אינה מוגדרת'}]);
-  let history=[];
-  let prompt='שלום הגעת למערכת הגיבוי אמור אחרי הצפצוף את השאלה שלך ולסיום הקש סולמית';
-  while(true) {
-    const recordPath=await call.read([{type:'text',data:sanitizeForYemot(prompt)}],'record',{min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
-    if(!recordPath || recordPath==='None') return call.id_list_message([{type:'text',data:'לא נקלט דבר להתראות'}]);
-    try {
-      const response=await withTimeout(yemotApi.download_file('ivr2:'+recordPath),REQUEST_TIMEOUT_MS,'backup recording');
-      const audio=Buffer.isBuffer(response.data)?response.data:Buffer.from(response.data);
-      const context=history.slice(-8).map((x,i)=>'תור '+(i+1)+' — מתקשר: '+x.user+'\\nתשובה: '+x.answer).join('\\n\\n');
-      const user=await transcribePhoneAudio(audio);
-      console.info('[Backup IVR] transcript ready', { chars:user.length, transcript:user });
+  const callerPhone=getCallerNumber(call);
+  const callId=call?.callId || call?.values?.ApiCallId || '';
+  const activeKey=String(callId || (Date.now()+'-'+callerPhone));
+  activeCalls.set(activeKey,{id:activeKey,phone:callerPhone,callId:String(callId||''),
+    startedAt:new Date().toISOString(),status:'ממתין להקלטה'});
 
-      // Deterministic handling for Israel-time questions: do not let Gemini
-      // invent or calculate the current time. This is isolated to branch 3.
-      const directTimeAnswer=answerIsraelTimeQuestion(user);
-      if(directTimeAnswer) {
-        history.push({user,answer:directTimeAnswer});
-        if(history.length>8) history=history.slice(-8);
-        prompt=directTimeAnswer+' אמור עכשיו את השאלה הבאה ולסיום הקש סולמית';
+  let firstTurn=true;
+  let openingPrompt=null;
+  let nextPrompt=null;
+  let emptyRecordAttempts=0;
+  let feedbackPending=false;
+  const turnHistory=[];
+  const turnContext={youtubeResults:[]};
+
+  if(process.env.ENABLE_AI_OPENING!=='false' && callerPhone!=='לא מזוהה' &&
+     conversationLog.some(x=>x.phone===callerPhone)) {
+    openingPrompt=await buildOpeningForCaller(callerPhone);
+    console.info('[BACKUP CALL_FLOW] returning_caller_memory_found',{callId:activeKey});
+  }
+
+  while(true) {
+    const prompt=nextPrompt || (firstTurn
+      ? (openingPrompt || process.env.FIRST_CALL_MESSAGE ||
+        'שלום, איזה כיף לשמוע אותך. אני כאן איתך. מה תרצה לעשות עכשיו?')
+      : 'אמור שאלה נוספת ולסיום הקש סולמית או הקש כוכבית ליציאה');
+    firstTurn=false;
+
+    const recordPath=await call.read(
+      [{type:'text',data:prompt}],
+      'record',
+      {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000}
+    );
+
+    if(!recordPath || recordPath==='None') {
+      emptyRecordAttempts++;
+      if(emptyRecordAttempts<3) {
+        nextPrompt='לא הצלחתי לשמוע אותך. נסה שוב.';
         continue;
       }
+      activeCalls.delete(activeKey);
+      return call.id_list_message([{type:'text',data:'לא התקבלה תשובה. להתראות'}]);
+    }
+    emptyRecordAttempts=0;
+    nextPrompt=null;
 
-      const webSearchRequested=isDeepWebSearchRequest(user);
-      const webQuery=extractWebSearchQuery(user);
-            const searchInstruction=webSearchRequested
-        ? '\\nזהו חיפוש אינטרנט עמוק ויסודי. חפש בפועל באינטרנט באמצעות כלי החיפוש. בצע חיפוש רחב בכמה ניסוחים וכיוונים רלוונטיים, העדף מקורות אמינים ועדכניים, השווה בין מקורות ויישב סתירות לפני המסקנה. אל תסתמך על זיכרון בלבד. החזר את המידע העיקרי בצורה ברורה, וציין בקצרה על אילו מקורות הסתמכת. אם אין מספיק מידע אמין, אמור זאת במפורש. שאילתת החיפוש: '+webQuery+'\\n'
-        : '';
-      console.info('[Backup IVR] web search mode', { enabled:webSearchRequested, query:webSearchRequested ? webQuery : '' });
-      const result=await generateBackupWithRetry(
-        audioContents(audio.toString('base64'),
-          EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+searchInstruction+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.'
-        ),
-        webSearchRequested
+    const active=activeCalls.get(activeKey);
+    if(active) active.status='הקלטה התקבלה — מתמלל ומעבד';
+
+    try {
+      const response=await withTimeout(
+        yemotApi.download_file('ivr2:'+recordPath),
+        REQUEST_TIMEOUT_MS,
+        'backup recording download'
       );
-      const raw=result.response.text().trim();
-      let parsed=null;
-      try { parsed=JSON.parse(raw); } catch { const m=raw.match(/\\{[\\s\\S]*\\}/); if(m){try{parsed=JSON.parse(m[0]);}catch{}} }
-      const finalUser=sanitizeForYemot(parsed?.transcript||user||raw);
-      const answer=sanitizeForYemot(parsed?.answer||raw)||'לא הצלחתי לענות כרגע';
-      history.push({user:finalUser,answer}); if(history.length>8) history=history.slice(-8);
-      prompt=answer+' אמור עכשיו את השאלה הבאה ולסיום הקש סולמית';
+      const audioBuffer=response.data;
+      const historyText=turnHistory.map((t,i)=>
+        'תור '+(i+1)+' — מתקשר: '+t.user+'\\nתשובה: '+t.assistant
+      ).join('\\n\\n');
+
+      const userTranscript=await transcribeBackupPhoneAudio(audioBuffer);
+      console.info('[BACKUP CALL_FLOW] transcript_ready',{callId:activeKey,transcript:userTranscript});
+
+      if(!userTranscript || userTranscript.length<2)
+        throw Object.assign(new Error('Empty backup phone transcription'),{status:400});
+
+      const israelNow=new Intl.DateTimeFormat('he-IL',{
+        timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'
+      }).format(new Date());
+
+      let replyText='';
+      const deterministicTime=answerIsraelTimeQuestion(userTranscript);
+      if(deterministicTime) {
+        replyText=deterministicTime;
+      } else if(isWeatherQuestion(userTranscript)) {
+        try { replyText=await answerWeatherDirect(userTranscript); }
+        catch { replyText=await answerBackupWithWebSearch(userTranscript,historyText); }
+      } else if(isNewsQuestion(userTranscript)) {
+        replyText=await answerBackupWithWebSearch(userTranscript,historyText);
+      } else {
+        const webRequested=shouldForceWebSearch(userTranscript);
+        const youtubeRequested=/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript);
+
+        if(webRequested && !youtubeRequested) {
+          replyText=await answerBackupWithWebSearch(userTranscript,historyText);
+        } else if(youtubeRequested) {
+          const youtubeAnswer=await searchYouTubeForPhone(userTranscript,historyText,turnContext);
+          replyText=youtubeAnswer || 'לא הצלחתי כרגע לקבל תוצאות מיוטיוב. נא לנסות שוב בעוד כמה רגעים.';
+        } else {
+          const answerPrompt=EXCLUSIVE_INSTRUCTION+
+            '\\n\\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+
+            '. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+
+            '\\n\\nהקשר קודם של השיחה, לפי הסדר:\\n'+
+            (historyText||'אין עדיין הקשר קודם.')+
+            '\\n\\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\\n'+
+            userTranscript+
+            '\\n\\nענה על השאלה בלבד. החזר אובייקט JSON תקין בלבד עם שדה "answer". '+
+            'התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. '+
+            'אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
+          const result=await generateBackupWithRetry(
+            [{role:'user',parts:[{text:answerPrompt}]}],
+            false
+          );
+          const raw=String(result?.response?.text?.()||'').trim();
+          let parsed=null;
+          try { parsed=JSON.parse(raw); } catch {
+            const m=raw.match(/\{[\s\S]*\}/);
+            if(m) { try { parsed=JSON.parse(m[0]); } catch {} }
+          }
+          replyText=String(parsed?.answer||raw||'לא הצלחתי לענות כרגע').trim();
+        }
+      }
+
+      if(feedbackPending &&
+         /^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר|לא|לא עזר|לא ממש|לא כל כך)\\s*$/i.test(userTranscript)) {
+        replyText=/^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר)/i.test(userTranscript)
+          ? 'מצוין. שמח שעזרתי לך. מה עוד תרצה שאעשה עבורך?'
+          : 'בסדר. מה לא היה ברור או מה חסר לך? אמור לי ואנסה לעזור בצורה אחרת.';
+        feedbackPending=false;
+      }
+
+      replyText=sanitizeForYemot(replyText)||'מצטער לא הצלחתי לנסח תשובה. נסה שוב.';
+      const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
+        phone:normalizePhone(callerPhone),callId:String(callId||''),
+        user:userTranscript,gemini:replyText};
+      conversationLog.push(entry);
+      if(conversationLog.length>MAX_CONVERSATION_LOG)
+        conversationLog.splice(0,conversationLog.length-MAX_CONVERSATION_LOG);
+      await persistConversationEntry(entry);
+
+      turnHistory.push({user:userTranscript,assistant:replyText});
+      if(turnHistory.length>8) turnHistory.shift();
+
+      console.info('[BACKUP CALL_FLOW] reply_ready',{
+        callId:activeKey,chars:replyText.length,historyTurns:turnHistory.length
+      });
+      nextPrompt=replyText;
+      feedbackPending=true;
     } catch(e) {
-      logDetailedError('Backup Gemini',e);
-      prompt='אירעה תקלה זמנית במערכת הגיבוי. אמור שוב את השאלה ולסיום הקש סולמית';
+      logDetailedError('Backup Gemini processing',e);
+      const status=geminiErrorStatus(e);
+      nextPrompt=status===429
+        ? 'מצטערים, מנוע הגיבוי הגיע כרגע למגבלת השימוש. נסה שוב בעוד כמה רגעים.'
+        : status===408
+          ? 'מצטערים, לקח יותר מדי זמן לענות. נסה שוב.'
+          : 'מצטער, הייתה תקלה זמנית במערכת הגיבוי. אמור שוב את השאלה.';
     }
   }
 }
