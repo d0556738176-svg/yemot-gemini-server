@@ -342,6 +342,15 @@ function answerIsraelTimeQuestion(transcript) {
   const date=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',weekday:'long',day:'numeric',month:'long'}).format(target);
   return 'בעוד '+(minutes===30?'חצי שעה':minutes===15?'רבע שעה':minutes===60?'שעה':minutes===120?'שעתיים':minutes+' דקות')+' תהיה השעה בישראל '+time+' ביום '+date;
 }
+function answerDailyDateQuestion(transcript) {
+  const q=String(transcript||'').toLowerCase().replace(/[״"'׳]/g,' ').replace(/\s+/g,' ').trim();
+  if(!/(מה התאריך|איזה תאריך|התאריך היום|איזה יום היום|מה היום|תאריך עברי|היום העברי|התאריך העברי)/.test(q)) return null;
+  const now=new Date();
+  const gregorian=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full'}).format(now);
+  const hebrew=new Intl.DateTimeFormat('he-IL-u-ca-hebrew',{timeZone:'Asia/Jerusalem',dateStyle:'long'}).format(now);
+  return 'היום בישראל '+gregorian+', והתאריך העברי הוא '+hebrew+'.';
+}
+
 async function transcribeWithDeepgram(audioBuffer, overrideKey='') {
   const key=(overrideKey || process.env.DEEPGRAM_API_KEY || '').trim();
   if(!key) return null;
@@ -1274,8 +1283,11 @@ async function callHandler(call) {
         else replyText='בסדר. מה לא היה ברור או מה חסר לך? אמור לי ואנסה לעזור בצורה אחרת.';
         feedbackPending=false;
       }
+      const deterministicDailyDateAnswer=answerDailyDateQuestion(userTranscript);
+      if(deterministicDailyDateAnswer) replyText=deterministicDailyDateAnswer;
       const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
-      if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
+      if(deterministicDailyDateAnswer) replyText=deterministicDailyDateAnswer;
+      else if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
       else if(isWeatherQuestion(userTranscript)) {
         try { replyText=await answerWeatherDirect(userTranscript); }
         catch(e) { replyText=await answerWithWebSearch(userTranscript, historyText); }
