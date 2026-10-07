@@ -1552,14 +1552,19 @@ async function backupCallHandler(call) {
       console.info('[Backup IVR] transcript ready', { chars:user.length, transcript:user });
       const webSearchRequested=isDeepWebSearchRequest(user);
       const webQuery=extractWebSearchQuery(user);
-      const selectedModel=webSearchRequested && backupGeminiWebModel ? backupGeminiWebModel : backupGeminiModel;
-      const searchInstruction=webSearchRequested
+            const searchInstruction=webSearchRequested
         ? '\\nזהו חיפוש אינטרנט עמוק ויסודי. חפש בפועל באינטרנט באמצעות כלי החיפוש. בצע חיפוש רחב בכמה ניסוחים וכיוונים רלוונטיים, העדף מקורות אמינים ועדכניים, השווה בין מקורות ויישב סתירות לפני המסקנה. אל תסתמך על זיכרון בלבד. החזר את המידע העיקרי בצורה ברורה, וציין בקצרה על אילו מקורות הסתמכת. אם אין מספיק מידע אמין, אמור זאת במפורש. שאילתת החיפוש: '+webQuery+'\\n'
         : '';
       console.info('[Backup IVR] web search mode', { enabled:webSearchRequested, query:webSearchRequested ? webQuery : '' });
-      const result=await withTimeout(selectedModel.generateContent(
-        audioContents(audio.toString('base64'), EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+searchInstruction+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.')
-      ),REQUEST_TIMEOUT_MS,'backup Gemini');
+      const result=await withTimeout(
+        generateWithRetry(
+          audioContents(audio.toString('base64'), EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+searchInstruction+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.'),
+          webSearchRequested,
+          false
+        ),
+        REQUEST_TIMEOUT_MS,
+        'backup Gemini'
+      );
       const raw=result.response.text().trim();
       let parsed=null;
       try { parsed=JSON.parse(raw); } catch { const m=raw.match(/\\{[\\s\\S]*\\}/); if(m){try{parsed=JSON.parse(m[0]);}catch{}} }
