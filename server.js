@@ -342,8 +342,8 @@ function answerIsraelTimeQuestion(transcript) {
   const date=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',weekday:'long',day:'numeric',month:'long'}).format(target);
   return 'בעוד '+(minutes===30?'חצי שעה':minutes===15?'רבע שעה':minutes===60?'שעה':minutes===120?'שעתיים':minutes+' דקות')+' תהיה השעה בישראל '+time+' ביום '+date;
 }
-async function transcribeWithDeepgram(audioBuffer) {
-  const key=(process.env.DEEPGRAM_API_KEY||'').trim();
+async function transcribeWithDeepgram(audioBuffer, overrideKey='') {
+  const key=(overrideKey || process.env.DEEPGRAM_API_KEY || '').trim();
   if(!key) return null;
 
   const bytes=Buffer.isBuffer(audioBuffer)?audioBuffer:Buffer.from(audioBuffer);
