@@ -1590,6 +1590,17 @@ async function backupCallHandler(call) {
       const context=history.slice(-8).map((x,i)=>'תור '+(i+1)+' — מתקשר: '+x.user+'\\nתשובה: '+x.answer).join('\\n\\n');
       const user=await transcribePhoneAudio(audio);
       console.info('[Backup IVR] transcript ready', { chars:user.length, transcript:user });
+
+      // Deterministic handling for Israel-time questions: do not let Gemini
+      // invent or calculate the current time. This is isolated to branch 3.
+      const directTimeAnswer=answerIsraelTimeQuestion(user);
+      if(directTimeAnswer) {
+        history.push({user,answer:directTimeAnswer});
+        if(history.length>8) history=history.slice(-8);
+        prompt=directTimeAnswer+' אמור עכשיו את השאלה הבאה ולסיום הקש סולמית';
+        continue;
+      }
+
       const webSearchRequested=isDeepWebSearchRequest(user);
       const webQuery=extractWebSearchQuery(user);
             const searchInstruction=webSearchRequested
