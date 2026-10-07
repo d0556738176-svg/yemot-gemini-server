@@ -663,6 +663,7 @@ function detectAudioMime(bytes) {
 
 async function answerNormalQuestion(transcript, historyText='') {
   const prompt=EXCLUSIVE_INSTRUCTION+'\n\nהקשר קודם של השיחה, לפי הסדר: '+(historyText || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המתומללת של המתקשר:\n'+transcript+'\n\nענה על השאלה. ענה בשפה שבה המתקשר דיבר. התשובה מיועדת להקראה בטלפון.';
+  // Coverage rules for the main branch: live business/service details, events, transit, daily information, and deep current-affairs research.\n  prompt += '\\n\\nכללי כיסוי: לעסק או מוסד חפש כתובת, שעות פתיחה, טלפון ואתר רשמי. לאירועים ופעילויות חפש לפי עיר/אזור, תאריך, שעה, מקום, מחיר וכרטיסים ממקור רשמי. לתחבורה ציבורית חפש מסלול, קווים, תחנות, החלפות וזמני יציאה/הגעה; זמן אמת יוצג ככזה רק אם מקור עדכני מאמת אותו. לטיולים בנה מסלול מעשי לפי מוצא, יעד, זמן ותחבורה. למידע יומי ספק תאריך, יום בשבוע, תאריך עברי וזמני יום לפי מקורות מתאימים. לחדשות, טכנולוגיה, מדע, טבע, בריאות וספורט חפש לעומק והשווה מקורות עדכניים. אל תציג הערכה או מידע ישן כאילו הוא מידע חי.';
   const result=await generateWithRetry([{role:'user',parts:[{text:prompt}]}]);
   return result.response.text();
 }
