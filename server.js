@@ -1254,6 +1254,7 @@ async function callHandler(call) {
       // improves phone latency, and leaves more capacity for real conversation/advice.
       const directDataRequest =
         !!answerIsraelTimeQuestion(userTranscript) ||
+        !!answerDailyDateQuestion(userTranscript) ||
         isWeatherQuestion(userTranscript) ||
         isNewsQuestion(userTranscript) ||
         shouldForceWebSearch(userTranscript) ||
