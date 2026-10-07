@@ -1516,33 +1516,51 @@ async function youtubeCallHandler(call) {
 
 const BACKUP_GEMINI_API_KEY = (process.env.YEMOT_BACKUP_GEMINI_API_KEY || process.env.GEMINI_BACKUP_API_KEY || apiKeys[1] || '').trim();
 const backupGeminiClient = BACKUP_GEMINI_API_KEY ? new GoogleGenerativeAI(BACKUP_GEMINI_API_KEY) : null;
-const backupGeminiModel = backupGeminiClient ? backupGeminiClient.getGenerativeModel({model:(process.env.GEMINI_BACKUP_MODEL || MODEL_NAMES[0] || 'gemini-3.8-flash')}) : null;
-// Separate grounded model for branch 3. It is only selected when the caller explicitly
-// asks to search the internet, so the normal backup conversation stays unchanged.
-const backupGeminiWebModel = backupGeminiClient ? backupGeminiClient.getGenerativeModel({
-  model:(process.env.GEMINI_BACKUP_MODEL || MODEL_NAMES[0] || 'gemini-3.8-flash'),
-  tools:[{googleSearch:{}}]
-}) : null;
+const backupModelNames = [...new Set([
+  'gemini-3.1-flash-lite',
+  ...(process.env.GEMINI_BACKUP_MODEL || '').split(',').map(x => x.trim()).filter(Boolean),
+  ...MODEL_NAMES
+])];
+const backupGeminiModels = backupGeminiClient
+  ? backupModelNames.map(model => backupGeminiClient.getGenerativeModel({model}))
+  : [];
+const backupGeminiWebModels = backupGeminiClient
+  ? backupModelNames.map(model => backupGeminiClient.getGenerativeModel({model, tools:[{googleSearch:{}}]}))
+  : [];
+const backupGeminiModel = backupGeminiModels[0] || null;
+const backupGeminiWebModel = backupGeminiWebModels[0] || null;
 
 async function generateBackupWithRetry(contents, useWebSearch=false) {
-  const model = useWebSearch ? backupGeminiWebModel : backupGeminiModel;
-  if (!model) throw Object.assign(new Error('Backup Gemini is not configured'), {status:400});
+  if (!backupGeminiClient || !backupGeminiModels.length)
+    throw Object.assign(new Error('Backup Gemini is not configured'), {status:400});
+
+  const models = useWebSearch ? backupGeminiWebModels : backupGeminiModels;
   let lastError;
-  for (let attempt=1; attempt<=2; attempt++) {
+  const perAttemptTimeout = Math.min(Math.max(3500, Math.floor(REQUEST_TIMEOUT_MS * 0.55)), 6000);
+
+  for (let i=0; i<models.length; i++) {
     try {
+      console.info('[Backup Gemini] trying model', {model:backupModelNames[i], useWebSearch});
       return await withTimeout(
-        model.generateContent({contents}),
-        REQUEST_TIMEOUT_MS,
-        'backup Gemini' + (useWebSearch ? ' web search' : '')
+        models[i].generateContent({contents}),
+        perAttemptTimeout,
+        'backup Gemini '+backupModelNames[i]
       );
     } catch (e) {
       lastError=e;
-      const status=geminiErrorStatus(e);
-      console.warn('[Backup Gemini] request failed', {attempt,status,useWebSearch});
-      if (attempt<2 && (status===408 || status===429 || status===500 || status===502 || status===503 || !status)) continue;
-      throw e;
+      console.warn('[Backup Gemini] model failed; trying next', {
+        model:backupModelNames[i], status:geminiErrorStatus(e), useWebSearch
+      });
     }
   }
+
+  try {
+    console.warn('[Backup Gemini] dedicated backup key exhausted; trying main Gemini pool');
+    return await generateWithRetry(contents, useWebSearch, true);
+  } catch (fallbackError) {
+    lastError=fallbackError;
+  }
+
   throw lastError;
 }
 
@@ -1578,10 +1596,11 @@ async function backupCallHandler(call) {
         ? '\\nזהו חיפוש אינטרנט עמוק ויסודי. חפש בפועל באינטרנט באמצעות כלי החיפוש. בצע חיפוש רחב בכמה ניסוחים וכיוונים רלוונטיים, העדף מקורות אמינים ועדכניים, השווה בין מקורות ויישב סתירות לפני המסקנה. אל תסתמך על זיכרון בלבד. החזר את המידע העיקרי בצורה ברורה, וציין בקצרה על אילו מקורות הסתמכת. אם אין מספיק מידע אמין, אמור זאת במפורש. שאילתת החיפוש: '+webQuery+'\\n'
         : '';
       console.info('[Backup IVR] web search mode', { enabled:webSearchRequested, query:webSearchRequested ? webQuery : '' });
-      const result=await withTimeout(
-        generateBackupWithRetry(audioContents(audio.toString('base64'), EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+searchInstruction+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.'), webSearchRequested),
-        REQUEST_TIMEOUT_MS,
-        'backup Gemini'
+      const result=await generateBackupWithRetry(
+        audioContents(audio.toString('base64'),
+          EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+searchInstruction+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.'
+        ),
+        webSearchRequested
       );
       const raw=result.response.text().trim();
       let parsed=null;
