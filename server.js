@@ -1514,6 +1514,7 @@ async function youtubeCallHandler(call) {
   }
 }
 
+// Backup branch configuration marker: branch 3 remains isolated from branch 1.
 const BACKUP_GEMINI_API_KEY = (process.env.YEMOT_BACKUP_GEMINI_API_KEY || process.env.GEMINI_BACKUP_API_KEY || apiKeys[1] || '').trim();
 const backupGeminiClient = BACKUP_GEMINI_API_KEY ? new GoogleGenerativeAI(BACKUP_GEMINI_API_KEY) : null;
 const backupModelNames = [...new Set([
