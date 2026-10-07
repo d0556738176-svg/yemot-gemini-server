@@ -617,6 +617,38 @@ async function transcribePhoneAudio(audioBuffer) {
   throw lastError || Object.assign(new Error('Phone transcription unavailable'),{status:503});
 }
 
+async function transcribeBackupPhoneAudio(audioBuffer) {
+  const key=(process.env.DEEPGRAM_BACKUP_API_KEY || process.env.YEMOT_BACKUP_DEEPGRAM_API_KEY || '').trim();
+  if(key) {
+    try {
+      const text=await transcribeWithDeepgram(audioBuffer,key);
+      if(text) return text;
+    } catch(err) {
+      console.warn('[BACKUP TRANSCRIBE] Deepgram failed',{
+        status:geminiErrorStatus(err),
+        message:String(err?.message||err).slice(0,500)
+      });
+    }
+  }
+  const bytes=Buffer.isBuffer(audioBuffer)?audioBuffer:Buffer.from(audioBuffer);
+  try {
+    const result=await generateBackupWithRetry(
+      audioContents(bytes.toString('base64'),
+        'תמלל בדיוק את דברי המתקשר בעברית. אל תשנה שמות, מספרים או מילים באנגלית. אל תשלים מילים שלא נשמעו. החזר רק את התמלול.'),
+      false
+    );
+    const text=String(result?.response?.text?.()||'').trim();
+    const cleaned=sanitizeForYemot(text);
+    if(cleaned) return cleaned;
+  } catch(err) {
+    console.warn('[BACKUP TRANSCRIBE] Gemini backup failed',{
+      status:geminiErrorStatus(err),
+      message:String(err?.message||err).slice(0,500)
+    });
+  }
+  throw Object.assign(new Error('Backup phone transcription unavailable'),{status:503});
+}
+
 function detectAudioMime(bytes) {
   if(!bytes || bytes.length < 4) return 'audio/wav';
   if(bytes.subarray(0,4).toString('ascii') === 'RIFF') return 'audio/wav';
