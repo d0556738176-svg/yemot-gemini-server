@@ -301,6 +301,69 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) 
   throw lastError;
 }
 
+
+const BRANCH1_BACKUP_GEMINI_API_KEY = (process.env.GEMINI_BACKUP_API_KEY || '').trim();
+const branch1BackupGeminiClient = BRANCH1_BACKUP_GEMINI_API_KEY
+  ? new GoogleGenerativeAI(BRANCH1_BACKUP_GEMINI_API_KEY)
+  : null;
+const branch1BackupModelNames = [...new Set([
+  ...MODEL_NAMES
+])];
+const branch1BackupModels = branch1BackupGeminiClient
+  ? branch1BackupModelNames.map(model => branch1BackupGeminiClient.getGenerativeModel({model}))
+  : [];
+const branch1BackupWebModels = branch1BackupGeminiClient
+  ? branch1BackupModelNames.map(model => branch1BackupGeminiClient.getGenerativeModel({model, tools:[{googleSearch:{}}]}))
+  : [];
+
+async function generateBranch1WithFallback(contents, useWebSearch=false, fastPhone=false) {
+  try {
+    return await generateWithRetry(contents, useWebSearch, fastPhone);
+  } catch (primaryError) {
+    const primaryStatus=geminiErrorStatus(primaryError);
+    const shouldFallback=[429,408,500,502,503,504].includes(primaryStatus);
+    if(!shouldFallback || !branch1BackupGeminiClient || !branch1BackupModels.length) {
+      throw primaryError;
+    }
+
+    const models=useWebSearch ? branch1BackupWebModels : branch1BackupModels;
+    const timeoutMs=fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+    let lastError=primaryError;
+
+    console.warn('[BRANCH1 FALLBACK] primary Gemini unavailable; trying separate backup Project', {
+      status:primaryStatus, useWebSearch, fastPhone
+    });
+
+    for(let i=0;i<models.length;i++) {
+      try {
+        const request={
+          contents,
+          ...(fastPhone ? {
+            generationConfig:{thinkingConfig:{thinkingLevel:'low'}}
+          } : {})
+        };
+        const result=await withTimeout(
+          models[i].generateContent(request),
+          timeoutMs,
+          'branch1 backup Gemini '+branch1BackupModelNames[i]
+        );
+        console.info('[BRANCH1 FALLBACK] backup Project succeeded', {
+          model:branch1BackupModelNames[i], useWebSearch, fastPhone
+        });
+        return result;
+      } catch(e) {
+        lastError=e;
+        console.warn('[BRANCH1 FALLBACK] backup model failed', {
+          model:branch1BackupModelNames[i],
+          status:geminiErrorStatus(e),
+          useWebSearch, fastPhone
+        });
+      }
+    }
+    throw lastError;
+  }
+}
+
 const yemotApi = new YemotApi(process.env.YEMOT_API_USERNAME, process.env.YEMOT_API_PASSWORD);
 const router = YemotRouter({
   printLog: true,
@@ -1148,7 +1211,7 @@ ${question}
 אם המתקשר נותן כתובת אתר, שם דומיין או מבקש מידע מאתר מסוים, נסה לפתוח ולקרוא את המקור עצמו או לחפש בתוך האתר, ולא להסתפק בתוצאות כלליות. מותר להשתמש במידע ציבורי נגיש מהאתר גם אם הוא ארוך, ולסכם אותו לפי בקשת המתקשר. אל תטען שקראת עמוד אם הוא לא היה נגיש בפועל. אין לעקוף התחברות, CAPTCHA, חומת תשלום, הגבלת גישה או אמצעי אבטחה; במקרה כזה אמור שהחומר לא נגיש. המטרה היא חיפוש רחב ככל האפשר במקורות ציבוריים ונגישים.
 אם החיפוש נכשל או לא החזיר מידע מספיק, אמור בקצרה שלא הצלחת להשיג מידע אמין כרגע. אל תציג כתובות אינטרנט ארוכות.`;
   try {
-    const result=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],true,false);
+    const result=await generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],true,false);
     const answer=result?.response?.text?.();
     if(answer && String(answer).trim()) return String(answer).trim();
     throw Object.assign(new Error('Web search returned an empty answer'),{status:503});
@@ -1263,7 +1326,7 @@ async function callHandler(call) {
 
       if(!directDataRequest) {
         const answerPrompt=EXCLUSIVE_INSTRUCTION+'\\n\\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\\n\\nהקשר קודם של השיחה, לפי הסדר:\\n'+(historyText || 'אין עדיין הקשר קודם.')+'\\n\\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\\n'+userTranscript+'\\n\\nענה על השאלה בלבד. החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. בדרך כלל 1 עד 4 משפטים קצרים; כשמדובר בהתייעצות או הסבר מורכב אפשר להרחיב בהדרגה. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
-        const firstPass=(await generateWithRetry([{role:'user',parts:[{text:answerPrompt}]}],false,true)).response.text().trim();
+        const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt}]}],false,true)).response.text().trim();
         let parsedTurn=null;
         try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\\{[\\s\\S]*\\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
         if(parsedTurn && typeof parsedTurn.answer==='string') {
@@ -1577,7 +1640,7 @@ async function answerBackupWithWebSearch(transcript, historyText='') {
 }
 
 // Backup branch configuration marker: branch 3 remains isolated from branch 1.
-const BACKUP_GEMINI_API_KEY = (process.env.YEMOT_BACKUP_GEMINI_API_KEY || process.env.GEMINI_BACKUP_API_KEY || apiKeys[1] || '').trim();
+const BACKUP_GEMINI_API_KEY = (process.env.YEMOT_BACKUP_GEMINI_API_KEY || '').trim();
 const backupGeminiClient = BACKUP_GEMINI_API_KEY ? new GoogleGenerativeAI(BACKUP_GEMINI_API_KEY) : null;
 const backupModelNames = [...new Set([
   'gemini-3.1-flash-lite',
