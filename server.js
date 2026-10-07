@@ -1524,16 +1524,38 @@ const backupGeminiWebModel = backupGeminiClient ? backupGeminiClient.getGenerati
   tools:[{googleSearch:{}}]
 }) : null;
 
+async function generateBackupWithRetry(contents, useWebSearch=false) {
+  const model = useWebSearch ? backupGeminiWebModel : backupGeminiModel;
+  if (!model) throw Object.assign(new Error('Backup Gemini is not configured'), {status:400});
+  let lastError;
+  for (let attempt=1; attempt<=2; attempt++) {
+    try {
+      return await withTimeout(
+        model.generateContent({contents}),
+        REQUEST_TIMEOUT_MS,
+        'backup Gemini' + (useWebSearch ? ' web search' : '')
+      );
+    } catch (e) {
+      lastError=e;
+      const status=geminiErrorStatus(e);
+      console.warn('[Backup Gemini] request failed', {attempt,status,useWebSearch});
+      if (attempt<2 && (status===408 || status===429 || status===500 || status===502 || status===503 || !status)) continue;
+      throw e;
+    }
+  }
+  throw lastError;
+}
+
 function isDeepWebSearchRequest(text) {
-  const q=String(text||'').toLowerCase().replace(/[״"'׳]/g,' ').replace(/\\s+/g,' ').trim();
-  return /(?:תחפש|חפש|חיפוש).{0,20}(?:באינטרנט|ברשת|בגוגל)|(?:בדוק|תבדוק).{0,20}(?:באינטרנט|ברשת|בגוגל)|חיפוש\\s+(?:עמוק|יסודי)|תחפש\\s+עמוק|חפש\\s+עמוק|מחקר\\s+(?:עמוק|יסודי)/.test(q);
+  const q=String(text||'').toLowerCase().replace(/[״"'׳]/g,' ').replace(/\s+/g,' ').trim();
+  return /(?:תחפש|חפש|חיפוש).{0,20}(?:באינטרנט|ברשת|בגוגל)|(?:בדוק|תבדוק).{0,20}(?:באינטרנט|ברשת|בגוגל)|חיפוש\s+(?:עמוק|יסודי)|תחפש\s+עמוק|חפש\s+עמוק|מחקר\s+(?:עמוק|יסודי)/.test(q);
 }
 
 function extractWebSearchQuery(text) {
   return String(text||'')
-    .replace(/^(?:אז\\s+)?(?:תחפש|חפש|בדוק|תבדוק)(?:\\s+לי)?(?:\\s+באינטרנט|\\s+ברשת|\\s+בגוגל)?/i,'')
-    .replace(/^(?:באינטרנט|ברשת|בגוגל)\\s*/i,'')
-    .replace(/^(?:עמוק|יסודי|וממש\\s+יסודי)\\s*/i,'')
+    .replace(/^(?:אז\s+)?(?:תחפש|חפש|בדוק|תבדוק)(?:\s+לי)?(?:\s+באינטרנט|\s+ברשת|\s+בגוגל)?/i,'')
+    .replace(/^(?:באינטרנט|ברשת|בגוגל)\s*/i,'')
+    .replace(/^(?:עמוק|יסודי|וממש\s+יסודי)\s*/i,'')
     .trim() || String(text||'').trim();
 }
 
@@ -1557,11 +1579,7 @@ async function backupCallHandler(call) {
         : '';
       console.info('[Backup IVR] web search mode', { enabled:webSearchRequested, query:webSearchRequested ? webQuery : '' });
       const result=await withTimeout(
-        generateWithRetry(
-          audioContents(audio.toString('base64'), EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+searchInstruction+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.'),
-          webSearchRequested,
-          false
-        ),
+        generateBackupWithRetry(audioContents(audio.toString('base64'), EXCLUSIVE_INSTRUCTION+'\\nאתה מערכת גיבוי לשיחה טלפונית. שמור על הקשר בין התורות.\\nהקשר הקודם:\\n'+(context||'אין עדיין הקשר.')+searchInstruction+'\\nהחזר JSON בלבד עם transcript ו-answer. תשובה קצרה וברורה להקראה בטלפון.'), webSearchRequested),
         REQUEST_TIMEOUT_MS,
         'backup Gemini'
       );
