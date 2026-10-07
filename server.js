@@ -1124,73 +1124,6 @@ function shouldForceWebSearch(transcript) {
   return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|שעות פעילות|פתוח עכשיו|סגור היום|מתי נסגר|מתי סוגר|מתי פתוח|יצירת קשר|איך יוצרים קשר|אתר רשמי|רשתות חברתיות|רשת חברתית|אינסטגרם|פייסבוק|טיקטוק|טוויטר|עדכון אחרון|מה חדש|הופעה|הופעות|מופע|מופעים|אירוע|אירועים|כרטיסים|רכישת כרטיסים|לקנות כרטיסים|איפה קונים|מחיר כרטיס|מכירת כרטיסים|בית מרקחת|בתי מרקחת|חנות|חנויות|עסק|עסקים|סניף|סניפים|כתובת של|מייל של|דוא.?ל|אימייל|קישור|האתר של|מידע מהאתר|חפש באתר|תחפש באתר|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם|אוטובוס|אוטובוסים|תחנת אוטובוס|תחבורה ציבורית|קו אוטובוס|קווי אוטובוס|רכבת|תחנת רכבת|מסלול נסיעה|איך מגיעים|איך להגיע|הגעה ל|טיול|טיולים|מסלול טיול|אירוע היום|אירועים היום|פעילות היום|פעילויות היום|פעילות קהילתית|פעילויות קהילתיות|מה יש היום|מה יש בסוף השבוע|מה יש בעיר)/i.test(t);
 }
 
-
-async function answerDirectInternetFallback(transcript) {
-  const question=String(transcript||'').trim();
-  if(!question) throw Object.assign(new Error('Internet fallback received empty query'),{status:400});
-
-  if(isWeatherQuestion(question)) return await answerWeatherDirect(question);
-  if(isNewsQuestion(question)) return await answerNewsDirect(question,'');
-
-  const queries=[
-    question,
-    question+' כתובת טלפון שעות פתיחה',
-    question+' חדשות עדכונים מידע רשמי'
-  ];
-  const results=[];
-  const seen=new Set();
-
-  for(const query of queries) {
-    const url='https://www.bing.com/search?format=rss&q='+encodeURIComponent(query);
-    try {
-      const response=await withTimeout(fetch(url,{
-        headers:{'User-Agent':'Mozilla/5.0 (compatible; YemotGeminiServer/1.0)'}
-      }),10000,'Bing RSS search');
-      if(!response.ok) continue;
-      const xml=await response.text();
-      const items=xml.match(/<item>[\\s\\S]*?<\\/item>/gi)||[];
-      for(const item of items) {
-        const titleMatch=item.match(/<title>([\\s\\S]*?)<\\/title>/i);
-        const linkMatch=item.match(/<link>([\\s\\S]*?)<\\/link>/i);
-        const descMatch=item.match(/<description>([\\s\\S]*?)<\\/description>/i);
-        if(!titleMatch) continue;
-        const clean=(v)=>String(v||'')
-          .replace(/<!\\[CDATA\\[/g,'').replace(/\\]\\]>/g,'')
-          .replace(/<[^>]+>/g,' ')
-          .replace(/&amp;/g,'&').replace(/&quot;/g,'"')
-          .replace(/&#39;/g,"'").replace(/&lt;/g,'<')
-          .replace(/&gt;/g,'>').replace(/\\s+/g,' ').trim();
-        const title=clean(titleMatch[1]);
-        const link=clean(linkMatch?.[1]||'');
-        const desc=clean(descMatch?.[1]||'');
-        const key=(title+'|'+link).toLowerCase();
-        if(!title||seen.has(key)) continue;
-        seen.add(key);
-        results.push({title,link,desc});
-        if(results.length>=8) break;
-      }
-    } catch(error) {
-      console.warn('[WEB_FALLBACK] provider failed', {
-        message:String(error?.message||error).slice(0,300)
-      });
-    }
-    if(results.length>=8) break;
-  }
-
-  if(!results.length) {
-    throw Object.assign(new Error('Independent internet search returned no results'),{status:503});
-  }
-
-  const answer='מצאתי תוצאות בחיפוש אינטרנט חלופי, בלי להסתמך על מכסת Gemini. '+
-    results.slice(0,5).map((r,i)=>{
-      let s='תוצאה '+(i+1)+': '+r.title;
-      if(r.desc) s+=' — '+r.desc.slice(0,280);
-      return s;
-    }).join('. ')+
-    '. אם תרצה, אמור לי לבדוק אחת מהתוצאות לעומק.';
-  return sanitizeForYemot(answer);
-}
-
 async function answerWithWebSearch(transcript, historyText='') {
   const question=String(transcript||'').trim();
   if(!question) throw Object.assign(new Error('Search requested but transcript is empty'),{status:400});
@@ -1223,15 +1156,9 @@ ${question}
     console.warn('[WEB_SEARCH] Gemini web grounding unavailable; using direct fallback', {
       status:geminiErrorStatus(e), message:String(e?.message||e).slice(0,500)
     });
-    try {
-      return await answerDirectInternetFallback(question);
-    } catch(fallbackError) {
-      console.warn('[WEB_SEARCH] independent fallback failed', {
-        status:geminiErrorStatus(fallbackError),
-        message:String(fallbackError?.message||fallbackError).slice(0,500)
-      });
-      throw e;
-    }
+    if(isWeatherQuestion(question)) return await answerWeatherDirect(question);
+    if(isNewsQuestion(question)) return await answerNewsDirect(question, historyText);
+    throw e;
   }
 }
 async function buildOpeningForCaller(phone) {
