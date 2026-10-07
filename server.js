@@ -1187,6 +1187,85 @@ function shouldForceWebSearch(transcript) {
   return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|שעות פעילות|פתוח עכשיו|סגור היום|מתי נסגר|מתי סוגר|מתי פתוח|יצירת קשר|איך יוצרים קשר|אתר רשמי|רשתות חברתיות|רשת חברתית|אינסטגרם|פייסבוק|טיקטוק|טוויטר|עדכון אחרון|מה חדש|הופעה|הופעות|מופע|מופעים|אירוע|אירועים|כרטיסים|רכישת כרטיסים|לקנות כרטיסים|איפה קונים|מחיר כרטיס|מכירת כרטיסים|בית מרקחת|בתי מרקחת|חנות|חנויות|עסק|עסקים|סניף|סניפים|כתובת של|מייל של|דוא.?ל|אימייל|קישור|האתר של|מידע מהאתר|חפש באתר|תחפש באתר|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם|אוטובוס|אוטובוסים|תחנת אוטובוס|תחבורה ציבורית|קו אוטובוס|קווי אוטובוס|רכבת|תחנת רכבת|מסלול נסיעה|איך מגיעים|איך להגיע|הגעה ל|טיול|טיולים|מסלול טיול|אירוע היום|אירועים היום|פעילות היום|פעילויות היום|פעילות קהילתית|פעילויות קהילתיות|מה יש היום|מה יש בסוף השבוע|מה יש בעיר)/i.test(t);
 }
 
+async function searchWebDirect(query, options={}) {
+  const q=String(query||'').trim();
+  if(!q) return [];
+  const url=new URL('https://html.duckduckgo.com/html/');
+  url.searchParams.set('q',q.slice(0,240));
+  const response=await withTimeout(fetch(url,{
+    headers:{'user-agent':'Mozilla/5.0 (compatible; YemotAnswerEngine/1.0)'}
+  }), Number(options.timeoutMs||10000), 'direct web search');
+  const html=await response.text();
+  if(!response.ok) throw Object.assign(new Error('Direct web search HTTP '+response.status),{status:response.status});
+  const results=[];
+  const blocks=html.split(/<div[^>]+class="[^"]*result[^"]*"/i).slice(1);
+  for(const block of blocks.slice(0,12)){
+    const linkMatch=block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+    if(!linkMatch) continue;
+    const href=decodeHtmlEntities(linkMatch[1]);
+    const title=stripHtml(decodeHtmlEntities(linkMatch[2]));
+    const snippetMatch=block.match(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/i) ||
+      block.match(/<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    const snippet=snippetMatch ? stripHtml(decodeHtmlEntities(snippetMatch[1])) : '';
+    if(title) results.push({title,url:href,snippet});
+  }
+  return results;
+}
+function stripHtml(value){
+  return String(value||'').replace(/<script[\s\S]*?<\/script>/gi,' ')
+    .replace(/<style[\s\S]*?<\/style>/gi,' ')
+    .replace(/<[^>]+>/g,' ')
+    .replace(/&nbsp;/gi,' ')
+    .replace(/\s+/g,' ').trim();
+}
+function decodeHtmlEntities(value){
+  return String(value||'')
+    .replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'")
+    .replace(/&lt;/gi,'<').replace(/&gt;/gi,'>')
+    .replace(/&#x2F;/gi,'/').replace(/&#x27;/gi,"'");
+}
+function extractDirectSearchQueries(question){
+  const cleaned=String(question||'').trim().replace(/^(?:אז\s+)?(?:תחפש|חפש|בדוק|תבדוק|תמצא|תאתר|תברר)(?:\s+לי)?(?:\s+באינטרנט|\s+ברשת|\s+בגוגל)?\s*/i,'').trim();
+  const queries=[cleaned];
+  if(/סופר פארם|סופרפארם/i.test(cleaned)) {
+    queries.push(cleaned+' כתובת שעות פתיחה טלפון');
+    queries.push(cleaned+' אתר רשמי סניפים');
+  } else if(/אוטובוס|אוטובוסים|רכבת|תחבורה ציבורית|קו\s*\d+/i.test(cleaned)) {
+    queries.push(cleaned+' לוח זמנים');
+    queries.push(cleaned+' מסלול תחנות');
+  } else if(/הופעה|הופעות|אירוע|אירועים|כרטיסים|מופע|מופעים/i.test(cleaned)) {
+    queries.push(cleaned+' תאריך שעה מחיר כרטיסים');
+    queries.push(cleaned+' אתר רשמי');
+  } else {
+    queries.push(cleaned+' מידע עדכני');
+    queries.push(cleaned+' מקור רשמי');
+  }
+  return [...new Set(queries.filter(Boolean).map(x=>x.slice(0,240)))].slice(0,3);
+}
+async function answerWithDirectWebFallback(question){
+  const queries=extractDirectSearchQueries(question);
+  const all=[];
+  for(const q of queries){
+    try {
+      const items=await searchWebDirect(q);
+      all.push(...items);
+    } catch(e) {
+      console.warn('[DIRECT_WEB] search query failed',{query:q,status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,300)});
+    }
+  }
+  const seen=new Set();
+  const unique=all.filter(x=>{
+    const key=String(x.url||x.title).replace(/[?#].*$/,'').toLowerCase();
+    if(seen.has(key)) return false;
+    seen.add(key); return true;
+  }).slice(0,8);
+  if(!unique.length) throw Object.assign(new Error('Direct web search returned no results'),{status:503});
+  return 'מצאתי מידע עדכני בחיפוש באינטרנט. '+unique.map((x,i)=>{
+    const snippet=String(x.snippet||'').trim();
+    return (i+1)+'. '+sanitizeForYemot(x.title)+(snippet ? '. '+sanitizeForYemot(snippet).slice(0,500) : '');
+  }).join(' ');
+}
+
 async function answerWithWebSearch(transcript, historyText='') {
   const question=String(transcript||'').trim();
   if(!question) throw Object.assign(new Error('Search requested but transcript is empty'),{status:400});
@@ -1221,6 +1300,13 @@ ${question}
     });
     if(isWeatherQuestion(question)) return await answerWeatherDirect(question);
     if(isNewsQuestion(question)) return await answerNewsDirect(question, historyText);
+    try {
+      const directAnswer=await answerWithDirectWebFallback(question);
+      console.info('[WEB_SEARCH] direct web fallback succeeded after Gemini failure');
+      return directAnswer;
+    } catch(fallbackError) {
+      console.warn('[WEB_SEARCH] direct web fallback also failed',{status:geminiErrorStatus(fallbackError),message:String(fallbackError?.message||fallbackError).slice(0,400)});
+    }
     throw e;
   }
 }
