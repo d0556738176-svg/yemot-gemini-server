@@ -1546,6 +1546,22 @@ async function youtubeCallHandler(call) {
   }
 }
 
+async function answerBackupWithWebSearch(transcript, historyText='') {
+  const question=String(transcript||'').trim();
+  if(!question) throw Object.assign(new Error('Backup web search requested but transcript is empty'),{status:400});
+  const prompt=EXCLUSIVE_INSTRUCTION+
+    '\\n\\nהקשר קודם של השיחה:\\n'+(historyText||'אין עדיין הקשר קודם.')+
+    '\\n\\nהשאלה המדויקת של המתקשר לחיפוש באינטרנט:\\n'+question+
+    '\\n\\nבצע חיפוש אינטרנט חי ורחב באמצעות Google Search. פרק את הבקשה לכמה כיווני חיפוש כשצריך, העדף מקורות רשמיים ועדכניים, השווה בין מקורות ואל תמציא מידע. ענה בעברית טבעית, ברורה וקצרה להקראה בטלפון.';
+  const result=await generateBackupWithRetry(
+    [{role:'user',parts:[{text:prompt}]}],
+    true
+  );
+  const answer=String(result?.response?.text?.()||'').trim();
+  if(!answer) throw Object.assign(new Error('Backup web search returned empty answer'),{status:503});
+  return answer;
+}
+
 // Backup branch configuration marker: branch 3 remains isolated from branch 1.
 const BACKUP_GEMINI_API_KEY = (process.env.YEMOT_BACKUP_GEMINI_API_KEY || process.env.GEMINI_BACKUP_API_KEY || apiKeys[1] || '').trim();
 const backupGeminiClient = BACKUP_GEMINI_API_KEY ? new GoogleGenerativeAI(BACKUP_GEMINI_API_KEY) : null;
