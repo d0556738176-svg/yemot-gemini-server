@@ -863,7 +863,7 @@ function wantsYouTubeVideoFollowUp(text) {
 }
 
 async function searchYouTubeForPhone(transcript, historyText='', context={}) {
-  const key=(process.env.YOUTUBE_API_KEY||'').trim();
+  const key=((arguments[3]||'').trim() || process.env.YOUTUBE_API_KEY || '').trim();
   if(!key) return null;
   const question=String(transcript||'').trim();
   if(!question) return null;
@@ -1712,7 +1712,7 @@ async function backupCallHandler(call) {
         if(webRequested && !youtubeRequested) {
           replyText=await answerBackupWithWebSearch(userTranscript,historyText);
         } else if(youtubeRequested) {
-          const youtubeAnswer=await searchYouTubeForPhone(userTranscript,historyText,turnContext);
+          const youtubeAnswer=await searchYouTubeForPhone(userTranscript,historyText,turnContext,(process.env.YOUTUBE_BACKUP_API_KEY||'').trim());
           replyText=youtubeAnswer || 'לא הצלחתי כרגע לקבל תוצאות מיוטיוב. נא לנסות שוב בעוד כמה רגעים.';
         } else {
           const answerPrompt=EXCLUSIVE_INSTRUCTION+
