@@ -1065,7 +1065,7 @@ async function analyzePublicVideoUrl(videoUrl, question) {
   if(!candidateKeys.length) throw Object.assign(new Error('Gemini key unavailable for video analysis'),{status:503});
   const configuredMediaModel=(process.env.MEDIA_GEMINI_MODEL||process.env.YOUTUBE_GEMINI_MODEL||'gemini-3.8-flash').trim();
   const mediaModels=[...new Set([configuredMediaModel,'gemini-3.6-flash','gemini-3.5-flash-lite'])].filter(Boolean);
-  const isYouTube=/^(?:https?:\\/\\/)?(?:www\\.)?(?:youtube\\.com|youtu\\.be)\\//i.test(videoUrl);
+  const isYouTube=/^(?:https?:\/\/)?(?:www\.)?(?:youtube\.com|youtu\.be)\//i.test(videoUrl);
   let videoInput;
 
   if(isYouTube){
@@ -1077,7 +1077,7 @@ async function analyzePublicVideoUrl(videoUrl, question) {
     const mime=String(response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
     const contentLength=Number(response.headers.get('content-length')||0);
     if(contentLength && contentLength>MEDIA_MAX_VIDEO_BYTES) throw Object.assign(new Error('Video too large for phone analysis'),{status:413});
-    if(!mime.startsWith('video/') && !/\\.(mp4|webm|mov|mpeg|mpg|avi|wmv|3gp)(?:\\?|$)/i.test(videoUrl))
+    if(!mime.startsWith('video/') && !/\.(mp4|webm|mov|mpeg|mpg|avi|wmv|3gp)(?:\?|$)/i.test(videoUrl))
       throw Object.assign(new Error('Public URL is not a supported video'),{status:415});
     const bytes=await readResponseBufferLimited(response,MEDIA_MAX_VIDEO_BYTES,'Public video');
     videoInput={type:'video',data:bytes.toString('base64'),mime_type:mime||'video/mp4'};
@@ -1149,12 +1149,12 @@ async function findPublicImageForVisualQuery(question) {
           for(const block of (step?.content||[])){
             for(const ann of (block?.annotations||[])){
               const u=String(ann?.url||ann?.url_citation?.url||'').trim();
-              if(/^https?:\\/\\//i.test(u) && !urls.includes(u)) urls.push(u);
+              if(/^https?:\/\//i.test(u) && !urls.includes(u)) urls.push(u);
             }
           }
         }
         const out=String(data?.output_text||'');
-        for(const m of out.matchAll(/https?:\\/\\/[^\\s)]+/gi)){
+        for(const m of out.matchAll(/https?:\/\/[^\s)]+/gi)){
           const u=m[0].replace(/[.,;]+$/,'');
           if(!urls.includes(u)) urls.push(u);
         }
@@ -1243,7 +1243,7 @@ async function analyzeRequestedMedia(question, context={}) {
   let lastError=null;
   for(const url of urls.slice(0,MEDIA_MAX_CANDIDATES)){
     try{
-      if(intent.video || /(?:youtube\\.com|youtu\\.be)/i.test(url)) return await analyzePublicVideoUrl(url,question);
+      if(intent.video || /(?:youtube\.com|youtu\.be)/i.test(url)) return await analyzePublicVideoUrl(url,question);
       return await analyzePublicImageUrl(url,question);
     }catch(e){
       lastError=e;
@@ -1283,7 +1283,7 @@ async function analyzeRequestedMedia(question, context={}) {
     return String(data?.output_text||'').trim();
   }
 
-  if(intent.video || /(?:youtube\.com|youtu\.be)/i.test(url)) return analyzePublicVideoUrl(url,question);
+      if(intent.video || /(?:youtube\.com|youtu\.be)/i.test(url)) return await analyzePublicVideoUrl(url,question);
   return analyzePublicImageUrl(url,question);
 }
 
