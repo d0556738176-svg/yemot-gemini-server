@@ -202,12 +202,15 @@ async function addConversationEntry({phone, callId, userText, geminiText}) {
 }
 function sanitizeForYemot(text) {
   if (!text) return '';
-  // Yemot response text cannot contain the pipe character; YouTube titles and
-  // search results commonly contain it, so normalize it before every handoff.
+  // Keep branch 1 speech output conservative: strip URLs/markdown/control
+  // characters and normalize punctuation that can confuse phone TTS.
   return String(text)
+    .replace(/https?:\/\/\S+/gi, ' ')
     .replace(/[|]/g, ' ')
+    .replace(/[\\*_#<>\[\]{}]/g, ' ')
     .replace(/[.&"“”‘’']/g, ' ')
     .replace(/[-–—]/g, ' ')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -432,7 +435,7 @@ async function transcribeWithDeepgram(audioBuffer, overrideKey='') {
   const bytes=Buffer.isBuffer(audioBuffer)?audioBuffer:Buffer.from(audioBuffer);
   const mimeType=(process.env.YEMOT_AUDIO_MIME_TYPE||detectAudioMime(bytes)||'audio/wav').trim();
   const vocabulary=(process.env.DEEPGRAM_KEYTERMS ||
-    'יוטיוב,YouTube,גוגל,Google,אילן גוזל,רנולד,ימות,רנולד שוורצנגר')
+    'יוטיוב,YouTube,גוגל,Google,ChatGPT,GPT,Gemini,גמיני,ג׳מיני,ימות,ימות המשיח,רנולד,רנולד שוורצנגר,Deepgram,Render,Supabase,API,אילן גוזל,רעננה,סופר פארם,בנק הפועלים,בנק דיסקונט,בנק לאומי,בנק מזרחי טפחות,מכבי,כללית,מאוחדת,לאומית')
     .split(',').map(x=>x.trim()).filter(Boolean).slice(0,100);
 
   const url=new URL('https://api.deepgram.com/v1/listen');
@@ -2358,8 +2361,31 @@ async function callHandler(call) {
       'שלום איך אפשר לעזור לך היום אמור בבקשה על מה תרצה לדבר אחרי הצפצוף ולסיום ההקלטה הקש סולמית'):
       'אמור שאלה נוספת ולסיום הקש סולמית או הקש כוכבית ליציאה');
     firstTurn=false;
-    const recordPath=await call.read([{type:'text',data:prompt}],'record',
-      {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
+    let recordPath;
+    try {
+      recordPath=await call.read([{type:'text',data:prompt}],'record',
+        {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
+    } catch(readError) {
+      // Do not let a temporary Yemot TTS/read failure kill branch 1.
+      // Retry once with a short, TTS-safe prompt and keep the same call context.
+      console.warn('[TTS] branch1 read failed; retrying with short prompt',{
+        callId:activeKey,
+        status:geminiErrorStatus(readError),
+        message:String(readError?.message||readError).slice(0,240)
+      });
+      const retryPrompt='יש תקלה זמנית בהקראה. אפשר להמשיך. אמור בבקשה את השאלה שלך ולסיום הקש סולמית.';
+      try {
+        recordPath=await call.read([{type:'text',data:retryPrompt}],'record',
+          {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
+      } catch(retryError) {
+        console.error('[TTS] branch1 read retry failed',{
+          callId:activeKey,
+          status:geminiErrorStatus(retryError),
+          message:String(retryError?.message||retryError).slice(0,240)
+        });
+        throw retryError;
+      }
+    }
     if(!recordPath || recordPath==='None') {
       emptyRecordAttempts++;
       if(emptyRecordAttempts < 3) {
