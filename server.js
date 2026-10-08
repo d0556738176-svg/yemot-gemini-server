@@ -1102,7 +1102,7 @@ async function findPublicImageForVisualQuery(question) {
     }
   }
   const text=String(data?.output_text||'');
-  for(const m of text.matchAll(/https?:\\/\\/[^\\s)]+/gi)) {
+  for(const m of text.matchAll(/https?:\/\/[^\s)]+/gi)) {
     const u=m[0].replace(/[.,;]+$/,'');
     if(!urls.includes(u)) urls.push(u);
   }
