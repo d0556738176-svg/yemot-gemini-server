@@ -1253,40 +1253,6 @@ async function analyzeRequestedMedia(question, context={}) {
   throw lastError||Object.assign(new Error('All public visual candidates failed'),{status:503});
 }
 
-async function analyzeRequestedMedia(question, context={}) {
-  const intent=isMultimodalAnalysisRequest(question);
-  if(!intent.any) return null;
-  const explicitUrl=extractPublicUrl(question);
-  const youtubeVideo=context?.currentVideo?.videoId
-    ? 'https://www.youtube.com/watch?v='+context.currentVideo.videoId : '';
-  let url=explicitUrl||youtubeVideo;
-  if(!url && intent.video && context?.youtubeResults?.length) {
-    const candidate=context.youtubeResults[0];
-    if(candidate?.videoId) url='https://www.youtube.com/watch?v='+candidate.videoId;
-  }
-  if(!url && intent.image && !intent.video) {
-    const discoveredImage=await findPublicImageForVisualQuery(question);
-    if(discoveredImage) url=discoveredImage;
-  }
-  if(!url) throw Object.assign(new Error('לא מצאתי מקור ציבורי מתאים לניתוח החזותי. נסה לציין את שם האדם או לשלוח קישור לתמונה.'),{status:400});
-
-  if(intent.site && !intent.image && !intent.video) {
-    const key=apiKeys[0]||'';
-    if(!key) throw Object.assign(new Error('Gemini key unavailable for site analysis'),{status:503});
-    const model=(process.env.MEDIA_GEMINI_MODEL||'gemini-3.8-flash').trim();
-    const r=await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{
-      method:'POST',headers:{'x-goog-api-key':key,'Content-Type':'application/json'},
-      body:JSON.stringify({model,store:false,input:'נתח את האתר הבא לפי בקשת המתקשר. כתובת: '+url+'\nבקשה: '+question,tools:[{type:'url_context'}]})
-    }),MEDIA_ANALYSIS_TIMEOUT_MS,'Gemini site analysis');
-    const data=await r.json().catch(()=>({}));
-    if(!r.ok) throw Object.assign(new Error(data?.error?.message||('Gemini site analysis HTTP '+r.status)),{status:r.status});
-    return String(data?.output_text||'').trim();
-  }
-
-      if(intent.video || /(?:youtube\.com|youtu\.be)/i.test(url)) return await analyzePublicVideoUrl(url,question);
-  return analyzePublicImageUrl(url,question);
-}
-
 function wantsYouTubeVideoFollowUp(text) {
   return /(על מה|מה דיברו|מה דיבר|מה אמרו|מה נאמר|מה היה|מה קרה בסרטון|מה בדיוק|תוכן הסרטון|תוכן השיר|מילים|סכם|סיכום|תספר לי מה יש|כמה צפיות|מספר צפיות|צפיות|כמה לייקים|לייקים|כמה תגובות|תגובות|מה אומרים בתגובות|מה כתבו בתגובות|פרטי הסרטון|פרטים על הסרטון|מידע על הסרטון|מתי עלה|מתי פורסם|תאריך הפרסום|תיאור הסרטון|מי העלה|באיזה ערוץ|שם הערוץ)/i.test(String(text||''));
 }
