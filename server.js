@@ -95,6 +95,7 @@ const DIRECT_WEB_QUERY_TIMEOUT_MS = Number(process.env.DIRECT_WEB_QUERY_TIMEOUT_
 // a slow Deepgram request does not inherit Gemini's tighter phone-answer timeout.
 // 18s is only a safety ceiling; successful requests should return much sooner.
 const PHONE_DEEPGRAM_TIMEOUT_MS = Number(process.env.PHONE_DEEPGRAM_TIMEOUT_MS || 18000);
+const MEDIA_ANALYSIS_TIMEOUT_MS = Number(process.env.MEDIA_ANALYSIS_TIMEOUT_MS || 90000);
 
 // Avoid repeatedly hammering Gemini after the API has explicitly reported quota exhaustion.
 // This is especially important on phone calls, where a second fallback request can turn one
