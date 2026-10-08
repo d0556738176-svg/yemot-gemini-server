@@ -1187,21 +1187,79 @@ function shouldForceWebSearch(transcript) {
   return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|שעות פעילות|פתוח עכשיו|סגור היום|מתי נסגר|מתי סוגר|מתי פתוח|יצירת קשר|איך יוצרים קשר|אתר רשמי|רשתות חברתיות|רשת חברתית|אינסטגרם|פייסבוק|טיקטוק|טוויטר|עדכון אחרון|מה חדש|הופעה|הופעות|מופע|מופעים|אירוע|אירועים|כרטיסים|רכישת כרטיסים|לקנות כרטיסים|איפה קונים|מחיר כרטיס|מכירת כרטיסים|בית מרקחת|בתי מרקחת|חנות|חנויות|עסק|עסקים|סניף|סניפים|כתובת של|מייל של|דוא.?ל|אימייל|קישור|האתר של|מידע מהאתר|חפש באתר|תחפש באתר|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם|אוטובוס|אוטובוסים|תחנת אוטובוס|תחבורה ציבורית|קו אוטובוס|קווי אוטובוס|רכבת|תחנת רכבת|מסלול נסיעה|איך מגיעים|איך להגיע|הגעה ל|טיול|טיולים|מסלול טיול|אירוע היום|אירועים היום|פעילות היום|פעילויות היום|פעילות קהילתית|פעילויות קהילתיות|מה יש היום|מה יש בסוף השבוע|מה יש בעיר)/i.test(t);
 }
 
+function compactJinaContent(value, query='') {
+  const text=stripHtml(decodeHtmlEntities(String(value||''))).replace(/\\s+/g,' ').trim();
+  if(!text) return '';
+  const terms=String(query||'').toLowerCase().split(/\\s+/).filter(x=>x.length>=3).slice(0,8);
+  const sentences=text.split(/(?<=[.!?。！？])\\s+/);
+  const relevant=sentences.filter(sentence=>{
+    const s=sentence.toLowerCase();
+    return terms.some(term=>s.includes(term)) || /(כתובת|טלפון|שעות|פתוח|סגור|סניף|מחיר|כרטיס|תאריך|שעה|contact|address|phone|hours|price|tickets)/i.test(sentence);
+  });
+  return (relevant.length ? relevant.slice(0,8).join(' ') : text.slice(0,1400)).slice(0,1800);
+}
+
+function parseJinaSearchResults(body, query='') {
+  const source=String(body||'').trim();
+  if(!source) return [];
+  let parsed=null;
+  try { parsed=JSON.parse(source); } catch {}
+  let entries=[];
+  if(Array.isArray(parsed)) entries=parsed;
+  else if(parsed && Array.isArray(parsed.data)) entries=parsed.data;
+  else if(parsed && Array.isArray(parsed.results)) entries=parsed.results;
+  else if(parsed && Array.isArray(parsed.items)) entries=parsed.items;
+
+  const results=[];
+  for(const item of entries.slice(0,10)){
+    const title=stripHtml(decodeHtmlEntities(String(item?.title||item?.name||'').trim()));
+    const url=normalizeSearchHref(String(item?.url||item?.link||'').trim());
+    const snippet=compactJinaContent(item?.content||item?.snippet||item?.description||'',query);
+    if(title&&url) results.push({title,url,snippet});
+  }
+  if(results.length) return dedupeSearchResults(results);
+
+  // Fallback for a plain-text/markdown response from s.jina.ai.
+  const lines=source.split('\\n').map(x=>x.trim()).filter(Boolean);
+  for(let i=0;i<lines.length&&results.length<10;i++){
+    const line=lines[i];
+    const urlMatch=line.match(/https?:\\/\\/[^\\s)]+/);
+    if(!urlMatch) continue;
+    const url=normalizeSearchHref(urlMatch[0]);
+    if(!url) continue;
+    let title=line.replace(urlMatch[0],'').replace(/^[-*#>\\s]+/,'').trim();
+    if(!title) title='תוצאת חיפוש';
+    results.push({title:stripHtml(decodeHtmlEntities(title)).slice(0,240),url,snippet:compactJinaContent(lines.slice(i+1,i+6).join(' '),query)});
+  }
+  return dedupeSearchResults(results);
+}
+
 async function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
-  const timeoutMs=Number(options.timeoutMs||5000);
+  const timeoutMs=Number(options.timeoutMs||8000);
+  const jinaKey=(process.env.JINA_API_KEY||'').trim();
+  const jinaHeaders={
+    'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)',
+    'accept':'application/json,text/plain;q=0.9,*/*;q=0.8',
+    'accept-language':'he-IL,he;q=0.9,en;q=0.7',
+    'x-timeout':'8',
+    'x-token-budget':'6000',
+    'x-locale':'he-IL',
+    ...(jinaKey ? {'authorization':'Bearer '+jinaKey} : {})
+  };
   const providers=[
-    ['bing-rss','https://www.bing.com/search?format=rss&q='+encodeURIComponent(q.slice(0,240)),parseBingRssResults],
-    ['google','https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240)),parseGoogleResults],
-    ['yahoo','https://search.yahoo.com/search?p='+encodeURIComponent(q.slice(0,240)),parseYahooResults],
-    ['duckduckgo','https://html.duckduckgo.com/html/?q='+encodeURIComponent(q.slice(0,240)),parseDuckDuckGoResults]
+    ['jina','https://s.jina.ai/?q='+encodeURIComponent(q.slice(0,240)),body=>parseJinaSearchResults(body,q),jinaHeaders],
+    ['bing-rss','https://www.bing.com/search?format=rss&q='+encodeURIComponent(q.slice(0,240)),parseBingRssResults,null],
+    ['google','https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240)),parseGoogleResults,null],
+    ['yahoo','https://search.yahoo.com/search?p='+encodeURIComponent(q.slice(0,240)),parseYahooResults,null],
+    ['duckduckgo','https://html.duckduckgo.com/html/?q='+encodeURIComponent(q.slice(0,240)),parseDuckDuckGoResults,null]
   ];
   let lastError=null;
   for(const provider of providers){
-    const name=provider[0], target=provider[1], parser=provider[2];
+    const name=provider[0], target=provider[1], parser=provider[2], customHeaders=provider[3];
     try{
-      const response=await withTimeout(fetch(target,{headers:{
+      const response=await withTimeout(fetch(target,{headers:customHeaders||{
         'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/154 Safari/537.36',
         'accept':'application/rss+xml,application/xml,text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
         'accept-language':'he-IL,he;q=0.9,en;q=0.7'
@@ -1221,7 +1279,6 @@ async function searchWebDirect(query, options={}) {
   }
   throw lastError||Object.assign(new Error('Direct web search unavailable'),{status:503});
 }
-
 function decodeXml(value){
   return decodeHtmlEntities(String(value||'').replace('<![CDATA[','').replace(']]>',''));
 }
@@ -1998,276 +2055,3 @@ async function backupCallHandler(call) {
         try { replyText=await answerWeatherDirect(userTranscript); }
         catch { replyText=await answerBackupWithWebSearch(userTranscript,historyText); }
       } else if(isNewsQuestion(userTranscript)) {
-        replyText=await answerBackupWithWebSearch(userTranscript,historyText);
-      } else {
-        const webRequested=shouldForceWebSearch(userTranscript);
-        const youtubeRequested=/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript);
-
-        if(webRequested && !youtubeRequested) {
-          replyText=await answerBackupWithWebSearch(userTranscript,historyText);
-        } else if(youtubeRequested) {
-          const youtubeAnswer=await searchYouTubeForPhone(userTranscript,historyText,turnContext,(process.env.YOUTUBE_BACKUP_API_KEY||'').trim());
-          replyText=youtubeAnswer || 'לא הצלחתי כרגע לקבל תוצאות מיוטיוב. נא לנסות שוב בעוד כמה רגעים.';
-        } else {
-          const answerPrompt=EXCLUSIVE_INSTRUCTION+
-            '\\n\\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+
-            '. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+
-            '\\n\\nהקשר קודם של השיחה, לפי הסדר:\\n'+
-            (historyText||'אין עדיין הקשר קודם.')+
-            '\\n\\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\\n'+
-            userTranscript+
-            '\\n\\nענה על השאלה בלבד. החזר אובייקט JSON תקין בלבד עם שדה "answer". '+
-            'התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. '+
-            'אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
-          const result=await generateBackupWithRetry(
-            [{role:'user',parts:[{text:answerPrompt}]}],
-            false
-          );
-          const raw=String(result?.response?.text?.()||'').trim();
-          let parsed=null;
-          try { parsed=JSON.parse(raw); } catch {
-            const m=raw.match(/\{[\s\S]*\}/);
-            if(m) { try { parsed=JSON.parse(m[0]); } catch {} }
-          }
-          replyText=String(parsed?.answer||raw||'לא הצלחתי לענות כרגע').trim();
-        }
-      }
-
-      if(feedbackPending &&
-         /^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר|לא|לא עזר|לא ממש|לא כל כך)\\s*$/i.test(userTranscript)) {
-        replyText=/^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר)/i.test(userTranscript)
-          ? 'מצוין. שמח שעזרתי לך. מה עוד תרצה שאעשה עבורך?'
-          : 'בסדר. מה לא היה ברור או מה חסר לך? אמור לי ואנסה לעזור בצורה אחרת.';
-        feedbackPending=false;
-      }
-
-      replyText=sanitizeForYemot(replyText)||'מצטער לא הצלחתי לנסח תשובה. נסה שוב.';
-      const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
-        phone:normalizePhone(callerPhone),callId:String(callId||''),
-        user:userTranscript,gemini:replyText};
-      conversationLog.push(entry);
-      if(conversationLog.length>MAX_CONVERSATION_LOG)
-        conversationLog.splice(0,conversationLog.length-MAX_CONVERSATION_LOG);
-      await persistConversationEntry(entry);
-
-      turnHistory.push({user:userTranscript,assistant:replyText});
-      if(turnHistory.length>8) turnHistory.shift();
-
-      console.info('[BACKUP CALL_FLOW] reply_ready',{
-        callId:activeKey,chars:replyText.length,historyTurns:turnHistory.length
-      });
-      nextPrompt=replyText;
-      feedbackPending=true;
-    } catch(e) {
-      logDetailedError('Backup Gemini processing',e);
-      const status=geminiErrorStatus(e);
-      nextPrompt=status===429
-        ? 'מצטערים, מנוע הגיבוי הגיע כרגע למגבלת השימוש. נסה שוב בעוד כמה רגעים.'
-        : status===408
-          ? 'מצטערים, לקח יותר מדי זמן לענות. נסה שוב.'
-          : 'מצטער, הייתה תקלה זמנית במערכת הגיבוי. אמור שוב את השאלה.';
-    }
-  }
-}
-
-router.get('/yemot', callHandler);
-router.get('/yemot-backup', backupCallHandler);
-router.get('/yemot-youtube', youtubeCallHandler);
-app.use(router);
-
-app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDashboardAuth, (req,res)=>res.json({
-  conversations:conversationLog,
-  activeCalls:Array.from(activeCalls.values()),
-  totalMessages:conversationLog.length,
-  totalCallers:new Set(conversationLog.map(x=>x.phone)).size,
-  serverTime:new Date().toISOString()
-}));
-app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
-
-app.use('/dashboard', express.static(new URL('./public', import.meta.url).pathname));
-
-app.get('/api/youtube/authorized-source', rateLimit(60, 60 * 1000, 'youtube-authorized-source'), requireDashboardAuth, async (req,res)=>{
-  const videoId=String(req.query.videoId||'').trim();
-  if(!/^[A-Za-z0-9_-]{6,20}$/.test(videoId))
-    return res.status(400).json({error:'Invalid videoId'});
-  if(!SUPABASE_ENABLED)
-    return res.status(503).json({error:'Supabase is not configured'});
-  try {
-    const url=new URL(SUPABASE_URL+'/rest/v1/authorized_audio_sources');
-    url.searchParams.set('select','video_id,source_url,enabled,created_at,updated_at');
-    url.searchParams.set('video_id','eq.'+videoId);
-    const response=await fetch(url,{
-      headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY},
-      signal:AbortSignal.timeout(10000)
-    });
-    if(!response.ok) return res.status(502).json({error:'Authorized source registry unavailable'});
-    const rows=await response.json();
-    return res.json({source:rows?.[0]||null});
-  } catch(e) {
-    logDetailedError('Authorized source lookup',e);
-    return res.status(502).json({error:'Authorized source lookup failed'});
-  }
-});
-
-app.post('/api/youtube/authorized-source', rateLimit(30, 60 * 1000, 'youtube-authorized-source-write'), requireDashboardAuth, async (req,res)=>{
-  const videoId=String(req.body?.videoId||'').trim();
-  const sourceUrl=String(req.body?.sourceUrl||'').trim();
-  if(!/^[A-Za-z0-9_-]{6,20}$/.test(videoId))
-    return res.status(400).json({error:'Invalid videoId'});
-  if(!sourceUrl) return res.status(400).json({error:'Missing sourceUrl'});
-  if(!SUPABASE_ENABLED) return res.status(503).json({error:'Supabase is not configured'});
-
-  try {
-    const parsed=new URL(sourceUrl);
-    const allowedHosts=String(process.env.AUTHORIZED_AUDIO_HOSTS||'')
-      .split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
-    if(parsed.protocol!=='https:' || !allowedHosts.length || !allowedHosts.includes(parsed.hostname.toLowerCase()))
-      return res.status(400).json({error:'Source URL must be HTTPS and use an allowlisted host'});
-
-    const url=new URL(SUPABASE_URL+'/rest/v1/authorized_audio_sources');
-    const response=await fetch(url,{
-      method:'POST',
-      headers:{
-        apikey:SUPABASE_KEY,
-        Authorization:'Bearer '+SUPABASE_KEY,
-        'Content-Type':'application/json',
-        Prefer:'resolution=merge-duplicates,return=representation'
-      },
-      body:JSON.stringify({
-        video_id:videoId,
-        source_url:parsed.toString(),
-        enabled:true,
-        updated_at:new Date().toISOString()
-      })
-    });
-    const body=await response.text();
-    if(!response.ok) return res.status(502).json({error:'Authorized source registry write failed'});
-    let data=[]; try { data=JSON.parse(body); } catch {}
-    return res.json({ok:true,source:data?.[0]||{video_id:videoId,source_url:parsed.toString(),enabled:true}});
-  } catch(e) {
-    logDetailedError('Authorized source registration',e);
-    return res.status(400).json({error:'Invalid source URL'});
-  }
-});
-
-app.delete('/api/youtube/authorized-source', rateLimit(30, 60 * 1000, 'youtube-authorized-source-delete'), requireDashboardAuth, async (req,res)=>{
-  const videoId=String(req.query.videoId||'').trim();
-  if(!/^[A-Za-z0-9_-]{6,20}$/.test(videoId))
-    return res.status(400).json({error:'Invalid videoId'});
-  if(!SUPABASE_ENABLED) return res.status(503).json({error:'Supabase is not configured'});
-  try {
-    const url=new URL(SUPABASE_URL+'/rest/v1/authorized_audio_sources');
-    url.searchParams.set('video_id','eq.'+videoId);
-    const response=await fetch(url,{
-      method:'DELETE',
-      headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+SUPABASE_KEY},
-      signal:AbortSignal.timeout(10000)
-    });
-    if(!response.ok) return res.status(502).json({error:'Authorized source registry delete failed'});
-    return res.json({ok:true,videoId});
-  } catch(e) {
-    logDetailedError('Authorized source deletion',e);
-    return res.status(502).json({error:'Authorized source deletion failed'});
-  }
-});
-
-app.get('/api/youtube/search', rateLimit(20, 60 * 1000, 'youtube'), requireDashboardAuth, async (req,res)=>{
-  const key=(process.env.YOUTUBE_API_KEY||'').trim();
-  const q=String(req.query.q||'').trim().slice(0,120);
-  if(!key) return res.status(503).json({error:'YouTube search is not configured'});
-  if(!q) return res.status(400).json({error:'Missing query'});
-  try {
-    const url=new URL('https://www.googleapis.com/youtube/v3/search');
-    url.searchParams.set('part','snippet');
-    url.searchParams.set('q',q);
-    url.searchParams.set('type','video');
-    url.searchParams.set('maxResults','50');
-    url.searchParams.set('safeSearch','strict');
-    url.searchParams.set('regionCode',process.env.YOUTUBE_REGION_CODE||'IL');
-    url.searchParams.set('key',key);
-    const r=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'YouTube search');
-    const data=await r.json();
-    if(!r.ok) return res.status(r.status===403?502:400).json({error:'YouTube search failed'});
-    res.setHeader('Cache-Control','no-store');
-    return res.json({items:(data.items||[]).map(x=>({
-      videoId:x.id?.videoId||'',title:x.snippet?.title||'',description:x.snippet?.description||'',
-      channelTitle:x.snippet?.channelTitle||'',publishedAt:x.snippet?.publishedAt||'',
-      thumbnail:x.snippet?.thumbnails?.medium?.url||x.snippet?.thumbnails?.default?.url||''
-    })).filter(x=>x.videoId)});
-  } catch(e) {
-    logDetailedError('YouTube search',e);
-    return res.status(502).json({error:'YouTube search unavailable'});
-  }
-});
-app.get('/',(req,res)=>res.type('html').send('<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>AI Phone Line</title></head><body><h1>AI Phone Line Dashboard</h1><p>המערכת מחוברת וממתינה לשיחות</p></body></html>'));
-
-async function configureYemotStructure() {
-  const apiUser=(process.env.YEMOT_API_USERNAME||'').trim();
-  const apiPassword=(process.env.YEMOT_API_PASSWORD||'').trim();
-  if(!apiUser || !apiPassword) {
-    console.log('Yemot system number or management password missing; skipping automatic setup');
-    return;
-  }
-
-  const token=apiUser+':'+apiPassword;
-  const base='https://www.call2all.co.il/ym/api';
-
-  async function updateExtension(path,params) {
-    const qs=new URLSearchParams({token,path,...params});
-    const url=base + '/UpdateExtension?' + qs.toString();
-    const r=await fetch(url);
-    const responseText=await r.text();
-    let data;
-    try { data=JSON.parse(responseText); } catch { data={raw:responseText}; }
-
-    if(!r.ok) throw new Error('UpdateExtension HTTP ' + r.status + ' path=' + path);
-    if(data.responseStatus && data.responseStatus!=='OK') {
-      const detail=data.message || data.error || data.responseStatus;
-      throw new Error('UpdateExtension failed path=' + path + ': ' + String(detail).slice(0,180));
-    }
-    console.log('[Yemot automatic setup] UpdateExtension OK path=' + path);
-    return data;
-  }
-
-  const publicUrl=(process.env.PUBLIC_BASE_URL||'').replace(/\/$/,'');
-  if(!publicUrl) {
-    console.log('PUBLIC_BASE_URL missing; skipping automatic IVR URL setup');
-    return;
-  }
-
-  let parsedBase;
-  try { parsedBase = new URL(publicUrl); }
-  catch { throw new Error('PUBLIC_BASE_URL is invalid'); }
-  if(parsedBase.protocol !== 'https:') throw new Error('PUBLIC_BASE_URL must use HTTPS');
-
-  await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
-  // Extension 2 is the isolated YouTube robot; preserve voice selection under extension 3.
-  await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
-  if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
-  else console.log('[Yemot automatic setup] Backup key missing; /3 was not changed');
-
-  const voiceMap=(process.env.YEMOT_VOICE_OPTIONS||'1:Elik_2100,2:Jacob,3:ymMale').split(',');
-  for(const item of voiceMap) {
-    const [extension,voice]=item.split(':');
-    if(!extension||!voice) continue;
-    await updateExtension('ivr2:/' + '3/' + extension,{
-      type:'add_id_to_list',
-      add_id_to_list_location_list:'/ivr',
-      add_id_to_list_key:'voice',
-      add_id_to_list_value:voice,
-      add_id_to_list_value_change:'yes',
-      add_id_to_list_end_goto:'/1',
-      add_id_to_list_error_end_goto:'/2'
-    });
-  }
-}
-
-process.on('unhandledRejection',(reason)=>{if(!(reason instanceof ExitError)) logDetailedError('Unhandled Rejection',reason)});
-process.on('uncaughtException',(err)=>{if(!(err instanceof ExitError)) logDetailedError('Uncaught Exception',err)});
-const port=process.env.PORT||3000;
-app.listen(port,async()=>{
-  console.log('server running on port '+port);
-  await loadConversationLog();
-  try { await configureYemotStructure(); }
-  catch (e) { logDetailedError('Yemot automatic setup', e); }
-});
