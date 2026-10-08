@@ -1190,27 +1190,102 @@ function shouldForceWebSearch(transcript) {
 async function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
-  const url=new URL('https://html.duckduckgo.com/html/');
-  url.searchParams.set('q',q.slice(0,240));
-  const response=await withTimeout(fetch(url,{
-    headers:{'user-agent':'Mozilla/5.0 (compatible; YemotAnswerEngine/1.0)'}
-  }), Number(options.timeoutMs||10000), 'direct web search');
-  const html=await response.text();
-  if(!response.ok) throw Object.assign(new Error('Direct web search HTTP '+response.status),{status:response.status});
+
+  const timeoutMs=Number(options.timeoutMs||7000);
+  const providers=[
+    ['google','https://www.google.com/search',parseGoogleResults],
+    ['bing','https://www.bing.com/search',parseBingResults],
+    ['duckduckgo','https://html.duckduckgo.com/html/',parseDuckDuckGoResults]
+  ];
+
+  let lastError=null;
+  for(const [name,baseUrl,parser] of providers){
+    try {
+      const url=new URL(baseUrl);
+      url.searchParams.set('q',q.slice(0,240));
+      if(name==='google'){
+        url.searchParams.set('hl','he');
+        url.searchParams.set('gl','il');
+        url.searchParams.set('num','10');
+      } else if(name==='bing'){
+        url.searchParams.set('setlang','he-IL');
+        url.searchParams.set('cc','il');
+        url.searchParams.set('count','10');
+      }
+
+      const response=await withTimeout(fetch(url,{
+        headers:{
+          'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/154 Safari/537.36',
+          'accept':'text/html,application/xhtml+xml'
+        }
+      }),timeoutMs,'direct web search '+name);
+
+      const html=await response.text();
+      if(!response.ok) throw Object.assign(new Error('Direct web search '+name+' HTTP '+response.status),{status:response.status});
+
+      const results=parser(html).filter(x=>x.title && x.url);
+      if(results.length){
+        console.info('[DIRECT_WEB] provider succeeded',{provider:name,query:q.slice(0,180),results:results.length});
+        return results.slice(0,10);
+      }
+      throw Object.assign(new Error('Direct web search '+name+' returned no parsed results'),{status:502});
+    } catch(e) {
+      lastError=e;
+      console.warn('[DIRECT_WEB] provider failed',{provider:name,status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,220)});
+    }
+  }
+
+  throw lastError || Object.assign(new Error('Direct web search unavailable'),{status:503});
+}
+
+function parseGoogleResults(html){
   const results=[];
-  const blocks=html.split(/<div[^>]+class="[^"]*result[^"]*"/i).slice(1);
-  for(const block of blocks.slice(0,12)){
-    const linkMatch=block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+  const blocks=String(html||'').split(/<div[^>]+class="[^"]*MjjYud[^"]*"[^>]*>/i).slice(1);
+  for(const block of blocks.slice(0,15)){
+    const linkMatch=block.match(/<a[^>]+href="(https?:\\/\\/[^"]+)"[^>]*>/i);
     if(!linkMatch) continue;
     const href=decodeHtmlEntities(linkMatch[1]);
-    const title=stripHtml(decodeHtmlEntities(linkMatch[2]));
-    const snippetMatch=block.match(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/i) ||
-      block.match(/<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+    if(/google\\.(?:com|co\\.il)/i.test(href)) continue;
+    const titleMatch=block.match(/<h3[^>]*>([\\s\\S]*?)<\\/h3>/i);
+    const title=titleMatch ? stripHtml(decodeHtmlEntities(titleMatch[1])) : '';
+    const snippetMatch=block.match(/<div[^>]+(?:class="[^"]*(?:VwiC3b|yXK7lf)[^"]*"|data-sncf="1")[^>]*>([\\s\\S]*?)<\\/div>/i);
     const snippet=snippetMatch ? stripHtml(decodeHtmlEntities(snippetMatch[1])) : '';
     if(title) results.push({title,url:href,snippet});
   }
   return results;
 }
+
+function parseBingResults(html){
+  const results=[];
+  const blocks=String(html||'').split(/<li[^>]+class="[^"]*b_algo[^"]*"[^>]*>/i).slice(1);
+  for(const block of blocks.slice(0,15)){
+    const linkMatch=block.match(/<h2[^>]*>\\s*<a[^>]+href="([^"]+)"[^>]*>([\\s\\S]*?)<\\/a>/i);
+    if(!linkMatch) continue;
+    const title=stripHtml(decodeHtmlEntities(linkMatch[2]));
+    const href=decodeHtmlEntities(linkMatch[1]);
+    const snippetMatch=block.match(/<p[^>]*>([\\s\\S]*?)<\\/p>/i);
+    const snippet=snippetMatch ? stripHtml(decodeHtmlEntities(snippetMatch[1])) : '';
+    if(title) results.push({title,url:href,snippet});
+  }
+  return results;
+}
+
+function parseDuckDuckGoResults(html){
+  const results=[];
+  const blocks=String(html||'').split(/<div[^>]+class="[^"]*result[^"]*"[^>]*>/i).slice(1);
+  for(const block of blocks.slice(0,15)){
+    const linkMatch=block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\\s\\S]*?)<\\/a>/i);
+    if(!linkMatch) continue;
+    const href=decodeHtmlEntities(linkMatch[1]);
+    const title=stripHtml(decodeHtmlEntities(linkMatch[2]));
+    const snippetMatch=block.match(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\\s\\S]*?)<\\/a>/i) ||
+      block.match(/<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\\s\\S]*?)<\\/div>/i);
+    const snippet=snippetMatch ? stripHtml(decodeHtmlEntities(snippetMatch[1])) : '';
+    if(title) results.push({title,url:href,snippet});
+  }
+  return results;
+}
+
 function stripHtml(value){
   return String(value||'').replace(/<script[\s\S]*?<\/script>/gi,' ')
     .replace(/<style[\s\S]*?<\/style>/gi,' ')
