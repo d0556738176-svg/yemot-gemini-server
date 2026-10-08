@@ -1193,7 +1193,13 @@ async function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
   const timeoutMs=Number(options.timeoutMs||5000);
-  const providers=[\n    ['jina','https://s.jina.ai/?q='+encodeURIComponent(q.slice(0,240)),parseJinaSearchResults],\n    ['bing-rss','https://www.bing.com/search?format=rss&q='+encodeURIComponent(q.slice(0,240)),parseBingRssResults],\n    ['google','https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240)),parseGoogleResults],\n    ['yahoo','https://search.yahoo.com/search?p='+encodeURIComponent(q.slice(0,240)),parseYahooResults],\n    ['duckduckgo','https://html.duckduckgo.com/html/?q='+encodeURIComponent(q.slice(0,240)),parseDuckDuckGoResults]\n  ];
+  const providers=[
+    ['jina','https://s.jina.ai/?q='+encodeURIComponent(q.slice(0,240)),parseJinaSearchResults],
+    ['bing-rss','https://www.bing.com/search?format=rss&q='+encodeURIComponent(q.slice(0,240)),parseBingRssResults],
+    ['google','https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240)),parseGoogleResults],
+    ['yahoo','https://search.yahoo.com/search?p='+encodeURIComponent(q.slice(0,240)),parseYahooResults],
+    ['duckduckgo','https://html.duckduckgo.com/html/?q='+encodeURIComponent(q.slice(0,240)),parseDuckDuckGoResults]
+  ];
   let lastError=null;
   for(const provider of providers){
     const name=provider[0], target=provider[1], parser=provider[2];
