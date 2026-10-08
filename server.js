@@ -1191,45 +1191,28 @@ async function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
 
-  const timeoutMs=Number(options.timeoutMs||4500);
+  const timeoutMs=Number(options.timeoutMs||5000);
   const providers=[
-    ['google','https://www.google.com/search',parseGoogleResults],
-    ['bing','https://www.bing.com/search',parseBingResults],
-    ['yahoo','https://search.yahoo.com/search',parseYahooResults],
-    ['duckduckgo','https://html.duckduckgo.com/html/',parseDuckDuckGoResults]
+    ['bing-rss','https://www.bing.com/search?format=rss&q='+encodeURIComponent(q.slice(0,240)),parseBingRssResults],
+    ['google','https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240)),parseGoogleResults],
+    ['yahoo','https://search.yahoo.com/search?p='+encodeURIComponent(q.slice(0,240)),parseYahooResults],
+    ['duckduckgo','https://html.duckduckgo.com/html/?q='+encodeURIComponent(q.slice(0,240)),parseDuckDuckGoResults]
   ];
 
   let lastError=null;
-  for(const [name,baseUrl,parser] of providers){
+  for(const [name,target,parser] of providers){
     try {
-      const url=new URL(baseUrl);
-      url.searchParams.set('q',q.slice(0,240));
-      if(name==='google'){
-        url.searchParams.set('hl','he');
-        url.searchParams.set('gl','il');
-        url.searchParams.set('num','10');
-        url.searchParams.set('filter','0');
-      } else if(name==='bing'){
-        url.searchParams.set('setlang','he-IL');
-        url.searchParams.set('cc','il');
-        url.searchParams.set('count','10');
-      } else if(name==='yahoo'){
-        url.searchParams.set('ei','UTF-8');
-        url.searchParams.set('fr','yfp-t');
-      }
-
-      const response=await withTimeout(fetch(url,{
+      const response=await withTimeout(fetch(target,{
         headers:{
           'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/154 Safari/537.36',
-          'accept':'text/html,application/xhtml+xml,text/html;q=0.9,*/*;q=0.8',
+          'accept':'application/rss+xml,application/xml,text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
           'accept-language':'he-IL,he;q=0.9,en;q=0.7'
         }
       }),timeoutMs,'direct web search '+name);
-
-      const html=await response.text();
+      const body=await response.text();
       if(!response.ok) throw Object.assign(new Error('Direct web search '+name+' HTTP '+response.status),{status:response.status});
 
-      const results=parser(html).filter(x=>x.title && x.url);
+      const results=parser(body).filter(x=>x.title&&x.url);
       if(results.length){
         console.info('[DIRECT_WEB] provider succeeded',{provider:name,query:q.slice(0,180),results:results.length});
         return results.slice(0,10);
@@ -1240,8 +1223,27 @@ async function searchWebDirect(query, options={}) {
       console.warn('[DIRECT_WEB] provider failed',{provider:name,status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,220)});
     }
   }
-
   throw lastError || Object.assign(new Error('Direct web search unavailable'),{status:503});
+}
+
+function decodeXml(value){
+  return decodeHtmlEntities(String(value||'')
+    .replace(/<!\[CDATA\[([\\s\\S]*?)\]\]>/gi,'$1'));
+}
+
+function parseBingRssResults(xml){
+  const results=[];
+  const items=String(xml||'').match(/<item>[\\s\\S]*?<\\/item>/gi)||[];
+  for(const item of items.slice(0,15)){
+    const titleMatch=item.match(/<title>([\\s\\S]*?)<\\/title>/i);
+    const linkMatch=item.match(/<link>([\\s\\S]*?)<\\/link>/i);
+    const descMatch=item.match(/<description>([\\s\\S]*?)<\\/description>/i);
+    const title=titleMatch?stripHtml(decodeXml(titleMatch[1])):'';
+    const url=normalizeSearchHref(decodeXml(linkMatch?linkMatch[1]:'')); 
+    const snippet=descMatch?stripHtml(decodeXml(descMatch[1])):'';
+    if(title&&url) results.push({title,url,snippet});
+  }
+  return dedupeSearchResults(results);
 }
 
 function normalizeSearchHref(rawHref){
@@ -1249,14 +1251,15 @@ function normalizeSearchHref(rawHref){
   if(!href) return '';
   try {
     if(href.startsWith('//')) href='https:'+href;
-    if(href.startsWith('/url?') || href.startsWith('/url/')){
+    if(href.startsWith('/url?')||href.startsWith('/url/')){
       const u=new URL('https://www.google.com'+href);
-      href=u.searchParams.get('q') || u.searchParams.get('url') || href;
+      href=u.searchParams.get('q')||u.searchParams.get('url')||href;
     }
-    if(/^https?:\/\//i.test(href)){
+    if(/^https?:\\/\\//i.test(href)){
       const u=new URL(href);
-      if(/^(?:www\.)?(?:google|bing|search\.yahoo)\./i.test(u.hostname) && u.searchParams.has('url')){
-        href=u.searchParams.get('url') || href;
+      for(const key of ['url','u','target']){
+        const nested=u.searchParams.get(key);
+        if(nested&&/^https?:\\/\\//i.test(nested)){ href=nested; break; }
       }
       return href;
     }
@@ -1269,46 +1272,41 @@ function parseHeadingResults(html, headingTag){
   const source=String(html||'');
   const re=new RegExp('<'+headingTag+'[^>]*>([\\s\\S]*?)<\\/'+headingTag+'>','gi');
   let match;
-  while((match=re.exec(source)) && results.length<15){
+  while((match=re.exec(source))&&results.length<15){
     const title=stripHtml(decodeHtmlEntities(match[1]));
     if(!title) continue;
-    const before=source.slice(Math.max(0,match.index-1800),match.index);
+    const before=source.slice(Math.max(0,match.index-5000),match.index);
     const links=[...before.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi)];
     if(!links.length) continue;
-    const href=normalizeSearchHref(links[links.length-1][1]);
-    if(!href || /(?:google\.|bing\.|yahoo\.)/i.test(href)) continue;
-    const after=source.slice(match.index,Math.min(source.length,match.index+1800));
-    const snippetMatch=after.match(/<(?:div|p)[^>]+class=["'][^"']*(?:VwiC3b|yXK7lf|b_caption|compText|s-desc)["'][^>]*>([\\s\\S]*?)<\/(?:div|p)>/i);
-    const snippet=snippetMatch ? stripHtml(decodeHtmlEntities(snippetMatch[1])) : '';
+    let href='';
+    for(let i=links.length-1;i>=0;i--){
+      const candidate=normalizeSearchHref(links[i][1]);
+      if(candidate&&!/(?:google\\.|bing\\.|yahoo\\.)/i.test(candidate)){ href=candidate; break; }
+    }
+    if(!href) continue;
+    const after=source.slice(match.index,Math.min(source.length,match.index+3000));
+    const snippetMatch=after.match(/<(?:div|p|span)[^>]+class=["'][^"']*(?:VwiC3b|yXK7lf|b_caption|compText|s-desc|description)["'][^>]*>([\\s\\S]*?)<\\/(?:div|p|span)>/i);
+    const snippet=snippetMatch?stripHtml(decodeHtmlEntities(snippetMatch[1])):'';
     results.push({title,url:href,snippet});
   }
   return dedupeSearchResults(results);
 }
 
-function parseGoogleResults(html){
-  return parseHeadingResults(html,'h3');
-}
-
-function parseBingResults(html){
-  return parseHeadingResults(html,'h2');
-}
-
-function parseYahooResults(html){
-  return parseHeadingResults(html,'h3');
-}
+function parseGoogleResults(html){ return parseHeadingResults(html,'h3'); }
+function parseYahooResults(html){ return parseHeadingResults(html,'h3'); }
 
 function parseDuckDuckGoResults(html){
   const results=[];
   const blocks=String(html||'').split(/<div[^>]+class="[^"]*result[^"]*"[^>]*>/i).slice(1);
   for(const block of blocks.slice(0,15)){
-    const linkMatch=block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\\s\\S]*?)<\/a>/i);
+    const linkMatch=block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\\s\\S]*?)<\\/a>/i);
     if(!linkMatch) continue;
     const href=normalizeSearchHref(linkMatch[1]);
     const title=stripHtml(decodeHtmlEntities(linkMatch[2]));
-    const snippetMatch=block.match(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\\s\\S]*?)<\/a>/i) ||
-      block.match(/<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\\s\\S]*?)<\/div>/i);
-    const snippet=snippetMatch ? stripHtml(decodeHtmlEntities(snippetMatch[1])) : '';
-    if(title && href) results.push({title,url:href,snippet});
+    const snippetMatch=block.match(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\\s\\S]*?)<\\/a>/i) ||
+      block.match(/<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\\s\\S]*?)<\\/div>/i);
+    const snippet=snippetMatch?stripHtml(decodeHtmlEntities(snippetMatch[1])):'';
+    if(title&&href) results.push({title,url:href,snippet});
   }
   return dedupeSearchResults(results);
 }
@@ -1317,7 +1315,7 @@ function dedupeSearchResults(results){
   const seen=new Set();
   return results.filter(x=>{
     const key=String(x.url||'').replace(/[?#].*$/,'').toLowerCase();
-    if(!key || seen.has(key)) return false;
+    if(!key||seen.has(key)) return false;
     seen.add(key);
     return true;
   });
