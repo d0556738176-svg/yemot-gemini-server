@@ -1192,15 +1192,19 @@ function extractSearchCity(transcript) {
   return cities.find(city=>t.includes(city)) || '';
 }
 
-async function answerPharmacySearchDirect(transcript) {
+async async function answerPharmacySearchDirect(transcript) {
   const question=String(transcript||'').trim();
-  const city=extractSearchCity(question) || 'בית שמש';
+  const loc=extractExplicitLocation(question);
+  const city=loc.city || extractSearchCity(question) || 'בית שמש';
+  const area=loc.area || '';
+  const locationText=[area,city].filter(Boolean).join(' ');
   const queries=[
-    'בית מרקחת פתוח עכשיו '+city,
-    'בית מרקחת מומלץ '+city+' שעות פתיחה טלפון',
-    'בית מרקחת '+city+' אתר רשמי שעות פתיחה'
+    'בית מרקחת '+locationText+' פתוח עכשיו',
+    'בית מרקחת כללית דונה '+locationText+' שעות פתיחה',
+    'כללית '+locationText+' בית מרקחת שעות פתיחה אתר רשמי',
+    'בית מרקחת '+locationText+' כתובת טלפון שעות פתיחה אתר רשמי'
   ];
-  const settled=await Promise.allSettled(queries.map(q=>searchWebDirect(q,{timeoutMs:3500})));
+  const settled=await Promise.allSettled(queries.map(q=>searchWebDirect(q,{timeoutMs:4500})));
   const all=[];
   for(const item of settled) if(item.status==='fulfilled') all.push(...item.value);
   const unique=dedupeSearchResults(all).slice(0,12);
@@ -1455,6 +1459,89 @@ function mapsIsraelUrl(title,address){
   return q ? 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q) : '';
 }
 
+function officialDomainsForQuestion(question){
+  const q=String(question||'').toLowerCase();
+  const map=[
+    [/דיסקונט|discount/,['discountbank.co.il']],
+    [/כללית|clalit/,['clalit.co.il']],
+    [/מכבי|maccabi/,['maccabi4u.co.il']],
+    [/מאוחדת|meuhedet/,['meuhedet.co.il']],
+    [/לאומית|leumit/,['leumit.co.il']],
+    [/סופר.?פארם|super.?pharm/,['super-pharm.co.il']],
+    [/בנק הפועלים|הפועלים|poalim/,['bankhapoalim.co.il']],
+    [/לאומי|בנק לאומי|leumi/,['leumi.co.il']],
+    [/מזרחי|מזרחי טפחות|mizrahi/,['mizrahitefahot.co.il']]
+  ];
+  for(const [pattern,domains] of map) if(pattern.test(q)) return domains;
+  return [];
+}
+function isOfficialSearchUrl(url,domains){
+  try{
+    const host=new URL(String(url||'')).hostname.toLowerCase().replace(/^www\./,'');
+    return domains.some(d=>host===d || host.endsWith('.'+d));
+  }catch{return false;}
+}
+function normalizePhoneCandidate(value){
+  let s=String(value||'').replace(/[״"׳']/g,'').trim();
+  if(!s) return '';
+  let m=s.match(/\*\s*(\d{3,6})/);
+  if(m) return '*'+m[1];
+  m=s.match(/(^|\s)(\d{3,6})\s*\*(?=\s|$)/);
+  if(m) return '*'+m[2];
+  return '';
+}
+function extractStarPhoneCandidates(text){
+  const out=[];
+  for(const re of [/\*\s*\d{3,6}/g,/\b\d{3,6}\s*\*/g]){
+    for(const match of String(text||'').matchAll(re)){
+      const n=normalizePhoneCandidate(match[0]);
+      if(n&&!out.includes(n)) out.push(n);
+    }
+  }
+  return out;
+}
+function phoneEntityLabel(question){
+  const q=String(question||'').replace(/^.*?(?:מספר|טלפון|מוקד|שירות לקוחות)\s*(?:של|ה)?\s*/i,'').trim();
+  return q.replace(/(?:שמתחיל.*|שמתחילה.*|בכוכבית.*|בכוכב.*)$/i,'').trim();
+}
+async function answerPhoneNumberDirect(question){
+  const domains=officialDomainsForQuestion(question);
+  const label=phoneEntityLabel(question);
+  const base=String(question||'').replace(/^.*?(?:חפש|תחפש|בדוק|תבדוק)\s*(?:לי\s*)?(?:באינטרנט\s*)?/i,'').trim();
+  const queries=[
+    base+' מספר טלפון',
+    base+' מוקד טלפון',
+    ...(domains.length ? domains.map(d=>base+' site:'+d+' טלפון') : [base+' אתר רשמי טלפון'])
+  ];
+  const settled=await Promise.allSettled(queries.slice(0,4).map(q=>searchWebDirect(q,{timeoutMs:4500})));
+  const all=[];
+  for(const item of settled) if(item.status==='fulfilled') all.push(...item.value);
+  const unique=dedupeSearchResults(all);
+  if(!unique.length) throw Object.assign(new Error('Phone verification returned no results'),{status:503});
+  const official=unique.filter(x=>isOfficialSearchUrl(x.url,domains));
+  const pool=official.length ? official : unique;
+  const starByNumber=new Map();
+  for(const item of pool){
+    for(const n of extractStarPhoneCandidates([item.title,item.snippet].join(' '))){
+      if(!starByNumber.has(n)) starByNumber.set(n,[]);
+      starByNumber.get(n).push(item);
+    }
+  }
+  if(/כוכבית|כוכב|\*\s*\d/.test(String(question||''))){
+    if(starByNumber.size===1) return 'המספר שביקשת הוא '+[...starByNumber.keys()][0]+'.';
+    throw Object.assign(new Error('Star phone number could not be verified'),{status:422});
+  }
+  const normalCandidates=[];
+  for(const item of pool){
+    const matches=([item.title,item.snippet].join(' ').match(/(?:0\d{1,2}[- ]?)?\d{7,8}|1[- ]?\d{2,3}[- ]?\d{3}[- ]?\d{2,4}/g)||[]);
+    for(const raw of matches){
+      const digits=raw.replace(/\D/g,'');
+      if(digits.length>=8&&digits.length<=11&&!normalCandidates.includes(raw.trim())) normalCandidates.push(raw.trim());
+    }
+  }
+  if(normalCandidates.length===1) return 'המספר הוא '+normalCandidates[0]+'.';
+  throw Object.assign(new Error('Phone number could not be uniquely verified'),{status:422});
+}
 function extractDirectSearchQueries(question){
   const cleaned=String(question||'').trim().replace(/^(?:אז\s+)?(?:תחפש|חפש|בדוק|תבדוק|תמצא|תאתר|תברר)(?:\s+לי)?(?:\s+באינטרנט|\s+ברשת|\s+בגוגל)?\s*/i,'').trim();
   const loc=extractExplicitLocation(cleaned);
@@ -1465,6 +1552,7 @@ function extractDirectSearchQueries(question){
   if(isPhoneNumberRequest(cleaned)){
     queries.push(base+' מספר טלפון מוקד שירות לקוחות');
     queries.push(base+' אתר רשמי טלפון');
+    for(const d of officialDomainsForQuestion(cleaned)) queries.push(base+' site:'+d+' טלפון');
   } else if(isBusinessLocalRequest(cleaned)){
     queries.push(base+' כתובת מדויקת שעות פתיחה טלפון');
     queries.push(base+' אתר רשמי סניפים');
@@ -1479,7 +1567,7 @@ function extractDirectSearchQueries(question){
     queries.push(base+' מידע עדכני');
     queries.push(base+' מקור רשמי');
   }
-  return [...new Set(queries.filter(Boolean).map(x=>x.slice(0,240)))].slice(0,4);
+  return [...new Set(queries.filter(Boolean).map(x=>x.slice(0,240)))].slice(0,5);
 }
 async function answerWithDirectWebFallback(question){
   const queries=extractDirectSearchQueries(question);
@@ -1541,6 +1629,14 @@ async function answerWithDirectWebFallback(question){
 async function answerWithWebSearch(transcript, historyText='') {
   const question=String(transcript||'').trim();
   if(!question) throw Object.assign(new Error('Search requested but transcript is empty'),{status:400});
+  if(isPhoneNumberRequest(question)){
+    try {
+      return await answerPhoneNumberDirect(question);
+    } catch(e) {
+      console.warn('[PHONE_VERIFY] refusing to guess after verification failure',{status:geminiErrorStatus(e)});
+      if(geminiErrorStatus(e)===422) return 'לא הצלחתי לאמת את המספר המדויק ממקור רשמי, ולכן אני לא רוצה לנחש.';
+    }
+  }
   if(isPharmacySearchRequest(question)) return await answerPharmacySearchDirect(question);
   try {
     const directAnswer=await answerWithDirectWebFallback(question);
