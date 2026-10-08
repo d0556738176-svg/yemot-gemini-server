@@ -85,6 +85,12 @@ const MODEL_NAMES = [...new Set([
 ])];
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
 const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 12000);
+// Long answers are intentionally given the normal generation budget instead of the
+// low-latency phone budget. This prevents multi-minute answers from being cut off
+// by the short-turn timeout while keeping ordinary turns fast.
+const LONG_ANSWER_TIMEOUT_MS = Number(process.env.LONG_ANSWER_TIMEOUT_MS || 90000);
+const LONG_ANSWER_MAX_CHARS = Number(process.env.LONG_ANSWER_MAX_CHARS || 12000);
+const DIRECT_WEB_QUERY_TIMEOUT_MS = Number(process.env.DIRECT_WEB_QUERY_TIMEOUT_MS || 4500);
 // Deepgram is the primary Hebrew phone ASR. Keep its timeout separate from Gemini so
 // a slow Deepgram request does not inherit Gemini's tighter phone-answer timeout.
 // 18s is only a safety ceiling; successful requests should return much sooner.
@@ -1180,6 +1186,67 @@ async function getYouTubeComments(videoId, maxResults=10) {
 }
 
 
+function isTransitRequest(text) {
+  return /(אוטובוס|אוטובוסים|תחבורה ציבורית|רכבת|תחנת רכבת|מסלול נסיעה|איך מגיעים|איך להגיע|קו\\s*\\d+)/i.test(String(text||''));
+}
+
+function extractTransitEndpoints(question) {
+  const q=String(question||'').replace(/\\s+/g,' ').trim();
+  const patterns=[
+    /(?:מ|מן)\\s+(.+?)\\s+(?:ל|אל)\\s+(.+?)(?:\\s+(?:עכשיו|היום|מחר|ב\\s+\\d{1,2}[:.]\\d{2}|\\?|$))/i,
+    /(?:מוצא)\\s*[:]?\\s*(.+?)\\s+(?:יעד|ל)\\s*[:]?\\s*(.+?)(?:\\s+|$)/i
+  ];
+  for(const re of patterns){
+    const m=q.match(re);
+    if(m && m[1] && m[2]) return {origin:m[1].trim(),destination:m[2].trim()};
+  }
+  return null;
+}
+
+async function answerTransitDirect(question) {
+  const key=(process.env.GOOGLE_MAPS_API_KEY||'').trim();
+  const endpoints=extractTransitEndpoints(question);
+  if(!key || !endpoints) return null;
+  const now=new Date();
+  const body={
+    origin:{address:endpoints.origin},
+    destination:{address:endpoints.destination},
+    travelMode:'TRANSIT',
+    departureTime:now.toISOString(),
+    languageCode:'he-IL',
+    units:'METRIC'
+  };
+  const response=await withTimeout(fetch('https://routes.googleapis.com/directions/v2:computeRoutes',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-Goog-Api-Key':key,
+      'X-Goog-FieldMask':'routes.duration,routes.distanceMeters,routes.legs.steps.transitDetails,routes.legs.steps.navigationInstruction,routes.localizedValues,routes.travelAdvisory.transitFare'},
+    body:JSON.stringify(body)
+  }),REQUEST_TIMEOUT_MS,'Google transit route');
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok) throw Object.assign(new Error(data?.error?.message||'Google transit route HTTP '+response.status),{status:response.status});
+  const route=data?.routes?.[0];
+  if(!route) return null;
+  const steps=(route.legs||[]).flatMap(leg=>leg.steps||[]);
+  const transitSteps=steps.map(step=>step.transitDetails).filter(Boolean);
+  const lines=[];
+  for(const step of transitSteps){
+    const line=step.transitLine||{};
+    const name=line.name||line.shortName||'';
+    const from=step.stopDetails?.departureStop?.name||'';
+    const to=step.stopDetails?.arrivalStop?.name||'';
+    if(name) lines.push((line.agency?.[0]?.name?line.agency[0].name+' ':'')+'קו '+name+(from?' מהתחנה '+from:'')+(to?' לתחנה '+to:''));
+  }
+  const duration=route.localizedValues?.duration?.text || (route.duration ? Math.round(parseFloat(route.duration)/60)+' דקות' : '');
+  let answer='מסלול התחבורה הציבורית שמצאתי עכשיו מ'+endpoints.origin+' ל'+endpoints.destination;
+  if(duration) answer+=' נמשך בערך '+duration;
+  if(lines.length) answer+=' וכולל '+lines.slice(0,4).join(', ')+'.';
+  else answer+='.';
+  const fare=route.travelAdvisory?.transitFare?.localized?.text || route.travelAdvisory?.transitFare?.currency?.units;
+  if(fare) answer+=' התעריף המשוער הוא '+fare+'.';
+  answer+=' הנתונים מבוססים על נתיב תחבורה שנבדק בזמן הבקשה.';
+  return sanitizeForYemot(answer);
+}
+
 function isPharmacySearchRequest(transcript) {
   const t=String(transcript||'').toLowerCase().replace(/\s+/g,' ').trim();
   return /(בית מרקחת|בתי מרקחת|סופר.?פארם|פארם)/i.test(t) &&
@@ -1227,6 +1294,11 @@ async function answerPharmacySearchDirect(transcript) {
   return sanitizeForYemot((first.title+'. '+String(first.snippet||'')).trim());
 }
 
+function isLongAnswerRequest(text) {
+  const q=String(text||'').toLowerCase().replace(/\\s+/g,' ').trim();
+  return /(תשובה ארוכה|תשובה מפורטת|בהרחבה|בפירוט|תפרט|פרט|ספר לי סיפור|סיפור ארוך|כמה דקות|מספר דקות|מאמר|סקירה מקיפה|היסטוריה של|הסיפור המלא|תן את כל הפרטים|כל הפרטים|לעומק)/i.test(q) || q.length>320;
+}
+
 function shouldForceWebSearch(transcript) {
   const t = String(transcript || '').toLowerCase().replace(/\s+/g,' ').trim();
   // Explicit search language always means live web search, even when the topic
@@ -1272,7 +1344,7 @@ function parseJinaMarkdownResults(markdown){
 async function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
-  const timeoutMs=Number(options.timeoutMs||5000);
+  const timeoutMs=Number(options.timeoutMs||DIRECT_WEB_QUERY_TIMEOUT_MS);
   const googleUrl='https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240));
   const providers=[
     ['jina-search','https://s.jina.ai/?q='+encodeURIComponent(q.slice(0,240)),parseJinaSearchResults],
@@ -1297,14 +1369,15 @@ async function searchWebDirect(query, options={}) {
     console.info('[DIRECT_WEB] provider succeeded',{provider:name,query:q.slice(0,180),results:parsed.length});
     return parsed.slice(0,10);
   });
-  try{
-    return await Promise.any(attempts);
-  }catch(e){
-    const errors=Array.isArray(e?.errors)?e.errors:[e];
-    for(const err of errors) console.warn('[DIRECT_WEB] parallel provider failed',{status:geminiErrorStatus(err),message:String(err?.message||err).slice(0,220)});
-    throw errors[errors.length-1]||Object.assign(new Error('Direct web search unavailable'),{status:503});
+  const settled=await Promise.allSettled(attempts);
+  const successful=settled.filter(x=>x.status==='fulfilled').flatMap(x=>x.value||[]);
+  const merged=dedupeSearchResults(successful).slice(0,20);
+  if(merged.length) return merged;
+  for(const item of settled.filter(x=>x.status==='rejected')) {
+    const err=item.reason;
+    console.warn('[DIRECT_WEB] parallel provider failed',{status:geminiErrorStatus(err),message:String(err?.message||err).slice(0,220)});
   }
-  throw lastError||Object.assign(new Error('Direct web search unavailable'),{status:503});
+  throw Object.assign(new Error('Direct web search unavailable'),{status:503});
 }
 
 function decodeXml(value){
@@ -1601,14 +1674,12 @@ function extractDirectSearchQueries(question){
 }
 async function answerWithDirectWebFallback(question){
   const queries=extractDirectSearchQueries(question);
+  const settled=await Promise.allSettled(queries.map(q=>searchWebDirect(q,{timeoutMs:DIRECT_WEB_QUERY_TIMEOUT_MS})));
   const all=[];
-  for(const q of queries){
-    try {
-      const items=await searchWebDirect(q);
-      all.push(...items);
-    } catch(e) {
-      console.warn('[DIRECT_WEB] search query failed',{query:q,status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,300)});
-    }
+  for(let i=0;i<settled.length;i++){
+    const item=settled[i];
+    if(item.status==='fulfilled') all.push(...item.value);
+    else console.warn('[DIRECT_WEB] search query failed',{query:queries[i],status:geminiErrorStatus(item.reason),message:String(item.reason?.message||item.reason).slice(0,300)});
   }
   const seen=new Set();
   const unique=all.filter(x=>{
@@ -1841,8 +1912,11 @@ async function callHandler(call) {
         /(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript);
 
       if(!directDataRequest) {
-        const answerPrompt=EXCLUSIVE_INSTRUCTION+'\\n\\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\\n\\nהקשר קודם של השיחה, לפי הסדר:\\n'+(historyText || 'אין עדיין הקשר קודם.')+'\\n\\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\\n'+userTranscript+'\\n\\nענה על השאלה בלבד. החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. בדרך כלל 1 עד 4 משפטים קצרים; כשמדובר בהתייעצות או הסבר מורכב אפשר להרחיב בהדרגה. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
-        const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt}]}],false,true)).response.text().trim();
+        const longAnswer=isLongAnswerRequest(userTranscript);
+        const answerPrompt=EXCLUSIVE_INSTRUCTION+'\\n\\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\\n\\nהקשר קודם של השיחה, לפי הסדר:\\n'+(historyText || 'אין עדיין הקשר קודם.')+'\\n\\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\\n'+userTranscript+'\\n\\n'+(longAnswer
+          ? 'זו בקשה לתשובה ארוכה ומפורטת. אל תקצר ל-1 עד 4 משפטים. בנה תשובה רציפה ומסודרת, בדרך כלל 8 עד 20 פסקאות או משפטים קצרים לפי הצורך, עד כ-'+LONG_ANSWER_MAX_CHARS+' תווים. שמור על רצף טבעי להקראה בטלפון, בלי כותרות טכניות ובלי לחזור על עצמך. '
+          : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. ')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
+        const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt}]}],false,!longAnswer)).response.text().trim();
         let parsedTurn=null;
         try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\\{[\\s\\S]*\\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
         if(parsedTurn && typeof parsedTurn.answer==='string') {
@@ -1875,6 +1949,15 @@ async function callHandler(call) {
       else if(isNewsQuestion(userTranscript)) {
         try { replyText=await answerNewsDirect(userTranscript, historyText); }
         catch(e) { replyText=await answerWithWebSearch(userTranscript, historyText); }
+      }
+      else if(isTransitRequest(userTranscript)) {
+        try {
+          const transitAnswer=await answerTransitDirect(userTranscript);
+          replyText=transitAnswer || await answerWithWebSearch(userTranscript, historyText);
+        } catch(e) {
+          console.warn('[TRANSIT] direct route unavailable; falling back to live web search',{status:geminiErrorStatus(e)});
+          replyText=await answerWithWebSearch(userTranscript, historyText);
+        }
       }
       else if(isPharmacySearchRequest(userTranscript)) {
         try {
@@ -1915,6 +1998,10 @@ async function callHandler(call) {
     }
 
     replyText=sanitizeForYemot(replyText)||'מצטער לא הצלחתי לנסח תשובה נסה שוב';
+    if(replyText.length>LONG_ANSWER_MAX_CHARS) {
+      console.warn('[CALL_FLOW] long_answer_trimmed',{callId:activeKey,chars:replyText.length,max:LONG_ANSWER_MAX_CHARS});
+      replyText=replyText.slice(0,LONG_ANSWER_MAX_CHARS).replace(/\\s+\\S*$/,'').trim()+'.';
+    }
     console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length });
     const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
       phone:normalizePhone(callerPhone),callId:String(callId||''),user:userTranscript || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText};
