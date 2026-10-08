@@ -1131,8 +1131,21 @@ function extractVisualSubject(question, historyText='') {
     .replace(/[?!.:,;]+/g,' ')
     .replace(/\s+/g,' ').trim();
   const direct=clean(q);
-  if(direct && direct.length>=3 && !/^(אותו|אותה|זה|זו|שם האדם|האדם)$/i.test(direct)) return direct;
+  const looksLikeContinuation=/(תמצא|תמצאי|מצא|חפש|תחפש|מחפש|מחפשת|תנסה שוב|נסה שוב|שוב|שלו|שלה|אותו|אותה|הפיזי|הפיזית)/i.test(q);
   const turns=h.split(/\n\s*\n|(?=תור\s*\d+)/).reverse();
+  // For a follow-up that refers to "him/her/the same one", prefer the last
+  // explicit visual subject from the conversation instead of treating words
+  // such as "מחפש" or "תנסה שוב" as the subject itself.
+  if(looksLikeContinuation){
+    for(const turn of turns){
+      const m=turn.match(/מתקשר:\s*([^\n]+)/i);
+      if(m && /איך\s+(?:הוא|היא)?\s*נראה|איך\s*נראית|תמחיש|תמונה|צילום|תיאור\s*(?:חזותי|הפיזי)|מה\s*רואים/i.test(m[1])){
+        const t=clean(m[1]);
+        if(t.length>=3 && !/^(איך|נראה|תמונה|צילום)$/i.test(t)) return t;
+      }
+    }
+  }
+  if(direct && direct.length>=3 && !/^(אותו|אותה|זה|זו|שם האדם|האדם)$/i.test(direct)) return direct;
   for(const turn of turns){
     const m=turn.match(/מתקשר:\s*([^\n]+)/i);
     if(m){
@@ -1144,9 +1157,10 @@ function extractVisualSubject(question, historyText='') {
 }
 
 function isVisualContinuationRequest(text, historyText='') {
-  const q=String(text||'');
-  const continuation=/(תמצא|תמצאי|מצא|חפש|תחפש|חיפוש|משהו ציבורי|מקור ציבורי|תמונה ציבורית|תמונה כלשהי|תמונה כל שהוא|קישור ציבורי|קישור כלשהו|תנסה שוב|נסה שוב|תחפש משהו|תמצא משהו)/i.test(q);
-  const visualHistory=/(איך נראה|איך היא נראית|איך הוא נראה|תמחיש|המחשה|תמונה|צילום|סרטון|וידאו|תיאור חזותי|מה רואים)/i.test(String(historyText||''));
+  const q=String(text||'').trim();
+  const h=String(historyText||'');
+  const continuation=/(תמצא|תמצאי|מצא|חפש|תחפש|מחפש|מחפשת|חיפוש|משהו ציבורי|מקור ציבורי|תמונה ציבורית|תמונה כלשהי|תמונה כל שהוא|קישור ציבורי|קישור כלשהו|תנסה שוב|נסה שוב|שוב|תיאור הפיזי|תיאור חזותי|איך הוא|איך היא|שלו|שלה|אותו|אותה)/i.test(q);
+  const visualHistory=/(איך נראה|איך היא נראית|איך הוא נראה|תמחיש|המחשה|תמונה|צילום|סרטון|וידאו|תיאור חזותי|תיאור הפיזי|מה רואים)/i.test(h);
   return continuation && visualHistory;
 }
 
@@ -2354,6 +2368,13 @@ async function callHandler(call) {
         }
       }
       else if(isMultimodalAnalysisRequest(userTranscript).any || isVisualContinuationRequest(userTranscript,historyText)) {
+        const visualFollowUp=isVisualContinuationRequest(userTranscript,historyText);
+        console.info('[MULTIMODAL] visual_route_selected',{
+          callId:activeKey,
+          visualFollowUp,
+          transcript:userTranscript,
+          historyHasVisualCue:/(איך נראה|איך היא נראית|איך הוא נראה|תמחיש|תמונה|צילום|תיאור חזותי|תיאור הפיזי|מה רואים)/i.test(historyText)
+        });
         try {
           replyText=await analyzeRequestedMedia(userTranscript,{...turnContext,historyText});
           if(!replyText) throw Object.assign(new Error('Media analysis returned empty answer'),{status:503});
