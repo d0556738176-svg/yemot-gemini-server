@@ -973,18 +973,30 @@ function extractMetaUrl(html, wantedNames) {
 }
 
 async function analyzePublicImageWithVision(imageUrl, question='') {
-  const key=String(process.env.GOOGLE_VISION_API_KEY||'').trim();
-  if(!key) throw Object.assign(new Error('Google Vision fallback key is not configured'),{status:503});
-  const endpoint='https://vision.googleapis.com/v1/images:annotate?key='+encodeURIComponent(key);
+  const visionKeys=[...new Set([
+    String(process.env.GOOGLE_VISION_API_KEY||'').trim(),
+    ...apiKeys,
+    String(process.env.YOUTUBE_API_KEY||'').trim()
+  ].filter(Boolean))];
+  if(!visionKeys.length) throw Object.assign(new Error('Google Vision fallback key is not configured'),{status:503});
   const body={requests:[{image:{source:{imageUri:imageUrl}},features:[
     {type:'WEB_DETECTION',maxResults:10},
     {type:'LABEL_DETECTION',maxResults:12},
     {type:'FACE_DETECTION',maxResults:10},
     {type:'TEXT_DETECTION',maxResults:5}
   ]}]};
-  const r=await withTimeout(fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),12000,'Google Vision fallback');
-  const data=await r.json().catch(()=>({}));
-  if(!r.ok) throw Object.assign(new Error(data?.error?.message||('Google Vision HTTP '+r.status)),{status:r.status});
+  let lastVisionError=null, data={};
+  for(const key of visionKeys){
+    try{
+      const endpoint='https://vision.googleapis.com/v1/images:annotate?key='+encodeURIComponent(key);
+      const r=await withTimeout(fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),12000,'Google Vision fallback');
+      data=await r.json().catch(()=>({}));
+      if(r.ok && !data?.responses?.[0]?.error) break;
+      lastVisionError=Object.assign(new Error(data?.error?.message||data?.responses?.[0]?.error?.message||('Google Vision HTTP '+r.status)),{status:r.status||Number(data?.responses?.[0]?.error?.code)||502});
+    }catch(e){ lastVisionError=e; }
+  }
+  if(lastVisionError && !data?.responses?.[0] && !data?.responses?.[0]?.error)
+    throw lastVisionError;
   const out=data?.responses?.[0]||{};
   if(out.error) throw Object.assign(new Error(out.error.message||'Google Vision image annotation failed'),{status:Number(out.error.code)||502});
   const labels=(out.labelAnnotations||[]).map(x=>String(x.description||'').trim()).filter(Boolean).slice(0,8);
