@@ -1173,6 +1173,7 @@ async function findPublicImageFromOpenSources(question, historyText='') {
   const add=(u)=>{ if(u && /^https?:\/\//i.test(u) && !candidates.includes(u)) candidates.push(u); };
 
   const endpoints=[
+    'https://commons.wikimedia.org/w/api.php?action=query&format=json&formatversion=2&generator=search&gsrsearch='+encodeURIComponent(subject)+'&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url|mime&iiurlwidth=1200&redirects=1',
     'https://he.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&generator=search&gsrsearch='+encodeURIComponent(subject)+'&gsrnamespace=0&gsrlimit=6&prop=pageimages&piprop=thumbnail&pilicense=any&pithumbsize=1000&redirects=1',
     'https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&generator=search&gsrsearch='+encodeURIComponent(subject)+'&gsrnamespace=0&gsrlimit=6&prop=pageimages&piprop=thumbnail&pilicense=any&pithumbsize=1000&redirects=1'
   ];
@@ -1181,7 +1182,11 @@ async function findPublicImageFromOpenSources(question, historyText='') {
       const r=await withTimeout(fetch(endpoint,{headers:{'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)'}}),7000,'Wikipedia image search');
       if(!r.ok) continue;
       const data=await r.json().catch(()=>null);
-      for(const page of (data?.query?.pages||[])) add(page?.thumbnail?.source);
+      for(const page of (data?.query?.pages||[])) {
+        const info=page?.imageinfo?.[0];
+        if(info && String(info.mime||'').startsWith('image/')) add(info.thumburl||info.url);
+        add(page?.thumbnail?.source);
+      }
     }catch{}
     if(candidates.length>=MEDIA_MAX_CANDIDATES) break;
   }
