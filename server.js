@@ -1079,6 +1079,49 @@ async function analyzePublicVideoUrl(videoUrl, question) {
   return blocks.join(' ').trim();
 }
 
+async function findPublicImageForVisualQuery(question) {
+  const key=apiKeys[0]||'';
+  if(!key) throw Object.assign(new Error('Gemini key unavailable for public visual search'),{status:503});
+  const model=(process.env.MEDIA_GEMINI_MODEL||'gemini-3.8-flash').trim();
+  const searchPrompt='חפש באינטרנט מקור ציבורי אמין שמכיל תמונה של האדם או הנושא שביקש המתקשר לראות. בקשת המתקשר: '+String(question||'')+
+    '\nהמטרה היא למצוא תמונה ציבורית אמיתית שאפשר לנתח חזותית. העדף אתר רשמי, ערוץ/עמוד ציבורי מזוהה, או מקור חדשותי/אנציקלופדי מוכר. אל תנחש זהות. החזר תשובה קצרה בלבד.';
+  const r=await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{
+    method:'POST',
+    headers:{'x-goog-api-key':key,'Content-Type':'application/json'},
+    body:JSON.stringify({model,store:false,input:searchPrompt,tools:[{type:'google_search'}]})
+  }),MEDIA_ANALYSIS_TIMEOUT_MS,'public visual web search');
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw Object.assign(new Error(data?.error?.message||('Public visual search HTTP '+r.status)),{status:r.status});
+  const urls=[];
+  for(const step of (data?.steps||[])) {
+    for(const block of (step?.content||[])) {
+      for(const ann of (block?.annotations||[])) {
+        const u=String(ann?.url||ann?.url_citation?.url||'').trim();
+        if(/^https?:\\/\\//i.test(u) && !urls.includes(u)) urls.push(u);
+      }
+    }
+  }
+  const text=String(data?.output_text||'');
+  for(const m of text.matchAll(/https?:\\/\\/[^\\s)]+/gi)) {
+    const u=m[0].replace(/[.,;]+$/,'');
+    if(!urls.includes(u)) urls.push(u);
+  }
+  for(const pageUrl of urls.slice(0,8)) {
+    try {
+      const response=await withTimeout(fetch(pageUrl,{redirect:'follow',headers:{'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)'}}),12000,'public image page fetch');
+      if(!response.ok) continue;
+      const mime=String(response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
+      if(mime.startsWith('image/')) return pageUrl;
+      const html=Buffer.from(await response.arrayBuffer()).toString('utf8');
+      const image=extractMetaUrl(html,['og:image','twitter:image','twitter:image:src']);
+      if(image) {
+        try { return new URL(image,pageUrl).toString(); } catch {}
+      }
+    } catch {}
+  }
+  return '';
+}
+
 async function analyzeRequestedMedia(question, context={}) {
   const intent=isMultimodalAnalysisRequest(question);
   if(!intent.any) return null;
@@ -1090,7 +1133,11 @@ async function analyzeRequestedMedia(question, context={}) {
     const candidate=context.youtubeResults[0];
     if(candidate?.videoId) url='https://www.youtube.com/watch?v='+candidate.videoId;
   }
-  if(!url) throw Object.assign(new Error('Media analysis requires a public image, video, or page URL, or a selected YouTube video'),{status:400});
+  if(!url && intent.image && !intent.video) {
+    const discoveredImage=await findPublicImageForVisualQuery(question);
+    if(discoveredImage) url=discoveredImage;
+  }
+  if(!url) throw Object.assign(new Error('לא מצאתי מקור ציבורי מתאים לניתוח החזותי. נסה לציין את שם האדם או לשלוח קישור לתמונה.'),{status:400});
 
   if(intent.site && !intent.image && !intent.video) {
     const key=apiKeys[0]||'';
