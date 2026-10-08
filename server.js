@@ -1535,44 +1535,43 @@ async function answerPhoneNumberDirect(question){
   if(!unique.length) throw Object.assign(new Error('Phone verification returned no results'),{status:503});
 
   const official=unique.filter(x=>isOfficialSearchUrl(x.url,domains));
+  if(domains.length && !official.length){
+    throw Object.assign(new Error('No official source available for phone verification'),{status:422});
+  }
   const pool=official.length ? official : unique;
 
-  // For a star-number request, never let a secondary service number win merely
-  // because it appears on a broad official page. Prefer the entity's verified
-  // primary hotline, but only after confirming that the official source itself
-  // contains that exact star number.
-  if(isStarRequest && preferred && official.length){
-    const corroborated=official.filter(item=>{
-      const text=[item.title,item.snippet].join(' ');
-      return text.includes(preferred.number) || text.replace(/\s+/g,'').includes(preferred.number.replace('*','*'));
-    });
-    if(corroborated.length){
-      return 'המספר שביקשת הוא '+preferred.number+'.';
+  const sourceNumbers=new Map();
+  for(const item of pool){
+    const text=[item.title,item.snippet].join(' ');
+    const stars=extractStarPhoneCandidates(text);
+    const regular=text.match(/(?:0\d(?:[-\s]?\d){7,9})/g)||[];
+    for(const n of [...stars,...regular.map(n=>n.replace(/\s+/g,' '))]){
+      const key=n.replace(/[\s-]/g,'');
+      if(!sourceNumbers.has(key)) sourceNumbers.set(key,{display:n,sources:[]});
+      sourceNumbers.get(key).sources.push(item.url);
     }
+  }
+  const independentlyVerified=[...sourceNumbers.values()]
+    .filter(x=>new Set(x.sources).size>=2);
+
+  if(isStarRequest){
+    if(preferred){
+      const preferredKey=preferred.number.replace(/[\s-]/g,'');
+      const hit=independentlyVerified.find(x=>x.display.replace(/[\s-]/g,'')===preferredKey);
+      if(hit) return 'המספר שביקשת הוא '+preferred.number+'.';
+    }
+    if(independentlyVerified.length===1){
+      return 'המספר שביקשת הוא '+independentlyVerified[0].display+'.';
+    }
+    throw Object.assign(new Error('Unverified star phone number'),{status:422});
   }
 
-  const starByNumber=new Map();
-  for(const item of pool){
-    for(const n of extractStarPhoneCandidates([item.title,item.snippet].join(' '))){
-      if(!starByNumber.has(n)) starByNumber.set(n,[]);
-      starByNumber.get(n).push(item);
-    }
+  if(independentlyVerified.length===1){
+    return 'מספר הטלפון הוא '+independentlyVerified[0].display+'.';
   }
-  if(isStarRequest){
-    if(starByNumber.size===1) return 'המספר שביקשת הוא '+[...starByNumber.keys()][0]+'.';
-    throw Object.assign(new Error('Star phone number could not be verified'),{status:422});
-  }
-  const normalCandidates=[];
-  for(const item of pool){
-    const matches=([item.title,item.snippet].join(' ').match(/(?:0\d{1,2}[- ]?)?\d{7,8}|1[- ]?\d{2,3}[- ]?\d{3}[- ]?\d{2,4}/g)||[]);
-    for(const raw of matches){
-      const digits=raw.replace(/\D/g,'');
-      if(digits.length>=8&&digits.length<=11&&!normalCandidates.includes(raw.trim())) normalCandidates.push(raw.trim());
-    }
-  }
-  if(normalCandidates.length===1) return 'המספר הוא '+normalCandidates[0]+'.';
-  throw Object.assign(new Error('Phone number could not be uniquely verified'),{status:422});
+  throw Object.assign(new Error('Unverified phone number'),{status:422});
 }
+
 function extractDirectSearchQueries(question){
   const cleaned=String(question||'').trim().replace(/^(?:אז\s+)?(?:תחפש|חפש|בדוק|תבדוק|תמצא|תאתר|תברר)(?:\s+לי)?(?:\s+באינטרנט|\s+ברשת|\s+בגוגל)?\s*/i,'').trim();
   const loc=extractExplicitLocation(cleaned);
