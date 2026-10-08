@@ -1043,7 +1043,8 @@ async function analyzePublicVideoUrl(videoUrl, question) {
   const isYouTube=/^(?:https?:\/\/)?(?:www\.)?(?:youtube\.com|youtu\.be)\//i.test(videoUrl);
   let videoInput;
   if(isYouTube) {
-    videoInput={type:'video',uri:videoUrl};
+    const useAgenticVideo=/^gemini-3\.(8|7|6)-flash$|^gemini-3\.5-flash-lite$/i.test(model);
+    videoInput={type:'video',uri:videoUrl,...(useAgenticVideo?{processing:'agentic'}:{})};
   } else {
     const response=await withTimeout(fetch(videoUrl,{redirect:'follow',headers:{'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)'}}),MEDIA_ANALYSIS_TIMEOUT_MS,'public video fetch');
     if(!response.ok) throw Object.assign(new Error('Public video HTTP '+response.status),{status:502});
