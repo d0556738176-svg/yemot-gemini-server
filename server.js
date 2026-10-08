@@ -1223,7 +1223,7 @@ function parseJinaSearchResults(body, query='') {
   const lines=source.split('\\n').map(x=>x.trim()).filter(Boolean);
   for(let i=0;i<lines.length&&results.length<10;i++){
     const line=lines[i];
-    const urlMatch=line.match(/https?:\\/\\/[^\\s)]+/);
+    const urlMatch=(line.split(/\\s+/).find(token=>token.startsWith('http://')||token.startsWith('https://'))||'').replace(/[),.;]+$/g,'');
     if(!urlMatch) continue;
     const url=normalizeSearchHref(urlMatch[0]);
     if(!url) continue;
@@ -1997,61 +1997,3 @@ async function backupCallHandler(call) {
     openingPrompt=await buildOpeningForCaller(callerPhone);
     console.info('[BACKUP CALL_FLOW] returning_caller_memory_found',{callId:activeKey});
   }
-
-  while(true) {
-    const prompt=nextPrompt || (firstTurn
-      ? (openingPrompt || process.env.FIRST_CALL_MESSAGE ||
-        'שלום, איזה כיף לשמוע אותך. אני כאן איתך. מה תרצה לעשות עכשיו?')
-      : 'אמור שאלה נוספת ולסיום הקש סולמית או הקש כוכבית ליציאה');
-    firstTurn=false;
-
-    const recordPath=await call.read(
-      [{type:'text',data:prompt}],
-      'record',
-      {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000}
-    );
-
-    if(!recordPath || recordPath==='None') {
-      emptyRecordAttempts++;
-      if(emptyRecordAttempts<3) {
-        nextPrompt='לא הצלחתי לשמוע אותך. נסה שוב.';
-        continue;
-      }
-      activeCalls.delete(activeKey);
-      return call.id_list_message([{type:'text',data:'לא התקבלה תשובה. להתראות'}]);
-    }
-    emptyRecordAttempts=0;
-    nextPrompt=null;
-
-    const active=activeCalls.get(activeKey);
-    if(active) active.status='הקלטה התקבלה — מתמלל ומעבד';
-
-    try {
-      const response=await withTimeout(
-        yemotApi.download_file('ivr2:'+recordPath),
-        REQUEST_TIMEOUT_MS,
-        'backup recording download'
-      );
-      const audioBuffer=response.data;
-      const historyText=turnHistory.map((t,i)=>
-        'תור '+(i+1)+' — מתקשר: '+t.user+'\\nתשובה: '+t.assistant
-      ).join('\\n\\n');
-
-      const userTranscript=await transcribeBackupPhoneAudio(audioBuffer);
-      console.info('[BACKUP CALL_FLOW] transcript_ready',{callId:activeKey,transcript:userTranscript});
-
-      if(!userTranscript || userTranscript.length<2)
-        throw Object.assign(new Error('Empty backup phone transcription'),{status:400});
-
-      const israelNow=new Intl.DateTimeFormat('he-IL',{
-        timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'
-      }).format(new Date());
-
-      let replyText='';
-      const deterministicTime=answerIsraelTimeQuestion(userTranscript);
-      if(deterministicTime) {
-        replyText=deterministicTime;
-      } else if(isWeatherQuestion(userTranscript)) {
-        try { replyText=await answerWeatherDirect(userTranscript); }
-        catch { replyText=await answerBackupWithWebSearch(userTranscript,historyText); }
-      } else if(isNewsQuestion(userTranscript)) {
