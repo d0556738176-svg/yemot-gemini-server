@@ -1086,15 +1086,20 @@ async function analyzePublicImageUrl(imageUrl, question) {
       }
     }
   }
-  if([429,408,500,502,503,504].includes(geminiErrorStatus(lastError))) {
+  // Gemini may be temporarily quota-limited. Always try the independent
+  // Google Vision path before returning an unavailable result.
+  if([429,408,500,502,503,504].includes(geminiErrorStatus(lastError)) || lastError) {
     try {
       const visionAnswer=await analyzePublicImageWithVision(imageUrl,question);
       if(visionAnswer) {
-        console.info('[MULTIMODAL] Google Vision fallback succeeded');
+        console.info('[MULTIMODAL] Google Vision fallback succeeded',{afterGeminiStatus:geminiErrorStatus(lastError)});
         return visionAnswer;
       }
     } catch(e) {
-      console.warn('[MULTIMODAL] Google Vision fallback failed',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,220)});
+      console.warn('[MULTIMODAL] Google Vision fallback failed',{
+        status:geminiErrorStatus(e),
+        message:String(e?.message||e).slice(0,220)
+      });
     }
   }
   throw lastError||Object.assign(new Error('Image analysis unavailable'),{status:503});
@@ -1379,7 +1384,21 @@ async function analyzeRequestedMedia(question, context={}) {
     if(candidate?.videoId) urls=['https://www.youtube.com/watch?v='+candidate.videoId];
   }
   if(!urls.length && intent.image && !intent.video){
-    urls=await findPublicImageForVisualQuery(question,historyText);
+    // First use sources that are completely independent of Gemini quota.
+    // A Gemini 429 must not prevent a phone visual request from finding a real public image.
+    urls=await findPublicImageFromOpenSources(question,historyText);
+    if(urls.length) console.info('[MULTIMODAL] open-source visual candidates found',{count:urls.length});
+    // Gemini web search is only a secondary discovery layer.
+    if(!urls.length){
+      try {
+        urls=await findPublicImageForVisualQuery(question,historyText);
+      } catch(e) {
+        console.warn('[MULTIMODAL] Gemini visual discovery unavailable; continuing with public-source fallback',{
+          status:geminiErrorStatus(e),
+          message:String(e?.message||e).slice(0,220)
+        });
+      }
+    }
   }
   if(!urls.length) throw Object.assign(new Error('לא מצאתי מקור ציבורי מתאים לניתוח החזותי.'),{status:404});
 
