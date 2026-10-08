@@ -948,10 +948,12 @@ function extractPublicUrl(text) {
 
 function isMultimodalAnalysisRequest(text) {
   const q=String(text||'').toLowerCase();
-  const asksVisual=/(תמונה|תמונות|צילום|צילום מסך|תצלום|מה רואים|איך נראה|תתאר.*תמונה|נתח.*תמונה|תנתח.*תמונה|תאר.*תמונה|תיאור.*תמונה|מה מופיע בתמונה|מה יש בתמונה)/i.test(q);
-  const asksVideo=/(סרטון|סירטון|וידאו|קליפ|מה רואים בסרטון|מה שומעים בסרטון|תנתח.*סרטון|נתח.*סרטון|תיאור.*סרטון|מה קורה בסרטון|מה מופיע בסרטון|תספר.*סרטון)/i.test(q);
+  const asksVisual=/(תמונה|תמונות|צילום|צילום מסך|תצלום|מה רואים|איך נראה|איך הוא נראה|איך היא נראית|תמחיש|המחשה|להמחיש|תראה לי|תאר לי איך|מה הייתי רואה|תתאר.*תמונה|נתח.*תמונה|תנתח.*תמונה|תאר.*תמונה|תיאור.*תמונה|מה מופיע בתמונה|מה יש בתמונה)/i.test(q);
+  const asksVideo=/(סרטון|סירטון|סרט|וידאו|קליפ|הסרט הזה|הסרטון הזה|מה רואים בסרטון|מה שומעים בסרטון|תנתח.*סרטון|נתח.*סרטון|תיאור.*סרטון|מה קורה בסרטון|מה מופיע בסרטון|מה הוא עושה בסרטון|מה היא עושה בסרטון|תספר.*סרטון|תמחיש.*סרט|המחשה.*סרט|תמחיש.*וידאו)/i.test(q);
+  const genericVideoVisual=/(תמחיש|המחשה|להמחיש|איך הוא נראה|איך היא נראית|מה רואים|מה קורה|מה הוא עושה|מה היא עושה|תראה לי|תאר לי)/i.test(q) &&
+    /(סרט|סרטון|וידאו|קליפ|יוטיוב|יוטוב|ביויוטב)/i.test(q);
   const asksSite=/(תנתח.*אתר|נתח.*אתר|תסביר.*אתר|מה יש באתר|מה כתוב באתר|תיאור.*אתר)/i.test(q);
-  return {image:asksVisual,video:asksVideo,site:asksSite,any:asksVisual||asksVideo||asksSite};
+  return {image:asksVisual&&!asksVideo,video:asksVideo||genericVideoVisual,site:asksSite,any:asksVisual||asksVideo||genericVideoVisual||asksSite};
 }
 
 function extractMetaUrl(html, wantedNames) {
@@ -1054,12 +1056,19 @@ async function analyzePublicVideoUrl(videoUrl, question) {
     const bytes=await readResponseBufferLimited(response,MEDIA_MAX_VIDEO_BYTES,'Public video');
     videoInput={type:'video',data:bytes.toString('base64'),mime_type:mime||'video/mp4'};
   }
-  const prompt='נתח את הסרטון עצמו, כולל המידע החזותי והשמע. השאלה של המתקשר: '+String(question||'תאר את הסרטון בפירוט')+
-    '\nתן תיאור מפורט ומעמיק בעברית: מה קורה לאורך הסרטון, מי או מה מופיע, פעולות ושינויים בין סצנות, טקסטים קריאים, ומה נאמר או נשמע כאשר ניתן לקבוע זאת. אם אפשר, ציין זמנים רלוונטיים. אל תמציא פרטים; ציין במפורש מה אינו ודאי. התשובה מיועדת להקראה בטלפון.';
+  const prompt='נתח את הסרטון עצמו, לא רק את הכותרת, התיאור או המטא-דאטה, כולל המידע החזותי והשמע. השאלה של המתקשר: '+String(question||'תמחיש את הסרטון בפירוט')+
+    '\nתן המחשה קולית מפורטת ומעמיקה בעברית: איך הסרטון נראה מתחילתו, מי או מה מופיע, לבוש ומראה כללי שניתן לראות, המקום והסביבה, מה כל אדם או אובייקט עושה, רצף האירועים והשינויים בין הסצנות, טקסטים שמופיעים על המסך, ומה נאמר או נשמע כאשר ניתן לקבוע זאת. אם יש תנועה מהירה או רגע חשוב, נסה לאתר אותו ולציין זמן רלוונטי. הפרד בבירור בין מה שנצפה לבין השערה, ואל תמציא פרטים. התשובה מיועדת להקראה בטלפון ולכן היא צריכה ממש לעזור למאזין לדמיין את הסרטון.';
   const r=await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{
     method:'POST',
     headers:{'x-goog-api-key':key,'Content-Type':'application/json'},
-    body:JSON.stringify({model,store:false,input:[{type:'text',text:prompt},videoInput]})
+    body:JSON.stringify({
+      model,
+      store:false,
+      input:[
+        videoInput,
+        {type:'text',text:prompt}
+      ]
+    })
   }),MEDIA_ANALYSIS_TIMEOUT_MS,'Gemini video analysis');
   const data=await r.json().catch(()=>({}));
   if(!r.ok) throw Object.assign(new Error(data?.error?.message||('Gemini video analysis HTTP '+r.status)),{status:r.status});
@@ -1147,7 +1156,8 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
     if (n && context.youtubeResults[n-1]) videos=[context.youtubeResults[n-1]];
   }
 
-  if (hasPinnedVideo && (wantsContent || wantsStats || wantsDetails || wantsCommentDetails)) {
+  const wantsVisualFollowUp=/(תמחיש|המחשה|להמחיש|איך הוא נראה|איך היא נראית|מה רואים|מה קורה|מה הוא עושה|מה היא עושה|תיאור חזותי|תאר לי)/i.test(question);
+  if (hasPinnedVideo && (wantsContent || wantsStats || wantsDetails || wantsCommentDetails || wantsVisualFollowUp)) {
     videos=[context.currentVideo];
   }
 
@@ -1200,6 +1210,11 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   if(!videos.length) return 'לא מצאתי כרגע תוצאה מתאימה ביוטיוב.';
   if (context && Array.isArray(context.youtubeResults) && videos.length && !resultMatch) {
     context.youtubeResults = videos.slice(0, 15);
+  }
+  // Keep the most relevant result available for the next natural follow-up.
+  // This lets "תמחיש לי איך הוא נראה" refer to the video just found.
+  if (context && videos.length) {
+    context.currentVideo = videos[0];
   }
   if(wantsStats || wantsDetails) {
     try {
