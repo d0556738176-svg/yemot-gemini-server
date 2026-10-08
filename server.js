@@ -1008,25 +1008,58 @@ async function analyzePublicImageUrl(imageUrl, question) {
   return blocks.join(' ').trim();
 }
 
+async function readResponseBufferLimited(response, maxBytes, label) {
+  if(!response?.body) {
+    const buffer=Buffer.from(await response.arrayBuffer());
+    if(buffer.length>maxBytes) throw Object.assign(new Error(label+' exceeds configured size limit'),{status:413});
+    return buffer;
+  }
+  const reader=response.body.getReader();
+  const chunks=[];
+  let total=0;
+  try {
+    while(true) {
+      const {done,value}=await reader.read();
+      if(done) break;
+      total+=value.byteLength;
+      if(total>maxBytes) {
+        try { await reader.cancel(); } catch {}
+        throw Object.assign(new Error(label+' exceeds configured size limit'),{status:413});
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+  return Buffer.concat(chunks,total);
+}
+
 async function analyzePublicVideoUrl(videoUrl, question) {
   const key=apiKeys[0]||'';
   if(!key) throw Object.assign(new Error('Gemini key unavailable for video analysis'),{status:503});
   const model=(process.env.MEDIA_GEMINI_MODEL||process.env.YOUTUBE_GEMINI_MODEL||'gemini-3.8-flash').trim();
   const isYouTube=/^(?:https?:\/\/)?(?:www\.)?(?:youtube\.com|youtu\.be)\//i.test(videoUrl);
-  if(!isYouTube) {
-    const head=await withTimeout(fetch(videoUrl,{method:'HEAD',redirect:'follow'}),10000,'media video HEAD').catch(()=>null);
-    const length=Number(head?.headers?.get('content-length')||0);
-    const mime=String(head?.headers?.get('content-type')||'').split(';')[0].trim().toLowerCase();
-    if(length && length>MEDIA_MAX_VIDEO_BYTES) throw Object.assign(new Error('Video too large for phone analysis'),{status:413});
+  let videoInput;
+  if(isYouTube) {
+    videoInput={type:'video',uri:videoUrl};
+  } else {
+    const response=await withTimeout(fetch(videoUrl,{redirect:'follow',headers:{'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)'}}),MEDIA_ANALYSIS_TIMEOUT_MS,'public video fetch');
+    if(!response.ok) throw Object.assign(new Error('Public video HTTP '+response.status),{status:502});
+    const mime=String(response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
+    const contentLength=Number(response.headers.get('content-length')||0);
+    if(contentLength && contentLength>MEDIA_MAX_VIDEO_BYTES)
+      throw Object.assign(new Error('Video too large for phone analysis'),{status:413});
     if(!mime.startsWith('video/') && !/\.(mp4|webm|mov|mpeg|mpg|avi|wmv|3gp)(?:\?|$)/i.test(videoUrl))
       throw Object.assign(new Error('Public URL is not a supported video'),{status:415});
+    const bytes=await readResponseBufferLimited(response,MEDIA_MAX_VIDEO_BYTES,'Public video');
+    videoInput={type:'video',data:bytes.toString('base64'),mime_type:mime||'video/mp4'};
   }
   const prompt='נתח את הסרטון עצמו, כולל המידע החזותי והשמע. השאלה של המתקשר: '+String(question||'תאר את הסרטון בפירוט')+
     '\nתן תיאור מפורט ומעמיק בעברית: מה קורה לאורך הסרטון, מי או מה מופיע, פעולות ושינויים בין סצנות, טקסטים קריאים, ומה נאמר או נשמע כאשר ניתן לקבוע זאת. אם אפשר, ציין זמנים רלוונטיים. אל תמציא פרטים; ציין במפורש מה אינו ודאי. התשובה מיועדת להקראה בטלפון.';
   const r=await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{
     method:'POST',
     headers:{'x-goog-api-key':key,'Content-Type':'application/json'},
-    body:JSON.stringify({model,store:false,input:[{type:'text',text:prompt},{type:'video',uri:videoUrl}]})
+    body:JSON.stringify({model,store:false,input:[{type:'text',text:prompt},videoInput]})
   }),MEDIA_ANALYSIS_TIMEOUT_MS,'Gemini video analysis');
   const data=await r.json().catch(()=>({}));
   if(!r.ok) throw Object.assign(new Error(data?.error?.message||('Gemini video analysis HTTP '+r.status)),{status:r.status});
