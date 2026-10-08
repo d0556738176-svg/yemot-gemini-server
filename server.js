@@ -972,6 +972,48 @@ function extractMetaUrl(html, wantedNames) {
   return '';
 }
 
+async function analyzePublicImageWithVision(imageUrl, question='') {
+  const key=String(process.env.GOOGLE_VISION_API_KEY||'').trim();
+  if(!key) throw Object.assign(new Error('Google Vision fallback key is not configured'),{status:503});
+  const endpoint='https://vision.googleapis.com/v1/images:annotate?key='+encodeURIComponent(key);
+  const body={requests:[{image:{source:{imageUri:imageUrl}},features:[
+    {type:'WEB_DETECTION',maxResults:10},
+    {type:'LABEL_DETECTION',maxResults:12},
+    {type:'FACE_DETECTION',maxResults:10},
+    {type:'TEXT_DETECTION',maxResults:5}
+  ]}]};
+  const r=await withTimeout(fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),12000,'Google Vision fallback');
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw Object.assign(new Error(data?.error?.message||('Google Vision HTTP '+r.status)),{status:r.status});
+  const out=data?.responses?.[0]||{};
+  if(out.error) throw Object.assign(new Error(out.error.message||'Google Vision image annotation failed'),{status:Number(out.error.code)||502});
+  const labels=(out.labelAnnotations||[]).map(x=>String(x.description||'').trim()).filter(Boolean).slice(0,8);
+  const entities=(out.webDetection?.webEntities||[]).filter(x=>Number(x.score||0)>=0.35).map(x=>String(x.description||'').trim()).filter(Boolean).slice(0,6);
+  const bestGuess=(out.webDetection?.bestGuessLabels||[]).map(x=>String(x.label||'').trim()).filter(Boolean).slice(0,3);
+  const faces=Array.isArray(out.faceAnnotations)?out.faceAnnotations:[];
+  const text=String(out.textAnnotations?.[0]?.description||'').trim().replace(/\s+/g,' ').slice(0,300);
+  const all=[...new Set([...entities,...bestGuess,...labels])];
+  const faceParts=[];
+  if(faces.length){
+    faceParts.push('זוהו '+faces.length+' פני אדם');
+    const likely=faces[0], moods=[];
+    if(likely.joyLikelihood==='VERY_LIKELY'||likely.joyLikelihood==='LIKELY') moods.push('שמחה');
+    if(likely.sorrowLikelihood==='VERY_LIKELY'||likely.sorrowLikelihood==='LIKELY') moods.push('עצבות');
+    if(likely.angerLikelihood==='VERY_LIKELY'||likely.angerLikelihood==='LIKELY') moods.push('כעס');
+    if(likely.surpriseLikelihood==='VERY_LIKELY'||likely.surpriseLikelihood==='LIKELY') moods.push('הפתעה');
+    if(moods.length) faceParts.push('הבעת הפנים נראית '+moods.join(' או '));
+    if(likely.headwearLikelihood==='VERY_LIKELY'||likely.headwearLikelihood==='LIKELY') faceParts.push('נראה כיסוי ראש');
+    if(likely.blurredLikelihood==='VERY_LIKELY'||likely.blurredLikelihood==='LIKELY') faceParts.push('הפנים מעט מטושטשות');
+  }
+  const parts=[];
+  if(all.length) parts.push('המערכת זיהתה בתמונה: '+all.join(', ')+'.');
+  if(faceParts.length) parts.push(faceParts.join(', ')+'.');
+  if(text) parts.push('טקסט שניתן לקרוא בתמונה: '+text+'.');
+  if(!parts.length) return '';
+  parts.push('זו המחשה אוטומטית על סמך ניתוח התמונה עצמה. פרטים שלא זוהו בביטחון אינם מוצגים כניחוש.');
+  return parts.join(' ');
+}
+
 async function analyzePublicImageUrl(imageUrl, question) {
   const mediaDedicatedKey=String(process.env.MEDIA_GEMINI_API_KEY||'').trim();
   const candidateKeys=[...(mediaDedicatedKey?[mediaDedicatedKey]:[]),...apiKeys,...(BRANCH1_BACKUP_GEMINI_API_KEY?[BRANCH1_BACKUP_GEMINI_API_KEY]:[])].filter(Boolean);
@@ -1030,6 +1072,17 @@ async function analyzePublicImageUrl(imageUrl, question) {
         const status=geminiErrorStatus(e);
         if(status===400||status===401||status===403||status===404||status===415||status===422) break;
       }
+    }
+  }
+  if([429,408,500,502,503,504].includes(geminiErrorStatus(lastError))) {
+    try {
+      const visionAnswer=await analyzePublicImageWithVision(imageUrl,question);
+      if(visionAnswer) {
+        console.info('[MULTIMODAL] Google Vision fallback succeeded');
+        return visionAnswer;
+      }
+    } catch(e) {
+      console.warn('[MULTIMODAL] Google Vision fallback failed',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,220)});
     }
   }
   throw lastError||Object.assign(new Error('Image analysis unavailable'),{status:503});
@@ -2390,7 +2443,7 @@ async function callHandler(call) {
             status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,300)
           });
           if(e?.status===400) replyText='כדי לנתח תמונה או סרטון אני צריך מקור ציבורי נגיש.';
-          else if(e?.status===429) replyText='מנוע ההמחשה הגיע כרגע למכסה. שמרתי את הבקשה וניסיתי מקור ציבורי חלופי; אפשר לנסות שוב בעוד כמה רגעים בלי לתת קישור.';
+          else if(e?.status===429) replyText='ניסיתי גם מסלול המחשה חלופי, אבל כרגע אין מנוע זמין לניתוח התמונה. המערכת תשמור את הבקשה ותנסה שוב אוטומטית בפעם הבאה.';
           else if(e?.status===404) replyText='לא מצאתי כרגע תמונה ציבורית נגישה שאפשר לנתח. אפשר לנסות שוב בניסוח מעט אחר.';
           else replyText='לא הצלחתי לנתח כרגע את המדיה שביקשת. המערכת ניסתה מקור נוסף אוטומטית, בלי לבקש ממך קישור.';
         }
