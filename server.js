@@ -1071,7 +1071,7 @@ async function analyzePublicVideoUrl(videoUrl, question) {
   let videoInput;
 
   if(isYouTube){
-    const useAgenticVideo=/^gemini-3\\.(8|7|6)-flash$|^gemini-3\\.5-flash-lite$/i;
+    const useAgenticVideo=/^gemini-3\.(8|7|6)-flash$|^gemini-3\.5-flash-lite$/i;
     videoInput={type:'video',uri:videoUrl,...(useAgenticVideo.test(mediaModels[0])?{processing:'agentic'}:{})};
   } else {
     const response=await withTimeout(fetch(videoUrl,{redirect:'follow',headers:{'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)'}}),MEDIA_ANALYSIS_TIMEOUT_MS,'public video fetch');
@@ -1092,7 +1092,7 @@ async function analyzePublicVideoUrl(videoUrl, question) {
   for(let ki=0;ki<candidateKeys.length;ki++){
     for(const model of mediaModels){
       try{
-        const agentic=/^gemini-3\\.(8|7|6)-flash$|^gemini-3\\.5-flash-lite$/i.test(model);
+        const agentic=/^gemini-3\.(8|7|6)-flash$|^gemini-3\.5-flash-lite$/i.test(model);
         const input=isYouTube
           ? {...videoInput,...(agentic?{processing:'agentic'}:{})}
           : videoInput;
