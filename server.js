@@ -1432,23 +1432,54 @@ function decodeHtmlEntities(value){
     .replace(/&lt;/gi,'<').replace(/&gt;/gi,'>')
     .replace(/&#x2F;/gi,'/').replace(/&#x27;/gi,"'");
 }
+function extractLocalArea(question){
+  const t=String(question||'').replace(/\s+/g,' ').trim();
+  const areas=['רמה א','רמה א׳','רמה ב','רמה ב׳','רמה ג','רמה ג׳','רמה ד','רמה ד׳','רמה ה','רמה ה׳','רמת בית שמש','מרכז העיר','מגדל המים','נחם','גבעת שרת','גבעת משקף','נווה שמיר','המשקפיים','הקניון','ביג'];
+  return areas.find(x=>t.includes(x)) || '';
+}
+function extractExplicitLocation(question){
+  const t=String(question||'').replace(/\s+/g,' ').trim();
+  const cityMatch=t.match(/(?:ב|ל|מ|אזור)\s+(בית שמש|ירושלים|רעננה|ביתר עילית|בני ברק|פתח תקווה|תל אביב|חיפה|אשדוד|נתניה|רחובות|מודיעין|באר שבע)/i);
+  const city=cityMatch?cityMatch[1]:'';
+  const area=extractLocalArea(t);
+  return {city,area};
+}
+function isPhoneNumberRequest(question){
+  return /(מספר טלפון|טלפון|טלפון של|מספר של|מה המספר|איך מתקשרים|מוקד|שירות לקוחות)/i.test(String(question||''));
+}
+function isBusinessLocalRequest(question){
+  return /(בית מרקחת|בתי מרקחת|סופר.?פארם|חנות|חנויות|עסק|עסקים|סניף|סניפים|מסעדה|מסעדות|בנק|בנקאות|קופת חולים|מרפאה|מרפאות)/i.test(String(question||''));
+}
+function mapsIsraelUrl(title,address){
+  const q=[title,address].filter(Boolean).join(', ');
+  return q ? 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q) : '';
+}
+
 function extractDirectSearchQueries(question){
   const cleaned=String(question||'').trim().replace(/^(?:אז\s+)?(?:תחפש|חפש|בדוק|תבדוק|תמצא|תאתר|תברר)(?:\s+לי)?(?:\s+באינטרנט|\s+ברשת|\s+בגוגל)?\s*/i,'').trim();
-  const queries=[cleaned];
-  if(/סופר פארם|סופרפארם/i.test(cleaned)) {
-    queries.push(cleaned+' כתובת שעות פתיחה טלפון');
-    queries.push(cleaned+' אתר רשמי סניפים');
-  } else if(/אוטובוס|אוטובוסים|רכבת|תחבורה ציבורית|קו\s*\d+/i.test(cleaned)) {
-    queries.push(cleaned+' לוח זמנים');
-    queries.push(cleaned+' מסלול תחנות');
-  } else if(/הופעה|הופעות|אירוע|אירועים|כרטיסים|מופע|מופעים/i.test(cleaned)) {
-    queries.push(cleaned+' תאריך שעה מחיר כרטיסים');
-    queries.push(cleaned+' אתר רשמי');
+  const loc=extractExplicitLocation(cleaned);
+  const queries=[];
+  const locationTail=[loc.area,loc.city].filter(Boolean).join(' ');
+  const base=locationTail && !cleaned.includes(locationTail) ? cleaned+' '+locationTail : cleaned;
+  queries.push(base);
+  if(isPhoneNumberRequest(cleaned)){
+    queries.push(base+' מספר טלפון מוקד שירות לקוחות');
+    queries.push(base+' אתר רשמי טלפון');
+  } else if(isBusinessLocalRequest(cleaned)){
+    queries.push(base+' כתובת מדויקת שעות פתיחה טלפון');
+    queries.push(base+' אתר רשמי סניפים');
+    queries.push(base+' מפה Google Maps');
+  } else if(/אוטובוס|אוטובוסים|רכבת|תחבורה ציבורית|קו\s*\d+/i.test(cleaned)){
+    queries.push(base+' לוח זמנים');
+    queries.push(base+' מסלול תחנות');
+  } else if(/הופעה|הופעות|אירוע|אירועים|כרטיסים|מופע|מופעים/i.test(cleaned)){
+    queries.push(base+' תאריך שעה מחיר כרטיסים');
+    queries.push(base+' אתר רשמי');
   } else {
-    queries.push(cleaned+' מידע עדכני');
-    queries.push(cleaned+' מקור רשמי');
+    queries.push(base+' מידע עדכני');
+    queries.push(base+' מקור רשמי');
   }
-  return [...new Set(queries.filter(Boolean).map(x=>x.slice(0,240)))].slice(0,3);
+  return [...new Set(queries.filter(Boolean).map(x=>x.slice(0,240)))].slice(0,4);
 }
 async function answerWithDirectWebFallback(question){
   const queries=extractDirectSearchQueries(question);
@@ -1475,16 +1506,20 @@ async function answerWithDirectWebFallback(question){
   // reading raw search-result snippets back to the caller.
   const evidence=unique.map((x,i)=>{
     const snippet=String(x.snippet||'').trim();
-    return 'מקור '+(i+1)+': '+String(x.title||'')+'\nכתובת: '+String(x.url||'')+'\nתוכן: '+snippet.slice(0,1800);
+    const map=mapsIsraelUrl(x.title||'',snippet);
+    return 'מקור '+(i+1)+': '+String(x.title||'')+'\nכתובת מקור: '+String(x.url||'')+'\nקישור מפה אפשרי: '+map+'\nתוכן: '+snippet.slice(0,1800);
   }).join('\n\n');
   const synthesisPrompt=
     'אתה מנוע תשובות קולי חכם. נסח תשובה ישירה לשאלה של המתקשר על בסיס מקורות האינטרנט שנאספו בלבד.\\n'+
     'השאלה: '+question+'\\n\\n'+
     'מקורות שנאספו:\\n'+evidence+'\\n\\n'+
     'כללי תשובה: התחל בתשובה עצמה, לא במשפט כמו "מצאתי מידע". חבר בין המקורות ואל תקריא רשימת תוצאות חיפוש. '+
-    'אם מדובר בעסק או שירות, חלץ את כל הסניפים הרלוונטיים לאזור שנשאל, ולכל סניף כתובת מלאה, טלפון ושעות פעילות אם נמצאו. '+
+    'אם מדובר בעסק או שירות מקומי, התייחס קודם למיקום שהמשתמש ציין, כולל שכונה/רמה/אזור, וחפש את האפשרויות הקרובות והרלוונטיות ביותר. '+
+    'לכל מקום שמומלץ לציין, תן שם מלא, כתובת מלאה, טלפון ושעות פעילות אם נמצאו. אם המשתמש ביקש מיקום, צור גם קישור Google Maps מתאים על בסיס שם המקום והכתובת; אל תמציא קואורדינטות. '+
+    'אם המשתמש ביקש מספר טלפון, אל תקריא מספר שמופיע רק במקור אחד לא מזוהה. העדף אתר רשמי של העסק/הבנק/הארגון, ואם אין מקור רשמי אז אמת מול מקור נוסף ועקבי. '+
+    'אם נמצאו מספרים סותרים, אל תבחר באקראי: ציין שיש סתירה וחפש מקור רשמי נוסף. עבור מספרי כוכבית, שמור בדיוק על הכוכבית והמיקום שלה, למשל *6111. '+
     'אם המשתמש ביקש כל הסניפים, אל תסתפק בסניף אחד. אם נתון לא אומת, אמור "לא הצלחתי לאמת" ולא תנחש. '+
-    'אם יש סתירה בין מקורות, ציין אותה בקצרה והעדף מקור רשמי או עדכני. '+
+    'אם יש סתירה בין מקורות, העדף מקור רשמי ועדכני. '+
     'דבר בעברית טבעית, זורמת ונעימה להקראה בטלפון. היה ממוקד אבל אל תשמיט פרט שהמשתמש ביקש במפורש. '+
     'אל תמציא עובדות שאינן במקורות.';
   try {
