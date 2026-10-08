@@ -1192,7 +1192,7 @@ function extractSearchCity(transcript) {
   return cities.find(city=>t.includes(city)) || '';
 }
 
-async async function answerPharmacySearchDirect(transcript) {
+async function answerPharmacySearchDirect(transcript) {
   const question=String(transcript||'').trim();
   const loc=extractExplicitLocation(question);
   const city=loc.city || extractSearchCity(question) || 'בית שמש';
