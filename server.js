@@ -1121,7 +1121,74 @@ async function analyzePublicVideoUrl(videoUrl, question) {
   throw lastError||Object.assign(new Error('Video analysis unavailable'),{status:503});
 }
 
-async function findPublicImageForVisualQuery(question) {
+function extractVisualSubject(question, historyText='') {
+  const q=String(question||'').trim();
+  const h=String(historyText||'');
+  const clean=(x)=>String(x||'')
+    .replace(/(?:איך|כיצד)\s*(?:הוא|היא|זה|זו)?\s*(?:נראה|נראית|נראים|נראות)/gi,' ')
+    .replace(/(?:תמחיש|המחשה|להמחיש|תראה לי|תאר לי|תיאור חזותי|מה רואים|מה קורה)/gi,' ')
+    .replace(/(?:תמצא|תמצאי|מצא|חפש|תחפש|חיפוש|משהו|תמונה|צילום|ציבורי|מקור|קישור|קישור ציבורי|תנסה שוב|שוב)/gi,' ')
+    .replace(/[?!.:,;]+/g,' ')
+    .replace(/\s+/g,' ').trim();
+  const direct=clean(q);
+  if(direct && direct.length>=3 && !/^(אותו|אותה|זה|זו|שם האדם|האדם)$/i.test(direct)) return direct;
+  const turns=h.split(/\n\s*\n|(?=תור\s*\d+)/).reverse();
+  for(const turn of turns){
+    const m=turn.match(/מתקשר:\s*([^\n]+)/i);
+    if(m){
+      const t=clean(m[1]);
+      if(/איך|נראה|נראית|תמחיש|תמונה|צילום|חזות/i.test(m[1]) && t.length>=3) return t;
+    }
+  }
+  return direct;
+}
+
+function isVisualContinuationRequest(text, historyText='') {
+  const q=String(text||'');
+  const continuation=/(תמצא|תמצאי|מצא|חפש|תחפש|חיפוש|משהו ציבורי|מקור ציבורי|תמונה ציבורית|תמונה כלשהי|תמונה כל שהוא|קישור ציבורי|קישור כלשהו|תנסה שוב|נסה שוב|תחפש משהו|תמצא משהו)/i.test(q);
+  const visualHistory=/(איך נראה|איך היא נראית|איך הוא נראה|תמחיש|המחשה|תמונה|צילום|סרטון|וידאו|תיאור חזותי|מה רואים)/i.test(String(historyText||''));
+  return continuation && visualHistory;
+}
+
+async function findPublicImageFromOpenSources(question, historyText='') {
+  const subject=extractVisualSubject(question,historyText);
+  if(!subject) return [];
+  const candidates=[];
+  const add=(u)=>{ if(u && /^https?:\/\//i.test(u) && !candidates.includes(u)) candidates.push(u); };
+
+  const endpoints=[
+    'https://he.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&generator=search&gsrsearch='+encodeURIComponent(subject)+'&gsrnamespace=0&gsrlimit=6&prop=pageimages&piprop=thumbnail&pilicense=any&pithumbsize=1000&redirects=1',
+    'https://en.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&generator=search&gsrsearch='+encodeURIComponent(subject)+'&gsrnamespace=0&gsrlimit=6&prop=pageimages&piprop=thumbnail&pilicense=any&pithumbsize=1000&redirects=1'
+  ];
+  for(const endpoint of endpoints){
+    try{
+      const r=await withTimeout(fetch(endpoint,{headers:{'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)'}}),7000,'Wikipedia image search');
+      if(!r.ok) continue;
+      const data=await r.json().catch(()=>null);
+      for(const page of (data?.query?.pages||[])) add(page?.thumbnail?.source);
+    }catch{}
+    if(candidates.length>=MEDIA_MAX_CANDIDATES) break;
+  }
+
+  // YouTube is an independent source from Gemini quota and its thumbnails are
+  // public image URLs. Use it when Wikipedia has no suitable picture.
+  if(candidates.length<MEDIA_MAX_CANDIDATES){
+    try{
+      const ytKey=(process.env.YOUTUBE_API_KEY||'').trim();
+      if(ytKey){
+        const videos=await searchYouTubeVideos(subject,{apiKey:ytKey,regionCode:process.env.YOUTUBE_REGION_CODE||'IL',timeoutMs:REQUEST_TIMEOUT_MS});
+        for(const v of (videos||[]).slice(0,MEDIA_MAX_CANDIDATES)){
+          add(v.thumbnail||v.thumbnails?.high?.url||v.thumbnails?.medium?.url||v.thumbnails?.default?.url);
+          if(candidates.length>=MEDIA_MAX_CANDIDATES) break;
+        }
+      }
+    }catch{}
+  }
+  return candidates.slice(0,MEDIA_MAX_CANDIDATES);
+}
+
+async function findPublicImageForVisualQuery(question, historyText='') {
+
   const candidateKeys=[...apiKeys, ...(BRANCH1_BACKUP_GEMINI_API_KEY?[BRANCH1_BACKUP_GEMINI_API_KEY]:[])].filter(Boolean);
   if(!candidateKeys.length) throw Object.assign(new Error('Gemini key unavailable for public visual search'),{status:503});
   const configuredMediaModel=(process.env.MEDIA_GEMINI_MODEL||'gemini-3.8-flash').trim();
@@ -1211,7 +1278,10 @@ async function findPublicImageForVisualQuery(question) {
 }
 
 async function analyzeRequestedMedia(question, context={}) {
+  const historyText=String(context?.historyText||'');
+  const visualContinuation=isVisualContinuationRequest(question,historyText);
   const intent=isMultimodalAnalysisRequest(question);
+  if(visualContinuation && !intent.any) intent.image=true, intent.any=true;
   if(!intent.any) return null;
   const explicitUrl=extractPublicUrl(question);
   const youtubeVideo=context?.currentVideo?.videoId
@@ -1223,7 +1293,7 @@ async function analyzeRequestedMedia(question, context={}) {
     if(candidate?.videoId) urls=['https://www.youtube.com/watch?v='+candidate.videoId];
   }
   if(!urls.length && intent.image && !intent.video){
-    urls=await findPublicImageForVisualQuery(question);
+    urls=await findPublicImageForVisualQuery(question,historyText);
   }
   if(!urls.length) throw Object.assign(new Error('לא מצאתי מקור ציבורי מתאים לניתוח החזותי.'),{status:404});
 
@@ -2226,6 +2296,7 @@ async function callHandler(call) {
       // improves phone latency, and leaves more capacity for real conversation/advice.
       const directDataRequest =
         isMultimodalAnalysisRequest(userTranscript).any ||
+        isVisualContinuationRequest(userTranscript,historyText) ||
         !!answerIsraelTimeQuestion(userTranscript) ||
         !!answerDailyDateQuestion(userTranscript) ||
         isWeatherQuestion(userTranscript) ||
@@ -2282,16 +2353,16 @@ async function callHandler(call) {
           replyText=await answerWithWebSearch(userTranscript, historyText);
         }
       }
-      else if(isMultimodalAnalysisRequest(userTranscript).any) {
+      else if(isMultimodalAnalysisRequest(userTranscript).any || isVisualContinuationRequest(userTranscript,historyText)) {
         try {
-          replyText=await analyzeRequestedMedia(userTranscript,turnContext);
+          replyText=await analyzeRequestedMedia(userTranscript,{...turnContext,historyText});
           if(!replyText) throw Object.assign(new Error('Media analysis returned empty answer'),{status:503});
         } catch(e) {
           console.warn('[MULTIMODAL] analysis unavailable; falling back safely',{
             status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,300)
           });
           if(e?.status===400) replyText='כדי לנתח תמונה או סרטון אני צריך מקור ציבורי נגיש.';
-          else if(e?.status===429) replyText='מקור אחד הגיע כרגע למגבלת שימוש. עברתי אוטומטית למקורות ולמפתח גיבוי, אבל גם הם לא היו זמינים כרגע. אפשר לנסות שוב בעוד רגע.';
+          else if(e?.status===429) replyText='מנוע ההמחשה הגיע כרגע למכסה. שמרתי את הבקשה וניסיתי מקור ציבורי חלופי; אפשר לנסות שוב בעוד כמה רגעים בלי לתת קישור.';
           else if(e?.status===404) replyText='לא מצאתי כרגע תמונה ציבורית נגישה שאפשר לנתח. אפשר לנסות שוב בניסוח מעט אחר.';
           else replyText='לא הצלחתי לנתח כרגע את המדיה שביקשת. המערכת ניסתה מקור נוסף אוטומטית, בלי לבקש ממך קישור.';
         }
