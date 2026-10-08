@@ -95,6 +95,8 @@ const DIRECT_WEB_QUERY_TIMEOUT_MS = Number(process.env.DIRECT_WEB_QUERY_TIMEOUT_
 // a slow Deepgram request does not inherit Gemini's tighter phone-answer timeout.
 // 18s is only a safety ceiling; successful requests should return much sooner.
 const PHONE_DEEPGRAM_TIMEOUT_MS = Number(process.env.PHONE_DEEPGRAM_TIMEOUT_MS || 18000);
+const MEDIA_MAX_IMAGE_BYTES = Number(process.env.MEDIA_MAX_IMAGE_BYTES || 12000000);
+const MEDIA_MAX_VIDEO_BYTES = Number(process.env.MEDIA_MAX_VIDEO_BYTES || 95000000);
 const MEDIA_ANALYSIS_TIMEOUT_MS = Number(process.env.MEDIA_ANALYSIS_TIMEOUT_MS || 90000);
 
 // Avoid repeatedly hammering Gemini after the API has explicitly reported quota exhaustion.
@@ -234,11 +236,11 @@ function geminiErrorStatus(err) {
   return match ? Number(match[1]) : 0;
 }
 
-async function generateWithRetry(contents, useWebSearch=false, fastPhone=false) {
+async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null) {
   if (!modelsByName.length || !modelsByName[0]?.length)
     throw Object.assign(new Error('Gemini is not configured'), {status:400});
   const groups = useWebSearch ? webModelsByName : modelsByName;
-  const timeoutMs = fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+  const timeoutMs = Number(timeoutOverrideMs || (fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS));
   const maxAttempts = fastPhone ? 1 : 2;
   let lastError;
 
@@ -323,9 +325,9 @@ const branch1BackupWebModels = branch1BackupGeminiClient
   ? branch1BackupModelNames.map(model => branch1BackupGeminiClient.getGenerativeModel({model, tools:[{googleSearch:{}}]}))
   : [];
 
-async function generateBranch1WithFallback(contents, useWebSearch=false, fastPhone=false) {
+async function generateBranch1WithFallback(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null) {
   try {
-    return await generateWithRetry(contents, useWebSearch, fastPhone);
+    return await generateWithRetry(contents, useWebSearch, fastPhone, timeoutOverrideMs);
   } catch (primaryError) {
     const primaryStatus=geminiErrorStatus(primaryError);
     const shouldFallback=[429,408,500,502,503,504].includes(primaryStatus);
@@ -334,7 +336,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
     }
 
     const models=useWebSearch ? branch1BackupWebModels : branch1BackupModels;
-    const timeoutMs=fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+    const timeoutMs=Number(timeoutOverrideMs || (fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS));
     let lastError=primaryError;
 
     console.warn('[BRANCH1 FALLBACK] primary Gemini unavailable; trying separate backup Project', {
@@ -936,6 +938,132 @@ async function analyzePublicYouTubeVideo(videoUrl, question) {
     return blocks.join(' ').trim();
   }
   return textOutput;
+}
+
+function extractPublicUrl(text) {
+  const match=String(text||'').match(/https?:\/\/[^\s<>]+/i);
+  if(!match) return '';
+  return match[0].replace(/[.,!?;:]+$/,'');
+}
+
+function isMultimodalAnalysisRequest(text) {
+  const q=String(text||'').toLowerCase();
+  const asksVisual=/(תמונה|תמונות|צילום|צילום מסך|תצלום|מה רואים|איך נראה|תתאר.*תמונה|נתח.*תמונה|תנתח.*תמונה|תאר.*תמונה|תיאור.*תמונה|מה מופיע בתמונה|מה יש בתמונה)/i.test(q);
+  const asksVideo=/(סרטון|סירטון|וידאו|קליפ|מה רואים בסרטון|מה שומעים בסרטון|תנתח.*סרטון|נתח.*סרטון|תיאור.*סרטון|מה קורה בסרטון|מה מופיע בסרטון|תספר.*סרטון)/i.test(q);
+  const asksSite=/(תנתח.*אתר|נתח.*אתר|תסביר.*אתר|מה יש באתר|מה כתוב באתר|תיאור.*אתר)/i.test(q);
+  return {image:asksVisual,video:asksVideo,site:asksSite,any:asksVisual||asksVideo||asksSite};
+}
+
+function extractMetaUrl(html, wantedNames) {
+  const source=String(html||'');
+  const wanted=new Set(wantedNames.map(x=>x.toLowerCase()));
+  const tags=source.match(/<meta\b[^>]*>/gi)||[];
+  for(const tag of tags) {
+    const attrs={};
+    for(const m of tag.matchAll(/([a-zA-Z_:][-a-zA-Z0-9_:]*)\s*=\s*["']([^"']*)["']/g)) attrs[m[1].toLowerCase()]=m[2];
+    const name=String(attrs.property||attrs.name||'').toLowerCase();
+    const content=String(attrs.content||'').trim();
+    if(wanted.has(name) && content) return decodeHtmlEntities(content);
+  }
+  return '';
+}
+
+async function analyzePublicImageUrl(imageUrl, question) {
+  const key=apiKeys[0]||'';
+  if(!key) throw Object.assign(new Error('Gemini key unavailable for image analysis'),{status:503});
+  let response=await withTimeout(fetch(imageUrl,{headers:{'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)'}}),MEDIA_ANALYSIS_TIMEOUT_MS,'media image fetch');
+  if(!response.ok) throw Object.assign(new Error('Image fetch HTTP '+response.status),{status:502});
+  let mime=String(response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
+  let bytes=Buffer.from(await response.arrayBuffer());
+
+  if(!mime.startsWith('image/')) {
+    const discovered=extractMetaUrl(bytes.toString('utf8'),['og:image','twitter:image','twitter:image:src']);
+    if(!discovered) throw Object.assign(new Error('No public image found at URL'),{status:415});
+    const discoveredUrl=new URL(discovered,new URL(imageUrl)).toString();
+    response=await withTimeout(fetch(discoveredUrl,{headers:{'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)'}}),MEDIA_ANALYSIS_TIMEOUT_MS,'media discovered image fetch');
+    if(!response.ok) throw Object.assign(new Error('Discovered image HTTP '+response.status),{status:502});
+    mime=String(response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
+    bytes=Buffer.from(await response.arrayBuffer());
+  }
+
+  if(!mime.startsWith('image/')) throw Object.assign(new Error('Unsupported image content type'),{status:415});
+  if(bytes.length>MEDIA_MAX_IMAGE_BYTES) throw Object.assign(new Error('Image too large for phone analysis'),{status:413});
+
+  const model=(process.env.MEDIA_GEMINI_MODEL||'gemini-3.8-flash').trim();
+  const prompt='נתח את התמונה עצמה, לא רק את כתובת המקור. השאלה של המתקשר: '+String(question||'תאר את התמונה בפירוט')+
+    '\nתן תיאור מפורט, מדויק וטבעי בעברית: מה נראה, אנשים או בעלי חיים אם יש, חפצים, סביבה, טקסט קריא, צבעים, מיקום יחסי, פעולות ואירועים שניתן להסיק בביטחון. הפרד בין מה שנראה בבירור לבין מה שאינו ודאי. אם יש טקסט בתמונה, קרא אותו רק אם הוא קריא. התשובה מיועדת להקראה בטלפון.';
+  const r=await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{
+    method:'POST',
+    headers:{'x-goog-api-key':key,'Content-Type':'application/json'},
+    body:JSON.stringify({model,store:false,input:[
+      {type:'text',text:prompt},
+      {type:'image',data:bytes.toString('base64'),mime_type:mime}
+    ]})
+  }),MEDIA_ANALYSIS_TIMEOUT_MS,'Gemini image analysis');
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw Object.assign(new Error(data?.error?.message||('Gemini image analysis HTTP '+r.status)),{status:r.status});
+  const out=String(data?.output_text||'').trim();
+  if(out) return out;
+  const blocks=(data?.steps||[]).flatMap(x=>x?.content||[]).filter(x=>x?.type==='text').map(x=>x.text||'');
+  return blocks.join(' ').trim();
+}
+
+async function analyzePublicVideoUrl(videoUrl, question) {
+  const key=apiKeys[0]||'';
+  if(!key) throw Object.assign(new Error('Gemini key unavailable for video analysis'),{status:503});
+  const model=(process.env.MEDIA_GEMINI_MODEL||process.env.YOUTUBE_GEMINI_MODEL||'gemini-3.8-flash').trim();
+  const isYouTube=/^(?:https?:\/\/)?(?:www\.)?(?:youtube\.com|youtu\.be)\//i.test(videoUrl);
+  if(!isYouTube) {
+    const head=await withTimeout(fetch(videoUrl,{method:'HEAD',redirect:'follow'}),10000,'media video HEAD').catch(()=>null);
+    const length=Number(head?.headers?.get('content-length')||0);
+    const mime=String(head?.headers?.get('content-type')||'').split(';')[0].trim().toLowerCase();
+    if(length && length>MEDIA_MAX_VIDEO_BYTES) throw Object.assign(new Error('Video too large for phone analysis'),{status:413});
+    if(!mime.startsWith('video/') && !/\.(mp4|webm|mov|mpeg|mpg|avi|wmv|3gp)(?:\?|$)/i.test(videoUrl))
+      throw Object.assign(new Error('Public URL is not a supported video'),{status:415});
+  }
+  const prompt='נתח את הסרטון עצמו, כולל המידע החזותי והשמע. השאלה של המתקשר: '+String(question||'תאר את הסרטון בפירוט')+
+    '\nתן תיאור מפורט ומעמיק בעברית: מה קורה לאורך הסרטון, מי או מה מופיע, פעולות ושינויים בין סצנות, טקסטים קריאים, ומה נאמר או נשמע כאשר ניתן לקבוע זאת. אם אפשר, ציין זמנים רלוונטיים. אל תמציא פרטים; ציין במפורש מה אינו ודאי. התשובה מיועדת להקראה בטלפון.';
+  const r=await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{
+    method:'POST',
+    headers:{'x-goog-api-key':key,'Content-Type':'application/json'},
+    body:JSON.stringify({model,store:false,input:[{type:'text',text:prompt},{type:'video',uri:videoUrl}]})
+  }),MEDIA_ANALYSIS_TIMEOUT_MS,'Gemini video analysis');
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw Object.assign(new Error(data?.error?.message||('Gemini video analysis HTTP '+r.status)),{status:r.status});
+  const out=String(data?.output_text||'').trim();
+  if(out) return out;
+  const blocks=(data?.steps||[]).flatMap(x=>x?.content||[]).filter(x=>x?.type==='text').map(x=>x.text||'');
+  return blocks.join(' ').trim();
+}
+
+async function analyzeRequestedMedia(question, context={}) {
+  const intent=isMultimodalAnalysisRequest(question);
+  if(!intent.any) return null;
+  const explicitUrl=extractPublicUrl(question);
+  const youtubeVideo=context?.currentVideo?.videoId
+    ? 'https://www.youtube.com/watch?v='+context.currentVideo.videoId : '';
+  let url=explicitUrl||youtubeVideo;
+  if(!url && intent.video && context?.youtubeResults?.length) {
+    const candidate=context.youtubeResults[0];
+    if(candidate?.videoId) url='https://www.youtube.com/watch?v='+candidate.videoId;
+  }
+  if(!url) throw Object.assign(new Error('Media analysis requires a public image, video, or page URL, or a selected YouTube video'),{status:400});
+
+  if(intent.site && !intent.image && !intent.video) {
+    const key=apiKeys[0]||'';
+    if(!key) throw Object.assign(new Error('Gemini key unavailable for site analysis'),{status:503});
+    const model=(process.env.MEDIA_GEMINI_MODEL||'gemini-3.8-flash').trim();
+    const r=await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{
+      method:'POST',headers:{'x-goog-api-key':key,'Content-Type':'application/json'},
+      body:JSON.stringify({model,store:false,input:'נתח את האתר הבא לפי בקשת המתקשר. כתובת: '+url+'\nבקשה: '+question,tools:[{type:'url_context'}]})
+    }),MEDIA_ANALYSIS_TIMEOUT_MS,'Gemini site analysis');
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok) throw Object.assign(new Error(data?.error?.message||('Gemini site analysis HTTP '+r.status)),{status:r.status});
+    return String(data?.output_text||'').trim();
+  }
+
+  if(intent.video || /(?:youtube\.com|youtu\.be)/i.test(url)) return analyzePublicVideoUrl(url,question);
+  return analyzePublicImageUrl(url,question);
 }
 
 function wantsYouTubeVideoFollowUp(text) {
@@ -1904,6 +2032,7 @@ async function callHandler(call) {
       // handled by deterministic/direct data paths below. This reduces quota use,
       // improves phone latency, and leaves more capacity for real conversation/advice.
       const directDataRequest =
+        isMultimodalAnalysisRequest(userTranscript).any ||
         !!answerIsraelTimeQuestion(userTranscript) ||
         !!answerDailyDateQuestion(userTranscript) ||
         isWeatherQuestion(userTranscript) ||
@@ -1917,7 +2046,7 @@ async function callHandler(call) {
         const answerPrompt=EXCLUSIVE_INSTRUCTION+'\\n\\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\\n\\nהקשר קודם של השיחה, לפי הסדר:\\n'+(historyText || 'אין עדיין הקשר קודם.')+'\\n\\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\\n'+userTranscript+'\\n\\n'+(longAnswer
           ? 'זו בקשה לתשובה ארוכה ומפורטת. אל תקצר ל-1 עד 4 משפטים. בנה תשובה רציפה ומסודרת, בדרך כלל 8 עד 20 פסקאות או משפטים קצרים לפי הצורך, עד כ-'+LONG_ANSWER_MAX_CHARS+' תווים. שמור על רצף טבעי להקראה בטלפון, בלי כותרות טכניות ובלי לחזור על עצמך. '
           : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. ')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
-        const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt}]}],false,!longAnswer)).response.text().trim();
+        const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
         let parsedTurn=null;
         try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\\{[\\s\\S]*\\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
         if(parsedTurn && typeof parsedTurn.answer==='string') {
@@ -1958,6 +2087,18 @@ async function callHandler(call) {
         } catch(e) {
           console.warn('[TRANSIT] direct route unavailable; falling back to live web search',{status:geminiErrorStatus(e)});
           replyText=await answerWithWebSearch(userTranscript, historyText);
+        }
+      }
+      else if(isMultimodalAnalysisRequest(userTranscript).any) {
+        try {
+          replyText=await analyzeRequestedMedia(userTranscript,turnContext);
+          if(!replyText) throw Object.assign(new Error('Media analysis returned empty answer'),{status:503});
+        } catch(e) {
+          console.warn('[MULTIMODAL] analysis unavailable; falling back safely',{
+            status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,300)
+          });
+          if(e?.status===400) replyText='כדי לנתח תמונה או סרטון אני צריך קישור ציבורי לתמונה או לסרטון, או לבחור קודם סרטון ביוטיוב.';
+          else replyText='לא הצלחתי לנתח כרגע את המדיה שביקשת. אפשר לנסות שוב עם קישור ציבורי ישיר.';
         }
       }
       else if(isPharmacySearchRequest(userTranscript)) {
