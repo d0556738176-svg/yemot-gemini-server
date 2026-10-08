@@ -1242,13 +1242,13 @@ function parseGoogleResults(html){
   const results=[];
   const blocks=String(html||'').split(/<div[^>]+class="[^"]*MjjYud[^"]*"[^>]*>/i).slice(1);
   for(const block of blocks.slice(0,15)){
-    const linkMatch=block.match(/<a[^>]+href="(https?:\\/\\/[^"]+)"[^>]*>/i);
+    const linkMatch=block.match(/<a[^>]+href="([^"]+)"[^>]*>/i);
     if(!linkMatch) continue;
     const href=decodeHtmlEntities(linkMatch[1]);
-    if(/google\\.(?:com|co\\.il)/i.test(href)) continue;
-    const titleMatch=block.match(/<h3[^>]*>([\\s\\S]*?)<\\/h3>/i);
+    if(!/^https?:/i.test(href) || /google\.(?:com|co\.il)/i.test(href)) continue;
+    const titleMatch=block.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
     const title=titleMatch ? stripHtml(decodeHtmlEntities(titleMatch[1])) : '';
-    const snippetMatch=block.match(/<div[^>]+(?:class="[^"]*(?:VwiC3b|yXK7lf)[^"]*"|data-sncf="1")[^>]*>([\\s\\S]*?)<\\/div>/i);
+    const snippetMatch=block.match(/<div[^>]+(?:class="[^"]*(?:VwiC3b|yXK7lf)[^"]*"|data-sncf="1")[^>]*>([\s\S]*?)<\/div>/i);
     const snippet=snippetMatch ? stripHtml(decodeHtmlEntities(snippetMatch[1])) : '';
     if(title) results.push({title,url:href,snippet});
   }
@@ -1259,11 +1259,12 @@ function parseBingResults(html){
   const results=[];
   const blocks=String(html||'').split(/<li[^>]+class="[^"]*b_algo[^"]*"[^>]*>/i).slice(1);
   for(const block of blocks.slice(0,15)){
-    const linkMatch=block.match(/<h2[^>]*>\\s*<a[^>]+href="([^"]+)"[^>]*>([\\s\\S]*?)<\\/a>/i);
+    const linkMatch=block.match(/<h2[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
     if(!linkMatch) continue;
     const title=stripHtml(decodeHtmlEntities(linkMatch[2]));
     const href=decodeHtmlEntities(linkMatch[1]);
-    const snippetMatch=block.match(/<p[^>]*>([\\s\\S]*?)<\\/p>/i);
+    if(!/^https?:/i.test(href)) continue;
+    const snippetMatch=block.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
     const snippet=snippetMatch ? stripHtml(decodeHtmlEntities(snippetMatch[1])) : '';
     if(title) results.push({title,url:href,snippet});
   }
@@ -1274,12 +1275,12 @@ function parseDuckDuckGoResults(html){
   const results=[];
   const blocks=String(html||'').split(/<div[^>]+class="[^"]*result[^"]*"[^>]*>/i).slice(1);
   for(const block of blocks.slice(0,15)){
-    const linkMatch=block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\\s\\S]*?)<\\/a>/i);
+    const linkMatch=block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
     if(!linkMatch) continue;
     const href=decodeHtmlEntities(linkMatch[1]);
     const title=stripHtml(decodeHtmlEntities(linkMatch[2]));
-    const snippetMatch=block.match(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\\s\\S]*?)<\\/a>/i) ||
-      block.match(/<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\\s\\S]*?)<\\/div>/i);
+    const snippetMatch=block.match(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/i) ||
+      block.match(/<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
     const snippet=snippetMatch ? stripHtml(decodeHtmlEntities(snippetMatch[1])) : '';
     if(title) results.push({title,url:href,snippet});
   }
