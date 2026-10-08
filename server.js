@@ -1190,7 +1190,6 @@ function shouldForceWebSearch(transcript) {
 async function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
-
   const timeoutMs=Number(options.timeoutMs||5000);
   const providers=[
     ['bing-rss','https://www.bing.com/search?format=rss&q='+encodeURIComponent(q.slice(0,240)),parseBingRssResults],
@@ -1198,49 +1197,53 @@ async function searchWebDirect(query, options={}) {
     ['yahoo','https://search.yahoo.com/search?p='+encodeURIComponent(q.slice(0,240)),parseYahooResults],
     ['duckduckgo','https://html.duckduckgo.com/html/?q='+encodeURIComponent(q.slice(0,240)),parseDuckDuckGoResults]
   ];
-
   let lastError=null;
-  for(const [name,target,parser] of providers){
-    try {
-      const response=await withTimeout(fetch(target,{
-        headers:{
-          'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/154 Safari/537.36',
-          'accept':'application/rss+xml,application/xml,text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-          'accept-language':'he-IL,he;q=0.9,en;q=0.7'
-        }
-      }),timeoutMs,'direct web search '+name);
+  for(const provider of providers){
+    const name=provider[0], target=provider[1], parser=provider[2];
+    try{
+      const response=await withTimeout(fetch(target,{headers:{
+        'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/154 Safari/537.36',
+        'accept':'application/rss+xml,application/xml,text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+        'accept-language':'he-IL,he;q=0.9,en;q=0.7'
+      }}),timeoutMs,'direct web search '+name);
       const body=await response.text();
       if(!response.ok) throw Object.assign(new Error('Direct web search '+name+' HTTP '+response.status),{status:response.status});
-
       const results=parser(body).filter(x=>x.title&&x.url);
       if(results.length){
         console.info('[DIRECT_WEB] provider succeeded',{provider:name,query:q.slice(0,180),results:results.length});
         return results.slice(0,10);
       }
       throw Object.assign(new Error('Direct web search '+name+' returned no parsed results'),{status:502});
-    } catch(e) {
+    }catch(e){
       lastError=e;
       console.warn('[DIRECT_WEB] provider failed',{provider:name,status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,220)});
     }
   }
-  throw lastError || Object.assign(new Error('Direct web search unavailable'),{status:503});
+  throw lastError||Object.assign(new Error('Direct web search unavailable'),{status:503});
 }
 
 function decodeXml(value){
-  return decodeHtmlEntities(String(value||'')
-    .replace(/<!\[CDATA\[([\\s\\S]*?)\]\]>/gi,'$1'));
+  return decodeHtmlEntities(String(value||'').replace('<![CDATA[','').replace(']]>',''));
+}
+
+function xmlTagValue(block,tag){
+  const startTag='<'+tag;
+  const start=block.indexOf(startTag);
+  if(start<0) return '';
+  const contentStart=block.indexOf('>',start);
+  if(contentStart<0) return '';
+  const end=block.indexOf('</'+tag+'>',contentStart+1);
+  if(end<0) return '';
+  return decodeXml(block.slice(contentStart+1,end));
 }
 
 function parseBingRssResults(xml){
   const results=[];
-  const items=String(xml||'').match(/<item>[\\s\\S]*?<\\/item>/gi)||[];
-  for(const item of items.slice(0,15)){
-    const titleMatch=item.match(/<title>([\\s\\S]*?)<\\/title>/i);
-    const linkMatch=item.match(/<link>([\\s\\S]*?)<\\/link>/i);
-    const descMatch=item.match(/<description>([\\s\\S]*?)<\\/description>/i);
-    const title=titleMatch?stripHtml(decodeXml(titleMatch[1])):'';
-    const url=normalizeSearchHref(decodeXml(linkMatch?linkMatch[1]:'')); 
-    const snippet=descMatch?stripHtml(decodeXml(descMatch[1])):'';
+  const parts=String(xml||'').split('<item>').slice(1,16);
+  for(const item of parts){
+    const title=stripHtml(xmlTagValue(item,'title'));
+    const url=normalizeSearchHref(xmlTagValue(item,'link'));
+    const snippet=stripHtml(xmlTagValue(item,'description'));
     if(title&&url) results.push({title,url,snippet});
   }
   return dedupeSearchResults(results);
@@ -1249,45 +1252,54 @@ function parseBingRssResults(xml){
 function normalizeSearchHref(rawHref){
   let href=decodeHtmlEntities(String(rawHref||'').trim());
   if(!href) return '';
-  try {
+  try{
     if(href.startsWith('//')) href='https:'+href;
     if(href.startsWith('/url?')||href.startsWith('/url/')){
       const u=new URL('https://www.google.com'+href);
       href=u.searchParams.get('q')||u.searchParams.get('url')||href;
     }
-    if(/^https?:\\/\\//i.test(href)){
-      const u=new URL(href);
-      for(const key of ['url','u','target']){
-        const nested=u.searchParams.get(key);
-        if(nested&&/^https?:\\/\\//i.test(nested)){ href=nested; break; }
-      }
-      return href;
+    if(!href.startsWith('http://')&&!href.startsWith('https://')) return '';
+    const u=new URL(href);
+    for(const key of ['url','u','target']){
+      const nested=u.searchParams.get(key);
+      if(nested&&(nested.startsWith('http://')||nested.startsWith('https://'))){ href=nested; break; }
     }
-  } catch {}
-  return '';
+    return href;
+  }catch{return '';}
 }
 
-function parseHeadingResults(html, headingTag){
+function parseHeadingResults(html,headingTag){
   const results=[];
   const source=String(html||'');
-  const re=new RegExp('<'+headingTag+'[^>]*>([\\s\\S]*?)<\\/'+headingTag+'>','gi');
-  let match;
-  while((match=re.exec(source))&&results.length<15){
-    const title=stripHtml(decodeHtmlEntities(match[1]));
-    if(!title) continue;
-    const before=source.slice(Math.max(0,match.index-5000),match.index);
-    const links=[...before.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi)];
-    if(!links.length) continue;
+  const open='<'+headingTag;
+  const close='</'+headingTag+'>';
+  let cursor=0;
+  while(results.length<15){
+    const start=source.indexOf(open,cursor);
+    if(start<0) break;
+    const contentStart=source.indexOf('>',start);
+    if(contentStart<0) break;
+    const end=source.indexOf(close,contentStart+1);
+    if(end<0) break;
+    const title=stripHtml(decodeHtmlEntities(source.slice(contentStart+1,end)));
+    const before=source.slice(Math.max(0,start-6000),start);
     let href='';
-    for(let i=links.length-1;i>=0;i--){
-      const candidate=normalizeSearchHref(links[i][1]);
-      if(candidate&&!/(?:google\\.|bing\\.|yahoo\\.)/i.test(candidate)){ href=candidate; break; }
+    let linkCursor=0;
+    while(true){
+      const a=before.indexOf('<a',linkCursor);
+      if(a<0) break;
+      const h=before.indexOf('href=',a);
+      if(h<0) break;
+      const quote=before.charAt(h+5);
+      const valueStart=h+6;
+      const valueEnd=before.indexOf(quote,valueStart);
+      if(valueEnd<0) break;
+      const candidate=normalizeSearchHref(before.slice(valueStart,valueEnd));
+      if(candidate&&!candidate.includes('google.')&&!candidate.includes('bing.')&&!candidate.includes('yahoo.')) href=candidate;
+      linkCursor=a+2;
     }
-    if(!href) continue;
-    const after=source.slice(match.index,Math.min(source.length,match.index+3000));
-    const snippetMatch=after.match(/<(?:div|p|span)[^>]+class=["'][^"']*(?:VwiC3b|yXK7lf|b_caption|compText|s-desc|description)["'][^>]*>([\\s\\S]*?)<\\/(?:div|p|span)>/i);
-    const snippet=snippetMatch?stripHtml(decodeHtmlEntities(snippetMatch[1])):'';
-    results.push({title,url:href,snippet});
+    if(title&&href) results.push({title,url:href,snippet:''});
+    cursor=end+close.length;
   }
   return dedupeSearchResults(results);
 }
@@ -1297,16 +1309,21 @@ function parseYahooResults(html){ return parseHeadingResults(html,'h3'); }
 
 function parseDuckDuckGoResults(html){
   const results=[];
-  const blocks=String(html||'').split(/<div[^>]+class="[^"]*result[^"]*"[^>]*>/i).slice(1);
-  for(const block of blocks.slice(0,15)){
-    const linkMatch=block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\\s\\S]*?)<\\/a>/i);
-    if(!linkMatch) continue;
-    const href=normalizeSearchHref(linkMatch[1]);
-    const title=stripHtml(decodeHtmlEntities(linkMatch[2]));
-    const snippetMatch=block.match(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\\s\\S]*?)<\\/a>/i) ||
-      block.match(/<div[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\\s\\S]*?)<\\/div>/i);
-    const snippet=snippetMatch?stripHtml(decodeHtmlEntities(snippetMatch[1])):'';
-    if(title&&href) results.push({title,url:href,snippet});
+  const source=String(html||'');
+  const blocks=source.split('result__a');
+  for(let i=1;i<blocks.length&&results.length<15;i++){
+    const block=blocks[i];
+    const quote=block.indexOf('href=');
+    if(quote<0) continue;
+    const qchar=block.charAt(quote+5);
+    const start=quote+6;
+    const end=block.indexOf(qchar,start);
+    if(end<0) continue;
+    const href=normalizeSearchHref(block.slice(start,end));
+    const gt=block.indexOf('>',end);
+    const titleEnd=block.indexOf('</a>',gt);
+    const title=gt>=0&&titleEnd>gt?stripHtml(decodeHtmlEntities(block.slice(gt+1,titleEnd))):'';
+    if(title&&href) results.push({title,url:href,snippet:''});
   }
   return dedupeSearchResults(results);
 }
