@@ -1179,6 +1179,50 @@ async function getYouTubeComments(videoId, maxResults=10) {
   }).filter(Boolean);
 }
 
+
+function isPharmacySearchRequest(transcript) {
+  const t=String(transcript||'').toLowerCase().replace(/\s+/g,' ').trim();
+  return /(בית מרקחת|בתי מרקחת|סופר.?פארם|פארם)/i.test(t) &&
+    /(פתוח עכשיו|פתוח היום|פתוחה עכשיו|פתוחה היום|מתי פתוח|מתי נסגר|מתי סוגר|אחד.*טובים|מומלץ|הכי טוב|טוב בבית שמש)/i.test(t);
+}
+
+function extractSearchCity(transcript) {
+  const t=String(transcript||'').replace(/\s+/g,' ').trim();
+  const cities=['בית שמש','ירושלים','רעננה','ביתר עילית','בני ברק','פתח תקווה','תל אביב','חיפה','אשדוד','נתניה','רחובות','מודיעין','באר שבע'];
+  return cities.find(city=>t.includes(city)) || '';
+}
+
+async function answerPharmacySearchDirect(transcript) {
+  const question=String(transcript||'').trim();
+  const city=extractSearchCity(question) || 'בית שמש';
+  const queries=[
+    'בית מרקחת פתוח עכשיו '+city,
+    'בית מרקחת מומלץ '+city+' שעות פתיחה טלפון',
+    'בית מרקחת '+city+' אתר רשמי שעות פתיחה'
+  ];
+  const settled=await Promise.allSettled(queries.map(q=>searchWebDirect(q,{timeoutMs:3500})));
+  const all=[];
+  for(const item of settled) if(item.status==='fulfilled') all.push(...item.value);
+  const unique=dedupeSearchResults(all).slice(0,12);
+  if(!unique.length) throw Object.assign(new Error('Pharmacy search returned no results'),{status:503});
+  const evidence=unique.map((x,i)=>
+    'מקור '+(i+1)+': '+x.title+'\nכתובת: '+x.url+'\nמידע: '+String(x.snippet||'').slice(0,1400)
+  ).join('\n\n');
+  const prompt='השאלה של המתקשר: '+question+'\nהעיר: '+city+'\nמקורות אינטרנט שנאספו עכשיו:\n'+evidence+'\n\n'+
+    'ענה ישירות על השאלה. אם המתקשר שאל איזה בית מרקחת פתוח עכשיו או ביקש אחד מבתי המרקחת הטובים, תן קודם שם של אפשרות אחת טובה ורלוונטית שפתוחה עכשיו, ואז כתובת ושעת סגירה אם הן מאומתות. אפשר להוסיף אפשרות נוספת אחת בלבד אם היא מועילה. '+
+    'אל תקריא את פעולת החיפוש ואל תגיד "מצאתי מידע". אל תקריא רשימת תוצאות. העדף מקור רשמי או מקור מקומי עדכני. '+
+    'אם אין דרך לאמת שהמקום פתוח עכשיו, אמור זאת במפורש ואל תנחש. התשובה קצרה, ממוקדת וטבעית להקראה בטלפון.';
+  try {
+    const result=await generateBranch1WithFallback([{role:'user',parts:[{text:EXCLUSIVE_INSTRUCTION+'\n\n'+prompt}]}],false,true);
+    const answer=String(result?.response?.text?.()||'').trim();
+    if(answer) return answer;
+  } catch(e) {
+    console.warn('[PHARMACY_SEARCH] synthesis unavailable',{status:geminiErrorStatus(e)});
+  }
+  const first=unique[0];
+  return sanitizeForYemot((first.title+'. '+String(first.snippet||'')).trim());
+}
+
 function shouldForceWebSearch(transcript) {
   const t = String(transcript || '').toLowerCase().replace(/\s+/g,' ').trim();
   // Explicit search language always means live web search, even when the topic
@@ -1462,6 +1506,14 @@ async function answerWithDirectWebFallback(question){
 async function answerWithWebSearch(transcript, historyText='') {
   const question=String(transcript||'').trim();
   if(!question) throw Object.assign(new Error('Search requested but transcript is empty'),{status:400});
+  if(isPharmacySearchRequest(question)) return await answerPharmacySearchDirect(question);
+  try {
+    const directAnswer=await answerWithDirectWebFallback(question);
+    if(directAnswer && String(directAnswer).trim()) return String(directAnswer).trim();
+  } catch(e) {
+    console.warn('[WEB_SEARCH] direct retrieval first-pass failed; trying Gemini grounding',{status:geminiErrorStatus(e)});
+  }
+  if(!question) throw Object.assign(new Error('Search requested but transcript is empty'),{status:400});
   const prompt=`${EXCLUSIVE_INSTRUCTION}
 הקשר קודם של השיחה:
 ${historyText || 'אין עדיין הקשר קודם.'}
@@ -1656,6 +1708,13 @@ async function callHandler(call) {
       else if(isNewsQuestion(userTranscript)) {
         try { replyText=await answerNewsDirect(userTranscript, historyText); }
         catch(e) { replyText=await answerWithWebSearch(userTranscript, historyText); }
+      }
+      else if(isPharmacySearchRequest(userTranscript)) {
+        try {
+          replyText=await answerPharmacySearchDirect(userTranscript);
+        } catch(e) {
+          replyText=await answerWithWebSearch(userTranscript, historyText);
+        }
       }
       else if(shouldForceWebSearch(userTranscript) ||
         /(חפש|תחפש|תמצא|חיפוש|באינטרנט|בגוגל|מה קורה עכשיו|מידע עדכני)/i.test(userTranscript) ||
