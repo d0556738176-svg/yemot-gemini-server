@@ -1187,16 +1187,11 @@ function shouldForceWebSearch(transcript) {
   return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|שעות פעילות|פתוח עכשיו|סגור היום|מתי נסגר|מתי סוגר|מתי פתוח|יצירת קשר|איך יוצרים קשר|אתר רשמי|רשתות חברתיות|רשת חברתית|אינסטגרם|פייסבוק|טיקטוק|טוויטר|עדכון אחרון|מה חדש|הופעה|הופעות|מופע|מופעים|אירוע|אירועים|כרטיסים|רכישת כרטיסים|לקנות כרטיסים|איפה קונים|מחיר כרטיס|מכירת כרטיסים|בית מרקחת|בתי מרקחת|חנות|חנויות|עסק|עסקים|סניף|סניפים|כתובת של|מייל של|דוא.?ל|אימייל|קישור|האתר של|מידע מהאתר|חפש באתר|תחפש באתר|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם|אוטובוס|אוטובוסים|תחנת אוטובוס|תחבורה ציבורית|קו אוטובוס|קווי אוטובוס|רכבת|תחנת רכבת|מסלול נסיעה|איך מגיעים|איך להגיע|הגעה ל|טיול|טיולים|מסלול טיול|אירוע היום|אירועים היום|פעילות היום|פעילויות היום|פעילות קהילתית|פעילויות קהילתיות|מה יש היום|מה יש בסוף השבוע|מה יש בעיר)/i.test(t);
 }
 
-async function searchWebDirect(query, options={}) {
+function parseJinaSearchResults(body){ const source=String(body||'').trim(); if(!source) return []; let parsed; try{parsed=JSON.parse(source);}catch{return [];} const entries=Array.isArray(parsed)?parsed:(Array.isArray(parsed.data)?parsed.data:(Array.isArray(parsed.results)?parsed.results:(Array.isArray(parsed.items)?parsed.items:[]))); const results=[]; for(const item of entries.slice(0,10)){ const title=stripHtml(decodeHtmlEntities(String(item?.title||'').trim())); const url=normalizeSearchHref(String(item?.url||item?.link||'').trim()); const snippet=String(item?.content||item?.snippet||item?.description||'').replaceAll('\n',' ').replaceAll('\r',' ').replaceAll('\t',' ').trim().slice(0,1800); if(title&&url) results.push({title,url,snippet}); } return dedupeSearchResults(results); }\n\nasync function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
   const timeoutMs=Number(options.timeoutMs||5000);
-  const providers=[
-    ['bing-rss','https://www.bing.com/search?format=rss&q='+encodeURIComponent(q.slice(0,240)),parseBingRssResults],
-    ['google','https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240)),parseGoogleResults],
-    ['yahoo','https://search.yahoo.com/search?p='+encodeURIComponent(q.slice(0,240)),parseYahooResults],
-    ['duckduckgo','https://html.duckduckgo.com/html/?q='+encodeURIComponent(q.slice(0,240)),parseDuckDuckGoResults]
-  ];
+  const providers=[\n    ['jina','https://s.jina.ai/?q='+encodeURIComponent(q.slice(0,240)),parseJinaSearchResults],\n    ['bing-rss','https://www.bing.com/search?format=rss&q='+encodeURIComponent(q.slice(0,240)),parseBingRssResults],\n    ['google','https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240)),parseGoogleResults],\n    ['yahoo','https://search.yahoo.com/search?p='+encodeURIComponent(q.slice(0,240)),parseYahooResults],\n    ['duckduckgo','https://html.duckduckgo.com/html/?q='+encodeURIComponent(q.slice(0,240)),parseDuckDuckGoResults)\n  ];
   let lastError=null;
   for(const provider of providers){
     const name=provider[0], target=provider[1], parser=provider[2];
