@@ -1500,14 +1500,29 @@ function extractStarPhoneCandidates(text){
   }
   return out;
 }
+
+// Verified primary star numbers for entities whose official contact pages clearly
+// identify a primary public hotline. These are NOT used blindly: answerPhoneNumberDirect
+// still requires live official-source corroboration before returning them.
+const VERIFIED_PRIMARY_STAR_NUMBERS = [
+  { test: /דיסקונט|discount/i, number: '*6111', domain: 'discountbank.co.il' }
+];
+
+function requestedPrimaryStarNumber(question){
+  const q=String(question||'');
+  const hit=VERIFIED_PRIMARY_STAR_NUMBERS.find(x=>x.test.test(q));
+  return hit || null;
+}
+
 function phoneEntityLabel(question){
   const q=String(question||'').replace(/^.*?(?:מספר|טלפון|מוקד|שירות לקוחות)\s*(?:של|ה)?\s*/i,'').trim();
   return q.replace(/(?:שמתחיל.*|שמתחילה.*|בכוכבית.*|בכוכב.*)$/i,'').trim();
 }
 async function answerPhoneNumberDirect(question){
   const domains=officialDomainsForQuestion(question);
-  const label=phoneEntityLabel(question);
   const base=String(question||'').replace(/^.*?(?:חפש|תחפש|בדוק|תבדוק)\s*(?:לי\s*)?(?:באינטרנט\s*)?/i,'').trim();
+  const isStarRequest=/כוכבית|כוכב|\*\s*\d/i.test(String(question||''));
+  const preferred=requestedPrimaryStarNumber(question);
   const queries=[
     base+' מספר טלפון',
     base+' מוקד טלפון',
@@ -1518,8 +1533,24 @@ async function answerPhoneNumberDirect(question){
   for(const item of settled) if(item.status==='fulfilled') all.push(...item.value);
   const unique=dedupeSearchResults(all);
   if(!unique.length) throw Object.assign(new Error('Phone verification returned no results'),{status:503});
+
   const official=unique.filter(x=>isOfficialSearchUrl(x.url,domains));
   const pool=official.length ? official : unique;
+
+  // For a star-number request, never let a secondary service number win merely
+  // because it appears on a broad official page. Prefer the entity's verified
+  // primary hotline, but only after confirming that the official source itself
+  // contains that exact star number.
+  if(isStarRequest && preferred && official.length){
+    const corroborated=official.filter(item=>{
+      const text=[item.title,item.snippet].join(' ');
+      return text.includes(preferred.number) || text.replace(/\s+/g,'').includes(preferred.number.replace('*','*'));
+    });
+    if(corroborated.length){
+      return 'המספר שביקשת הוא '+preferred.number+'.';
+    }
+  }
+
   const starByNumber=new Map();
   for(const item of pool){
     for(const n of extractStarPhoneCandidates([item.title,item.snippet].join(' '))){
@@ -1527,7 +1558,7 @@ async function answerPhoneNumberDirect(question){
       starByNumber.get(n).push(item);
     }
   }
-  if(/כוכבית|כוכב|\*\s*\d/.test(String(question||''))){
+  if(isStarRequest){
     if(starByNumber.size===1) return 'המספר שביקשת הוא '+[...starByNumber.keys()][0]+'.';
     throw Object.assign(new Error('Star phone number could not be verified'),{status:422});
   }
@@ -1634,6 +1665,12 @@ async function answerWithWebSearch(transcript, historyText='') {
       return await answerPhoneNumberDirect(question);
     } catch(e) {
       console.warn('[PHONE_VERIFY] refusing to guess after verification failure',{status:geminiErrorStatus(e)});
+      // A star-number request is never allowed to fall through to Gemini
+      // synthesis: that could turn an unverified secondary number into a
+      // confident but wrong answer.
+      if(/כוכבית|כוכב|\*\s*\d/i.test(question)){
+        return 'לא הצלחתי לאמת את מספר הכוכבית המדויק ממקור רשמי, ולכן אני לא רוצה לנחש.';
+      }
       if(geminiErrorStatus(e)===422) return 'לא הצלחתי לאמת את המספר המדויק ממקור רשמי, ולכן אני לא רוצה לנחש.';
     }
   }
