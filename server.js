@@ -1187,40 +1187,74 @@ function shouldForceWebSearch(transcript) {
   return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|שעות פעילות|פתוח עכשיו|סגור היום|מתי נסגר|מתי סוגר|מתי פתוח|יצירת קשר|איך יוצרים קשר|אתר רשמי|רשתות חברתיות|רשת חברתית|אינסטגרם|פייסבוק|טיקטוק|טוויטר|עדכון אחרון|מה חדש|הופעה|הופעות|מופע|מופעים|אירוע|אירועים|כרטיסים|רכישת כרטיסים|לקנות כרטיסים|איפה קונים|מחיר כרטיס|מכירת כרטיסים|בית מרקחת|בתי מרקחת|חנות|חנויות|עסק|עסקים|סניף|סניפים|כתובת של|מייל של|דוא.?ל|אימייל|קישור|האתר של|מידע מהאתר|חפש באתר|תחפש באתר|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם|אוטובוס|אוטובוסים|תחנת אוטובוס|תחבורה ציבורית|קו אוטובוס|קווי אוטובוס|רכבת|תחנת רכבת|מסלול נסיעה|איך מגיעים|איך להגיע|הגעה ל|טיול|טיולים|מסלול טיול|אירוע היום|אירועים היום|פעילות היום|פעילויות היום|פעילות קהילתית|פעילויות קהילתיות|מה יש היום|מה יש בסוף השבוע|מה יש בעיר)/i.test(t);
 }
 
-function parseJinaSearchResults(body){ const source=String(body||'').trim(); if(!source) return []; let parsed; try{parsed=JSON.parse(source);}catch{return [];} const entries=Array.isArray(parsed)?parsed:(Array.isArray(parsed.data)?parsed.data:(Array.isArray(parsed.results)?parsed.results:(Array.isArray(parsed.items)?parsed.items:[]))); const results=[]; for(const item of entries.slice(0,10)){ const title=stripHtml(decodeHtmlEntities(String(item?.title||'').trim())); const url=normalizeSearchHref(String(item?.url||item?.link||'').trim()); const snippet=String(item?.content||item?.snippet||item?.description||'').replaceAll('\n',' ').replaceAll('\r',' ').replaceAll('\t',' ').trim().slice(0,1800); if(title&&url) results.push({title,url,snippet}); } return dedupeSearchResults(results); }
+function parseJinaSearchResults(body){
+  const source=String(body||'').trim();
+  if(!source) return [];
+  let parsed=null;
+  try{ parsed=JSON.parse(source); }catch{}
+  const entries=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.data)?parsed.data:(Array.isArray(parsed?.results)?parsed.results:(Array.isArray(parsed?.items)?parsed.items:[])));
+  const results=[];
+  for(const item of entries.slice(0,10)){
+    const title=stripHtml(decodeHtmlEntities(String(item?.title||item?.name||'').trim()));
+    const url=normalizeSearchHref(String(item?.url||item?.link||'').trim());
+    const snippet=stripHtml(decodeHtmlEntities(String(item?.content||item?.snippet||item?.description||'').replaceAll('\n',' ').replaceAll('\r',' ').replaceAll('\t',' ').trim())).slice(0,1800);
+    if(title&&url) results.push({title,url,snippet});
+  }
+  return dedupeSearchResults(results);
+}
 
+function parseJinaMarkdownResults(markdown){
+  const results=[];
+  const source=String(markdown||'');
+  let cursor=0;
+  while(results.length<10){
+    const open=source.indexOf('[',cursor);
+    if(open<0) break;
+    const close=source.indexOf('](',open+1);
+    if(close<0) break;
+    const finish=source.indexOf(')',close+2);
+    if(finish<0) break;
+    const title=stripHtml(decodeHtmlEntities(source.slice(open+1,close).trim()));
+    const url=normalizeSearchHref(source.slice(close+2,finish).trim());
+    if(title&&url&&!url.includes('jina.ai')) results.push({title,url,snippet:''});
+    cursor=finish+1;
+  }
+  return dedupeSearchResults(results);
+}
 async function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
   const timeoutMs=Number(options.timeoutMs||5000);
+  const googleUrl='https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240));
   const providers=[
-    ['jina','https://s.jina.ai/?q='+encodeURIComponent(q.slice(0,240)),parseJinaSearchResults],
+    ['jina-search','https://s.jina.ai/?q='+encodeURIComponent(q.slice(0,240)),parseJinaSearchResults],
+    ['jina-google','https://r.jina.ai/'+googleUrl,parseJinaSearchResults],
     ['bing-rss','https://www.bing.com/search?format=rss&q='+encodeURIComponent(q.slice(0,240)),parseBingRssResults],
-    ['google','https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240)),parseGoogleResults],
+    ['google',googleUrl,parseGoogleResults],
     ['yahoo','https://search.yahoo.com/search?p='+encodeURIComponent(q.slice(0,240)),parseYahooResults],
     ['duckduckgo','https://html.duckduckgo.com/html/?q='+encodeURIComponent(q.slice(0,240)),parseDuckDuckGoResults]
   ];
   let lastError=null;
-  for(const provider of providers){
+  const attempts=providers.map(async provider=>{
     const name=provider[0], target=provider[1], parser=provider[2];
-    try{
-      const response=await withTimeout(fetch(target,{headers:{
-        'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/154 Safari/537.36',
-        'accept':'application/rss+xml,application/xml,text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-        'accept-language':'he-IL,he;q=0.9,en;q=0.7'
-      }}),timeoutMs,'direct web search '+name);
-      const body=await response.text();
-      if(!response.ok) throw Object.assign(new Error('Direct web search '+name+' HTTP '+response.status),{status:response.status});
-      const results=parser(body).filter(x=>x.title&&x.url);
-      if(results.length){
-        console.info('[DIRECT_WEB] provider succeeded',{provider:name,query:q.slice(0,180),results:results.length});
-        return results.slice(0,10);
-      }
-      throw Object.assign(new Error('Direct web search '+name+' returned no parsed results'),{status:502});
-    }catch(e){
-      lastError=e;
-      console.warn('[DIRECT_WEB] provider failed',{provider:name,status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,220)});
-    }
+    const response=await withTimeout(fetch(target,{headers:{
+      'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)',
+      'accept':'application/json,text/plain,application/rss+xml,application/xml,text/html;q=0.9,*/*;q=0.8',
+      'accept-language':'he-IL,he;q=0.9,en;q=0.7'
+    }}),timeoutMs,'direct web search '+name);
+    const raw=await response.text();
+    if(!response.ok) throw Object.assign(new Error('Direct web search '+name+' HTTP '+response.status),{status:response.status});
+    const parsed=parser(raw).filter(x=>x.title&&x.url);
+    if(!parsed.length) throw Object.assign(new Error('Direct web search '+name+' returned no parsed results'),{status:502});
+    console.info('[DIRECT_WEB] provider succeeded',{provider:name,query:q.slice(0,180),results:parsed.length});
+    return parsed.slice(0,10);
+  });
+  try{
+    return await Promise.any(attempts);
+  }catch(e){
+    const errors=Array.isArray(e?.errors)?e.errors:[e];
+    for(const err of errors) console.warn('[DIRECT_WEB] parallel provider failed',{status:geminiErrorStatus(err),message:String(err?.message||err).slice(0,220)});
+    throw errors[errors.length-1]||Object.assign(new Error('Direct web search unavailable'),{status:503});
   }
   throw lastError||Object.assign(new Error('Direct web search unavailable'),{status:503});
 }
