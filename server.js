@@ -973,7 +973,8 @@ function extractMetaUrl(html, wantedNames) {
 }
 
 async function analyzePublicImageUrl(imageUrl, question) {
-  const candidateKeys=[...apiKeys, ...(BRANCH1_BACKUP_GEMINI_API_KEY?[BRANCH1_BACKUP_GEMINI_API_KEY]:[])].filter(Boolean);
+  const mediaDedicatedKey=String(process.env.MEDIA_GEMINI_API_KEY||'').trim();
+  const candidateKeys=[...(mediaDedicatedKey?[mediaDedicatedKey]:[]),...apiKeys,...(BRANCH1_BACKUP_GEMINI_API_KEY?[BRANCH1_BACKUP_GEMINI_API_KEY]:[])].filter(Boolean);
   if(!candidateKeys.length) throw Object.assign(new Error('Gemini key unavailable for image analysis'),{status:503});
 
   let response=await withTimeout(fetch(imageUrl,{redirect:'follow',headers:{'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)'}}),MEDIA_ANALYSIS_TIMEOUT_MS,'media image fetch');
@@ -994,8 +995,8 @@ async function analyzePublicImageUrl(imageUrl, question) {
   if(!mime.startsWith('image/')) throw Object.assign(new Error('Unsupported image content type'),{status:415});
   if(bytes.length>MEDIA_MAX_IMAGE_BYTES) throw Object.assign(new Error('Image too large for phone analysis'),{status:413});
 
-  const configuredMediaModel=(process.env.MEDIA_GEMINI_MODEL||'gemini-3.8-flash').trim();
-  const mediaModels=[...new Set([configuredMediaModel,'gemini-3.6-flash','gemini-3.5-flash-lite'])].filter(Boolean);
+  const configuredMediaModel=(process.env.MEDIA_GEMINI_MODEL||'gemini-3.1-flash-lite').trim();
+  const mediaModels=[...new Set([configuredMediaModel,'gemini-3.1-flash-lite','gemini-3.5-flash-lite','gemini-3.6-flash','gemini-3.8-flash'])].filter(Boolean);
   const prompt='נתח את התמונה עצמה, לא רק את כתובת המקור. השאלה של המתקשר: '+String(question||'תאר את התמונה בפירוט')+
     '\nתן תיאור מפורט, מדויק וטבעי בעברית: מה נראה, אנשים או בעלי חיים אם יש, חפצים, סביבה, טקסט קריא, צבעים, מיקום יחסי, פעולות ואירועים שניתן להסיק בביטחון. הפרד בין מה שנראה בבירור לבין מה שאינו ודאי. אם יש טקסט בתמונה, קרא אותו רק אם הוא קריא. התשובה מיועדת להקראה בטלפון.';
   let lastError=null;
@@ -1061,10 +1062,11 @@ async function readResponseBufferLimited(response, maxBytes, label) {
 }
 
 async function analyzePublicVideoUrl(videoUrl, question) {
-  const candidateKeys=[...apiKeys, ...(BRANCH1_BACKUP_GEMINI_API_KEY?[BRANCH1_BACKUP_GEMINI_API_KEY]:[])].filter(Boolean);
+  const mediaDedicatedKey=String(process.env.MEDIA_GEMINI_API_KEY||'').trim();
+  const candidateKeys=[...(mediaDedicatedKey?[mediaDedicatedKey]:[]),...apiKeys,...(BRANCH1_BACKUP_GEMINI_API_KEY?[BRANCH1_BACKUP_GEMINI_API_KEY]:[])].filter(Boolean);
   if(!candidateKeys.length) throw Object.assign(new Error('Gemini key unavailable for video analysis'),{status:503});
-  const configuredMediaModel=(process.env.MEDIA_GEMINI_MODEL||process.env.YOUTUBE_GEMINI_MODEL||'gemini-3.8-flash').trim();
-  const mediaModels=[...new Set([configuredMediaModel,'gemini-3.6-flash','gemini-3.5-flash-lite'])].filter(Boolean);
+  const configuredMediaModel=(process.env.MEDIA_GEMINI_MODEL||process.env.YOUTUBE_GEMINI_MODEL||'gemini-3.1-flash-lite').trim();
+  const mediaModels=[...new Set([configuredMediaModel,'gemini-3.1-flash-lite','gemini-3.5-flash-lite','gemini-3.6-flash','gemini-3.8-flash'])].filter(Boolean);
   const isYouTube=/^(?:https?:\/\/)?(?:www\.)?(?:youtube\.com|youtu\.be)\//i.test(videoUrl);
   let videoInput;
 
