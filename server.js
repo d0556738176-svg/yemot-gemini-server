@@ -1097,7 +1097,7 @@ async function findPublicImageForVisualQuery(question) {
     for(const block of (step?.content||[])) {
       for(const ann of (block?.annotations||[])) {
         const u=String(ann?.url||ann?.url_citation?.url||'').trim();
-        if(/^https?:\\/\\//i.test(u) && !urls.includes(u)) urls.push(u);
+        if(/^(https?:\/\/)/i.test(u) && !urls.includes(u)) urls.push(u);
       }
     }
   }
