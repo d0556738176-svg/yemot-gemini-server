@@ -2114,12 +2114,16 @@ function extractStarPhoneCandidates(text){
 // identify a primary public hotline. These are NOT used blindly: answerPhoneNumberDirect
 // still requires live official-source corroboration before returning them.
 const VERIFIED_PRIMARY_STAR_NUMBERS = [
-  { test: /דיסקונט|discount/i, number: '*6111', domain: 'discountbank.co.il' }
+  // Put the service-specific number first: *2009 is for mortgages, not general banking.
+  { test: /דיסקונט|discount/i, service: 'mortgage', number: '*2009', domain: 'discountbank.co.il' },
+  { test: /דיסקונט|discount/i, service: 'general', number: '*6111', domain: 'discountbank.co.il' }
 ];
 
 function requestedPrimaryStarNumber(question){
   const q=String(question||'');
-  const hit=VERIFIED_PRIMARY_STAR_NUMBERS.find(x=>x.test.test(q));
+  const isMortgage=/משכנת|הלוואת\s*דיור|מיחזור\s*משכנת/i.test(q);
+  const hit=VERIFIED_PRIMARY_STAR_NUMBERS.find(x=>
+    x.test.test(q) && (isMortgage ? x.service==='mortgage' : x.service!=='mortgage'));
   return hit || null;
 }
 
@@ -2132,10 +2136,12 @@ async function answerPhoneNumberDirect(question){
   const base=String(question||'').replace(/^.*?(?:חפש|תחפש|בדוק|תבדוק)\s*(?:לי\s*)?(?:באינטרנט\s*)?/i,'').trim();
   const isStarRequest=/כוכבית|כוכב|\*\s*\d/i.test(String(question||''));
   const preferred=requestedPrimaryStarNumber(question);
+  const isMortgageRequest=/משכנת|הלוואת\s*דיור|מיחזור\s*משכנת/i.test(String(question||''));
   const queries=[
+    ...(isMortgageRequest ? [base+' מוקד משכנתאות טלפון שעות פעילות'] : []),
     base+' מספר טלפון',
-    base+' מוקד טלפון',
-    ...(domains.length ? domains.map(d=>base+' site:'+d+' טלפון') : [base+' אתר רשמי טלפון'])
+    base+(isMortgageRequest ? ' מוקד משכנתאות' : ' מוקד שירות לקוחות'),
+    ...(domains.length ? domains.map(d=>base+' site:'+d+' טלפון מוקד שירות') : [base+' אתר רשמי טלפון'])
   ];
   const settled=await Promise.allSettled(queries.slice(0,4).map(q=>searchWebDirect(q,{timeoutMs:4500})));
   const all=[];
@@ -2166,8 +2172,14 @@ async function answerPhoneNumberDirect(question){
   if(isStarRequest){
     if(preferred){
       const preferredKey=preferred.number.replace(/[\s-]/g,'');
-      const hit=independentlyVerified.find(x=>x.display.replace(/[\s-]/g,'')===preferredKey);
-      if(hit) return 'המספר שביקשת הוא '+preferred.number+'.';
+      // For known services, accept only live corroboration from the official domain.
+      // A different verified number (for example the mortgage line) must never
+      // override the primary general-service number.
+      const officialMention=pool.some(item=>
+        extractStarPhoneCandidates([item.title,item.snippet].join(' '))
+          .some(n=>n.replace(/[\s-]/g,'')===preferredKey));
+      if(officialMention) return 'המספר שביקשת הוא '+preferred.number+'.';
+      throw Object.assign(new Error('Preferred star number not corroborated by official source'),{status:422});
     }
     if(independentlyVerified.length===1){
       return 'המספר שביקשת הוא '+independentlyVerified[0].display+'.';
@@ -2213,7 +2225,10 @@ async function answerWithDirectWebFallback(question, historyText=''){
   const queries=extractDirectSearchQueries(question);
   // Most voice requests are specific lookups. One strong search is faster than
   // waiting for five parallel queries; broaden only for explicit deep research.
-  const firstPass=deepSearch?queries.slice(0,3):queries.slice(0,1);
+  const specificLookup=/מספר\s*טלפון|טלפון|כוכבית|שעות\s*(?:פתיחה|פעילות)|פתוח\s*(?:היום|עכשיו)|מתי\s*(?:נסגר|פתוח)|אתר\s*רשמי/i.test(question);
+  // Run multiple focused searches in parallel for specific factual lookups, not just
+  // the first generic query. This improves official-source coverage without serial waits.
+  const firstPass=deepSearch?queries.slice(0,3):specificLookup?queries.slice(0,2):queries.slice(0,1);
   const settled=await Promise.allSettled(firstPass.map(q=>searchWebDirect(q,{
     timeoutMs:Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,deepSearch?4200:3200),
     deep:deepSearch
