@@ -2519,7 +2519,7 @@ async function callHandler(call) {
     const audioBase64=Buffer.isBuffer(audioBuffer)?audioBuffer.toString('base64'):Buffer.from(audioBuffer).toString('base64');
     console.info('[CALL_FLOW] recording_downloaded', { callId: activeKey, bytes: audioBuffer?.length || 0 });
 
-    const historyText=buildCallHistoryText(callerPhone,callId,turnHistory);
+    const historyText=await buildCallHistoryText(callerPhone,callId,turnHistory);
 
     let replyText='';
     let userTranscript='';
