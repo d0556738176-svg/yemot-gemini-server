@@ -1854,7 +1854,7 @@ async function searchWebDirect(query, options={}) {
       ? tavily({apiKey:process.env.TAVILY_API_KEY})
       : tavily();
     const tavilyResponse=await withTimeout(tavilyClient.search(q.slice(0,400),{
-      searchDepth:deepSearch?'advanced':'basic',
+      searchDepth:deepSearch?'advanced':'fast',
       topic:'general',
       maxResults:deepSearch?7:5,
       includeAnswer:false,
@@ -2208,9 +2208,16 @@ function extractDirectSearchQueries(question){
   }
   return [...new Set(queries.filter(Boolean).map(x=>x.slice(0,240)))].slice(0,5);
 }
-async function answerWithDirectWebFallback(question){
+async function answerWithDirectWebFallback(question, historyText=''){
+  const deepSearch=isDeepWebSearchRequest(question) || /(לעומק|מחקר מקיף|סקירה מקיפה|השוואה מקיפה)/i.test(question);
   const queries=extractDirectSearchQueries(question);
-  const settled=await Promise.allSettled(queries.map(q=>searchWebDirect(q,{timeoutMs:DIRECT_WEB_QUERY_TIMEOUT_MS})));
+  // Most voice requests are specific lookups. One strong search is faster than
+  // waiting for five parallel queries; broaden only for explicit deep research.
+  const firstPass=deepSearch?queries.slice(0,3):queries.slice(0,1);
+  const settled=await Promise.allSettled(firstPass.map(q=>searchWebDirect(q,{
+    timeoutMs:Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,deepSearch?4200:3200),
+    deep:deepSearch
+  })));
   const all=[];
   for(let i=0;i<settled.length;i++){
     const item=settled[i];
@@ -2223,7 +2230,44 @@ async function answerWithDirectWebFallback(question){
     if(seen.has(key)) return false;
     seen.add(key); return true;
   }).slice(0,12);
+  if(!unique.length && queries.length>firstPass.length) {
+    // If the primary search fails, race the remaining focused queries and take
+    // the first non-empty response instead of waiting for every provider.
+    const fallback=queries.slice(firstPass.length,firstPass.length+2).map(q=>
+      searchWebDirect(q,{timeoutMs:Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,3000),deep:false})
+        .then(results=>{if(!results?.length) throw new Error('Empty fallback search'); return results;})
+    );
+    try {
+      const firstUseful=await Promise.any(fallback);
+      unique.push(...firstUseful);
+    } catch(e) {
+      console.warn('[DIRECT_WEB] focused fallback searches returned no results');
+    }
+  }
   if(!unique.length) throw Object.assign(new Error('Direct web search returned no results'),{status:503});
+
+  // Read page content only when the caller asks for deep research or the page
+  // itself. Normal lookups avoid this extra network hop to keep phone latency low.
+  const wantsPageContent=deepSearch || /(פתח את האתר|תיכנס לאתר|תכנס לאתר|תקרא את הטקסט|קרא את הטקסט|מה כתוב באתר|תוכן מלא|העמוד המלא|פרטים מלאים|קרא את הכתבה|תקרא את הכתבה)/i.test(question);
+  if(wantsPageContent) {
+    try {
+      const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
+      const urls=unique.slice(0,Math.min(deepSearch?3:2,unique.length)).map(x=>x.url).filter(Boolean);
+      if(urls.length) {
+        const extracted=await withTimeout(client.extract(urls,{timeout:Math.max(1,Math.ceil(Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,3500)/1000))}),
+          Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,3500),'Tavily page extraction');
+        const byUrl=new Map((Array.isArray(extracted.results)?extracted.results:[])
+          .map(x=>[String(x.url||'').replace(/#.*$/,''),String(x.rawContent||'').trim()]));
+        for(const item of unique) {
+          const content=byUrl.get(String(item.url||'').replace(/#.*$/,''));
+          if(content && content.length>80) item.snippet=content.slice(0,5000);
+        }
+        console.info('[DIRECT_WEB] page extraction completed',{requested:urls.length,extracted:byUrl.size});
+      }
+    } catch(e) {
+      console.warn('[DIRECT_WEB] page extraction unavailable; using search snippets',{status:geminiErrorStatus(e)});
+    }
+  }
 
   // The direct provider is a retrieval layer, not the final answer. When Gemini
   // Search grounding is unavailable, first try to let the normal Gemini answer
@@ -2236,6 +2280,7 @@ async function answerWithDirectWebFallback(question){
   }).join('\n\n');
   const synthesisPrompt=
     'אתה מנוע תשובות קולי חכם. נסח תשובה ישירה לשאלה של המתקשר על בסיס מקורות האינטרנט שנאספו בלבד.\\n'+
+    'הקשר קודם רלוונטי: '+(historyText||'אין הקשר קודם')+'\\n'+
     'השאלה: '+question+'\\n\\n'+
     'מקורות שנאספו:\\n'+evidence+'\\n\\n'+
     'כללי תשובה: התחל בתשובה עצמה, לא במשפט כמו "מצאתי מידע". חבר בין המקורות ואל תקריא רשימת תוצאות חיפוש. '+
@@ -2264,7 +2309,8 @@ async function answerWithDirectWebFallback(question){
 }
 
 async function answerWithWebSearch(transcript, historyText='') {
-  const question=String(transcript||'').trim();
+  const rawQuestion=String(transcript||'').trim();
+  const question=contextualizeSearchQuestion(rawQuestion,historyText);
   if(!question) throw Object.assign(new Error('Search requested but transcript is empty'),{status:400});
   if(isPhoneNumberRequest(question)){
     try {
@@ -2282,7 +2328,7 @@ async function answerWithWebSearch(transcript, historyText='') {
   }
   if(isPharmacySearchRequest(question)) return await answerPharmacySearchDirect(question);
   try {
-    const directAnswer=await answerWithDirectWebFallback(question);
+    const directAnswer=await answerWithDirectWebFallback(question,historyText);
     if(directAnswer && String(directAnswer).trim()) return String(directAnswer).trim();
   } catch(e) {
     console.warn('[WEB_SEARCH] direct retrieval first-pass failed; trying Gemini grounding',{status:geminiErrorStatus(e)});
@@ -2347,7 +2393,32 @@ ${question}
     throw e;
   }
 }
-async function buildOpeningForCaller(phone) {
+async function buildCallHistoryText(phone, callId, turnHistory=[]) {
+  const normalized=normalizePhone(phone);
+  const currentCallId=String(callId||'');
+  const prior=normalized!=='לא מזוהה'
+    ? conversationLog.filter(x=>normalizePhone(x.phone)===normalized &&
+        x.user && String(x.callId||'')!==currentCallId).slice(-6)
+    : [];
+  const current=Array.isArray(turnHistory)?turnHistory.slice(-8):[];
+  const combined=[...prior.map(x=>({user:x.user,assistant:x.gemini})),...current].slice(-12);
+  return combined.map((t,i)=>'תור '+(i+1)+' — מתקשר: '+String(t.user||'')+'\nתשובה: '+String(t.assistant||'')).join('\n\n');
+}
+
+function contextualizeSearchQuestion(question, historyText='') {
+  const q=String(question||'').trim();
+  if(!q || !historyText.trim()) return q;
+  const shortFollowUp=q.length<=110 && /^(?:(?:כן|נכון|בדיוק|טוב|אז|בסדר|אוקיי|אוקי)[, ]*)*(?:תבדוק|בדוק|תחפש|חפש|תמצא|תברר|בדוק לי|תבדוק לי|תבדוק עבורי|באתר הרשמי|אתר רשמי|פרטים נוספים|יותר פרטים|תמשיך|ומה לגבי|ומה עם|כמה זה עולה|מה המחיר|מתי הם פתוחים|מתי פתוח|מה השעות|שעות פתיחה|תביא את הפרטים|תן לי את הפרטים|תבדוק את זה)/i.test(q);
+  const vagueReference=q.length<=110 && /(שלהם|שלהן|שלו|שלה|של הסניף|של הבנק|של האירוע|של המופע|של הכרטיסים|האתר הרשמי|באתר הרשמי|תבדוק את זה|תבדוק עבורי)/i.test(q);
+  if(!shortFollowUp && !vagueReference) return q;
+  const turns=[...historyText.matchAll(/מתקשר:\s*([^\n]*)/g)].map(m=>String(m[1]||'').trim());
+  const prior=turns.reverse().find(x=>x.length>=8 && !/^(כן|לא|תודה|אוקיי|אוקי|מעולה|בדיוק)[.!? ]*$/i.test(x));
+  if(!prior || prior.toLowerCase()===q.toLowerCase()) return q;
+  console.info('[CONTEXT] attached short follow-up to previous topic',{previous:prior.slice(0,100),followUp:q.slice(0,100)});
+  return prior.replace(/[?!.]+$/,'').trim()+'. '+q;
+}
+
+function buildOpeningForCaller(phone) {
   const key=normalizePhone(phone);
   const previous=conversationLog.filter(x=>normalizePhone(x.phone)===key).filter(x=>x.user && x.user!=='לא ניתן היה לתמלל את ההקלטה').slice(-6);
   if(!previous.length) return process.env.FIRST_CALL_MESSAGE || 'שלום, איזה כיף לשמוע אותך. אני כאן איתך. מה מתחשק לך לבדוק או לעשות עכשיו?';
@@ -2448,7 +2519,7 @@ async function callHandler(call) {
     const audioBase64=Buffer.isBuffer(audioBuffer)?audioBuffer.toString('base64'):Buffer.from(audioBuffer).toString('base64');
     console.info('[CALL_FLOW] recording_downloaded', { callId: activeKey, bytes: audioBuffer?.length || 0 });
 
-    const historyText=turnHistory.map((t,i)=>'תור '+(i+1)+' — מתקשר: '+t.user+'\nתשובה: '+t.assistant).join('\n\n');
+    const historyText=buildCallHistoryText(callerPhone,callId,turnHistory);
 
     let replyText='';
     let userTranscript='';

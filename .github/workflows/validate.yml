@@ -2,7 +2,7 @@ name: Validate Node application
 
 on:
   push:
-    branches: [feature/tavily-branch1-search]
+    branches: [feature/tavily-branch1-search, fix/ivr-context-search-speed]
   pull_request:
     branches: [main]
 
