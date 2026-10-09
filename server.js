@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { tavily } from '@tavily/core';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
@@ -1845,6 +1846,37 @@ async function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
   const timeoutMs=Number(options.timeoutMs||DIRECT_WEB_QUERY_TIMEOUT_MS);
+  // Prefer Tavily's official SDK. It supports authenticated use and a shared
+  // keyless search mode; when shared limits are reached, continue to fallbacks.
+  try {
+    const deepSearch=Boolean(options.deep) || /(לעומק|מחקר מקיף|סקירה מקיפה|השוואה מקיפה)/i.test(q);
+    const tavilyClient=process.env.TAVILY_API_KEY
+      ? tavily({apiKey:process.env.TAVILY_API_KEY})
+      : tavily();
+    const tavilyResponse=await withTimeout(tavilyClient.search(q.slice(0,400),{
+      searchDepth:deepSearch?'advanced':'basic',
+      topic:'general',
+      maxResults:deepSearch?7:5,
+      includeAnswer:false,
+      includeRawContent:false,
+      timeout:Math.max(1,Math.ceil(Math.min(timeoutMs,3500)/1000))
+    }),Math.min(timeoutMs,3500),'Tavily web search');
+    const tavilyResults=(Array.isArray(tavilyResponse.results)?tavilyResponse.results:[])
+      .map(item=>({
+        title:String(item.title||'').trim(),
+        url:normalizeSearchHref(String(item.url||'').trim()),
+        snippet:String(item.content||'').trim()
+      }))
+      .filter(item=>item.title&&item.url)
+      .slice(0,deepSearch?7:5);
+    if(tavilyResults.length) {
+      console.info('[DIRECT_WEB] Tavily succeeded',{query:q.slice(0,140),results:tavilyResults.length,depth:deepSearch?'advanced':'basic',mode:process.env.TAVILY_API_KEY?'authenticated':'keyless'});
+      return tavilyResults;
+    }
+    throw Object.assign(new Error('Tavily returned no usable results'),{status:502});
+  } catch(e) {
+    console.warn('[DIRECT_WEB] Tavily failed; using existing fallback providers',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,160)});
+  }
   const googleUrl='https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240));
   const providers=[
     ['jina-search','https://s.jina.ai/?q='+encodeURIComponent(q.slice(0,240)),parseJinaSearchResults],
@@ -1869,13 +1901,17 @@ async function searchWebDirect(query, options={}) {
     console.info('[DIRECT_WEB] provider succeeded',{provider:name,query:q.slice(0,180),results:parsed.length});
     return parsed.slice(0,10);
   });
-  const settled=await Promise.allSettled(attempts);
-  const successful=settled.filter(x=>x.status==='fulfilled').flatMap(x=>x.value||[]);
-  const merged=dedupeSearchResults(successful).slice(0,20);
-  if(merged.length) return merged;
-  for(const item of settled.filter(x=>x.status==='rejected')) {
-    const err=item.reason;
-    console.warn('[DIRECT_WEB] parallel provider failed',{status:geminiErrorStatus(err),message:String(err?.message||err).slice(0,220)});
+  // Return the first usable provider instead of waiting for every provider to
+  // time out. Promise.any keeps all failures handled while minimizing phone silence.
+  try {
+    const first=await Promise.any(attempts);
+    const merged=dedupeSearchResults(first||[]).slice(0,10);
+    if(merged.length) return merged;
+  } catch(err) {
+    const errors=Array.isArray(err?.errors)?err.errors:[err];
+    for(const item of errors) {
+      console.warn('[DIRECT_WEB] fallback provider failed',{status:geminiErrorStatus(item),message:String(item?.message||item).slice(0,220)});
+    }
   }
   throw Object.assign(new Error('Direct web search unavailable'),{status:503});
 }
