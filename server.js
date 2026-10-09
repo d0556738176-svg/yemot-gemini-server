@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { tavily } from '@tavily/core';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
@@ -1845,44 +1846,36 @@ async function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
   const timeoutMs=Number(options.timeoutMs||DIRECT_WEB_QUERY_TIMEOUT_MS);
-  // Tavily is the preferred search provider when configured. It replaces the
-  // unreliable multi-provider fan-out for normal queries and keeps usage low.
-  if (process.env.TAVILY_API_KEY) {
-    try {
-      const deepSearch=Boolean(options.deep) || /(לעומק|מחקר מקיף|סקירה מקיפה|השוואה מקיפה)/i.test(q);
-      const tavilyResponse=await withTimeout(fetch('https://api.tavily.com/search',{
-        method:'POST',
-        headers:{
-          'content-type':'application/json',
-          'authorization':'Bearer '+process.env.TAVILY_API_KEY
-        },
-        body:JSON.stringify({
-          query:q.slice(0,400),
-          search_depth:deepSearch?'advanced':'basic',
-          topic:'general',
-          max_results:deepSearch?7:5,
-          include_answer:false,
-          include_raw_content:false
-        })
-      }),Math.min(timeoutMs,2800),'Tavily web search');
-      if(!tavilyResponse.ok) throw Object.assign(new Error('Tavily search HTTP '+tavilyResponse.status),{status:tavilyResponse.status});
-      const tavilyData=await tavilyResponse.json();
-      const tavilyResults=(Array.isArray(tavilyData.results)?tavilyData.results:[])
-        .map(item=>({
-          title:String(item.title||'').trim(),
-          url:normalizeSearchHref(String(item.url||'').trim()),
-          snippet:String(item.content||item.snippet||'').trim()
-        }))
-        .filter(item=>item.title&&item.url)
-        .slice(0,deepSearch?7:5);
-      if(tavilyResults.length) {
-        console.info('[DIRECT_WEB] Tavily succeeded',{query:q.slice(0,140),results:tavilyResults.length,depth:deepSearch?'advanced':'basic'});
-        return tavilyResults;
-      }
-      throw Object.assign(new Error('Tavily returned no usable results'),{status:502});
-    } catch(e) {
-      console.warn('[DIRECT_WEB] Tavily failed; using existing fallback providers',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,160)});
+  // Prefer Tavily's official SDK. It supports authenticated use and a shared
+  // keyless search mode; when shared limits are reached, continue to fallbacks.
+  try {
+    const deepSearch=Boolean(options.deep) || /(לעומק|מחקר מקיף|סקירה מקיפה|השוואה מקיפה)/i.test(q);
+    const tavilyClient=process.env.TAVILY_API_KEY
+      ? tavily({apiKey:process.env.TAVILY_API_KEY})
+      : tavily();
+    const tavilyResponse=await withTimeout(tavilyClient.search(q.slice(0,400),{
+      searchDepth:deepSearch?'advanced':'basic',
+      topic:'general',
+      maxResults:deepSearch?7:5,
+      includeAnswer:false,
+      includeRawContent:false,
+      timeout:Math.max(1,Math.ceil(Math.min(timeoutMs,3500)/1000))
+    }),Math.min(timeoutMs,3500),'Tavily web search');
+    const tavilyResults=(Array.isArray(tavilyResponse.results)?tavilyResponse.results:[])
+      .map(item=>({
+        title:String(item.title||'').trim(),
+        url:normalizeSearchHref(String(item.url||'').trim()),
+        snippet:String(item.content||'').trim()
+      }))
+      .filter(item=>item.title&&item.url)
+      .slice(0,deepSearch?7:5);
+    if(tavilyResults.length) {
+      console.info('[DIRECT_WEB] Tavily succeeded',{query:q.slice(0,140),results:tavilyResults.length,depth:deepSearch?'advanced':'basic',mode:process.env.TAVILY_API_KEY?'authenticated':'keyless'});
+      return tavilyResults;
     }
+    throw Object.assign(new Error('Tavily returned no usable results'),{status:502});
+  } catch(e) {
+    console.warn('[DIRECT_WEB] Tavily failed; using existing fallback providers',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,160)});
   }
   const googleUrl='https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240));
   const providers=[
