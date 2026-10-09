@@ -230,6 +230,13 @@ function logDetailedError(context, err) {
   console.error(`[${context}]`, clean);
 }
 
+function isCallerHangupError(err) {
+  const message=String(err?.message || err || '').toLowerCase();
+  return /(?:the )?call (?:was )?(?:hang.?up|disconnected|ended) by (?:the )?caller/.test(message) ||
+    /(?:caller|client) (?:has )?(?:hang.?up|disconnected)/.test(message) ||
+    /socket hang up|client disconnected|connection closed by peer/.test(message);
+}
+
 const genAIClients = apiKeys.map(key => new GoogleGenerativeAI(key));
 const modelsByName = MODEL_NAMES.map(name => genAIClients.map(ai => ai.getGenerativeModel({model:name})));
 const webModelsByName = MODEL_NAMES.map(name => genAIClients.map(ai => ai.getGenerativeModel({model:name, tools:[{googleSearch:{}}]})));
@@ -2488,6 +2495,14 @@ async function callHandler(call) {
       recordPath=await call.read([{type:'text',data:prompt}],'record',
         {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
     } catch(readError) {
+      // A caller hang-up is not a TTS failure. Do not issue a second Yemot
+      // response after the call has already ended (which can cause
+      // "Cannot set headers after they are sent to the client").
+      if(isCallerHangupError(readError)) {
+        console.info('[CALL_FLOW] caller_disconnected_during_read',{callId:activeKey});
+        activeCalls.delete(activeKey);
+        return;
+      }
       // Do not let a temporary Yemot TTS/read failure kill branch 1.
       // Retry once with a short, TTS-safe prompt and keep the same call context.
       console.warn('[TTS] branch1 read failed; retrying with short prompt',{
