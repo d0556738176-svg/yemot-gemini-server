@@ -1845,6 +1845,45 @@ async function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
   const timeoutMs=Number(options.timeoutMs||DIRECT_WEB_QUERY_TIMEOUT_MS);
+  // Tavily is the preferred search provider when configured. It replaces the
+  // unreliable multi-provider fan-out for normal queries and keeps usage low.
+  if (process.env.TAVILY_API_KEY) {
+    try {
+      const deepSearch=Boolean(options.deep) || /(לעומק|מחקר מקיף|סקירה מקיפה|השוואה מקיפה)/i.test(q);
+      const tavilyResponse=await withTimeout(fetch('https://api.tavily.com/search',{
+        method:'POST',
+        headers:{
+          'content-type':'application/json',
+          'authorization':'Bearer '+process.env.TAVILY_API_KEY
+        },
+        body:JSON.stringify({
+          query:q.slice(0,400),
+          search_depth:deepSearch?'advanced':'basic',
+          topic:'general',
+          max_results:deepSearch?7:5,
+          include_answer:false,
+          include_raw_content:false
+        })
+      }),Math.min(timeoutMs,2800),'Tavily web search');
+      if(!tavilyResponse.ok) throw Object.assign(new Error('Tavily search HTTP '+tavilyResponse.status),{status:tavilyResponse.status});
+      const tavilyData=await tavilyResponse.json();
+      const tavilyResults=(Array.isArray(tavilyData.results)?tavilyData.results:[])
+        .map(item=>({
+          title:String(item.title||'').trim(),
+          url:normalizeSearchHref(String(item.url||'').trim()),
+          snippet:String(item.content||item.snippet||'').trim()
+        }))
+        .filter(item=>item.title&&item.url)
+        .slice(0,deepSearch?7:5);
+      if(tavilyResults.length) {
+        console.info('[DIRECT_WEB] Tavily succeeded',{query:q.slice(0,140),results:tavilyResults.length,depth:deepSearch?'advanced':'basic'});
+        return tavilyResults;
+      }
+      throw Object.assign(new Error('Tavily returned no usable results'),{status:502});
+    } catch(e) {
+      console.warn('[DIRECT_WEB] Tavily failed; using existing fallback providers',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,160)});
+    }
+  }
   const googleUrl='https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240));
   const providers=[
     ['jina-search','https://s.jina.ai/?q='+encodeURIComponent(q.slice(0,240)),parseJinaSearchResults],
