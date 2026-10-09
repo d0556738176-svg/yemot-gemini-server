@@ -24,3 +24,6 @@ jobs:
           node --check youtube-ivr.js
           node --check youtube-transcript.js
           node --check youtube-authorized-playback.js
+      - name: Live Tavily keyless smoke test
+        run: |
+          node --input-type=module -e "import { tavily } from '@tavily/core'; const r = await tavily().search('OpenAI official website', { maxResults: 1, timeout: 5 }); if (!Array.isArray(r.results) || r.results.length < 1) throw new Error('Tavily returned no search results'); console.log('Tavily keyless smoke test passed:', r.results.length, 'result(s)');"
