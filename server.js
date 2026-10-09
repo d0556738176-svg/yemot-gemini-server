@@ -1901,13 +1901,17 @@ async function searchWebDirect(query, options={}) {
     console.info('[DIRECT_WEB] provider succeeded',{provider:name,query:q.slice(0,180),results:parsed.length});
     return parsed.slice(0,10);
   });
-  const settled=await Promise.allSettled(attempts);
-  const successful=settled.filter(x=>x.status==='fulfilled').flatMap(x=>x.value||[]);
-  const merged=dedupeSearchResults(successful).slice(0,20);
-  if(merged.length) return merged;
-  for(const item of settled.filter(x=>x.status==='rejected')) {
-    const err=item.reason;
-    console.warn('[DIRECT_WEB] parallel provider failed',{status:geminiErrorStatus(err),message:String(err?.message||err).slice(0,220)});
+  // Return the first usable provider instead of waiting for every provider to
+  // time out. Promise.any keeps all failures handled while minimizing phone silence.
+  try {
+    const first=await Promise.any(attempts);
+    const merged=dedupeSearchResults(first||[]).slice(0,10);
+    if(merged.length) return merged;
+  } catch(err) {
+    const errors=Array.isArray(err?.errors)?err.errors:[err];
+    for(const item of errors) {
+      console.warn('[DIRECT_WEB] fallback provider failed',{status:geminiErrorStatus(item),message:String(item?.message||item).slice(0,220)});
+    }
   }
   throw Object.assign(new Error('Direct web search unavailable'),{status:503});
 }
