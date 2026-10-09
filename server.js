@@ -2230,7 +2230,44 @@ async function answerWithDirectWebFallback(question, historyText=''){
     if(seen.has(key)) return false;
     seen.add(key); return true;
   }).slice(0,12);
+  if(!unique.length && queries.length>firstPass.length) {
+    // If the primary search fails, race the remaining focused queries and take
+    // the first non-empty response instead of waiting for every provider.
+    const fallback=queries.slice(firstPass.length,firstPass.length+2).map(q=>
+      searchWebDirect(q,{timeoutMs:Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,3000),deep:false})
+        .then(results=>{if(!results?.length) throw new Error('Empty fallback search'); return results;})
+    );
+    try {
+      const firstUseful=await Promise.any(fallback);
+      unique.push(...firstUseful);
+    } catch(e) {
+      console.warn('[DIRECT_WEB] focused fallback searches returned no results');
+    }
+  }
   if(!unique.length) throw Object.assign(new Error('Direct web search returned no results'),{status:503});
+
+  // Read page content only when the caller asks for deep research or the page
+  // itself. Normal lookups avoid this extra network hop to keep phone latency low.
+  const wantsPageContent=deepSearch || /(פתח את האתר|תיכנס לאתר|תכנס לאתר|תקרא את הטקסט|קרא את הטקסט|מה כתוב באתר|תוכן מלא|העמוד המלא|פרטים מלאים|קרא את הכתבה|תקרא את הכתבה)/i.test(question);
+  if(wantsPageContent) {
+    try {
+      const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
+      const urls=unique.slice(0,Math.min(deepSearch?3:2,unique.length)).map(x=>x.url).filter(Boolean);
+      if(urls.length) {
+        const extracted=await withTimeout(client.extract(urls,{timeout:Math.max(1,Math.ceil(Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,3500)/1000))}),
+          Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,3500),'Tavily page extraction');
+        const byUrl=new Map((Array.isArray(extracted.results)?extracted.results:[])
+          .map(x=>[String(x.url||'').replace(/#.*$/,''),String(x.rawContent||'').trim()]));
+        for(const item of unique) {
+          const content=byUrl.get(String(item.url||'').replace(/#.*$/,''));
+          if(content && content.length>80) item.snippet=content.slice(0,5000);
+        }
+        console.info('[DIRECT_WEB] page extraction completed',{requested:urls.length,extracted:byUrl.size});
+      }
+    } catch(e) {
+      console.warn('[DIRECT_WEB] page extraction unavailable; using search snippets',{status:geminiErrorStatus(e)});
+    }
+  }
 
   // The direct provider is a retrieval layer, not the final answer. When Gemini
   // Search grounding is unavailable, first try to let the normal Gemini answer
