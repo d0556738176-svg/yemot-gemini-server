@@ -2333,16 +2333,16 @@ async function answerWithDirectWebFallback(question, historyText=''){
 
 function extractExplicitHttpUrl(question) {
   const raw=String(question||'');
-  const match=raw.match(/https?:\\/\\/[^\\s<>]+/i);
+  const match=raw.match(/https?:\/\/[^\s<>]+/i);
   if(!match) return null;
-  let candidate=match[0].replace(/[),.!?;:'”’\\]]+$/g,'');
+  let candidate=match[0].replace(/[),.!?;:'”’\]]+$/g,'');
   try {
     const parsed=new URL(candidate);
     if(!['http:','https:'].includes(parsed.protocol) || parsed.username || parsed.password) return null;
     const host=parsed.hostname.toLowerCase();
     if(host==='localhost' || host.endsWith('.localhost') || host==='::1' ||
-       /^(127\\.|10\\.|192\\.168\\.|169\\.254\\.)/.test(host) ||
-       /^172\\.(1[6-9]|2[0-9]|3[01])\\./.test(host)) return null;
+       /^(127\.|10\.|192\.168\.|169\.254\.)/.test(host) ||
+       /^172\.(1[6-9]|2[0-9]|3[01])\./.test(host)) return null;
     return parsed.toString();
   } catch { return null; }
 }
