@@ -7,7 +7,7 @@ services:
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
-        value: "20"
+        value: "22"
       - key: GEMINI_API_KEYS
         sync: false
       - key: YEMOT_API_USERNAME
@@ -19,6 +19,8 @@ services:
       - key: PUBLIC_BASE_URL
         sync: false
       - key: DASHBOARD_ACCESS_TOKEN
+        sync: false
+      - key: TAVILY_API_KEY
         sync: false
       - key: YOUTUBE_API_KEY
         sync: false
