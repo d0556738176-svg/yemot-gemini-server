@@ -2306,8 +2306,20 @@ function currentIsraelDateAliases() {
 }
 
 function hasCurrentDateEvidence(results) {
-  const evidence=(Array.isArray(results)?results:[]).map(x=>[x.title,x.snippet,x.url].join(' ')).join('\n').toLowerCase();
-  return currentIsraelDateAliases().some(alias=>evidence.includes(alias.toLowerCase()));
+  // Require a full date including year in the result content. Short aliases such
+  // as "10/10" can occur in unrelated page metadata and must not validate an old event.
+  const evidence=(Array.isArray(results)?results:[])
+    .map(x=>[x.title,x.snippet].join(' ')).join('\n').toLowerCase();
+  const today=currentIsraelDateIso();
+  const [year,month,day]=today.split('-');
+  const fullDateAliases=[
+    today,
+    day+'.'+month+'.'+year,
+    day+'/'+month+'/'+year,
+    Number(day)+'.'+Number(month)+'.'+year,
+    Number(day)+'/'+Number(month)+'/'+year
+  ];
+  return fullDateAliases.some(alias=>evidence.includes(String(alias).toLowerCase()));
 }
 
 function isWebsiteNavigationRequest(question) {
@@ -2616,8 +2628,17 @@ async function answerWithWebSearch(transcript, historyText='', turnContext=null)
           return 'לא הצלחתי לאמת את מספר הכוכבית המדויק ממקור רשמי, ולכן אני לא רוצה לנחש.';
         }
       }
-      // A normal phone lookup may still be answered from the broader web-search
-      // path if the strict phone verifier could not corroborate it.
+      // Known bank hotlines are a deterministic safety fallback. If live search
+      // fails to corroborate the official primary number, do not send the request
+      // to generative synthesis: that previously produced unrelated/incorrect numbers.
+      const knownPrimary=requestedPrimaryStarNumber(question);
+      if(knownPrimary) {
+        const label=knownPrimary.service==='mortgage'?'מוקד המשכנתאות של בנק דיסקונט':'המוקד הכללי של בנק דיסקונט';
+        console.warn('[PHONE_VERIFY] using known primary bank hotline after live verification failure',{service:knownPrimary.service});
+        return label+': '+knownPrimary.number+'. לא הצלחתי לאמת את המספר מחדש בחיפוש החי כרגע.';
+      }
+      // Other phone lookups may still use broader web search if strict verification
+      // cannot corroborate them, but known bank numbers never reach free-form synthesis.
       if(geminiErrorStatus(e)===422) console.warn('[PHONE_VERIFY] continuing to broader web search after strict verification failure');
     }
   }
