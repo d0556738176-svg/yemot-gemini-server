@@ -2439,10 +2439,11 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
       if(urls.length) {
         const extracted=await withTimeout(client.extract(urls,{extractDepth:(deepSearch||eventVenueLookup)?'advanced':'basic',timeout:Math.max(1,Math.ceil(Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,4500)/1000))}),
           Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,4500),'Tavily page extraction');
+        const normalizeExtractUrl=value=>String(value||'').replace(/#.*$/,'').replace(/\/+$/,'');
         const byUrl=new Map((Array.isArray(extracted.results)?extracted.results:[])
-          .map(x=>[String(x.url||'').replace(/#.*$/,''),String(x.rawContent||'').trim()]));
+          .map(x=>[normalizeExtractUrl(x.url),String(x.rawContent||'').trim()]));
         for(const item of unique) {
-          const content=byUrl.get(String(item.url||'').replace(/#.*$/,''));
+          const content=byUrl.get(normalizeExtractUrl(item.url));
           if(content && content.length>80) item.snippet=content.slice(0,5000);
         }
         console.info('[DIRECT_WEB] page extraction completed',{requested:urls.length,extracted:byUrl.size});
@@ -2526,12 +2527,13 @@ async function answerExplicitWebsiteUrl(question, historyText='', turnContext=nu
   const client=process.env.TAVILY_API_KEY
     ? tavily({apiKey:process.env.TAVILY_API_KEY})
     : tavily();
+  const explicitPageTimeoutMs=10000;
   const extracted=await withTimeout(
     client.extract([url],{
       extractDepth:/עמוק|יסודי|כל הפרטים|תוכן מלא|בהרחבה/i.test(question)?'advanced':'basic',
-      timeout:Math.max(1,Math.ceil(Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,5000)/1000))
+      timeout:Math.ceil(explicitPageTimeoutMs/1000)
     }),
-    Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,5000),
+    explicitPageTimeoutMs,
     'Explicit website extraction'
   );
   const results=Array.isArray(extracted.results)?extracted.results:[];
@@ -2600,8 +2602,8 @@ async function answerWebsiteNavigation(question, startUrl, historyText='', turnC
       const extracted=await withTimeout(client.extract(urls,{
         extractDepth:/עמוק|יסודי|כל הפרטים|תוכן מלא|בהרחבה/i.test(question)?'advanced':'basic',
         query:String(question||'').slice(0,250),
-        timeout:5
-      }),5500,'Website relevant-page extraction');
+        timeout:9
+      }),10000,'Website relevant-page extraction');
       extractedItems=Array.isArray(extracted.results)?extracted.results:[];
     }
     const pages=extractedItems
