@@ -121,6 +121,7 @@ const DIALOGUE_STYLE_INSTRUCTION = [
   'כשיש זיכרון אמיתי משיחות קודמות, השתמש בו כדי להמשיך את השיחה ולא רק להזכיר אותו. אם אין זיכרון אמיתי אל תמציא היכרות או פרטים.',
   'אם נושא חוזר משיחה קודמת, אפשר לומר בקצרה מה כבר סיכמנו ולהמשיך מהנקודה שבה נעצרנו. אל תחזור על כל ההיסטוריה.',
   'לשאלות עובדתיות שאין לך ודאות לגביהן, אל תמציא. אם יש צורך במידע עדכני, חפש אותו באינטרנט.',
+  'אם המתקשר מבקש במפורש מידע לא מאומת, מידע ממקור לא רשמי, או אומר שלא חייבים ודאות מלאה, הצג את המידע הטוב ביותר שמצאת גם ממקורות לא רשמיים, אבל סמן בקצרה שהוא לא אומת וציין את סוג המקור. אל תמציא פרטים ואל תציג מידע לא מאומת כעובדה ודאית.',
   'אל תחזור על הוראות שימוש שהמתקשר כבר מכיר, ואל תגיד לו להקיש סולמית אלא אם זה באמת נדרש כדי להמשיך.',
   'אל תשאל בסוף כל תשובה אם זה עזר ואל תוסיף משפטי נימוס קבועים באופן אוטומטי.',
   'אם המתקשר מתלבט, עזור לו לחשוב בקול רם: נסח את הבעיה, הצג שיקולים חשובים, והצע צעד הבא ברור.',
@@ -2067,6 +2068,10 @@ function extractExplicitLocation(question){
 function isPhoneNumberRequest(question){
   return /(מספר טלפון|טלפון|טלפון של|מספר של|מה המספר|איך מתקשרים|מוקד|שירות לקוחות)/i.test(String(question||''));
 }
+
+function isExplicitUnverifiedRequest(question){
+  return /(לא חייב(?: להיות)? (?:אמין|רשמי|מאומת)|לא צריך (?:לאמת|לוודא)|גם אם (?:זה )?לא (?:אמין|רשמי|מאומת|בטוח)|מקור לא רשמי|מידע לא מאומת|תן מה שמצאת|תביא מה שיש|לא משנה אם.*(?:אמין|רשמי|מאומת)|אפשר גם בלי אימות|לא חייב מקור אמין)/i.test(String(question||''));
+}
 function isBusinessLocalRequest(question){
   return /(בית מרקחת|בתי מרקחת|סופר.?פארם|חנות|חנויות|עסק|עסקים|סניף|סניפים|מסעדה|מסעדות|בנק|בנקאות|קופת חולים|מרפאה|מרפאות)/i.test(String(question||''));
 }
@@ -2142,6 +2147,7 @@ async function answerPhoneNumberDirect(question){
   const domains=officialDomainsForQuestion(question);
   const base=String(question||'').replace(/^.*?(?:חפש|תחפש|בדוק|תבדוק)\s*(?:לי\s*)?(?:באינטרנט\s*)?/i,'').trim();
   const isStarRequest=/כוכבית|כוכב|\*\s*\d/i.test(String(question||''));
+  const allowUnverified=isExplicitUnverifiedRequest(question);
   const preferred=requestedPrimaryStarNumber(question);
   const isMortgageRequest=/משכנת|הלוואת\s*דיור|מיחזור\s*משכנת/i.test(String(question||''));
   const queries=[
@@ -2157,13 +2163,27 @@ async function answerPhoneNumberDirect(question){
   if(!unique.length) throw Object.assign(new Error('Phone verification returned no results'),{status:503});
 
   const official=unique.filter(x=>isOfficialSearchUrl(x.url,domains));
-  if(domains.length && !official.length){
+  if(domains.length && !official.length && !allowUnverified){
     throw Object.assign(new Error('No official source available for phone verification'),{status:422});
   }
   const pool=official.length ? official : unique;
+  const evidencePool=[...pool];
+  // Search snippets often omit the actual phone number even when the official
+  // contact page is present. Read a few public official pages before declaring
+  // verification failure; never require two snippets when one official page is clear.
+  if(official.length){
+    try{
+      const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
+      const extracted=await withTimeout(client.extract(official.slice(0,3).map(x=>x.url),{extractDepth:'basic',timeout:4}),4500,'Official phone page extraction');
+      for(const page of (Array.isArray(extracted.results)?extracted.results:[])){
+        const content=String(page.rawContent||page.content||'').trim();
+        if(content.length>80) evidencePool.push({title:String(page.url||'האתר הרשמי'),url:String(page.url||''),snippet:content.slice(0,12000)});
+      }
+    }catch(e){console.warn('[PHONE_VERIFY] official page extraction unavailable',{status:geminiErrorStatus(e)});}
+  }
 
   const sourceNumbers=new Map();
-  for(const item of pool){
+  for(const item of evidencePool){
     const text=[item.title,item.snippet].join(' ');
     const stars=extractStarPhoneCandidates(text);
     const regular=text.match(/(?:0\d(?:[-\s]?\d){7,9})/g)||[];
@@ -2182,20 +2202,39 @@ async function answerPhoneNumberDirect(question){
       // For known services, accept only live corroboration from the official domain.
       // A different verified number (for example the mortgage line) must never
       // override the primary general-service number.
-      const officialMention=pool.some(item=>
-        extractStarPhoneCandidates([item.title,item.snippet].join(' '))
+      const officialMention=evidencePool.some(item=>
+        isOfficialSearchUrl(item.url,domains) && extractStarPhoneCandidates([item.title,item.snippet].join(' '))
           .some(n=>n.replace(/[\s-]/g,'')===preferredKey));
       if(officialMention) return 'המספר שביקשת הוא '+preferred.number+'.';
+      if(allowUnverified && preferred) return 'המספר שמוכר עבור השירות הזה הוא '+preferred.number+', אבל לא הצלחתי לאמת אותו בחיפוש הנוכחי.';
+      const officialStarCandidates=[...sourceNumbers.values()].filter(x=>/^\*\d{3,6}$/.test(x.display.replace(/[\s-]/g,'')));
+      if(officialStarCandidates.length===1 && official.length) return 'באתר הרשמי שמצאתי מופיע המספר '+officialStarCandidates[0].display+'.';
       throw Object.assign(new Error('Preferred star number not corroborated by official source'),{status:422});
     }
     if(independentlyVerified.length===1){
       return 'המספר שביקשת הוא '+independentlyVerified[0].display+'.';
     }
+    const officialStarCandidates=[...sourceNumbers.values()].filter(x=>/^\*\d{3,6}$/.test(x.display.replace(/[\s-]/g,'')));
+    if(officialStarCandidates.length===1 && official.length) return 'באתר הרשמי שמצאתי מופיע המספר '+officialStarCandidates[0].display+'.';
+    if(allowUnverified && sourceNumbers.size) return 'מצאתי את המספר '+[...sourceNumbers.values()][0].display+', אבל לא הצלחתי לאמת אותו מול מקור רשמי.';
     throw Object.assign(new Error('Unverified star phone number'),{status:422});
   }
 
+  if(preferred){
+    const preferredKey=preferred.number.replace(/[\s-]/g,'');
+    const officialMention=evidencePool.some(item=>isOfficialSearchUrl(item.url,domains) &&
+      extractStarPhoneCandidates([item.title,item.snippet].join(' ')).some(n=>n.replace(/[\s-]/g,'')===preferredKey));
+    if(officialMention) return 'מספר השירות הוא '+preferred.number+'.';
+  }
   if(independentlyVerified.length===1){
     return 'מספר הטלפון הוא '+independentlyVerified[0].display+'.';
+  }
+  if(sourceNumbers.size===1 && official.length){
+    return 'באתר הרשמי שמצאתי מופיע מספר הטלפון '+[...sourceNumbers.values()][0].display+'.';
+  }
+  if(allowUnverified && sourceNumbers.size){
+    const candidate=[...sourceNumbers.values()].sort((a,b)=>b.sources.length-a.sources.length)[0];
+    return 'מצאתי את מספר הטלפון '+candidate.display+', אבל לא הצלחתי לאמת אותו מול מקור רשמי.';
   }
   throw Object.assign(new Error('Unverified phone number'),{status:422});
 }
@@ -2211,6 +2250,24 @@ function currentIsraelDateIso() {
   const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
   const values=Object.fromEntries(parts.map(p=>[p.type,p.value]));
   return values.year+'-'+values.month+'-'+values.day;
+}
+
+function currentIsraelDateAliases() {
+  const now=new Date();
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);
+  const values=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+  const day=String(Number(values.day));
+  const month=String(Number(values.month));
+  const year=values.year;
+  const hebrewMonth=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',month:'long'}).format(now);
+  const englishMonth=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem',month:'long'}).format(now);
+  return [values.year+'-'+values.month+'-'+values.day,day+'.'+month+'.'+year,day+'/'+month+'/'+year,
+    day+'.'+month,day+'/'+month,day+' ב'+hebrewMonth,day+' '+hebrewMonth,day+' '+englishMonth,englishMonth+' '+day];
+}
+
+function hasCurrentDateEvidence(results) {
+  const evidence=(Array.isArray(results)?results:[]).map(x=>[x.title,x.snippet,x.url].join(' ')).join('\n').toLowerCase();
+  return currentIsraelDateAliases().some(alias=>evidence.includes(alias.toLowerCase()));
 }
 
 function isWebsiteNavigationRequest(question) {
@@ -2317,6 +2374,14 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     } catch(e) {
       console.warn('[DIRECT_WEB] page extraction unavailable; using search snippets',{status:geminiErrorStatus(e)});
     }
+  }
+
+  // Venue-event results are highly date-sensitive. If the retrieved pages do not
+  // contain today's actual date in Israel, do not let the language model turn an
+  // old or undated listing into a confident claim that an event is happening today.
+  if(eventVenueLookup && !isExplicitUnverifiedRequest(question) && !hasCurrentDateEvidence(unique)) {
+    console.warn('[EVENT_LOOKUP] no source contained the current Israel date; refusing to present stale listings as current',{date:currentIsraelDateIso(),results:unique.length});
+    return 'לא מצאתי מקור עדכני שמאשר אילו אירועים מתקיימים היום במקום הזה. אני מעדיף לא להציג אירוע מתאריך אחר כאילו הוא מתקיים היום.';
   }
 
   // The direct provider is a retrieval layer, not the final answer. When Gemini
@@ -2505,12 +2570,21 @@ async function answerWithWebSearch(transcript, historyText='', turnContext=null)
       // synthesis: that could turn an unverified secondary number into a
       // confident but wrong answer.
       if(/כוכבית|כוכב|\*\s*\d/i.test(question)){
-        return 'לא הצלחתי לאמת את מספר הכוכבית המדויק ממקור רשמי, ולכן אני לא רוצה לנחש.';
+        if(isExplicitUnverifiedRequest(question)) {
+          try { return await answerWithDirectWebFallback(question,historyText,turnContext); } catch {}
+        } else {
+          return 'לא הצלחתי לאמת את מספר הכוכבית המדויק ממקור רשמי, ולכן אני לא רוצה לנחש.';
+        }
       }
-      if(geminiErrorStatus(e)===422) return 'לא הצלחתי לאמת את המספר המדויק ממקור רשמי, ולכן אני לא רוצה לנחש.';
+      // A normal phone lookup may still be answered from the broader web-search
+      // path if the strict phone verifier could not corroborate it.
+      if(geminiErrorStatus(e)===422) console.warn('[PHONE_VERIFY] continuing to broader web search after strict verification failure');
     }
   }
-  if(isPharmacySearchRequest(question)) return await answerPharmacySearchDirect(question);
+  if(isPharmacySearchRequest(question)) {
+    try { return await answerPharmacySearchDirect(question); }
+    catch(e) { console.warn('[PHARMACY_SEARCH] dedicated lookup failed; continuing to general web search',{status:geminiErrorStatus(e)}); }
+  }
   try {
     const directAnswer=await answerWithDirectWebFallback(question,historyText,turnContext);
     if(directAnswer && String(directAnswer).trim()) return String(directAnswer).trim();
