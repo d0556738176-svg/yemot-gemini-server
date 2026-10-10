@@ -2173,7 +2173,7 @@ const VERIFIED_PRIMARY_STAR_NUMBERS = [
 
 function requestedPrimaryStarNumber(question){
   const q=String(question||'');
-  const isMortgage=/משכנת|הלוואת\\s*דיור|מיחזור\\s*משכנת/i.test(q);
+  const isMortgage=/משכנת|הלוואת\s*דיור|מיחזור\s*משכנת/i.test(q);
   const hit=VERIFIED_PRIMARY_STAR_NUMBERS.find(x=>
     x.test.test(q) && (isMortgage ? x.service==='mortgage' : x.service!=='mortgage'));
   return hit || null;
