@@ -2342,7 +2342,7 @@ function isGenericWebsiteRequest(question) {
     || /(?:פתח|תפתח)(?:\s+לי)?\s+(?:את\s+)?(?:האתר|אתר אינטרנטי)\s*(?:בבקשה)?[?.! ]*$/i.test(q);
 }
 function isWebsiteNavigationRequest(question) {
-  return /(תדפדף|דפדף|תעבור לעמוד|תפתח(?: לי)? את האתר|תפתח(?: לי)? אתר|פתח את האתר|פתח אתר|(?:אתה\s+)?(?:(?:יכול(?:ה)?|תוכל|תוכלי)\s+)?לפתוח(?:\s+לי)? את האתר|(?:אתה\s+)?(?:יכול(?:ה)?\s+)?להיכנס לאתר|(?:אתה\s+)?(?:יכול(?:ה)?\s+)?להיכנס לאתר של|תיכנס לאתר|תכנס לאתר|תיכנס לאתר של|תכנס לאתר של|באתר הזה|בעמוד הזה|בדף הזה|מה כתוב בעמוד|מה כתוב באתר|מה כתוב שם|מה כתוב שמה|מה כתוב בדף|מה כתוב בעמוד|תקרא את האתר|קרא את האתר|תקרא מה כתוב|קרא מה כתוב|תמשיך באתר|תמשיך בעמוד|תמשיך לדפדף|עמוד הבא|דף הבא|תפתח את הדף|פתח את הדף|תפתח קישור|פתח קישור)/i.test(String(question||''));
+  return /(תדפדף|דפדף|תעבור לעמוד|תפתח(?: לי)? את האתר|תפתח(?: לי)? אתר|פתח את האתר|פתח אתר|(?:אתה\s+)?(?:(?:יכול(?:ה)?|תוכל|תוכלי)\s+)?לפתוח(?:\s+לי)? את האתר|(?:אתה\s+)?(?:יכול(?:ה)?\s+)?להיכנס לאתר|(?:אתה\s+)?(?:יכול(?:ה)?\s+)?להיכנס לאתר של|תיכנס לאתר|תכנס לאתר|תיכנס לאתר של|תכנס לאתר של|באתר הזה|בעמוד הזה|בדף הזה|מה כתוב בעמוד|מה כתוב באתר|מה כתוב שם|מה כתוב שמה|מה כתוב בדף|מה כתוב בעמוד|תקרא את האתר|קרא את האתר|תקרא מה כתוב|קרא מה כתוב|תמשיך באתר|תמשיך בעמוד|תמשיך לדפדף|עמוד הבא|דף הבא|תפתח את הדף|פתח את הדף|תפתח קישור|פתח קישור|תמצא.{0,25}(?:באתר|עמוד|דף)|חפש.{0,25}באתר|עמוד\s+(?:יצירת קשר|צור קשר|שירות לקוחות|אודות)|דף\s+(?:יצירת קשר|צור קשר|שירות לקוחות|אודות)|בתוך האתר)/i.test(String(question||''));
 }
 
 function extractDirectSearchQueries(question){
@@ -2582,21 +2582,24 @@ async function answerWebsiteNavigation(question, startUrl, historyText='', turnC
       ? (Array.isArray(rootExtract.value.results)?rootExtract.value.results[0]:null)
       : null;
     const rootContent=String(rootItem?.rawContent||rootItem?.content||'').trim();
-    const candidates=[startUrl];
-    const addCandidate=(raw)=>{
+    const linkedCandidates=[];
+    const searchedCandidates=[];
+    const addCandidate=(raw,target=linkedCandidates)=>{
       try {
         const u=new URL(String(raw||''),startUrl);
         if(!['http:','https:'].includes(u.protocol) || u.hostname.toLowerCase()!==base.hostname.toLowerCase()) return;
         u.hash='';
-        if(!candidates.includes(u.toString())) candidates.push(u.toString());
+        if(u.toString()!==startUrl && !linkedCandidates.includes(u.toString()) && !searchedCandidates.includes(u.toString())) target.push(u.toString());
       } catch {}
     };
     for(const match of rootContent.matchAll(/https?:\/\/[^\s)\]<>]+/gi)) addCandidate(match[0].replace(/[),.!?;:'”’\]]+$/g,''));
     for(const match of rootContent.matchAll(/\]\((https?:\/\/[^)\s]+)\)/gi)) addCandidate(match[1]);
     if(siteSearch.status==='fulfilled') {
-      for(const item of (Array.isArray(siteSearch.value.results)?siteSearch.value.results:[])) addCandidate(item.url);
+      for(const item of (Array.isArray(siteSearch.value.results)?siteSearch.value.results:[])) addCandidate(item.url,searchedCandidates);
     }
-    const urls=candidates.slice(0,4);
+    // Search-engine matches for the requested destination (for example Contact Us)
+    // are tried before incidental navigation links found in the homepage text.
+    const urls=[startUrl,...searchedCandidates,...linkedCandidates].filter((url,i,all)=>all.indexOf(url)===i).slice(0,4);
     let extractedItems=[];
     if(urls.length) {
       const extracted=await withTimeout(client.extract(urls,{
