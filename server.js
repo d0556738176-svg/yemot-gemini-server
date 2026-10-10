@@ -2252,6 +2252,24 @@ function currentIsraelDateIso() {
   return values.year+'-'+values.month+'-'+values.day;
 }
 
+function currentIsraelDateAliases() {
+  const now=new Date();
+  const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);
+  const values=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+  const day=String(Number(values.day));
+  const month=String(Number(values.month));
+  const year=values.year;
+  const hebrewMonth=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',month:'long'}).format(now);
+  const englishMonth=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem',month:'long'}).format(now);
+  return [values.year+'-'+values.month+'-'+values.day,day+'.'+month+'.'+year,day+'/'+month+'/'+year,
+    day+'.'+month,day+'/'+month,day+' ב'+hebrewMonth,day+' '+hebrewMonth,day+' '+englishMonth,englishMonth+' '+day];
+}
+
+function hasCurrentDateEvidence(results) {
+  const evidence=(Array.isArray(results)?results:[]).map(x=>[x.title,x.snippet,x.url].join(' ')).join('\n').toLowerCase();
+  return currentIsraelDateAliases().some(alias=>evidence.includes(alias.toLowerCase()));
+}
+
 function isWebsiteNavigationRequest(question) {
   return /(תדפדף|דפדף|תעבור לעמוד|תפתח את האתר|תפתח לי את האתר|פתח את האתר|תיכנס לאתר|תכנס לאתר|באתר הזה|בעמוד הזה|בדף הזה|מה כתוב בעמוד|מה כתוב באתר|תקרא את האתר|קרא את האתר|תמשיך באתר|תמשיך בעמוד|עמוד הבא|דף הבא)/i.test(String(question||''));
 }
@@ -2356,6 +2374,14 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     } catch(e) {
       console.warn('[DIRECT_WEB] page extraction unavailable; using search snippets',{status:geminiErrorStatus(e)});
     }
+  }
+
+  // Venue-event results are highly date-sensitive. If the retrieved pages do not
+  // contain today's actual date in Israel, do not let the language model turn an
+  // old or undated listing into a confident claim that an event is happening today.
+  if(eventVenueLookup && !isExplicitUnverifiedRequest(question) && !hasCurrentDateEvidence(unique)) {
+    console.warn('[EVENT_LOOKUP] no source contained the current Israel date; refusing to present stale listings as current',{date:currentIsraelDateIso(),results:unique.length});
+    return 'לא מצאתי מקור עדכני שמאשר אילו אירועים מתקיימים היום במקום הזה. אני מעדיף לא להציג אירוע מתאריך אחר כאילו הוא מתקיים היום.';
   }
 
   // The direct provider is a retrieval layer, not the final answer. When Gemini
