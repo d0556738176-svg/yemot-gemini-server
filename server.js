@@ -2323,7 +2323,7 @@ function hasCurrentDateEvidence(results) {
 }
 
 function isWebsiteNavigationRequest(question) {
-  return /(תדפדף|דפדף|תעבור לעמוד|תפתח את האתר|תפתח לי את האתר|פתח את האתר|תיכנס לאתר|תכנס לאתר|באתר הזה|בעמוד הזה|בדף הזה|מה כתוב בעמוד|מה כתוב באתר|תקרא את האתר|קרא את האתר|תמשיך באתר|תמשיך בעמוד|עמוד הבא|דף הבא)/i.test(String(question||''));
+  return /(תדפדף|דפדף|תעבור לעמוד|תפתח(?: לי)? את האתר|תפתח(?: לי)? אתר|פתח את האתר|פתח אתר|תיכנס לאתר|תכנס לאתר|תיכנס לאתר של|תכנס לאתר של|באתר הזה|בעמוד הזה|בדף הזה|מה כתוב בעמוד|מה כתוב באתר|תקרא את האתר|קרא את האתר|תמשיך באתר|תמשיך בעמוד|עמוד הבא|דף הבא|תפתח את הדף|פתח את הדף|תפתח קישור|פתח קישור)/i.test(String(question||''));
 }
 
 function extractDirectSearchQueries(question){
@@ -2364,7 +2364,7 @@ function extractDirectSearchQueries(question){
 async function answerWithDirectWebFallback(question, historyText='', turnContext=null){
   const deepSearch=isDeepWebSearchRequest(question) || /(לעומק|מחקר מקיף|סקירה מקיפה|השוואה מקיפה)/i.test(question);
   const eventVenueLookup=isCurrentVenueEventQuestion(question);
-  const openSiteRequest=isWebsiteNavigationRequest(question) || /(פתח|תפתח|תיכנס|תכנס|קרא|תקרא).{0,25}(אתר|עמוד|דף|קישור)/i.test(question);
+  const openSiteRequest=isWebsiteNavigationRequest(question) || /(פתח|תפתח|תיכנס|תכנס|קרא|תקרא).{0,35}(אתר|עמוד|דף|קישור)/i.test(question);
   const queries=extractDirectSearchQueries(question);
   // Most voice requests are specific lookups. One strong search is faster than
   // waiting for five parallel queries; broaden only for explicit deep research.
@@ -2614,6 +2614,16 @@ async function answerWithWebSearch(transcript, historyText='', turnContext=null)
     if(pageAnswer) return pageAnswer;
   }
   if(isPhoneNumberRequest(question)){
+    // Deterministic official hotline answers must run before any web/LLM synthesis.
+    // This avoids reading an unrelated number when search snippets contain several
+    // Discount Bank departments or the official page extraction omits the primary number.
+    const knownPrimary=requestedPrimaryStarNumber(question);
+    if(knownPrimary && /דיסקונט|discount/i.test(question)) {
+      if(knownPrimary.service==='mortgage') {
+        return 'מוקד המשכנתאות של בנק דיסקונט: כוכבית 2009, או 03 9439008.';
+      }
+      return 'המוקד הכללי של בנק דיסקונט: כוכבית 6111, או 03 9439111.';
+    }
     try {
       return await answerPhoneNumberDirect(question);
     } catch(e) {
