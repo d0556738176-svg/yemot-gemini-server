@@ -16,8 +16,9 @@ function cleanedSearchText(original) {
     // JavaScript's \b word boundary does not treat Hebrew letters as word characters.
     // Unicode letter/number boundaries make Hebrew filler words removable without
     // matching the same text inside a longer Hebrew word.
-    .replace(/(^|[^\p{L}\p{N}])(הכי חדש|החדש ביותר|הכי חדשה|החדש|האחרון|האחרונה|אחרון|אחרונה|עדכני ביותר|חדש ביותר)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
-    .replace(/(^|[^\p{L}\p{N}])(תביא לי|תביא|תן לי|תמצא לי|תמצא|תראה לי|אני רוצה לראות|אני רוצה|את הסרטון|סרטונים|סרטון|בנושא|נושא)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
+    .replace(/(^|[^\p{L}\p{N}])(החדש ביותר|עדכני ביותר|הכי חדשה|הכי חדש|חדש ביותר|האחרונה|האחרון|אחרונה|אחרון|החדש)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
+    .replace(/(^|[^\p{L}\p{N}])(אני רוצה לראות|תביא לי|תמצא לי|תראה לי|את הסרטון|הסרטונים|הסרטון|סרטונים|סרטון|אני רוצה|תביא|תן לי|תמצא|בנושא|נושא)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
+    .replace(/^\s*של\s+/i, '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 120);
