@@ -75,13 +75,19 @@ if (!apiKeys.length) {
   console.warn('Gemini is not configured yet. Set GEMINI_API_KEYS.');
 }
 
-const configuredModelNames = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gemini-3.5-flash-lite,gemini-3.5-flash')
+const configuredModelNames = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite')
   .split(',').map(x => x.trim()).filter(Boolean);
-// Keep the user's configured order, but always have a current high-volume audio-capable
-// fallback available. Gemini 3.1 Flash-Lite is designed for high-volume, low-latency
-// multimodal work and supports audio input.
+// Google retired the old gemini-3.5-flash alias in October 2026; normalize it to
+// the supported gemini-3.6-flash name so a stale Render variable does not waste a turn.
+// Keep the user's preferred order, then append low-cost fallbacks that help when a
+// project's primary model reaches quota. Keys in one Google project share its quota.
+const normalizedConfiguredModelNames = configuredModelNames.map(name =>
+  name === 'gemini-3.5-flash' ? 'gemini-3.6-flash' : name
+);
 const MODEL_NAMES = [...new Set([
-  ...configuredModelNames,
+  ...normalizedConfiguredModelNames,
+  'gemini-3.6-flash',
+  'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite'
 ])];
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
@@ -481,7 +487,7 @@ async function transcribeWithDeepgram(audioBuffer, overrideKey='') {
   const cleaned=sanitizeForYemot(transcript);
   if(cleaned) {
     console.info('[TRANSCRIBE] deepgram_nova3_he_ok',{
-      mimeType,chars:cleaned.length,text:cleaned
+      mimeType,chars:cleaned.length
     });
     return cleaned;
   }
@@ -610,7 +616,7 @@ async function transcribePhoneAudio(audioBuffer) {
         const cleaned=sanitizeForYemot(directText);
         if(cleaned) {
           console.info('[TRANSCRIBE] gemini_35_direct_ok',{
-            key:ki+1,mimeType,chars:cleaned.length,text:cleaned
+            key:ki+1,mimeType,chars:cleaned.length
           });
           return cleaned;
         }
@@ -666,7 +672,7 @@ async function transcribePhoneAudio(audioBuffer) {
           const cleaned=sanitizeForYemot(text);
           if(cleaned) {
             console.info('[TRANSCRIBE] gemini_35_interactions_ok',{
-              key:ki+1,mimeType,chars:cleaned.length,text:cleaned
+              key:ki+1,mimeType,chars:cleaned.length
             });
             return cleaned;
           }
@@ -695,7 +701,7 @@ async function transcribePhoneAudio(audioBuffer) {
         if(legacyText) {
           const cleaned=sanitizeForYemot(legacyText);
           console.info('[TRANSCRIBE] legacy_audio_fallback_ok',{
-            key:ki+1,chars:cleaned.length,text:cleaned
+            key:ki+1,chars:cleaned.length
           });
           if(cleaned) return cleaned;
         }
@@ -2928,7 +2934,7 @@ async function callHandler(call) {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
       userTranscript=await transcribePhoneAudio(audioBuffer);
-      console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcript:userTranscript});
+      console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
       // Avoid spending a Gemini generation call on requests that are already
       // handled by deterministic/direct data paths below. This reduces quota use,
@@ -3001,7 +3007,7 @@ async function callHandler(call) {
         console.info('[MULTIMODAL] visual_route_selected',{
           callId:activeKey,
           visualFollowUp,
-          transcript:userTranscript,
+          transcriptChars:userTranscript.length,
           historyHasVisualCue:/(איך נראה|איך היא נראית|איך הוא נראה|תמחיש|תמונה|צילום|תיאור חזותי|תיאור הפיזי|מה רואים)/i.test(historyText)
         });
         try {
@@ -3446,7 +3452,7 @@ async function backupCallHandler(call) {
       ).join('\\n\\n');
 
       const userTranscript=await transcribeBackupPhoneAudio(audioBuffer);
-      console.info('[BACKUP CALL_FLOW] transcript_ready',{callId:activeKey,transcript:userTranscript});
+      console.info('[BACKUP CALL_FLOW] transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length});
 
       if(!userTranscript || userTranscript.length<2)
         throw Object.assign(new Error('Empty backup phone transcription'),{status:400});
