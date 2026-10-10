@@ -13,8 +13,12 @@ export function normalizeYouTubeQuery(value) {
 
 function cleanedSearchText(original) {
   return normalizeYouTubeQuery(original)
-    .replace(/\b(הכי חדש|החדש ביותר|הכי חדשה|החדש|האחרון|האחרונה|אחרון|אחרונה|עדכני ביותר|חדש ביותר)\b/gi, ' ')
-    .replace(/\b(תביא לי|תביא|תן לי|תמצא לי|תמצא|תראה לי|אני רוצה|אני רוצה לראות|את הסרטון|סרטון|סרטונים|בנושא|נושא)\b/gi, ' ')
+    // JavaScript's \b word boundary does not treat Hebrew letters as word characters.
+    // Unicode letter/number boundaries make Hebrew filler words removable without
+    // matching the same text inside a longer Hebrew word.
+    .replace(/(^|[^\p{L}\p{N}])(החדש ביותר|עדכני ביותר|הכי חדשה|הכי חדש|חדש ביותר|האחרונה|האחרון|אחרונה|אחרון|החדש)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
+    .replace(/(^|[^\p{L}\p{N}])(אני רוצה לראות|תביא לי|תמצא לי|תראה לי|את הסרטון|הסרטונים|הסרטון|סרטונים|סרטון|אני רוצה|תביא|תן לי|תמצא|בנושא|נושא)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
+    .replace(/^\s*של\s+/i, '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 120);
@@ -72,9 +76,9 @@ export async function searchYouTubeVideos(query, {
     const channels = (channelData.items || []).filter(x => x.id?.channelId);
 
     if (channels.length) {
-      const words = q.toLowerCase().split(/\\s+/).filter(Boolean);
+      const words = q.toLowerCase().split(/\s+/).filter(Boolean);
       const ranked = channels.map((channel, index) => {
-        const title = String(channel.snippet?.channelTitle || '').toLowerCase();
+        const title = String(channel.snippet?.title || channel.snippet?.channelTitle || '').toLowerCase();
         const score = words.reduce((sum, word) => sum + (title.includes(word) ? 1 : 0), 0);
         return { channel, score, index };
       }).sort((a, b) => b.score - a.score || a.index - b.index);
@@ -136,7 +140,7 @@ export async function searchYouTubeVideos(query, {
     // Prefer results whose channel title actually contains the requested
     // person's/channel words. This is a fallback only; uploads-playlist
     // resolution above remains the authoritative path.
-    const words = q.toLowerCase().split(/\\s+/).filter(w => w.length > 1);
+    const words = q.toLowerCase().split(/\s+/).filter(w => w.length > 1);
     results.sort((a, b) => {
       const ac = String(a.channelTitle||'').toLowerCase();
       const bc = String(b.channelTitle||'').toLowerCase();
