@@ -2436,6 +2436,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     try { websiteRootUrl=new URL(unique[0].url).origin; } catch {}
     if(turnContext && websiteRootUrl) turnContext.currentWebsiteUrl=websiteRootUrl;
   }
+  let websitePageContentRead=false;
   if(wantsPageContent) {
     try {
       const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
@@ -2451,7 +2452,10 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
           .map(x=>[normalizeExtractUrl(x.url),String(x.rawContent||'').trim()]));
         for(const item of unique) {
           const content=byUrl.get(normalizeExtractUrl(item.url));
-          if(content && content.length>80) item.snippet=content.slice(0,5000);
+          if(content && content.length>80) {
+            item.snippet=content.slice(0,5000);
+            if(openSiteRequest) websitePageContentRead=true;
+          }
         }
         // The homepage URL is the origin, while search results may point to deep pages.
         // Attach the extracted homepage text to the leading result so synthesis uses it.
@@ -2460,6 +2464,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
           if(homepageContent && homepageContent.length>80) {
             unique[0].url=websiteRootUrl;
             unique[0].snippet=homepageContent.slice(0,5000);
+            websitePageContentRead=true;
           }
         }
         console.info('[DIRECT_WEB] page extraction completed',{requested:urls.length,extracted:byUrl.size});
@@ -2477,7 +2482,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     return 'לא מצאתי מקור עדכני שמאשר אילו אירועים מתקיימים היום במקום הזה. אני מעדיף לא להציג אירוע מתאריך אחר כאילו הוא מתקיים היום.';
   }
 
-  if(openSiteRequest && !unique.some(x=>String(x.snippet||'').trim().length>80)) {
+  if(openSiteRequest && !websitePageContentRead) {
     return 'מצאתי את כתובת האתר, אבל לא הצלחתי לקרוא את תוכן הדף עצמו. ייתכן שהאתר חוסם קריאה אוטומטית או דורש התחברות. לא אציג קישור כאילו קראתי את הדף.';
   }
 
