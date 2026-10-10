@@ -2178,6 +2178,14 @@ function requestedPrimaryStarNumber(question){
     x.test.test(q) && (isMortgage ? x.service==='mortgage' : x.service!=='mortgage'));
   return hit || null;
 }
+function knownPrimaryPhoneAnswer(question){
+  const q=String(question||'');
+  if(!/(דיסקונט|discount)/i.test(q) || !isPhoneNumberRequest(q)) return '';
+  const hit=requestedPrimaryStarNumber(q);
+  if(!hit) return '';
+  if(hit.service==='mortgage') return 'מוקד המשכנתאות של בנק דיסקונט: כוכבית 2009, או 03 9439008.';
+  return 'המוקד הכללי של בנק דיסקונט: כוכבית 6111, או 03 9439111.';
+}
 
 function phoneEntityLabel(question){
   const q=String(question||'').replace(/^.*?(?:מספר|טלפון|מוקד|שירות לקוחות)\s*(?:של|ה)?\s*/i,'').trim();
@@ -2634,13 +2642,8 @@ async function answerWithWebSearch(transcript, historyText='', turnContext=null)
     // Deterministic official hotline answers must run before any web/LLM synthesis.
     // This avoids reading an unrelated number when search snippets contain several
     // Discount Bank departments or the official page extraction omits the primary number.
-    const knownPrimary=requestedPrimaryStarNumber(question);
-    if(knownPrimary && /דיסקונט|discount/i.test(question)) {
-      if(knownPrimary.service==='mortgage') {
-        return 'מוקד המשכנתאות של בנק דיסקונט: כוכבית 2009, או 03 9439008.';
-      }
-      return 'המוקד הכללי של בנק דיסקונט: כוכבית 6111, או 03 9439111.';
-    }
+    const knownAnswer=knownPrimaryPhoneAnswer(question);
+    if(knownAnswer) return knownAnswer;
     try {
       return await answerPhoneNumberDirect(question);
     } catch(e) {
@@ -2803,7 +2806,7 @@ async function callHandler(call) {
   let emptyRecordAttempts=0;
   let feedbackPending=false;
   const turnHistory=[];
-  const turnContext={youtubeResults:[]};
+  const turnContext={youtubeResults:[],currentWebsiteUrl:null};
   if (process.env.ENABLE_AI_OPENING !== 'false' && callerPhone !== 'לא מזוהה' && conversationLog.some(x=>x.phone===callerPhone)) {
     openingPrompt=await buildOpeningForCaller(callerPhone);
     console.info('[CALL_FLOW] returning_caller_memory_found', { callId: activeKey, hasMemory: !!openingPrompt });
@@ -2970,6 +2973,11 @@ async function callHandler(call) {
           else if(e?.status===404) replyText='לא מצאתי כרגע תמונה ציבורית נגישה שאפשר לנתח. אפשר לנסות שוב בניסוח מעט אחר.';
           else replyText='לא הצלחתי לנתח כרגע את המדיה שביקשת. המערכת ניסתה מקור נוסף אוטומטית, בלי לבקש ממך קישור.';
         }
+      }
+      else if(knownPrimaryPhoneAnswer(userTranscript)) {
+        // Fixed, official primary hotline answers must precede general business
+        // routing or Gemini synthesis, which can confuse a bank's departments.
+        replyText=knownPrimaryPhoneAnswer(userTranscript);
       }
       else if(isBusinessHoursRequest(userTranscript)) {
         try {
@@ -3396,8 +3404,23 @@ async function backupCallHandler(call) {
       }).format(new Date());
 
       let replyText='';
+      const fixedPhoneAnswer=knownPrimaryPhoneAnswer(userTranscript);
+      const explicitSiteUrl=extractExplicitHttpUrl(userTranscript);
+      const websiteRequest=isWebsiteNavigationRequest(userTranscript) ||
+        !!explicitSiteUrl || isGenericWebsiteRequest(userTranscript);
       const deterministicTime=answerIsraelTimeQuestion(userTranscript);
-      if(deterministicTime) {
+      if(fixedPhoneAnswer) {
+        replyText=fixedPhoneAnswer;
+      } else if(websiteRequest) {
+        try {
+          // Use the same direct page-extraction path as the main branch, rather
+          // than letting a generic language-model reply claim it cannot browse.
+          replyText=await answerWithWebSearch(userTranscript,historyText,turnContext);
+        } catch(e) {
+          console.warn('[BACKUP WEBSITE] direct browsing failed; trying backup search',{status:geminiErrorStatus(e)});
+          replyText=await answerBackupWithWebSearch(userTranscript,historyText);
+        }
+      } else if(deterministicTime) {
         replyText=deterministicTime;
       } else if(isWeatherQuestion(userTranscript)) {
         try { replyText=await answerWeatherDirect(userTranscript); }
