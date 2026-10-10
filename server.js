@@ -2322,6 +2322,17 @@ function hasCurrentDateEvidence(results) {
   return fullDateAliases.some(alias=>evidence.includes(String(alias).toLowerCase()));
 }
 
+function isWebsiteCapabilityQuestion(question) {
+  const q=String(question||'').trim();
+  return /(?:יש לך גישה לאינטרנט|אתה יכול לפתוח לי את האתר נכון|אפשר לפתוח אתר|אפשר שתפתח אתר|אתה יכול לפתוח אתר|יש אפשרות לפתוח אתר|אתה יכול להיכנס לאתר)/i.test(q)
+    && !extractExplicitHttpUrl(q)
+    && !/(?:של\s+[\u0590-\u05FF]{2,}|(?:www\.)?[a-z0-9-]+\.(?:co\.il|com|org|net|gov\.il|il)\b)/i.test(q);
+}
+function isGenericWebsiteRequest(question) {
+  const q=String(question||'').trim();
+  return /^(?:אז\s*)?(?:תפתח(?:\s+לי)?|פתח|תיכנס|תכנס|תקרא|קרא)?\s*(?:את\s*)?(?:האתר|אתר(?:\s+אינטרנטי)?|הדף|דף|הקישור)?\s*(?:בבקשה)?[?.! ]*$/i.test(q)
+    || /(?:פתח|תפתח)(?:\s+לי)?\s+(?:את\s+)?(?:האתר|אתר אינטרנטי)\s*(?:בבקשה)?[?.! ]*$/i.test(q);
+}
 function isWebsiteNavigationRequest(question) {
   return /(תדפדף|דפדף|תעבור לעמוד|תפתח(?: לי)? את האתר|תפתח(?: לי)? אתר|פתח את האתר|פתח אתר|תיכנס לאתר|תכנס לאתר|תיכנס לאתר של|תכנס לאתר של|באתר הזה|בעמוד הזה|בדף הזה|מה כתוב בעמוד|מה כתוב באתר|תקרא את האתר|קרא את האתר|תמשיך באתר|תמשיך בעמוד|עמוד הבא|דף הבא|תפתח את הדף|פתח את הדף|תפתח קישור|פתח קישור)/i.test(String(question||''));
 }
@@ -2601,6 +2612,12 @@ async function answerWithWebSearch(transcript, historyText='', turnContext=null)
   const rawQuestion=String(transcript||'').trim();
   const question=contextualizeSearchQuestion(rawQuestion,historyText);
   if(!question) throw Object.assign(new Error('Search requested but transcript is empty'),{status:400});
+  if(isWebsiteCapabilityQuestion(rawQuestion)) {
+    return 'כן. אני יכול לחפש אתר ציבורי ולקרוא לך את התוכן שלו בטלפון. אמור את שם האתר או את כתובת האתר המדויקת, למשל נקודה קום, ואנסה לפתוח את הדף ולסכם אותו. אם האתר דורש התחברות או חוסם קריאה אוטומטית, אגיד לך ולא אעמיד פנים שהצלחתי.';
+  }
+  if(isGenericWebsiteRequest(rawQuestion) && !extractExplicitHttpUrl(rawQuestion)) {
+    return 'איזה אתר תרצה שאפתח? אמור את שם האתר או את כתובת האינטרנט שלו, ואנסה לקרוא לך את התוכן הזמין בו.';
+  }
   const explicitUrl=extractExplicitHttpUrl(rawQuestion);
   if(explicitUrl) {
     try {
