@@ -2453,6 +2453,15 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
           const content=byUrl.get(normalizeExtractUrl(item.url));
           if(content && content.length>80) item.snippet=content.slice(0,5000);
         }
+        // The homepage URL is the origin, while search results may point to deep pages.
+        // Attach the extracted homepage text to the leading result so synthesis uses it.
+        if(openSiteRequest && websiteRootUrl) {
+          const homepageContent=byUrl.get(normalizeExtractUrl(websiteRootUrl));
+          if(homepageContent && homepageContent.length>80) {
+            unique[0].url=websiteRootUrl;
+            unique[0].snippet=homepageContent.slice(0,5000);
+          }
+        }
         console.info('[DIRECT_WEB] page extraction completed',{requested:urls.length,extracted:byUrl.size});
       }
     } catch(e) {
