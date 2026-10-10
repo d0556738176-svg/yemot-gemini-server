@@ -1758,49 +1758,89 @@ async function answerTransitDirect(question) {
 
 function isPharmacySearchRequest(transcript) {
   const t=String(transcript||'').toLowerCase().replace(/\s+/g,' ').trim();
-  return /(בית מרקחת|בתי מרקחת|סופר.?פארם|פארם)/i.test(t) &&
-    /(פתוח עכשיו|פתוח היום|פתוחה עכשיו|פתוחה היום|מתי פתוח|מתי נסגר|מתי סוגר|אחד.*טובים|מומלץ|הכי טוב|טוב בבית שמש)/i.test(t);
+  return /(בית מרקחת|בתי מרקחת|סופר.?פארם|פארם|כללית|מכבי פארם|be פארם)/i.test(t) &&
+    /(פתוח|פתוחה|פתוחים|פתוחות|שעות|מתי|נסגר|סוגר|פתיחה|פעילות|מומלץ|הכי טוב|בית שמש)/i.test(t);
+}
+
+function isBusinessHoursRequest(transcript) {
+  const t=String(transcript||'').toLowerCase().replace(/\s+/g,' ').trim();
+  const asksHours=/(פתוח עכשיו|פתוחה עכשיו|פתוחים עכשיו|פתוחות עכשיו|פתוח היום|פתוחה היום|מתי פתוח|מתי פתוחה|מתי הם פתוחים|מתי נסגר|מתי סוגר|שעות פתיחה|שעות פעילות|זמני פתיחה|עד מתי פתוח|באיזה שעות|מתי פותח)/i.test(t);
+  const hasBusiness=/(בית מרקחת|בתי מרקחת|סופר.?פארם|פארם|כללית|מכבי|מאוחדת|לאומית|בנק|סניף|חנות|חנויות|עסק|מרכז קניות|קניון|דואר|סופר|מכולת|מסעדה|מספרה|דיסקונט|הפועלים|לאומי|מזרחי|איקאה|רמי לוי|שופרסל|ויקטורי|מחסני השוק|משרד)/i.test(t);
+  return asksHours && hasBusiness;
 }
 
 function extractSearchCity(transcript) {
   const t=String(transcript||'').replace(/\s+/g,' ').trim();
-  const cities=['בית שמש','ירושלים','רעננה','ביתר עילית','בני ברק','פתח תקווה','תל אביב','חיפה','אשדוד','נתניה','רחובות','מודיעין','באר שבע'];
+  const cities=['בית שמש','ירושלים','רעננה','ביתר עילית','בני ברק','פתח תקווה','תל אביב','חיפה','אשדוד','נתניה','רחובות','מודיעין','באר שבע','ראשון לציון','חולון','אשקלון','כפר סבא','הרצליה','רמת גן','גבעתיים','קריית גת','קרית גת','קריית שמונה','קרית שמונה','עפולה','טבריה','צפת','אילת','לוד','רמלה'];
   return cities.find(city=>t.includes(city)) || '';
 }
 
-async function answerPharmacySearchDirect(transcript) {
+function extractRequestedBusinessName(question) {
+  const t=String(question||'').replace(/\s+/g,' ').trim();
+  const known=[
+    ['סופר-פארם',/סופר\s*[-־]?\s*פארם/i],
+    ['כללית',/כללית/i],
+    ['מכבי פארם',/מכבי\s*פארם/i],
+    ['Be פארם',/\bbe\s*פארם|בי פארם/i],
+    ['מאוחדת',/מאוחדת/i],
+    ['לאומית',/לאומית/i],
+    ['בנק דיסקונט',/בנק\s*דיסקונט|דיסקונט/i],
+    ['בנק הפועלים',/בנק\s*הפועלים|הפועלים/i],
+    ['בנק לאומי',/בנק\s*לאומי|לאומי/i],
+    ['בנק מזרחי טפחות',/מזרחי\s*טפחות|בנק\s*מזרחי/i],
+    ['דואר ישראל',/דואר\s*ישראל|סניף\s*דואר/i],
+    ['רמי לוי',/רמי\s*לוי/i],
+    ['שופרסל',/שופרסל/i],
+    ['ויקטורי',/ויקטורי/i],
+    ['איקאה',/איקאה/i]
+  ];
+  return known.find(([,re])=>re.test(t))?.[0] || '';
+}
+
+async function answerBusinessHoursDirect(transcript) {
   const question=String(transcript||'').trim();
   const loc=extractExplicitLocation(question);
-  const city=loc.city || extractSearchCity(question) || 'בית שמש';
+  const city=loc.city || extractSearchCity(question);
   const area=loc.area || '';
+  const business=extractRequestedBusinessName(question);
+  const pharmacy=/(בית מרקחת|בתי מרקחת|פארם)/i.test(question);
+  const generic=pharmacy?'בית מרקחת':business || (question.match(/(?:של|ב|ה)‏?\s*([^,.?]{2,45})/i)?.[1]||'עסק');
+  if(!city && !area) {
+    return 'באיזו עיר או באיזה אזור נמצא הסניף? כך אוכל לבדוק את שעות הפתיחה של המקום הנכון.';
+  }
   const locationText=[area,city].filter(Boolean).join(' ');
-  const queries=[
-    'בית מרקחת '+locationText+' פתוח עכשיו',
-    'בית מרקחת כללית דונה '+locationText+' שעות פתיחה',
-    'כללית '+locationText+' בית מרקחת שעות פתיחה אתר רשמי',
-    'בית מרקחת '+locationText+' כתובת טלפון שעות פתיחה אתר רשמי'
-  ];
-  const settled=await Promise.allSettled(queries.map(q=>searchWebDirect(q,{timeoutMs:4500})));
+  const targets=business ? [business] : pharmacy ? ['בית מרקחת'] : [generic];
+  const queries=[];
+  for(const target of targets) {
+    queries.push(target+' '+locationText+' שעות פתיחה היום');
+    queries.push(target+' '+locationText+' פתוח עכשיו כתובת אתר רשמי');
+    queries.push(target+' '+locationText+' שעות פעילות סניף');
+  }
+  if(pharmacy && /כללית/i.test(question)) queries.push('כללית בית מרקחת '+locationText+' שעות פתיחה אתר רשמי');
+  const settled=await Promise.allSettled([...new Set(queries)].map(q=>searchWebDirect(q,{timeoutMs:4500})));
   const all=[];
   for(const item of settled) if(item.status==='fulfilled') all.push(...item.value);
   const unique=dedupeSearchResults(all).slice(0,12);
-  if(!unique.length) throw Object.assign(new Error('Pharmacy search returned no results'),{status:503});
+  if(!unique.length) throw Object.assign(new Error('Business-hours search returned no results'),{status:503});
   const evidence=unique.map((x,i)=>
     'מקור '+(i+1)+': '+x.title+'\nכתובת: '+x.url+'\nמידע: '+String(x.snippet||'').slice(0,1400)
   ).join('\n\n');
-  const prompt='השאלה של המתקשר: '+question+'\nהעיר: '+city+'\nמקורות אינטרנט שנאספו עכשיו:\n'+evidence+'\n\n'+
-    'ענה ישירות על השאלה. אם המתקשר שאל איזה בית מרקחת פתוח עכשיו או ביקש אחד מבתי המרקחת הטובים, תן קודם שם של אפשרות אחת טובה ורלוונטית שפתוחה עכשיו, ואז כתובת ושעת סגירה אם הן מאומתות. אפשר להוסיף אפשרות נוספת אחת בלבד אם היא מועילה. '+
-    'אל תקריא את פעולת החיפוש ואל תגיד "מצאתי מידע". אל תקריא רשימת תוצאות. העדף מקור רשמי או מקור מקומי עדכני. '+
-    'אם אין דרך לאמת שהמקום פתוח עכשיו, אמור זאת במפורש ואל תנחש. התשובה קצרה, ממוקדת וטבעית להקראה בטלפון.';
+  const prompt='שאלת המתקשר: '+question+'\nעסק מבוקש: '+(business||generic)+'\nאזור מבוקש: '+locationText+'\nמקורות שנאספו עכשיו:\n'+evidence+'\n\n'+
+    'ענה בעברית ובקצרה להקראה בטלפון. התייחס רק לעסק ולסניף שהמתקשר ביקש; אין להחליף רשת או מותג ברשת אחרת. '+
+    'ציין אם פתוח עכשיו ושעת סגירה רק אם יש לכך ראיה עדכנית וברורה במקורות. ציין כתובת סניף כשנמצאה. העדף אתר רשמי. '+
+    'אם המקורות אינם מאמתים את שעות היום או אם יש כמה סניפים אפשריים, אמור מה חסר ואל תנחש. אל תמציא שעות ואל תציג תוצאה של עסק אחר כאילו היא התוצאה המבוקשת.';
   try {
     const result=await generateBranch1WithFallback([{role:'user',parts:[{text:EXCLUSIVE_INSTRUCTION+'\n\n'+prompt}]}],false,true);
     const answer=String(result?.response?.text?.()||'').trim();
     if(answer) return answer;
   } catch(e) {
-    console.warn('[PHARMACY_SEARCH] synthesis unavailable',{status:geminiErrorStatus(e)});
+    console.warn('[BUSINESS_HOURS] synthesis unavailable',{status:geminiErrorStatus(e)});
   }
-  const first=unique[0];
-  return sanitizeForYemot((first.title+'. '+String(first.snippet||'')).trim());
+  return 'לא הצלחתי לאמת כרגע את שעות הפתיחה של הסניף המבוקש. כדאי לבדוק באתר הרשמי של העסק.';
+}
+
+async function answerPharmacySearchDirect(transcript) {
+  return answerBusinessHoursDirect(transcript);
 }
 
 function isLongAnswerRequest(text) {
@@ -2666,6 +2706,11 @@ async function buildCallHistoryText(phone, callId, turnHistory=[]) {
 function contextualizeSearchQuestion(question, historyText='') {
   const q=String(question||'').trim();
   if(!q || !historyText.trim()) return q;
+  // A correction, a named business, or an explicit location is a new-topic cue.
+  // Never glue it to the previous utterance merely because it asks a short question.
+  const correction=/^(?:לא התכוונתי|התכוונתי ל|טעיתי|תיקון|לא לזה|בעצם|שכח מזה|עזוב את זה|נושא אחר|אני שואל על)/i.test(q);
+  const explicitTarget=/(בית מרקחת|סופר\s*[-־]?\s*פארם|כללית|מכבי|מאוחדת|לאומית|בנק|דיסקונט|הפועלים|לאומי|דואר|רמי לוי|שופרסל|נתניה|בית שמש|ירושלים|רעננה|תל אביב|חיפה|אשדוד|פתח תקווה|באר שבע|רחובות|מודיעין|היום|עכשיו)/i.test(q);
+  if(correction || explicitTarget) return q;
   const shortFollowUp=q.length<=110 && /^(?:(?:כן|נכון|בדיוק|טוב|אז|בסדר|אוקיי|אוקי)[, ]*)*(?:תבדוק|בדוק|תחפש|חפש|תמצא|תברר|בדוק לי|תבדוק לי|תבדוק עבורי|באתר הרשמי|אתר רשמי|פרטים נוספים|יותר פרטים|תמשיך|ומה לגבי|ומה עם|כמה זה עולה|מה המחיר|מתי הם פתוחים|מתי פתוח|מה השעות|שעות פתיחה|תביא את הפרטים|תן לי את הפרטים|תבדוק את זה)/i.test(q);
   const vagueReference=q.length<=110 && /(שלהם|שלהן|שלו|שלה|של הסניף|של הבנק|של האירוע|של המופע|של הכרטיסים|האתר הרשמי|באתר הרשמי|תבדוק את זה|תבדוק עבורי)/i.test(q);
   if(!shortFollowUp && !vagueReference) return q;
@@ -2878,9 +2923,9 @@ async function callHandler(call) {
           else replyText='לא הצלחתי לנתח כרגע את המדיה שביקשת. המערכת ניסתה מקור נוסף אוטומטית, בלי לבקש ממך קישור.';
         }
       }
-      else if(isPharmacySearchRequest(userTranscript)) {
+      else if(isBusinessHoursRequest(userTranscript)) {
         try {
-          replyText=await answerPharmacySearchDirect(userTranscript);
+          replyText=await answerBusinessHoursDirect(userTranscript);
         } catch(e) {
           replyText=await answerWithWebSearch(userTranscript, historyText, turnContext);
         }
