@@ -2342,7 +2342,7 @@ function isGenericWebsiteRequest(question) {
     || /(?:פתח|תפתח)(?:\s+לי)?\s+(?:את\s+)?(?:האתר|אתר אינטרנטי)\s*(?:בבקשה)?[?.! ]*$/i.test(q);
 }
 function isWebsiteNavigationRequest(question) {
-  return /(תדפדף|דפדף|תעבור לעמוד|תפתח(?: לי)? את האתר|תפתח(?: לי)? אתר|פתח את האתר|פתח אתר|(?:אתה\s+)?(?:(?:יכול(?:ה)?|תוכל|תוכלי)\s+)?לפתוח(?:\s+לי)? את האתר|(?:אתה\s+)?(?:יכול(?:ה)?\s+)?להיכנס לאתר|(?:אתה\s+)?(?:יכול(?:ה)?\s+)?להיכנס לאתר של|תיכנס לאתר|תכנס לאתר|תיכנס לאתר של|תכנס לאתר של|באתר הזה|בעמוד הזה|בדף הזה|מה כתוב בעמוד|מה כתוב באתר|מה כתוב שם|מה כתוב שמה|מה כתוב בדף|מה כתוב בעמוד|תקרא את האתר|קרא את האתר|תקרא מה כתוב|קרא מה כתוב|תמשיך באתר|תמשיך בעמוד|תמשיך לדפדף|עמוד הבא|דף הבא|תפתח את הדף|פתח את הדף|תפתח קישור|פתח קישור)/i.test(String(question||''));
+  return /(תדפדף|דפדף|תעבור לעמוד|תפתח(?: לי)? את האתר|תפתח(?: לי)? אתר|פתח את האתר|פתח אתר|(?:אתה\s+)?(?:(?:יכול(?:ה)?|תוכל|תוכלי)\s+)?לפתוח(?:\s+לי)? את האתר|(?:אתה\s+)?(?:יכול(?:ה)?\s+)?להיכנס לאתר|(?:אתה\s+)?(?:יכול(?:ה)?\s+)?להיכנס לאתר של|תיכנס לאתר|תכנס לאתר|תיכנס לאתר של|תכנס לאתר של|באתר הזה|בעמוד הזה|בדף הזה|מה כתוב בעמוד|מה כתוב באתר|מה כתוב שם|מה כתוב שמה|מה כתוב בדף|מה כתוב בעמוד|תקרא את האתר|קרא את האתר|תקרא מה כתוב|קרא מה כתוב|תמשיך באתר|תמשיך בעמוד|תמשיך לדפדף|עמוד הבא|דף הבא|תפתח את הדף|פתח את הדף|תפתח קישור|פתח קישור|תמצא.{0,25}(?:באתר|עמוד|דף)|חפש.{0,25}באתר|עמוד\s+(?:יצירת קשר|צור קשר|שירות לקוחות|אודות)|דף\s+(?:יצירת קשר|צור קשר|שירות לקוחות|אודות)|בתוך האתר)/i.test(String(question||''));
 }
 
 function extractDirectSearchQueries(question){
@@ -2428,22 +2428,44 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
   }
   if(!unique.length) throw Object.assign(new Error('Direct web search returned no results'),{status:503});
 
-  // Read page content only when the caller asks for deep research or the page
-  // itself. Normal lookups avoid this extra network hop to keep phone latency low.
+  // Website-opening requests must read the page itself, not merely return a search result.
+  // Keep the session anchored at the site's origin so follow-up requests navigate from the homepage.
   const wantsPageContent=deepSearch || eventVenueLookup || openSiteRequest || /(פתח את האתר|תיכנס לאתר|תכנס לאתר|תקרא את הטקסט|קרא את הטקסט|מה כתוב באתר|תוכן מלא|העמוד המלא|פרטים מלאים|קרא את הכתבה|תקרא את הכתבה)/i.test(question);
-  if(openSiteRequest && turnContext && unique[0]?.url) turnContext.currentWebsiteUrl=unique[0].url;
+  let websiteRootUrl=null;
+  if(openSiteRequest && unique[0]?.url) {
+    try { websiteRootUrl=new URL(unique[0].url).origin; } catch {}
+    if(turnContext && websiteRootUrl) turnContext.currentWebsiteUrl=websiteRootUrl;
+  }
+  let websitePageContentRead=false;
   if(wantsPageContent) {
     try {
       const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
-      const urls=unique.slice(0,Math.min((deepSearch||eventVenueLookup)?3:2,unique.length)).map(x=>x.url).filter(Boolean);
+      const maxPages=(deepSearch||eventVenueLookup)?3:2;
+      const urls=[...(openSiteRequest&&websiteRootUrl?[websiteRootUrl]:[]),...unique.map(x=>x.url).filter(Boolean)]
+        .filter((url,i,all)=>all.indexOf(url)===i).slice(0,maxPages);
       if(urls.length) {
-        const extracted=await withTimeout(client.extract(urls,{extractDepth:(deepSearch||eventVenueLookup)?'advanced':'basic',timeout:Math.max(1,Math.ceil(Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,4500)/1000))}),
-          Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,4500),'Tavily page extraction');
+        const pageTimeoutMs=openSiteRequest?10000:Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,4500);
+        const extracted=await withTimeout(client.extract(urls,{extractDepth:(deepSearch||eventVenueLookup)?'advanced':'basic',timeout:Math.ceil(pageTimeoutMs/1000)}),
+          pageTimeoutMs,'Tavily page extraction');
+        const normalizeExtractUrl=value=>String(value||'').replace(/#.*$/,'').replace(/\/+$/,'');
         const byUrl=new Map((Array.isArray(extracted.results)?extracted.results:[])
-          .map(x=>[String(x.url||'').replace(/#.*$/,''),String(x.rawContent||'').trim()]));
+          .map(x=>[normalizeExtractUrl(x.url),String(x.rawContent||'').trim()]));
         for(const item of unique) {
-          const content=byUrl.get(String(item.url||'').replace(/#.*$/,''));
-          if(content && content.length>80) item.snippet=content.slice(0,5000);
+          const content=byUrl.get(normalizeExtractUrl(item.url));
+          if(content && content.length>80) {
+            item.snippet=content.slice(0,5000);
+            if(openSiteRequest) websitePageContentRead=true;
+          }
+        }
+        // The homepage URL is the origin, while search results may point to deep pages.
+        // Attach the extracted homepage text to the leading result so synthesis uses it.
+        if(openSiteRequest && websiteRootUrl) {
+          const homepageContent=byUrl.get(normalizeExtractUrl(websiteRootUrl));
+          if(homepageContent && homepageContent.length>80) {
+            unique[0].url=websiteRootUrl;
+            unique[0].snippet=homepageContent.slice(0,5000);
+            websitePageContentRead=true;
+          }
         }
         console.info('[DIRECT_WEB] page extraction completed',{requested:urls.length,extracted:byUrl.size});
       }
@@ -2458,6 +2480,10 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
   if(eventVenueLookup && !isExplicitUnverifiedRequest(question) && !hasCurrentDateEvidence(unique)) {
     console.warn('[EVENT_LOOKUP] no source contained the current Israel date; refusing to present stale listings as current',{date:currentIsraelDateIso(),results:unique.length});
     return 'לא מצאתי מקור עדכני שמאשר אילו אירועים מתקיימים היום במקום הזה. אני מעדיף לא להציג אירוע מתאריך אחר כאילו הוא מתקיים היום.';
+  }
+
+  if(openSiteRequest && !websitePageContentRead) {
+    return 'מצאתי את כתובת האתר, אבל לא הצלחתי לקרוא את תוכן הדף עצמו. ייתכן שהאתר חוסם קריאה אוטומטית או דורש התחברות. לא אציג קישור כאילו קראתי את הדף.';
   }
 
   // The direct provider is a retrieval layer, not the final answer. When Gemini
@@ -2483,6 +2509,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     'אם יש סתירה בין מקורות, העדף מקור רשמי ועדכני. '+
     (eventVenueLookup?'בשאלה על אירוע במקום מסוים, התייחס רק לאירועים שתאריך האירוע שלהם מתאים להיום לפי שעון ישראל ('+currentIsraelDateIso()+') או שמצוינים במפורש כמתקיימים כעת. הבדל בין אירוע שמתקיים עכשיו לבין אירוע עתידי או אירוע שכבר הסתיים. אל תציג פרסום ישן כאירוע נוכחי. אם אין לוח מעודכן שמאשר מה מתקיים עכשיו, אמור זאת במפורש וציין תאריך לכל אירוע שאפשר לאמת. ':'')+
     'דבר בעברית טבעית, זורמת ונעימה להקראה בטלפון. היה ממוקד אבל אל תשמיט פרט שהמשתמש ביקש במפורש. '+
+    (openSiteRequest?'המשתמש ביקש לפתוח אתר ולקרוא את הדף עצמו: אל תחזיר רק כתובת או קישור. סכם מה כתוב בדף שחולץ, ציין את הכותרת, הנושאים והפרטים המעשיים שנמצאו. אם התוכן לא חולץ, אמור זאת במפורש. ':'')+
     'אל תמציא עובדות שאינן במקורות.';
   try {
     const result=await generateBranch1WithFallback([{role:'user',parts:[{text:EXCLUSIVE_INSTRUCTION+'\\n\\n'+synthesisPrompt}]}],false,false);
@@ -2526,12 +2553,13 @@ async function answerExplicitWebsiteUrl(question, historyText='', turnContext=nu
   const client=process.env.TAVILY_API_KEY
     ? tavily({apiKey:process.env.TAVILY_API_KEY})
     : tavily();
+  const explicitPageTimeoutMs=10000;
   const extracted=await withTimeout(
     client.extract([url],{
       extractDepth:/עמוק|יסודי|כל הפרטים|תוכן מלא|בהרחבה/i.test(question)?'advanced':'basic',
-      timeout:Math.max(1,Math.ceil(Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,5000)/1000))
+      timeout:Math.ceil(explicitPageTimeoutMs/1000)
     }),
-    Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,5000),
+    explicitPageTimeoutMs,
     'Explicit website extraction'
   );
   const results=Array.isArray(extracted.results)?extracted.results:[];
@@ -2580,28 +2608,34 @@ async function answerWebsiteNavigation(question, startUrl, historyText='', turnC
       ? (Array.isArray(rootExtract.value.results)?rootExtract.value.results[0]:null)
       : null;
     const rootContent=String(rootItem?.rawContent||rootItem?.content||'').trim();
-    const candidates=[startUrl];
-    const addCandidate=(raw)=>{
+    const linkedCandidates=[];
+    const searchedCandidates=[];
+    const addCandidate=(raw,target=linkedCandidates)=>{
       try {
         const u=new URL(String(raw||''),startUrl);
         if(!['http:','https:'].includes(u.protocol) || u.hostname.toLowerCase()!==base.hostname.toLowerCase()) return;
         u.hash='';
-        if(!candidates.includes(u.toString())) candidates.push(u.toString());
+        if(u.toString()!==startUrl && !linkedCandidates.includes(u.toString()) && !searchedCandidates.includes(u.toString())) target.push(u.toString());
       } catch {}
     };
+    // Resolve Markdown and HTML relative links against the current page, as a browser does.
     for(const match of rootContent.matchAll(/https?:\/\/[^\s)\]<>]+/gi)) addCandidate(match[0].replace(/[),.!?;:'”’\]]+$/g,''));
     for(const match of rootContent.matchAll(/\]\((https?:\/\/[^)\s]+)\)/gi)) addCandidate(match[1]);
+    for(const match of rootContent.matchAll(/\]\((\/(?!\/)[^)\s#?][^)\s]*)\)/g)) addCandidate(match[1]);
+    for(const match of rootContent.matchAll(/href=["']([^"']+)["']/gi)) addCandidate(match[1]);
     if(siteSearch.status==='fulfilled') {
-      for(const item of (Array.isArray(siteSearch.value.results)?siteSearch.value.results:[])) addCandidate(item.url);
+      for(const item of (Array.isArray(siteSearch.value.results)?siteSearch.value.results:[])) addCandidate(item.url,searchedCandidates);
     }
-    const urls=candidates.slice(0,4);
+    // Search-engine matches for the requested destination (for example Contact Us)
+    // are tried before incidental navigation links found in the homepage text.
+    const urls=[startUrl,...searchedCandidates,...linkedCandidates].filter((url,i,all)=>all.indexOf(url)===i).slice(0,4);
     let extractedItems=[];
     if(urls.length) {
       const extracted=await withTimeout(client.extract(urls,{
         extractDepth:/עמוק|יסודי|כל הפרטים|תוכן מלא|בהרחבה/i.test(question)?'advanced':'basic',
         query:String(question||'').slice(0,250),
-        timeout:5
-      }),5500,'Website relevant-page extraction');
+        timeout:9
+      }),10000,'Website relevant-page extraction');
       extractedItems=Array.isArray(extracted.results)?extracted.results:[];
     }
     const pages=extractedItems
