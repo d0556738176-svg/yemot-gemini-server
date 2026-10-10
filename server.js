@@ -2342,11 +2342,16 @@ function isGenericWebsiteRequest(question) {
     || /(?:פתח|תפתח)(?:\s+לי)?\s+(?:את\s+)?(?:האתר|אתר אינטרנטי)\s*(?:בבקשה)?[?.! ]*$/i.test(q);
 }
 function isWebsiteNavigationRequest(question) {
-  return /(תדפדף|דפדף|תעבור לעמוד|תפתח(?: לי)? את האתר|תפתח(?: לי)? אתר|פתח את האתר|פתח אתר|תיכנס לאתר|תכנס לאתר|תיכנס לאתר של|תכנס לאתר של|באתר הזה|בעמוד הזה|בדף הזה|מה כתוב בעמוד|מה כתוב באתר|תקרא את האתר|קרא את האתר|תמשיך באתר|תמשיך בעמוד|עמוד הבא|דף הבא|תפתח את הדף|פתח את הדף|תפתח קישור|פתח קישור)/i.test(String(question||''));
+  return /(תדפדף|דפדף|תעבור לעמוד|תפתח(?: לי)? את האתר|תפתח(?: לי)? אתר|פתח את האתר|פתח אתר|(?:אתה\s+)?(?:(?:יכול(?:ה)?|תוכל|תוכלי)\s+)?לפתוח(?:\s+לי)? את האתר|(?:אתה\s+)?(?:יכול(?:ה)?\s+)?להיכנס לאתר|(?:אתה\s+)?(?:יכול(?:ה)?\s+)?להיכנס לאתר של|תיכנס לאתר|תכנס לאתר|תיכנס לאתר של|תכנס לאתר של|באתר הזה|בעמוד הזה|בדף הזה|מה כתוב בעמוד|מה כתוב באתר|מה כתוב שם|מה כתוב שמה|מה כתוב בדף|מה כתוב בעמוד|תקרא את האתר|קרא את האתר|תקרא מה כתוב|קרא מה כתוב|תמשיך באתר|תמשיך בעמוד|תמשיך לדפדף|עמוד הבא|דף הבא|תפתח את הדף|פתח את הדף|תפתח קישור|פתח קישור)/i.test(String(question||''));
 }
 
 function extractDirectSearchQueries(question){
-  const cleaned=String(question||'').trim().replace(/^(?:אז\s+)?(?:תחפש|חפש|בדוק|תבדוק|תמצא|תאתר|תברר)(?:\s+לי)?(?:\s+באינטרנט|\s+ברשת|\s+בגוגל)?\s*/i,'').trim();
+  const cleaned=String(question||'').trim()
+    .replace(/^(?:כן[, ]*)?(?:אתה\s+)?(?:(?:יכול(?:ה)?|תוכל|תוכלי)\s+)?(?:לפתוח|להיכנס|לגשת)(?:\s+לי)?\s+(?:אל\s+)?(?:את\s+)?(?:האתר|אתר|העמוד|עמוד|הדף|דף)\s*/i,'')
+    .replace(/^(?:תפתח|פתח)(?:\s+לי)?\s+(?:את\s+)?(?:האתר|אתר|העמוד|עמוד|הדף|דף)\s*/i,'')
+    .replace(/(?:ותגיד\s+לי|ולהגיד\s+לי|ואז\s+תגיד\s+לי)\s*/i,'')
+    .replace(/מה\s+כתוב\s+(?:שם|שמה|באתר|בעמוד|בדף)\b/ig,' ')
+    .replace(/^(?:אז\s+)?(?:תחפש|חפש|בדוק|תבדוק|תמצא|תאתר|תברר)(?:\s+לי)?(?:\s+באינטרנט|\s+ברשת|\s+בגוגל)?\s*/i,'').trim();
   const loc=extractExplicitLocation(cleaned);
   const queries=[];
   const locationTail=[loc.area,loc.city].filter(Boolean).join(' ');
@@ -2901,6 +2906,10 @@ async function callHandler(call) {
         !!answerDailyDateQuestion(userTranscript) ||
         isWeatherQuestion(userTranscript) ||
         isNewsQuestion(userTranscript) ||
+        isWebsiteCapabilityQuestion(userTranscript) ||
+        isWebsiteNavigationRequest(userTranscript) ||
+        isGenericWebsiteRequest(userTranscript) ||
+        !!extractExplicitHttpUrl(userTranscript) ||
         shouldForceWebSearch(userTranscript) ||
         /(חפש|תחפש|תמצא|חיפוש|באינטרנט|בגוגל|מה קורה עכשיו|מידע עדכני)/i.test(userTranscript) ||
         /(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript);
@@ -2978,6 +2987,15 @@ async function callHandler(call) {
         // Fixed, official primary hotline answers must precede general business
         // routing or Gemini synthesis, which can confuse a bank's departments.
         replyText=knownPrimaryPhoneAnswer(userTranscript);
+      }
+      else if(isWebsiteCapabilityQuestion(userTranscript) || isWebsiteNavigationRequest(userTranscript) || isGenericWebsiteRequest(userTranscript) || extractExplicitHttpUrl(userTranscript)) {
+        // Website requests must use the real retrieval/extraction path, not the generic no-tools answer.
+        try {
+          replyText=await answerWithWebSearch(userTranscript,historyText,turnContext);
+        } catch(e) {
+          console.warn('[WEBSITE_REQUEST] direct website retrieval failed',{status:geminiErrorStatus(e)});
+          replyText='לא הצלחתי לפתוח ולקרוא את האתר כרגע. אפשר לנסות שוב עם שם האתר או כתובת מדויקת.';
+        }
       }
       else if(isBusinessHoursRequest(userTranscript)) {
         try {
