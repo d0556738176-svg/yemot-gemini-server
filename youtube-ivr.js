@@ -78,7 +78,7 @@ export async function searchYouTubeVideos(query, {
     if (channels.length) {
       const words = q.toLowerCase().split(/\s+/).filter(Boolean);
       const ranked = channels.map((channel, index) => {
-        const title = String(channel.snippet?.channelTitle || '').toLowerCase();
+        const title = String(channel.snippet?.title || channel.snippet?.channelTitle || '').toLowerCase();
         const score = words.reduce((sum, word) => sum + (title.includes(word) ? 1 : 0), 0);
         return { channel, score, index };
       }).sort((a, b) => b.score - a.score || a.index - b.index);
