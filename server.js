@@ -2220,6 +2220,12 @@ async function answerPhoneNumberDirect(question){
     throw Object.assign(new Error('Unverified star phone number'),{status:422});
   }
 
+  if(preferred){
+    const preferredKey=preferred.number.replace(/[\s-]/g,'');
+    const officialMention=evidencePool.some(item=>isOfficialSearchUrl(item.url,domains) &&
+      extractStarPhoneCandidates([item.title,item.snippet].join(' ')).some(n=>n.replace(/[\s-]/g,'')===preferredKey));
+    if(officialMention) return 'מספר השירות הוא '+preferred.number+'.';
+  }
   if(independentlyVerified.length===1){
     return 'מספר הטלפון הוא '+independentlyVerified[0].display+'.';
   }
