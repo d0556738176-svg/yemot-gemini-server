@@ -2346,7 +2346,12 @@ function isWebsiteNavigationRequest(question) {
 }
 
 function extractDirectSearchQueries(question){
-  const cleaned=String(question||'').trim()\n    .replace(/^(?:כן[, ]*)?(?:אתה\\s+)?(?:יכול(?:ה)?\\s+)?(?:לפתוח|להיכנס|לגשת)(?:\\s+לי)?\\s+(?:אל\\s+)?(?:את\\s+)?(?:האתר|אתר|העמוד|עמוד|הדף|דף)\\s*/i,'')\n    .replace(/^(?:תפתח|פתח)(?:\\s+לי)?\\s+(?:את\\s+)?(?:האתר|אתר|העמוד|עמוד|הדף|דף)\\s*/i,'')\n    .replace(/(?:ותגיד\\s+לי|ולהגיד\\s+לי|ואז\\s+תגיד\\s+לי)\\s*/i,'')\n    .replace(/מה\\s+כתוב\\s+(?:שם|שמה|באתר|בעמוד|בדף)\\b/ig,' ')\n    .replace(/^(?:אז\\s+)?(?:תחפש|חפש|בדוק|תבדוק|תמצא|תאתר|תברר)(?:\\s+לי)?(?:\\s+באינטרנט|\\s+ברשת|\\s+בגוגל)?\\s*/i,'').trim();
+  const cleaned=String(question||'').trim()
+    .replace(/^(?:כן[, ]*)?(?:אתה\s+)?(?:יכול(?:ה)?\s+)?(?:לפתוח|להיכנס|לגשת)(?:\s+לי)?\s+(?:אל\s+)?(?:את\s+)?(?:האתר|אתר|העמוד|עמוד|הדף|דף)\s*/i,'')
+    .replace(/^(?:תפתח|פתח)(?:\s+לי)?\s+(?:את\s+)?(?:האתר|אתר|העמוד|עמוד|הדף|דף)\s*/i,'')
+    .replace(/(?:ותגיד\s+לי|ולהגיד\s+לי|ואז\s+תגיד\s+לי)\s*/i,'')
+    .replace(/מה\s+כתוב\s+(?:שם|שמה|באתר|בעמוד|בדף)\b/ig,' ')
+    .replace(/^(?:אז\s+)?(?:תחפש|חפש|בדוק|תבדוק|תמצא|תאתר|תברר)(?:\s+לי)?(?:\s+באינטרנט|\s+ברשת|\s+בגוגל)?\s*/i,'').trim();
   const loc=extractExplicitLocation(cleaned);
   const queries=[];
   const locationTail=[loc.area,loc.city].filter(Boolean).join(' ');
