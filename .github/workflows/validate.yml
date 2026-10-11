@@ -2,7 +2,7 @@ name: Validate Node application
 
 on:
   push:
-    branches: [feature/tavily-branch1-search, fix/ivr-context-search-speed, feature-search-quality-2026-10-10, feature-search-recovery-2026-10-10]
+    branches: [main, feature/tavily-branch1-search, fix/ivr-context-search-speed, feature-search-quality-2026-10-10, feature-search-recovery-2026-10-10]
   pull_request:
     branches: [main]
 
@@ -26,7 +26,6 @@ jobs:
           node --check youtube-authorized-playback.js
       - name: Run regression tests
         run: npm test
-      - name: Optional Tavily keyless smoke test
-        continue-on-error: true
+      - name: Check Tavily SDK initialization (offline)
         run: |
-          node --input-type=module -e "import { tavily } from '@tavily/core'; const r = await tavily().search('OpenAI official website', { maxResults: 1, timeout: 5 }); if (!Array.isArray(r.results) || r.results.length < 1) throw new Error('Tavily returned no search results'); console.log('Tavily keyless smoke test passed:', r.results.length, 'result(s)');"
+          node --input-type=module -e "import { tavily } from '@tavily/core'; const client = tavily(); if (!client || typeof client.search !== 'function' || typeof client.extract !== 'function' || typeof client.crawl !== 'function') throw new Error('Tavily SDK methods are unavailable'); console.log('Tavily SDK initialization passed (offline; no API call made)');"
