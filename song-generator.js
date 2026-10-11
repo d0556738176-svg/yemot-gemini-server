@@ -214,7 +214,10 @@ async function generateAudio(spec) {
       markProvider('eleven', limited ? 'rate_limited' : temporary ? 'temporary_error' : 'disabled',
         limited ? 60000 : temporary ? 15000 : 0);
       log('MUSIC_PROVIDER_FAILED', { provider: 'eleven', status: status || 'unknown' });
-      if (!limited && !temporary && status !== 0 && status < 500) throw error;
+      // Authentication, missing-endpoint, and provider availability failures should still try the configured backup.
+      // Only clearly invalid generation requests should fail fast without a backup attempt.
+      const invalidRequest = status === 400 || status === 413 || status === 422;
+      if (invalidRequest) throw error;
     }
   }
   const backupEndpoint = String(process.env.MUSIC_BACKUP_API_URL || '').trim();
