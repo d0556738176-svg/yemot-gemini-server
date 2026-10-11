@@ -2501,6 +2501,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
       .replace(/^(?:אז\s*)?(?:תפתח|פתח)\s+(?:לי\s+)?את\s+/i,'')
       .replace(/^(?:את\s+)?(?:האתר|אתר)\s+(?:של\s+)?/i,'')
       .replace(/\s+(?:ותקרא|תקרא|ותגיד|תגיד).*[\s\S]*$/i,'')
+      .replace(/[.,!?;:"׳״'()]/g,' ')
       .trim().toLowerCase();
     const tokens=requestedSite.split(/\s+/).filter(token=>token.length>2);
     const scored=unique.map((item,index)=>{
