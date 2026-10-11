@@ -30,3 +30,8 @@ test('allows an explicit request to open YouTube when the result matches', () =>
   const requested = { title: 'YouTube', url: 'https://www.youtube.com/' };
   assert.equal(selectWebsiteResult('תפתח לי את האתר של YouTube', [requested]), requested);
 });
+
+test('rejects non-web URL schemes even when their text matches the requested site', () => {
+  const unsafe = { title: 'פרוג', url: 'javascript:alert(1)' };
+  assert.equal(selectWebsiteResult('תפתח לי את האתר של פרוג', [unsafe]), null);
+});
