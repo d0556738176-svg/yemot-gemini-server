@@ -9,6 +9,7 @@ import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback } from './business-hours.js';
 import { rankWebsitePages } from './website-relevance.js';
+import { readPublicWebsitePages } from './website-reader.js';
 import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
 
 const app = express();
@@ -2509,39 +2510,85 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
   }
   let websitePageContentRead=false;
   if(wantsPageContent) {
-    try {
-      const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
-      const maxPages=(deepSearch||eventVenueLookup)?3:2;
-      const urls=[...(openSiteRequest&&websiteRootUrl?[websiteRootUrl]:[]),...unique.map(x=>x.url).filter(Boolean)]
-        .filter((url,i,all)=>all.indexOf(url)===i).slice(0,maxPages);
-      if(urls.length) {
-        const pageTimeoutMs=openSiteRequest?10000:Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,4500);
-        const extracted=await withTimeout(client.extract(urls,{extractDepth:(deepSearch||eventVenueLookup)?'advanced':'basic',timeout:Math.ceil(pageTimeoutMs/1000)}),
-          pageTimeoutMs,'Tavily page extraction');
-        const normalizeExtractUrl=value=>String(value||'').replace(/#.*$/,'').replace(/\/+$/,'');
-        const byUrl=new Map((Array.isArray(extracted.results)?extracted.results:[])
-          .map(x=>[normalizeExtractUrl(x.url),String(x.rawContent||'').trim()]));
-        for(const item of unique) {
-          const content=byUrl.get(normalizeExtractUrl(item.url));
-          if(content && content.length>80) {
-            item.snippet=content.slice(0,5000);
-            if(openSiteRequest) websitePageContentRead=true;
+    // For an explicitly requested website, fetch the public HTML directly first,
+    // then follow relevant same-origin links (contact, hours, branches, services,
+    // events, pricing) instead of relying on a homepage-only extraction.
+    if(openSiteRequest && websiteRootUrl) {
+      try {
+        const directPages=await readPublicWebsitePages({
+          startUrl:unique[0]?.url || websiteRootUrl,
+          rootUrl:websiteRootUrl,
+          question,
+          searchUrls:unique.map(x=>x.url).filter(Boolean),
+          maxPages:4,
+          timeoutMs:5000
+        });
+        if(directPages.length) {
+          const merged=[];
+          for(const page of directPages) {
+            const normalizedUrl=String(page.url||'').replace(/#.*$/,'').replace(/\/+$/,'');
+            const existing=unique.find(item=>String(item.url||'').replace(/#.*$/,'').replace(/\/+$/,'')===normalizedUrl);
+            const item=existing || {title:page.title||page.url,url:page.url,snippet:''};
+            item.title=page.title||item.title||page.url;
+            item.url=page.url;
+            item.snippet=String(page.content||'').slice(0,12000);
+            merged.push(item);
+            if(item.snippet.length>80) websitePageContentRead=true;
           }
-        }
-        // The homepage URL is the origin, while search results may point to deep pages.
-        // Attach the extracted homepage text to the leading result so synthesis uses it.
-        if(openSiteRequest && websiteRootUrl) {
-          const homepageContent=byUrl.get(normalizeExtractUrl(websiteRootUrl));
-          if(homepageContent && homepageContent.length>80) {
-            unique[0].url=websiteRootUrl;
-            unique[0].snippet=homepageContent.slice(0,5000);
-            websitePageContentRead=true;
+          for(const item of unique) {
+            if(!merged.some(page=>page.url===item.url)) merged.push(item);
           }
+          unique.splice(0,unique.length,...merged);
+          console.info('[DIRECT_WEB] direct public-site crawl completed',{
+            requested:unique[0]?.url||websiteRootUrl,pages:directPages.length,contentRead:websitePageContentRead
+          });
         }
-        console.info('[DIRECT_WEB] page extraction completed',{requested:urls.length,extracted:byUrl.size});
+      } catch(e) {
+        console.warn('[DIRECT_WEB] direct public-site crawl failed; trying Tavily extraction',{
+          status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,180)
+        });
       }
-    } catch(e) {
-      console.warn('[DIRECT_WEB] page extraction unavailable; using search snippets',{status:geminiErrorStatus(e)});
+    }
+    // Tavily remains as a secondary extractor for JavaScript-heavy sites and
+    // general deep-search results; the existing search fallback is preserved.
+    if(!openSiteRequest || !websitePageContentRead) {
+      try {
+        const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
+        const maxPages=(deepSearch||eventVenueLookup)?3:2;
+        const urls=[...(openSiteRequest&&websiteRootUrl?[websiteRootUrl]:[]),...unique.map(x=>x.url).filter(Boolean)]
+          .filter((url,i,all)=>all.indexOf(url)===i).slice(0,maxPages);
+        if(urls.length) {
+          const pageTimeoutMs=openSiteRequest?10000:Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,4500);
+          const extracted=await withTimeout(client.extract(urls,{extractDepth:(deepSearch||eventVenueLookup)?'advanced':'basic',timeout:Math.ceil(pageTimeoutMs/1000)}),
+            pageTimeoutMs,'Tavily page extraction');
+          const normalizeExtractUrl=value=>String(value||'').replace(/#.*$/,'').replace(/\/+$/,'');
+          const byUrl=new Map((Array.isArray(extracted.results)?extracted.results:[])
+            .map(x=>[normalizeExtractUrl(x.url),String(x.rawContent||'').trim()]));
+          for(const item of unique) {
+            const content=byUrl.get(normalizeExtractUrl(item.url));
+            if(content && content.length>80) {
+              item.snippet=content.slice(0,12000);
+              if(openSiteRequest) websitePageContentRead=true;
+            }
+          }
+          if(openSiteRequest && websiteRootUrl) {
+            const homepageContent=byUrl.get(normalizeExtractUrl(websiteRootUrl));
+            if(homepageContent && homepageContent.length>80) {
+              const homepage=unique.find(x=>normalizeExtractUrl(x.url)===normalizeExtractUrl(websiteRootUrl))||unique[0];
+              if(homepage) {
+                homepage.url=websiteRootUrl;
+                homepage.snippet=homepageContent.slice(0,12000);
+                websitePageContentRead=true;
+              }
+            }
+          }
+          console.info('[DIRECT_WEB] Tavily page extraction completed',{requested:urls.length,extracted:byUrl.size});
+        }
+      } catch(e) {
+        console.warn('[DIRECT_WEB] page extraction unavailable; using search snippets',{
+          status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,180)
+        });
+      }
     }
   }
 
