@@ -8,6 +8,7 @@ import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback } from './business-hours.js';
+import { rankWebsitePages } from './website-relevance.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -2792,13 +2793,8 @@ async function answerWebsiteNavigation(question, startUrl, historyText='', turnC
         console.warn('[WEBSITE_NAV] linked-page extraction failed',{status:geminiErrorStatus(e)});
       }
     }
-    const pages=[...pageMap.entries()]
-      .map(([url,content])=>({url,content}))
-      .sort((a,b)=>{
-        const aRoot=a.url===normalizeUrl(startUrl)?1:0;
-        const bRoot=b.url===normalizeUrl(startUrl)?1:0;
-        return bRoot-aRoot || b.content.length-a.content.length;
-      })
+    const pages=rankWebsitePages(question,[...pageMap.entries()]
+      .map(([url,content])=>({url,content})),startUrl)
       .slice(0,deepMode?8:4);
     if(!pages.length) {
       console.warn('[WEBSITE_NAV] no readable page content',{host:base.hostname,deepMode});
