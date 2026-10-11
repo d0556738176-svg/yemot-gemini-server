@@ -37,7 +37,7 @@ export function buildNewsSearchQueries(question, historyText = '') {
 
   const categories = CATEGORY_PATTERNS.filter(item => item.pattern.test(q));
   if (categories.length === 1) return [categories[0].query];
-  if (categories.length > 1) return categories.slice(0, 4).map(item => item.query);
+  if (categories.length > 1) return categories.slice(0, 6).map(item => item.query);
 
   const combined = (q + ' ' + history.slice(-500)).toLowerCase();
   if (/(כותרת|תוצאה|הפרט הראשון|הנושא הראשון|הראשונה|השני|השלישי)/i.test(q) && history) {
