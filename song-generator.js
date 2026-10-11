@@ -118,35 +118,41 @@ function splitLyrics(lyrics, durationSeconds, spec) {
   let current = { name: 'Verse 1', lines: [] };
   const heading = /^\s*\[(intro|verse\s*\d*|chorus|bridge|outro|pre-chorus|post-chorus|instrumental|פזמון|בית\s*\d*)\]\s*$/i;
   for (const line of lines) {
-    const m = line.match(heading);
-    if (m) {
+    const match = line.match(heading);
+    if (match) {
       if (current.lines.length || !sections.length) sections.push(current);
-      current = { name: m[1].trim(), lines: [] };
-    } else if (line.trim()) current.lines.push(line.trim().slice(0, 200));
+      current = { name: match[1].trim(), lines: [] };
+    } else if (line.trim()) {
+      current.lines.push(line.trim().slice(0, 200));
+    }
   }
   if (current.lines.length || !sections.length) sections.push(current);
-  const useful = sections.filter(x => x.lines.length).slice(0, 6);
+  const useful = sections.filter(section => section.lines.length).slice(0, 6);
   if (!useful.length) useful.push({ name: 'Song', lines: [String(lyrics).slice(0, 200)] });
+
   const totalMs = durationSeconds * 1000;
   const eachMs = Math.floor(totalMs / useful.length / 1000) * 1000;
   let remaining = totalMs;
   return useful.map((section, index) => {
     const duration = index === useful.length - 1 ? remaining : eachMs;
     remaining -= duration;
-    const text = '[' + section.name + ']\n' + section.lines.join('\n');
     return {
-      text: text.slice(0, 6100),
-      duration_ms: Math.max(3000, duration),
-      positive_styles: [spec.musicPrompt, spec.tempo, 'original song', 'clear vocals'].filter(Boolean).map(x => String(x).slice(0, 180)).slice(0, 10),
-      negative_styles: ['unintelligible vocals', 'abrupt ending'],
-      context_adherence: 'high'
+      section_name: section.name.slice(0, 80),
+      lines: section.lines.slice(0, 100).map(line => line.slice(0, 500)),
+      duration_ms: duration,
+      positive_local_styles: [spec.musicPrompt, spec.tempo, 'original song', 'clear vocals']
+        .filter(Boolean).map(value => String(value).slice(0, 180)).slice(0, 10),
+      negative_local_styles: ['unintelligible vocals', 'abrupt ending']
     };
   });
 }
 
 export function buildCompositionPlan(spec) {
   return {
-    chunks: splitLyrics(spec.lyrics, spec.durationSeconds, spec)
+    positive_global_styles: [spec.genre, spec.mood, spec.musicPrompt]
+      .filter(Boolean).map(value => String(value).slice(0, 180)).slice(0, 10),
+    negative_global_styles: ['abrupt ending', 'unintelligible vocals'],
+    sections: splitLyrics(spec.lyrics, spec.durationSeconds, spec)
   };
 }
 
