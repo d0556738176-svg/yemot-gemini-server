@@ -12,8 +12,9 @@ test('recognizes news requests across security, politics, technology, health, an
   ]) assert.equal(isNewsQuestion(q), true, q);
 });
 
-test('does not route an ordinary timeless question about health as current news', () => {
+test('does not route ordinary non-news questions into the news pipeline', () => {
   assert.equal(isNewsQuestion('מה זה לחץ דם'), false);
+  assert.equal(isNewsQuestion('מה קורה עם הטלפון שלי'), false);
 });
 
 test('general news briefing searches several topic lanes in parallel', () => {
