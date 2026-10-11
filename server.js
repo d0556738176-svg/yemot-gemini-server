@@ -132,6 +132,13 @@ const DIALOGUE_STYLE_INSTRUCTION = [
   'אל תשאל בסוף כל תשובה אם זה עזר ואל תוסיף משפטי נימוס קבועים באופן אוטומטי.',
   'אם המתקשר מתלבט, עזור לו לחשוב בקול רם: נסח את הבעיה, הצג שיקולים חשובים, והצע צעד הבא ברור.',
   'אם המתקשר מבקש מידע עדכני, חדשות או YouTube, השתמש בגישה האינטרנטית של המערכת ונסה להביא את המידע בעצמך.',
+  'כאשר המתקשר מבקש לפתוח אתר, לזהות את האתר המדויק לפי שם האתר והכוונה, ולא לבחור אתר אחר בגלל מילה דומה, תוצאת YouTube או מקור שהופיע קודם. אם יש כמה אפשרויות ולא ניתן לאמת מי הנכון, שאל שאלה קצרה במקום לנחש.',
+  'לאחר פתיחת אתר, להתייחס רק לעמוד שהמערכת באמת פתחה או שתוכן ממנו נאסף בהצלחה. אין לטעון שראית כותרת, טקסט, כפתור או מספר טלפון אם אין נתונים שמאמתים זאת.',
+  'ביטויים כמו "שם", "באתר הזה", "מה ראית", "תקרא מההתחלה", "תמשיך" ו"הרחב על הפרט הראשון" מתייחסים לעמוד ולאתר האחרונים שנפתחו בשיחה. שמור על ההקשר ועדכן אותו רק כשהמתקשר מבקש לעבור לאתר או לנושא אחר.',
+  'הבחן בין הפעולות: "פתח את האתר" פירושו לאתר ולפתוח את האתר; "תקרא מה כתוב" פירושו לקרוא תוכן שנאסף בפועל; "מה כתוב בהתחלה" פירושו לקרוא את תחילת העמוד; "מה מספר הטלפון" פירושו לאתר מספר במקור; "מה ראית שם" פירושו לתאר את העמוד האחרון שנפתח בפועל.',
+  'אם תוכן העמוד לא נטען, אמור זאת בבירור והצע ניסיון חלופי. אל תחליף את האתר המבוקש באתר אחר ואל תציג מידע כללי או תוכן שנוצר על ידי המודל כאילו נצפה בעמוד.',
+  'בקשה למידע ציבורי באתר של בנק אינה בקשה להיכנס לחשבון אישי. סייע במידע ציבורי, בפרטי קשר ובהסברים כלליים; אל תבקש סיסמאות או קודי אימות ואל תטען שיש לך גישה לחשבון פרטי.',
+  'ענה קודם כול על הפעולה המדויקת שהתבקשה. אל תוסיף סיכום כללי במקום ביצוע הבקשה. אם התבקשה קריאה, קרא בנאמנות את הטקסט הזמין; אם התבקשה הרחבה, הרחב רק על הפרט שאליו המתקשר מתייחס.',
   'בתשובה קולית העדף עברית טבעית, משפטים שקל לשמוע בטלפון, ניסוח זורם והגייה פשוטה. הימנע מרשימות ארוכות וממשפטים מסורבלים.'
 ].join('\n');
 const EXCLUSIVE_INSTRUCTION = [CONTENT_FILTER_INSTRUCTION, DIALOGUE_STYLE_INSTRUCTION, process.env.AI_SYSTEM_INSTRUCTION || '']
@@ -2377,13 +2384,23 @@ function extractDirectSearchQueries(question){
     .replace(/בנק\s+(?:דיווחון|דיסקונטון)/gi,'בנק דיסקונט')
     .replace(/^(?:כן[, ]*)?(?:אתה\s+)?(?:(?:יכול(?:ה)?|תוכל|תוכלי)\s+)?(?:לפתוח|להיכנס|לגשת)(?:\s+לי)?\s+(?:אל\s+)?(?:את\s+)?(?:האתר|אתר|העמוד|עמוד|הדף|דף)\s*/i,'')
     .replace(/^(?:תפתח|פתח)(?:\s+לי)?\s+(?:את\s+)?(?:האתר|אתר|העמוד|עמוד|הדף|דף)\s*/i,'')
+    .replace(/^(?:תפתח|פתח)(?:\s+לי)?\s+את\s+/i,'')
     .replace(/(?:ותגיד\s+לי|ולהגיד\s+לי|ואז\s+תגיד\s+לי)\s*/i,'')
+    .replace(/[, ]*(?:ו?תקרא|ו?קרא|ו?תקריא|ואז\s+תקרא|ואז\s+קרא)\s+(?:לי\s+)?(?:מה\s+שכתוב|מה\s+כתוב|את\s+התוכן|את\s+הטקסט).*$/i,'')
     .replace(/מה\s+כתוב\s+(?:שם|שמה|באתר|בעמוד|בדף)\b/ig,' ')
     .replace(/^(?:אז\s+)?(?:תחפש|חפש|בדוק|תבדוק|תמצא|תאתר|תברר)(?:\s+לי)?(?:\s+באינטרנט|\s+ברשת|\s+בגוגל)?\s*/i,'').trim();
+  // Strip navigation phrasing so the search engine receives the requested site name,
+  // not a fragment such as "של פרוג" or "תפתח לי את האתר של פרוג".
+  const siteQuery=cleaned
+    .replace(/^(?:של|אתר\s+של|האתר\s+של)\s+/i,'')
+    .replace(/^(?:האתר|אתר|העמוד|עמוד|הדף|דף)\s+/i,'')
+    .replace(/\s+(?:האתר\s+הרשמי|אתר\s+רשמי)$/i,'')
+    .trim();
   const loc=extractExplicitLocation(cleaned);
   const queries=[];
   const locationTail=[loc.area,loc.city].filter(Boolean).join(' ');
-  const base=locationTail && !cleaned.includes(locationTail) ? cleaned+' '+locationTail : cleaned;
+  const base=locationTail && !siteQuery.includes(locationTail) ? siteQuery+' '+locationTail : siteQuery;
+  const wantsWebsite=/(?:פתח|תפתח|תיכנס|תכנס|לפתוח|להיכנס).{0,45}(?:אתר|עמוד|דף)|(?:האתר|אתר)\s+של|^(?:אז\s*)?(?:תפתח|פתח)\s+(?:לי\s+)?את\s+[^?!.]+$/i.test(question);
   if(isCurrentVenueEventQuestion(cleaned)) {
     const today=currentIsraelDateIso();
     queries.push(base+' '+today+' לוח אירועים רשמי');
@@ -2391,6 +2408,12 @@ function extractDirectSearchQueries(question){
     queries.push(base+' אתר רשמי לוח אירועים כנסים מופעים');
     queries.push(base+' אירוע עכשיו היום '+today);
     return [...new Set(queries)].slice(0,5);
+  }
+  if(wantsWebsite) {
+    queries.push(base+' אתר רשמי');
+    queries.push(base+' official website');
+    queries.push(base);
+    return [...new Set(queries.filter(Boolean).map(x=>x.slice(0,240)))].slice(0,5);
   }
   queries.push(base);
   if(isPhoneNumberRequest(cleaned)){
@@ -2416,14 +2439,14 @@ function extractDirectSearchQueries(question){
 async function answerWithDirectWebFallback(question, historyText='', turnContext=null){
   const deepSearch=isDeepWebSearchRequest(question) || /(לעומק|מחקר מקיף|סקירה מקיפה|השוואה מקיפה)/i.test(question);
   const eventVenueLookup=isCurrentVenueEventQuestion(question);
-  const openSiteRequest=isWebsiteNavigationRequest(question) || /(פתח|תפתח|תיכנס|תכנס|קרא|תקרא).{0,35}(אתר|עמוד|דף|קישור)/i.test(question);
+  const openSiteRequest=isWebsiteNavigationRequest(question) || /(פתח|תפתח|תיכנס|תכנס|קרא|תקרא).{0,35}(אתר|עמוד|דף|קישור)/i.test(question) || /^(?:אז\s*)?(?:תפתח|פתח)\s+(?:לי\s+)?את\s+[^?!.]+$/i.test(question);
   const queries=extractDirectSearchQueries(question);
   // Most voice requests are specific lookups. One strong search is faster than
   // waiting for five parallel queries; broaden only for explicit deep research.
   const specificLookup=/מספר\s*טלפון|טלפון|כוכבית|שעות\s*(?:פתיחה|פעילות)|פתוח\s*(?:היום|עכשיו)|מתי\s*(?:נסגר|פתוח)|אתר\s*רשמי/i.test(question);
   // Run multiple focused searches in parallel for specific factual lookups, not just
   // the first generic query. This improves official-source coverage without serial waits.
-  const firstPass=(deepSearch||eventVenueLookup)?queries.slice(0,3):specificLookup?queries.slice(0,2):queries.slice(0,1);
+  const firstPass=(deepSearch||eventVenueLookup)?queries.slice(0,3):openSiteRequest?queries.slice(0,3):specificLookup?queries.slice(0,2):queries.slice(0,1);
   const communitySearch=deepSearch || /(פורום|פורומים|קהילות|דיונים|רשתות חברתיות|רשת חברתית|פייסבוק|אינסטגרם|טיקטוק|טוויטר|reddit|facebook|instagram|tiktok|twitter|x\.com|threads)/i.test(question);
   if(communitySearch) {
     const topic=String(question||'').slice(0,180);
@@ -2471,7 +2494,40 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
   const wantsPageContent=deepSearch || eventVenueLookup || openSiteRequest || /(פתח את האתר|תיכנס לאתר|תכנס לאתר|תקרא את הטקסט|קרא את הטקסט|מה כתוב באתר|תוכן מלא|העמוד המלא|פרטים מלאים|קרא את הכתבה|תקרא את הכתבה)/i.test(question);
   let websiteRootUrl=null;
   if(openSiteRequest && unique[0]?.url) {
-    try { websiteRootUrl=new URL(unique[0].url).origin; } catch {}
+    // Prefer the result with the strongest match to the requested site name.
+    // This reduces accidental navigation to YouTube or another unrelated result.
+    const requestedSite=String(question||'')
+      .replace(/^(?:אז\s*)?(?:תפתח|פתח|תיכנס|תכנס|תחפש|חפש)\s+(?:לי\s+)?(?:את\s+)?(?:האתר|אתר)\s+(?:של\s+)?/i,'')
+      .replace(/^(?:אז\s*)?(?:תפתח|פתח)\s+(?:לי\s+)?את\s+/i,'')
+      .replace(/^(?:את\s+)?(?:האתר|אתר)\s+(?:של\s+)?/i,'')
+      .replace(/\s+(?:ותקרא|תקרא|ותגיד|תגיד).*[\s\S]*$/i,'')
+      .replace(/[.,!?;:"׳״'()]/g,' ')
+      .trim().toLowerCase();
+    const tokens=requestedSite.split(/\s+/).filter(token=>token.length>2);
+    const scored=unique.map((item,index)=>{
+      const haystack=(String(item.title||'')+' '+String(item.url||'')).toLowerCase();
+      const tokenScore=tokens.reduce((sum,token)=>sum+(haystack.includes(token)?2:0),0);
+      let score=tokenScore+(index===0?0.1:0);
+      try {
+        const host=new URL(item.url).hostname.toLowerCase();
+        if(host.includes('youtube.com')||host.includes('youtu.be')) score-=5;
+      } catch {}
+      return {item,score,index};
+    }).sort((a,b)=>b.score-a.score || a.index-b.index);
+    const best=scored[0];
+    // Never treat the search engine's first result as a match unless at least
+    // one meaningful token from the requested site appears in its title or URL.
+    // The tiny ordering bonus is only for tie-breaking between actual matches.
+    if(best && best.score>0.1 && tokens.some(token=>(String(best.item.title||'')+' '+String(best.item.url||'')).toLowerCase().includes(token))) {
+      const selected=best.item;
+      try { websiteRootUrl=new URL(selected.url).origin; } catch {}
+      if(websiteRootUrl) {
+        unique.splice(unique.indexOf(selected),1);
+        unique.unshift(selected);
+      }
+    } else {
+      try { websiteRootUrl=new URL(unique[0].url).origin; } catch {}
+    }
     if(turnContext && websiteRootUrl) turnContext.currentWebsiteUrl=websiteRootUrl;
   }
   let websitePageContentRead=false;
