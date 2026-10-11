@@ -19,7 +19,10 @@ export function selectWebsiteResult(question, results) {
     const matchedTokens=tokens.filter(token=>haystack.includes(token));
     const score=matchedTokens.length*2+(index===0?0.1:0);
     try {
-      new URL(item.url);
+      const parsed=new URL(item.url);
+      if(parsed.protocol!=='https:' && parsed.protocol!=='http:') {
+        return {item,score:-Infinity,index,matchedTokens:[]};
+      }
     } catch { return {item,score:-Infinity,index,matchedTokens:[]}; }
     return {item,score,index,matchedTokens};
   }).sort((a,b)=>b.score-a.score || a.index-b.index);
