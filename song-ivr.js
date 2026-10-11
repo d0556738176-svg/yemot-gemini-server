@@ -17,6 +17,8 @@ export function createSongCallHandler({
     const say = value => sanitizeForYemot(value);
     let prompt = 'ברוכים הבאים ליוצר השירים. אמור איזה שיר תרצה ליצור, למשל שיר קצבי לנסיעה בלילה, ולסיום ההקלטה הקש סולמית.';
     let transcript = '';
+    let pendingRequest = '';
+    let awaitingClarification = false;
     let clarificationCount = 0;
 
     try {
@@ -36,6 +38,11 @@ export function createSongCallHandler({
           'song request recording download'
         );
         transcript = String(await transcribePhoneAudio(response.data) || '').trim();
+        if (awaitingClarification && pendingRequest) {
+          transcript = pendingRequest + '\nהעדפה נוספת של המתקשר: ' + transcript;
+          pendingRequest = '';
+          awaitingClarification = false;
+        }
         console.info('[SONG] VOICE_INPUT', { callId, chars: transcript.length });
         if (transcript.length < 3) {
           prompt = 'לא הצלחתי להבין את הבקשה. אמור בקצרה איזה שיר תרצה, ולסיום הקש סולמית.';
@@ -106,6 +113,8 @@ export function createSongCallHandler({
             return call.id_list_message([{ type: 'text', data: 'לא הצלחתי להבין את הסגנון המבוקש. אפשר להתחיל שוב עם תיאור קצר יותר.' }]);
           }
           clarificationCount++;
+          pendingRequest = transcript;
+          awaitingClarification = true;
           prompt = say(jobResult.clarificationQuestion || 'איזה סגנון מוזיקלי תרצה?');
           continue;
         }
