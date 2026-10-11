@@ -9,7 +9,10 @@ const INTENT_PATTERNS = [
 ];
 
 function normalized(value) {
-  return String(value || '').toLowerCase().replace(/[?#].*$/, '').replace(/[_/-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return String(value || '').toLowerCase().replace(/[_/-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function normalizedUrl(value) {
+  return normalized(String(value || '').replace(/[?#].*$/, ''));
 }
 
 /**
@@ -25,9 +28,9 @@ export function rankWebsitePages(question, pages, startUrl = '') {
   const tokens = normalizedQuestion.split(/\s+/).filter(token =>
     token.length >= 3 && !/^(?:תפתח|פתח|תמשיך|תפרט|תרחיב|תסביר|בבקשה|באתר|האתר|אתר|עמוד|דף|תוכן|פרטים|מידע|אפשר|רוצה|לי|של|את|על|מה|איך|האם|איפה|כאן|שם|הזה|הזאת|הוא|היא|אני|תן|תביא|תקריא|תקרא)$/.test(token)
   );
-  const root = normalized(startUrl).replace(/\/$/, '');
+  const root = normalizedUrl(startUrl).replace(/\/$/, '');
   return pages.map((page, index) => {
-    const url = normalized(page?.url);
+    const url = normalizedUrl(page?.url);
     const content = normalized(String(page?.content || '').slice(0, 9000));
     let score = 0;
     for (const intent of intents) {
