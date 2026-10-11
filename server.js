@@ -3856,7 +3856,12 @@ async function configureYemotStructure() {
   // Extension 2 is the isolated YouTube robot; preserve voice selection under extension 3.
   await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
   // Branch 4 is isolated; it does not modify the existing branch 1-3 endpoints.
-  await updateExtension('ivr2:/4',{type:'api',api_link:publicUrl + '/yemot-song'});
+  try {
+    await updateExtension('ivr2:/4',{type:'api',api_link:publicUrl + '/yemot-song'});
+  } catch (branch4SetupError) {
+    // Branch 4 is optional: its configuration failure must never stop setup of branches 1–3.
+    logDetailedError('Branch 4 automatic setup', branch4SetupError);
+  }
   if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
   else console.log('[Yemot automatic setup] Backup key missing; /3 was not changed');
 
