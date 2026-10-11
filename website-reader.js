@@ -129,7 +129,10 @@ export async function readPublicWebsitePages({
   if (origin !== rootOrigin) return [];
   const visited = new Set();
   const pages = [];
-  const queue = [startUrl, ...(Array.isArray(searchUrls) ? searchUrls : [])];
+  const queue = [startUrl];
+  for (const candidate of (Array.isArray(searchUrls) ? searchUrls : [])) {
+    try { const parsed = new URL(candidate); if (parsed.origin === origin && isPublicHttpUrl(parsed.href)) queue.push(parsed.href); } catch {}
+  }
   const enqueue = (url) => {
     try {
       const parsed = new URL(url);
