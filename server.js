@@ -7,6 +7,7 @@ import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
+import { createSongCallHandler } from './song-ivr.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -3744,9 +3745,23 @@ async function backupCallHandler(call) {
   }
 }
 
+const songCallHandler = createSongCallHandler({
+  yemotApi,
+  transcribePhoneAudio,
+  generateText: async prompt => {
+    const result = await generateWithRetry([{ role: 'user', parts: [{ text: prompt }] }], false, false, 30000);
+    return String(result?.response?.text?.() || '');
+  },
+  sanitizeForYemot,
+  withTimeout,
+  getCallerNumber,
+  logDetailedError
+});
+
 router.get('/yemot', callHandler);
 router.get('/yemot-backup', backupCallHandler);
 router.get('/yemot-youtube', youtubeCallHandler);
+router.get('/yemot-song', songCallHandler);
 app.use(router);
 
 app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDashboardAuth, (req,res)=>res.json({
@@ -3917,6 +3932,18 @@ async function configureYemotStructure() {
   await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
   // Extension 2 is the isolated YouTube robot; preserve voice selection under extension 3.
   await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
+  // Extension 4 is optional and isolated; never alter it unless a provider is configured.
+  const songProviderConfigured = !!String(process.env.ELEVENLABS_API_KEY || '').trim() ||
+    (!!String(process.env.MUSIC_BACKUP_API_URL || '').trim() && !!String(process.env.MUSIC_BACKUP_API_KEY || '').trim());
+  if (songProviderConfigured) {
+    try {
+      await updateExtension('ivr2:/4',{type:'api',api_link:publicUrl + '/yemot-song'});
+    } catch (branch4SetupError) {
+      logDetailedError('Branch 4 automatic setup', branch4SetupError);
+    }
+  } else {
+    console.log('[Yemot automatic setup] No music provider configured; /4 was not changed');
+  }
   if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
   else console.log('[Yemot automatic setup] Backup key missing; /3 was not changed');
 
