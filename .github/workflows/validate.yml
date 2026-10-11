@@ -2,7 +2,7 @@ name: Validate Node application
 
 on:
   push:
-    branches: [main, feature/tavily-branch1-search, fix/ivr-context-search-speed, feature-search-quality-2026-10-10, feature-search-recovery-2026-10-10, fix/branch1-website-context]
+    branches: [main, feature/branch-4-song-generator-main-sync, feature/tavily-branch1-search, fix/ivr-context-search-speed, feature-search-quality-2026-10-10, feature-search-recovery-2026-10-10, fix/branch1-website-context]
   pull_request:
     branches: [main]
 
@@ -27,6 +27,8 @@ jobs:
           node --check youtube-ivr.js
           node --check youtube-transcript.js
           node --check youtube-authorized-playback.js
+          node --check song-generator.js
+          node --check song-ivr.js
       - name: Run regression tests
         run: npm test
       - name: Check Tavily SDK initialization (offline)
