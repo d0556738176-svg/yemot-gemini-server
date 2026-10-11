@@ -365,6 +365,7 @@ async function buildAndUpload(spec, job) {
     job.status = 'generating_music';
     log('MUSIC_GENERATION_STARTED', { id: uuid, durationSeconds: spec.durationSeconds });
     const generated = await generateAudio(spec);
+    log('MUSIC_GENERATION_READY', { id: uuid, provider: generated.provider, bytes: generated.audio.length });
     record.provider = generated.provider;
     record.model = generated.model;
     job.status = 'downloading';
@@ -373,7 +374,9 @@ async function buildAndUpload(spec, job) {
       log('AUDIO_ARCHIVE_FAILED', { id: uuid, status: httpStatus(error) || 'unknown' });
       return null;
     });
+    job.status = 'converting';
     const wavFiles = await convertToYemotWavChunks(generated.audio, tempDir);
+    log('AUDIO_CONVERTED', { id: uuid, chunks: wavFiles.length });
     job.status = 'uploading';
     const playbackPaths = [];
     for (let i = 0; i < wavFiles.length; i++) {
@@ -439,7 +442,6 @@ function enqueueJob(run) {
 export async function createSong({ prompt, callId = '', userKey = 'unknown', generateText, onStatus = () => {} }) {
   const request = normalizeSongRequest({ prompt });
   if (!request.prompt) throw Object.assign(new Error('Empty song prompt'), { code: 'NEEDS_CLARIFICATION' });
-  enforceRateLimit(userKey);
   if (activeJobs.has(callId) && callId) return activeJobs.get(callId);
   const job = { id: randomUUID(), callId: String(callId || ''), prompt: request.prompt, status: 'queued' };
   log('SONG_REQUEST', { jobId: job.id, promptChars: request.prompt.length, durationSeconds: request.durationSeconds });
@@ -449,14 +451,19 @@ export async function createSong({ prompt, callId = '', userKey = 'unknown', gen
       job.status = 'generating_lyrics';
       log('LYRICS_STARTED', { jobId: job.id });
       onStatus({ status: 'generating_lyrics', jobId: job.id });
-      const spec = await Promise.race([
-        generateSongSpec(request, generateText),
-        new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('Song LLM timed out'), { status: 408 })), 30000))
-      ]);
+      let llmTimer;
+      let spec;
+      try {
+        spec = await Promise.race([
+          generateSongSpec(request, generateText),
+          new Promise((_, reject) => { llmTimer = setTimeout(() => reject(Object.assign(new Error('Song LLM timed out'), { status: 408 })), 30000); })
+        ]);
+      } finally { clearTimeout(llmTimer); }
       if (spec.needsClarification) {
         job.status = 'needs_clarification';
         return { needsClarification: true, clarificationQuestion: spec.clarificationQuestion, jobId: job.id };
       }
+      enforceRateLimit(userKey);
       return await buildAndUpload(spec, job);
     } finally {
       activeJobs.delete(callId);
