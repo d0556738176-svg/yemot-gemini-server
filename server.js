@@ -2493,42 +2493,23 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
   // Keep the session anchored at the site's origin so follow-up requests navigate from the homepage.
   const wantsPageContent=deepSearch || eventVenueLookup || openSiteRequest || /(פתח את האתר|תיכנס לאתר|תכנס לאתר|תקרא את הטקסט|קרא את הטקסט|מה כתוב באתר|תוכן מלא|העמוד המלא|פרטים מלאים|קרא את הכתבה|תקרא את הכתבה)/i.test(question);
   let websiteRootUrl=null;
-  if(openSiteRequest && unique[0]?.url) {
-    // Prefer the result with the strongest match to the requested site name.
-    // This reduces accidental navigation to YouTube or another unrelated result.
-    const requestedSite=String(question||'')
-      .replace(/^(?:אז\s*)?(?:תפתח|פתח|תיכנס|תכנס|תחפש|חפש)\s+(?:לי\s+)?(?:את\s+)?(?:האתר|אתר)\s+(?:של\s+)?/i,'')
-      .replace(/^(?:אז\s*)?(?:תפתח|פתח)\s+(?:לי\s+)?את\s+/i,'')
-      .replace(/^(?:את\s+)?(?:האתר|אתר)\s+(?:של\s+)?/i,'')
-      .replace(/\s+(?:ותקרא|תקרא|ותגיד|תגיד).*[\s\S]*$/i,'')
-      .replace(/[.,!?;:"׳״'()]/g,' ')
-      .trim().toLowerCase();
-    const tokens=requestedSite.split(/\s+/).filter(token=>token.length>2);
-    const scored=unique.map((item,index)=>{
-      const haystack=(String(item.title||'')+' '+String(item.url||'')).toLowerCase();
-      const tokenScore=tokens.reduce((sum,token)=>sum+(haystack.includes(token)?2:0),0);
-      let score=tokenScore+(index===0?0.1:0);
-      try {
-        const host=new URL(item.url).hostname.toLowerCase();
-        if(host.includes('youtube.com')||host.includes('youtu.be')) score-=5;
-      } catch {}
-      return {item,score,index};
-    }).sort((a,b)=>b.score-a.score || a.index-b.index);
-    const best=scored[0];
-    // Never treat the search engine's first result as a match unless at least
-    // one meaningful token from the requested site appears in its title or URL.
-    // The tiny ordering bonus is only for tie-breaking between actual matches.
-    if(best && best.score>0.1 && tokens.some(token=>(String(best.item.title||'')+' '+String(best.item.url||'')).toLowerCase().includes(token))) {
-      const selected=best.item;
-      try { websiteRootUrl=new URL(selected.url).origin; } catch {}
-      if(websiteRootUrl) {
-        unique.splice(unique.indexOf(selected),1);
-        unique.unshift(selected);
-      }
-    } else {
-      try { websiteRootUrl=new URL(unique[0].url).origin; } catch {}
+  if(openSiteRequest) {
+    // Do not silently open an unrelated top search result when the requested
+    // website cannot be matched. This is safer than anchoring follow-ups to
+    // an unrelated domain.
+    const { selectWebsiteResult } = await import('./website-selection.js');
+    const selected=selectWebsiteResult(question, unique);
+    if(!selected) {
+      console.warn('[DIRECT_WEB] requested website could not be matched confidently');
+      return 'לא הצלחתי לזהות בוודאות את האתר שביקשת מתוך תוצאות החיפוש. לא אפתח אתר אחר בטעות. נסה לומר את שם האתר שוב או לאיית אותו.';
     }
-    if(turnContext && websiteRootUrl) turnContext.currentWebsiteUrl=websiteRootUrl;
+    try { websiteRootUrl=new URL(selected.url).origin; } catch {}
+    if(!websiteRootUrl) {
+      return 'מצאתי תוצאה, אבל לא הצלחתי לאמת את כתובת האתר. לא אפתח אתר אחר במקום האתר שביקשת.';
+    }
+    unique.splice(unique.indexOf(selected),1);
+    unique.unshift(selected);
+    if(turnContext) turnContext.currentWebsiteUrl=websiteRootUrl;
   }
   let websitePageContentRead=false;
   if(wantsPageContent) {
