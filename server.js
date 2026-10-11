@@ -858,7 +858,7 @@ async function answerNewsDirect(transcript, historyText='') {
 
   function decodeXml(value) {
     return String(value||'')
-      .replace(/<!\\[CDATA\\[|\\]\\]>/g,'')
+      .replace(/<!\[CDATA\[|\]\]>/g,'')
       .replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'")
       .replace(/&lt;/g,'<').replace(/&gt;/g,'>');
   }
@@ -891,7 +891,7 @@ async function answerNewsDirect(transcript, historyText='') {
   for(const result of settled) {
     if(result.status!=='fulfilled') continue;
     for(const item of result.value) {
-      const key=String(item.title||'').toLowerCase().replace(/[^\\p{L}\\p{N}]+/gu,' ').trim();
+      const key=String(item.title||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
       if(!key||seen.has(key)) continue;
       seen.add(key);
       items.push(item);
@@ -899,7 +899,7 @@ async function answerNewsDirect(transcript, historyText='') {
   }
   if(!items.length) throw Object.assign(new Error('No news items from RSS sources'),{status:503});
   const latest=items.slice(0,12);
-  const raw=latest.map((x,i)=>'מקור '+(i+1)+': '+x.title+(x.source?' | '+x.source:'')+(x.pub?' | '+x.pub:'')+(x.description?' | '+x.description.slice(0,500):'')).join('\\n');
+  const raw=latest.map((x,i)=>'מקור '+(i+1)+': '+x.title+(x.source?' | '+x.source:'')+(x.pub?' | '+x.pub:'')+(x.description?' | '+x.description.slice(0,500):'')).join('\n');
   try {
     const prompt=`${EXCLUSIVE_INSTRUCTION}
 אתה מסכם חדשות עדכניות למענה קולי בטלפון.
