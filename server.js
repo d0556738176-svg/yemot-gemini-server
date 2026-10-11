@@ -11,6 +11,7 @@ import { buildBusinessHoursQueries, buildBusinessHoursFallback } from './busines
 import { rankWebsitePages } from './website-relevance.js';
 import { readPublicWebsitePages } from './website-reader.js';
 import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
+import { answerWithOpenAIWebSearch, isOpenAIWebSearchRequest, stripOpenAIWebSearchPrefix } from './openai-web-search.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -2972,7 +2973,20 @@ async function answerWebsiteNavigation(question, startUrl, historyText='', turnC
 
 async function answerWithWebSearch(transcript, historyText='', turnContext=null) {
   const rawQuestion=String(transcript||'').trim();
-  const question=contextualizeSearchQuestion(rawQuestion,historyText);
+  const explicitOpenAIRequest=isOpenAIWebSearchRequest(rawQuestion);
+  const normalizedQuestion=explicitOpenAIRequest ? stripOpenAIWebSearchPrefix(rawQuestion) : rawQuestion;
+  const question=contextualizeSearchQuestion(normalizedQuestion,historyText);
+  if(explicitOpenAIRequest) {
+    try {
+      const answer=await answerWithOpenAIWebSearch(question,historyText);
+      console.info('[OPENAI_WEB_SEARCH] succeeded',{chars:answer.length,deep:/לעומק|מחקר מקיף|סקירה מקיפה|בדיקה יסודית/i.test(question)});
+      return answer;
+    } catch(e) {
+      console.warn('[OPENAI_WEB_SEARCH] unavailable; continuing with existing live-search path',{
+        status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,220)
+      });
+    }
+  }
   const currentPage=getCurrentWebsitePage(turnContext);
   const literalReadRequest=/(?:תקרא|תקריא|קרא|תקריא לי).{0,55}(?:כל מה שכתוב|את כל הדף|את כל העמוד|את הטקסט|מההתחלה|מההתחלה עד הסוף|את ההתחלה|בהתחלה|מה כתוב בהתחלה|מה שכתוב בהתחלה)|(?:תקרא|תקריא|קרא).{0,25}(?:מההתחלה|את כל הדף|את כל העמוד|בהתחלה)|(?:כל הדף|כל העמוד).{0,20}(?:תקרא|תקריא|קרא)/i.test(rawQuestion);
   const restartReadRequest=/(?:תקרא|תקריא|קרא).{0,25}(?:מההתחלה|מהתחלה|מהתחלת הדף|מהתחלת העמוד)/i.test(rawQuestion);
@@ -3811,7 +3825,11 @@ async function backupCallHandler(call) {
         const webRequested=shouldForceWebSearch(userTranscript);
         const youtubeRequested=/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript);
 
-        if(webRequested && !youtubeRequested) {
+        if(isOpenAIWebSearchRequest(userTranscript)) {
+          // Explicit ChatGPT search uses the Responses API route; if unavailable,
+          // answerWithWebSearch retains the existing Gemini/Tavily fallback chain.
+          replyText=await answerWithWebSearch(userTranscript,historyText,turnContext);
+        } else if(webRequested && !youtubeRequested) {
           replyText=await answerBackupWithWebSearch(userTranscript,historyText);
         } else if(youtubeRequested) {
           const youtubeAnswer=await searchYouTubeForPhone(userTranscript,historyText,turnContext,(process.env.YOUTUBE_BACKUP_API_KEY||'').trim());
