@@ -2387,10 +2387,18 @@ function extractDirectSearchQueries(question){
     .replace(/(?:ותגיד\s+לי|ולהגיד\s+לי|ואז\s+תגיד\s+לי)\s*/i,'')
     .replace(/מה\s+כתוב\s+(?:שם|שמה|באתר|בעמוד|בדף)\b/ig,' ')
     .replace(/^(?:אז\s+)?(?:תחפש|חפש|בדוק|תבדוק|תמצא|תאתר|תברר)(?:\s+לי)?(?:\s+באינטרנט|\s+ברשת|\s+בגוגל)?\s*/i,'').trim();
+  // Strip navigation phrasing so the search engine receives the requested site name,
+  // not a fragment such as "של פרוג" or "תפתח לי את האתר של פרוג".
+  const siteQuery=cleaned
+    .replace(/^(?:של|אתר\s+של|האתר\s+של)\s+/i,'')
+    .replace(/^(?:האתר|אתר|העמוד|עמוד|הדף|דף)\s+/i,'')
+    .replace(/\s+(?:האתר\s+הרשמי|אתר\s+רשמי)$/i,'')
+    .trim();
   const loc=extractExplicitLocation(cleaned);
   const queries=[];
   const locationTail=[loc.area,loc.city].filter(Boolean).join(' ');
-  const base=locationTail && !cleaned.includes(locationTail) ? cleaned+' '+locationTail : cleaned;
+  const base=locationTail && !siteQuery.includes(locationTail) ? siteQuery+' '+locationTail : siteQuery;
+  const wantsWebsite=/(?:פתח|תפתח|תיכנס|תכנס|לפתוח|להיכנס).{0,45}(?:אתר|עמוד|דף)|(?:האתר|אתר)\s+של/i.test(question);
   if(isCurrentVenueEventQuestion(cleaned)) {
     const today=currentIsraelDateIso();
     queries.push(base+' '+today+' לוח אירועים רשמי');
@@ -2398,6 +2406,12 @@ function extractDirectSearchQueries(question){
     queries.push(base+' אתר רשמי לוח אירועים כנסים מופעים');
     queries.push(base+' אירוע עכשיו היום '+today);
     return [...new Set(queries)].slice(0,5);
+  }
+  if(wantsWebsite) {
+    queries.push(base+' אתר רשמי');
+    queries.push(base+' official website');
+    queries.push(base);
+    return [...new Set(queries.filter(Boolean).map(x=>x.slice(0,240)))].slice(0,5);
   }
   queries.push(base);
   if(isPhoneNumberRequest(cleaned)){
@@ -2430,7 +2444,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
   const specificLookup=/מספר\s*טלפון|טלפון|כוכבית|שעות\s*(?:פתיחה|פעילות)|פתוח\s*(?:היום|עכשיו)|מתי\s*(?:נסגר|פתוח)|אתר\s*רשמי/i.test(question);
   // Run multiple focused searches in parallel for specific factual lookups, not just
   // the first generic query. This improves official-source coverage without serial waits.
-  const firstPass=(deepSearch||eventVenueLookup)?queries.slice(0,3):specificLookup?queries.slice(0,2):queries.slice(0,1);
+  const firstPass=(deepSearch||eventVenueLookup)?queries.slice(0,3):openSiteRequest?queries.slice(0,3):specificLookup?queries.slice(0,2):queries.slice(0,1);
   const communitySearch=deepSearch || /(פורום|פורומים|קהילות|דיונים|רשתות חברתיות|רשת חברתית|פייסבוק|אינסטגרם|טיקטוק|טוויטר|reddit|facebook|instagram|tiktok|twitter|x\.com|threads)/i.test(question);
   if(communitySearch) {
     const topic=String(question||'').slice(0,180);
@@ -2478,7 +2492,35 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
   const wantsPageContent=deepSearch || eventVenueLookup || openSiteRequest || /(פתח את האתר|תיכנס לאתר|תכנס לאתר|תקרא את הטקסט|קרא את הטקסט|מה כתוב באתר|תוכן מלא|העמוד המלא|פרטים מלאים|קרא את הכתבה|תקרא את הכתבה)/i.test(question);
   let websiteRootUrl=null;
   if(openSiteRequest && unique[0]?.url) {
-    try { websiteRootUrl=new URL(unique[0].url).origin; } catch {}
+    // Prefer the result with the strongest match to the requested site name.
+    // This reduces accidental navigation to YouTube or another unrelated result.
+    const requestedSite=String(question||'')
+      .replace(/^(?:אז\s*)?(?:תפתח|פתח|תיכנס|תכנס|תחפש|חפש)\s+(?:לי\s+)?(?:את\s+)?(?:האתר|אתר)\s+(?:של\s+)?/i,'')
+      .replace(/^(?:את\s+)?(?:האתר|אתר)\s+(?:של\s+)?/i,'')
+      .replace(/\s+(?:ותקרא|תקרא|ותגיד|תגיד).*[\s\S]*$/i,'')
+      .trim().toLowerCase();
+    const tokens=requestedSite.split(/\s+/).filter(token=>token.length>2);
+    const scored=unique.map((item,index)=>{
+      const haystack=(String(item.title||'')+' '+String(item.url||'')).toLowerCase();
+      const tokenScore=tokens.reduce((sum,token)=>sum+(haystack.includes(token)?2:0),0);
+      let score=tokenScore+(index===0?0.1:0);
+      try {
+        const host=new URL(item.url).hostname.toLowerCase();
+        if(host.includes('youtube.com')||host.includes('youtu.be')) score-=5;
+      } catch {}
+      return {item,score,index};
+    }).sort((a,b)=>b.score-a.score || a.index-b.index);
+    const best=scored[0];
+    if(best && best.score>0) {
+      const selected=best.item;
+      try { websiteRootUrl=new URL(selected.url).origin; } catch {}
+      if(websiteRootUrl) {
+        unique.splice(unique.indexOf(selected),1);
+        unique.unshift(selected);
+      }
+    } else {
+      try { websiteRootUrl=new URL(unique[0].url).origin; } catch {}
+    }
     if(turnContext && websiteRootUrl) turnContext.currentWebsiteUrl=websiteRootUrl;
   }
   let websitePageContentRead=false;
