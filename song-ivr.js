@@ -48,7 +48,7 @@ export function createSongCallHandler({
         const jobPromise = createSong({
           prompt: transcript,
           callId,
-          userKey: caller,
+          userKey: caller === 'לא מזוהה' ? callId : caller,
           generateText,
           onStatus: state => console.info('[SONG] JOB_STATUS', { callId, status: state.status })
         }).then(result => {
@@ -77,6 +77,10 @@ export function createSongCallHandler({
             if (/hang.?up|disconnected|socket hang up|connection closed/.test(message)) {
               console.info('[SONG] CALL_DISCONNECTED', { callId });
               return;
+            }
+            if (/timeout|timed out|no input|recording timeout/.test(message)) {
+              console.info('[SONG] STATUS_POLL_TIMEOUT', { callId });
+              continue;
             }
             logDetailedError('Song status prompt', waitError);
             throw waitError;
