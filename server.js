@@ -2384,6 +2384,7 @@ function extractDirectSearchQueries(question){
     .replace(/בנק\s+(?:דיווחון|דיסקונטון)/gi,'בנק דיסקונט')
     .replace(/^(?:כן[, ]*)?(?:אתה\s+)?(?:(?:יכול(?:ה)?|תוכל|תוכלי)\s+)?(?:לפתוח|להיכנס|לגשת)(?:\s+לי)?\s+(?:אל\s+)?(?:את\s+)?(?:האתר|אתר|העמוד|עמוד|הדף|דף)\s*/i,'')
     .replace(/^(?:תפתח|פתח)(?:\s+לי)?\s+(?:את\s+)?(?:האתר|אתר|העמוד|עמוד|הדף|דף)\s*/i,'')
+    .replace(/^(?:תפתח|פתח)(?:\s+לי)?\s+את\s+/i,'')
     .replace(/(?:ותגיד\s+לי|ולהגיד\s+לי|ואז\s+תגיד\s+לי)\s*/i,'')
     .replace(/[, ]*(?:ו?תקרא|ו?קרא|ו?תקריא|ואז\s+תקרא|ואז\s+קרא)\s+(?:לי\s+)?(?:מה\s+שכתוב|מה\s+כתוב|את\s+התוכן|את\s+הטקסט).*$/i,'')
     .replace(/מה\s+כתוב\s+(?:שם|שמה|באתר|בעמוד|בדף)\b/ig,' ')
@@ -2399,7 +2400,7 @@ function extractDirectSearchQueries(question){
   const queries=[];
   const locationTail=[loc.area,loc.city].filter(Boolean).join(' ');
   const base=locationTail && !siteQuery.includes(locationTail) ? siteQuery+' '+locationTail : siteQuery;
-  const wantsWebsite=/(?:פתח|תפתח|תיכנס|תכנס|לפתוח|להיכנס).{0,45}(?:אתר|עמוד|דף)|(?:האתר|אתר)\s+של/i.test(question);
+  const wantsWebsite=/(?:פתח|תפתח|תיכנס|תכנס|לפתוח|להיכנס).{0,45}(?:אתר|עמוד|דף)|(?:האתר|אתר)\s+של|^(?:אז\s*)?(?:תפתח|פתח)\s+(?:לי\s+)?את\s+[^?!.]+$/i.test(question);
   if(isCurrentVenueEventQuestion(cleaned)) {
     const today=currentIsraelDateIso();
     queries.push(base+' '+today+' לוח אירועים רשמי');
@@ -2438,7 +2439,7 @@ function extractDirectSearchQueries(question){
 async function answerWithDirectWebFallback(question, historyText='', turnContext=null){
   const deepSearch=isDeepWebSearchRequest(question) || /(לעומק|מחקר מקיף|סקירה מקיפה|השוואה מקיפה)/i.test(question);
   const eventVenueLookup=isCurrentVenueEventQuestion(question);
-  const openSiteRequest=isWebsiteNavigationRequest(question) || /(פתח|תפתח|תיכנס|תכנס|קרא|תקרא).{0,35}(אתר|עמוד|דף|קישור)/i.test(question);
+  const openSiteRequest=isWebsiteNavigationRequest(question) || /(פתח|תפתח|תיכנס|תכנס|קרא|תקרא).{0,35}(אתר|עמוד|דף|קישור)/i.test(question) || /^(?:אז\s*)?(?:תפתח|פתח)\s+(?:לי\s+)?את\s+[^?!.]+$/i.test(question);
   const queries=extractDirectSearchQueries(question);
   // Most voice requests are specific lookups. One strong search is faster than
   // waiting for five parallel queries; broaden only for explicit deep research.
@@ -2497,6 +2498,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     // This reduces accidental navigation to YouTube or another unrelated result.
     const requestedSite=String(question||'')
       .replace(/^(?:אז\s*)?(?:תפתח|פתח|תיכנס|תכנס|תחפש|חפש)\s+(?:לי\s+)?(?:את\s+)?(?:האתר|אתר)\s+(?:של\s+)?/i,'')
+      .replace(/^(?:אז\s*)?(?:תפתח|פתח)\s+(?:לי\s+)?את\s+/i,'')
       .replace(/^(?:את\s+)?(?:האתר|אתר)\s+(?:של\s+)?/i,'')
       .replace(/\s+(?:ותקרא|תקרא|ותגיד|תגיד).*[\s\S]*$/i,'')
       .trim().toLowerCase();
