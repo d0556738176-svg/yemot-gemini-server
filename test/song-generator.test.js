@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeSongRequest, generateSongSpec, buildCompositionPlan } from '../song-generator.js';
+import { normalizeSongRequest, generateSongSpec, buildCompositionPlan, shouldFallbackToBackup } from '../song-generator.js';
 
 test('song requests are bounded to 30-60 seconds', () => {
   assert.equal(normalizeSongRequest({ prompt: 'שיר', duration_seconds: 10 }).durationSeconds, 30);
@@ -58,4 +58,17 @@ test('invalid LLM JSON is rejected', async () => {
     generateSongSpec({ prompt: 'שיר קצבי' }, async () => 'not json'),
     /valid JSON/
   );
+});
+
+
+test('provider router falls back for auth, quota, timeout and availability failures', () => {
+  for (const status of [0, 401, 403, 404, 408, 429, 500, 502, 503, 504]) {
+    assert.equal(shouldFallbackToBackup(status), true, `expected fallback for HTTP ${status}`);
+  }
+});
+
+test('provider router does not retry clearly invalid generation requests', () => {
+  for (const status of [400, 413, 422]) {
+    assert.equal(shouldFallbackToBackup(status), false, `expected fail-fast for HTTP ${status}`);
+  }
 });
