@@ -17,10 +17,9 @@ export function selectWebsiteResult(question, results) {
   const scored=results.map((item,index)=>{
     const haystack=(String(item?.title||'')+' '+String(item?.url||'')).toLowerCase();
     const matchedTokens=tokens.filter(token=>haystack.includes(token));
-    let score=matchedTokens.length*2+(index===0?0.1:0);
+    const score=matchedTokens.length*2+(index===0?0.1:0);
     try {
-      const host=new URL(item.url).hostname.toLowerCase();
-      if(host.includes('youtube.com')||host.includes('youtu.be')) score-=5;
+      new URL(item.url);
     } catch { return {item,score:-Infinity,index,matchedTokens:[]}; }
     return {item,score,index,matchedTokens};
   }).sort((a,b)=>b.score-a.score || a.index-b.index);
