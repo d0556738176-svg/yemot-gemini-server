@@ -2625,10 +2625,11 @@ async function answerWebsiteNavigation(question, startUrl, historyText='', turnC
     const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
     const base=new URL(startUrl);
     const deepMode=/(לעומק|יסודי|כל הפרטים|תוכן מלא|כל האתר|כל העמודים|לפרטי פרטים|מחקר מקיף|סקירה מקיפה|פורום|פורומים|רשתות חברתיות|רשת חברתית)/i.test(String(question||''));
-    const extractDepth=deepMode?'advanced':'basic';
+    const detailRequest=/(?:טלפון|מספר|יצירת קשר|צור קשר|שעות פתיחה|שעות פעילות|סניפים|מוקד|פרטי התקשרות)/i.test(String(question||''));
+    const extractDepth=(deepMode||detailRequest)?'advanced':'basic';
     const query=String(question||'').slice(0,250);
     const crawlTimeoutMs=deepMode?22000:14000;
-    const crawlPromise=withTimeout(client.crawl(startUrl,{
+    const crawlPromise=withTimeout(Promise.resolve().then(()=>client.crawl(startUrl,{
       instructions:'Read the public pages on this website that are most relevant to the user request. User request: '+query+'. Prioritize the exact requested page, contact details, article, discussion, or information. Stay on this website and return readable page content with source URLs. Do not follow external links.',
       maxDepth:deepMode?2:1,
       maxBreadth:deepMode?7:4,
@@ -2638,7 +2639,7 @@ async function answerWebsiteNavigation(question, startUrl, historyText='', turnC
       extractDepth,
       format:'markdown',
       timeout:deepMode?20:12
-    }),crawlTimeoutMs,'Website same-domain crawl');
+    })),crawlTimeoutMs,'Website same-domain crawl');
     const rootPromise=withTimeout(client.extract([startUrl],{
       extractDepth,
       query,
