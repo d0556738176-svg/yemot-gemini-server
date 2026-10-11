@@ -36,6 +36,11 @@ function markProvider(provider, status, cooldownMs = 0) {
   log('PROVIDER_HEALTH', { provider, status });
 }
 
+export function shouldFallbackToBackup(status) {
+  const code = Number(status || 0);
+  return code !== 400 && code !== 413 && code !== 422;
+}
+
 function httpStatus(error) {
   const status = Number(error?.status || error?.statusCode || 0);
   if (status) return status;
@@ -216,8 +221,7 @@ async function generateAudio(spec) {
       log('MUSIC_PROVIDER_FAILED', { provider: 'eleven', status: status || 'unknown' });
       // Authentication, missing-endpoint, and provider availability failures should still try the configured backup.
       // Only clearly invalid generation requests should fail fast without a backup attempt.
-      const invalidRequest = status === 400 || status === 413 || status === 422;
-      if (invalidRequest) throw error;
+      if (!shouldFallbackToBackup(status)) throw error;
     }
   }
   const backupEndpoint = String(process.env.MUSIC_BACKUP_API_URL || '').trim();
