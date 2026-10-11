@@ -2592,9 +2592,20 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
               const homepage=unique.find(x=>normalizeExtractUrl(x.url)===normalizeExtractUrl(websiteRootUrl))||unique[0];
               if(homepage) {
                 homepage.url=websiteRootUrl;
-                homepage.snippet=homepageContent.slice(0,12000);
+                homepage.snippet=homepageContent.slice(0,60000);
                 websitePageContentRead=true;
               }
+            }
+            if(turnContext) {
+              const sameSite=unique.filter(item=>{
+                try { return new URL(item.url).origin===websiteRootUrl && String(item.snippet||'').length>80; }
+                catch { return false; }
+              });
+              sameSite.sort((a,b)=>Number(normalizeExtractUrl(b.url)===normalizeExtractUrl(websiteRootUrl))-Number(normalizeExtractUrl(a.url)===normalizeExtractUrl(websiteRootUrl)));
+              turnContext.currentWebsitePages=sameSite.map(item=>({url:item.url,title:item.title||item.url,content:String(item.snippet||'')}));
+              turnContext.currentWebsitePageIndex=0;
+              turnContext.currentWebsiteReadOffset=0;
+              if(sameSite.length) console.info('[WEBSITE_READ] extracted site pages cached for voice reading',{pages:sameSite.length,chars:sameSite[0].snippet.length});
             }
           }
           console.info('[DIRECT_WEB] Tavily page extraction completed',{requested:urls.length,extracted:byUrl.size});
@@ -2963,7 +2974,7 @@ async function answerWithWebSearch(transcript, historyText='', turnContext=null)
   const rawQuestion=String(transcript||'').trim();
   const question=contextualizeSearchQuestion(rawQuestion,historyText);
   const currentPage=getCurrentWebsitePage(turnContext);
-  const literalReadRequest=/(?:תקרא|תקריא|קרא|תקריא לי).{0,45}(?:כל מה שכתוב|את כל הדף|את כל העמוד|את הטקסט|מההתחלה|מההתחלה עד הסוף|את ההתחלה)|(?:תקרא|תקריא|קרא).{0,25}(?:מההתחלה|את כל הדף|את כל העמוד)|(?:כל הדף|כל העמוד).{0,20}(?:תקרא|תקריא|קרא)/i.test(rawQuestion);
+  const literalReadRequest=/(?:תקרא|תקריא|קרא|תקריא לי).{0,55}(?:כל מה שכתוב|את כל הדף|את כל העמוד|את הטקסט|מההתחלה|מההתחלה עד הסוף|את ההתחלה|בהתחלה|מה כתוב בהתחלה|מה שכתוב בהתחלה)|(?:תקרא|תקריא|קרא).{0,25}(?:מההתחלה|את כל הדף|את כל העמוד|בהתחלה)|(?:כל הדף|כל העמוד).{0,20}(?:תקרא|תקריא|קרא)/i.test(rawQuestion);
   const restartReadRequest=/(?:תקרא|תקריא|קרא).{0,25}(?:מההתחלה|מהתחלה|מהתחלת הדף|מהתחלת העמוד)/i.test(rawQuestion);
   const explainPageRequest=/(?:תסביר|הסבר|תפרט|תרחיב).{0,50}(?:כל מה שכתוב|כל הדף|כל העמוד|כל התוכן|מה שכתוב בדף|מה שכתוב בעמוד|את התוכן של הדף|את התוכן של העמוד)/i.test(rawQuestion);
   const continueReadRequest=/^(?:אז\s*)?(?:תמשיך|המשך|תמשיכי|תמשיך לקרוא|תמשיך להקריא|המשך לקרוא|המשך להקריא)[.!? ]*$/i.test(rawQuestion);
