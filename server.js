@@ -3685,6 +3685,7 @@ const songCallHandler = createSongCallHandler({
 router.get('/yemot', callHandler);
 router.get('/yemot-backup', backupCallHandler);
 router.get('/yemot-youtube', youtubeCallHandler);
+router.get('/yemot-song', songCallHandler);
 app.use(router);
 
 app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDashboardAuth, (req,res)=>res.json({
