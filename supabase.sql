@@ -27,3 +27,18 @@ create table if not exists public.authorized_audio_sources (
 alter table public.authorized_audio_sources enable row level security;
 revoke all on table public.authorized_audio_sources from anon, authenticated;
 
+
+
+-- Branch 4 song metadata. Audio is also uploaded to Yemot for phone playback.
+create table if not exists public.generated_songs (
+  id uuid primary key, call_id text, user_id text, prompt text not null default '',
+  title text not null default '', lyrics text not null default '', genre text not null default '', mood text not null default '',
+  duration_seconds integer not null default 45 check (duration_seconds between 30 and 60),
+  provider text, model text,
+  status text not null default 'queued' check (status in ('queued','generating_lyrics','generating_music','downloading','converting','uploading','ready','playing','failed')),
+  audio_url text, created_at timestamptz not null default now(), completed_at timestamptz, error_message text
+);
+create index if not exists generated_songs_created_at_idx on public.generated_songs(created_at desc);
+create index if not exists generated_songs_call_id_idx on public.generated_songs(call_id);
+alter table public.generated_songs enable row level security;
+revoke all on table public.generated_songs from anon, authenticated;
