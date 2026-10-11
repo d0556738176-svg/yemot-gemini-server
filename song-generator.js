@@ -130,30 +130,28 @@ function splitLyrics(lyrics, durationSeconds, spec) {
   const useful = sections.filter(section => section.lines.length).slice(0, 6);
   if (!useful.length) useful.push({ name: 'Song', lines: [String(lyrics).slice(0, 200)] });
 
-  const totalMs = durationSeconds * 1000;
-  const eachMs = Math.floor(totalMs / useful.length / 1000) * 1000;
+  // Eleven Music music_v2_5 expects composition_plan.chunks, not the legacy
+  // sections/lines schema used by older model versions.
+  const totalMs = Math.max(3000 * useful.length, durationSeconds * 1000);
+  const baseMs = Math.floor(totalMs / useful.length / 1000) * 1000;
   let remaining = totalMs;
   return useful.map((section, index) => {
-    const duration = index === useful.length - 1 ? remaining : eachMs;
+    const duration = index === useful.length - 1 ? remaining : baseMs;
     remaining -= duration;
+    const text = '[' + section.name + ']\n' + section.lines.join('\n');
     return {
-      section_name: section.name.slice(0, 80),
-      lines: section.lines.slice(0, 100).map(line => line.slice(0, 500)),
+      text: text.slice(0, 6132),
       duration_ms: duration,
-      positive_local_styles: [spec.musicPrompt, spec.tempo, 'original song', 'clear vocals']
+      positive_styles: [spec.genre, spec.mood, spec.musicPrompt, spec.tempo, 'clear vocals']
         .filter(Boolean).map(value => String(value).slice(0, 180)).slice(0, 10),
-      negative_local_styles: ['unintelligible vocals', 'abrupt ending']
+      negative_styles: ['unintelligible vocals', 'abrupt ending'],
+      context_adherence: 'high'
     };
   });
 }
 
 export function buildCompositionPlan(spec) {
-  return {
-    positive_global_styles: [spec.genre, spec.mood, spec.musicPrompt]
-      .filter(Boolean).map(value => String(value).slice(0, 180)).slice(0, 10),
-    negative_global_styles: ['abrupt ending', 'unintelligible vocals'],
-    sections: splitLyrics(spec.lyrics, spec.durationSeconds, spec)
-  };
+  return { chunks: splitLyrics(spec.lyrics, spec.durationSeconds, spec) };
 }
 
 async function fetchWithTimeout(url, options, timeoutMs, label) {
