@@ -30,3 +30,23 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: MUSIC_BACKUP_API_URL
+        sync: false
+      - key: MUSIC_BACKUP_API_KEY
+        sync: false
+      - key: MUSIC_BACKUP_MODEL
+        sync: false
+      - key: SONG_STORAGE_BUCKET
+        sync: false
+      - key: SONG_GENERATION_TIMEOUT_MS
+        value: "120000"
+      - key: SONG_WAIT_PROMPT_TIMEOUT_MS
+        value: "15000"
+      - key: SONG_MAX_CONCURRENT
+        value: "2"
+      - key: SONG_MAX_QUEUE
+        value: "4"
+      - key: SONG_MAX_PER_HOUR
+        value: "2"
