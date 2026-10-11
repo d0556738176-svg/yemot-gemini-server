@@ -8,26 +8,27 @@ test('song requests are bounded to 30-60 seconds', () => {
   assert.equal(normalizeSongRequest({ prompt: 'שיר' }).durationSeconds, 45);
 });
 
-test('composition plan contains structured chunks with valid durations', () => {
+test('composition plan uses official music_v2_5 chunks schema and exact duration', () => {
   const spec = {
     title: 'לילה בעיר', genre: 'pop', mood: 'upbeat', tempo: '110 BPM',
     musicPrompt: 'upbeat pop, warm synths', durationSeconds: 45,
     lyrics: '[Intro]\nלילה נדלק\n[Verse 1]\nהאורות רצים איתי\n[Chorus]\nנוסעים עד האור'
   };
   const plan = buildCompositionPlan(spec);
-  assert.ok(plan.sections.length >= 2);
-  assert.ok(plan.sections.every(section => section.duration_ms >= 3000));
-  assert.equal(plan.sections.reduce((sum, section) => sum + section.duration_ms, 0), 45000);
-  assert.ok(plan.sections.every(section =>
-    typeof section.section_name === 'string' &&
-    Array.isArray(section.lines) &&
-    Array.isArray(section.positive_local_styles) &&
-    Array.isArray(section.negative_local_styles)
+  assert.ok(Array.isArray(plan.chunks));
+  assert.ok(plan.chunks.length >= 2);
+  assert.equal(plan.chunks.reduce((sum, chunk) => sum + chunk.duration_ms, 0), 45000);
+  assert.ok(plan.chunks.every(chunk =>
+    typeof chunk.text === 'string' &&
+    chunk.duration_ms >= 3000 &&
+    chunk.duration_ms <= 120000 &&
+    Array.isArray(chunk.positive_styles) &&
+    Array.isArray(chunk.negative_styles) &&
+    chunk.context_adherence === 'high'
   ));
-  assert.equal(plan.sections[0].section_name, 'Intro');
-  assert.ok(plan.sections[0].lines.includes('לילה נדלק'));
-  assert.ok(Array.isArray(plan.positive_global_styles));
-  assert.ok(Array.isArray(plan.negative_global_styles));
+  assert.match(plan.chunks[0].text, /\[Intro\]/);
+  assert.match(plan.chunks[0].text, /לילה נדלק/);
+  assert.ok(!Object.hasOwn(plan, 'sections'));
 });
 
 test('lyrics generator accepts a valid structured JSON response', async () => {
