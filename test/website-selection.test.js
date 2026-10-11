@@ -25,3 +25,8 @@ test('matches a domain token in the URL when the title is generic', () => {
   const requested = { title: 'דף הבית', url: 'https://prog.co.il/' };
   assert.equal(selectWebsiteResult('תפתח לי את האתר של prog', [requested]), requested);
 });
+
+test('allows an explicit request to open YouTube when the result matches', () => {
+  const requested = { title: 'YouTube', url: 'https://www.youtube.com/' };
+  assert.equal(selectWebsiteResult('תפתח לי את האתר של YouTube', [requested]), requested);
+});
