@@ -14,7 +14,7 @@ const NEWS_CUES = /חדשות|מבזק|כותרות|עדכונים|מה חדש|�
 export function isNewsQuestion(transcript) {
   const q = String(transcript || '').trim();
   if (!q) return false;
-  if (/(ערוץ\\s*(?:14|12|13|11|c14)|c14\\.co\\.il|כאן חדשות|חדשות 12|חדשות 13|ynet|ווינט|וואלה חדשות|ישראל היום|מעריב)/i.test(q)) return true;
+  if (/(ערוץ\s*(?:14|12|13|11|c14)|c14\.co\.il|כאן חדשות|חדשות 12|חדשות 13|ynet|ווינט|וואלה חדשות|ישראל היום|מעריב)/i.test(q)) return true;
   const hasCategory = CATEGORY_PATTERNS.some(item => item.pattern.test(q));
   if (NEWS_CUES.test(q)) return true;
   return hasCategory && /(היום|עכשיו|כרגע|עדכון|אחרונ|מה חדש|מה קורה|מה המצב|סקור|סקירה|מה קרה)/i.test(q);
@@ -23,7 +23,7 @@ export function isNewsQuestion(transcript) {
 export function buildNewsSearchQueries(question, historyText = '') {
   const q = String(question || '').trim();
   const history = String(historyText || '').trim();
-  const sourceMatch = q.match(/(?:ערוץ|חדשות|כותרות)\\s*(14|c14|12|13|11)/i);
+  const sourceMatch = q.match(/(?:ערוץ|חדשות|כותרות)\s*(14|c14|12|13|11)/i);
   if (sourceMatch) {
     const source = String(sourceMatch[1]).toUpperCase() === 'C14' ? 'ערוץ 14' : 'ערוץ ' + sourceMatch[1];
     const sourceQueries = {
@@ -41,7 +41,7 @@ export function buildNewsSearchQueries(question, historyText = '') {
 
   const combined = (q + ' ' + history.slice(-500)).toLowerCase();
   if (/(כותרת|תוצאה|הפרט הראשון|הנושא הראשון|הראשונה|השני|השלישי)/i.test(q) && history) {
-    const previousTitle = history.match(/(?:כותרת|תוצאה)\\s*\\d+\\s*[:.]\\s*([^\\n.]+)/i)?.[1]?.trim();
+    const previousTitle = history.match(/(?:כותרת|תוצאה)\s*\d+\s*[:.]\s*([^\n.]+)/i)?.[1]?.trim();
     if (previousTitle) return [previousTitle.slice(0, 180)];
   }
   if (/(סקור|סקירה|כל התחומים|בכל התחומים|בכללי|באופן כללי|תמונת מצב|כל החדשות|חדשות היום|מה החדשות)/i.test(q) ||
