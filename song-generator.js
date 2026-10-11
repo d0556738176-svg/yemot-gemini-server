@@ -80,7 +80,7 @@ export async function generateSongSpec(request, generateText) {
     'כתוב מילים מקוריות בלבד; אל תצטט שיר קיים ואל תבקש חיקוי מדויק של אמן מסוים.',
     'במילים השתמש בסימוני מבנה [Intro], [Verse 1], [Chorus], [Verse 2], [Outro] לפי הצורך.',
     'הגבל את אורך השיר ל-30 עד 60 שניות. ברירת המחדל היא ' + normalized.durationSeconds + ' שניות.',
-    'music_prompt צריך לתאר סגנון, קצב, אווירה, כלים והפקה באנגלית. שמור את מילות השיר בשפה שביקש המתקשר.',
+    'genre, mood, tempo ו-music_prompt חייבים להיות באנגלית כדי שמנוע המוזיקה יבין אותם. שמור את מילות השיר בשפה שביקש המתקשר.',
     'בקשת המתקשר: ' + normalized.prompt,
     'משך מבוקש בשניות: ' + normalized.durationSeconds
   ].join('\n');
@@ -132,7 +132,7 @@ function splitLyrics(lyrics, durationSeconds, spec) {
     return {
       text: text.slice(0, 6100),
       duration_ms: Math.max(3000, duration),
-      positive_styles: [spec.genre, spec.mood, spec.tempo, spec.musicPrompt].filter(Boolean).map(x => String(x).slice(0, 180)).slice(0, 10),
+      positive_styles: [spec.musicPrompt, spec.tempo, 'original song', 'clear vocals'].filter(Boolean).map(x => String(x).slice(0, 180)).slice(0, 10),
       negative_styles: ['unintelligible vocals', 'abrupt ending'],
       context_adherence: 'high'
     };
@@ -274,9 +274,12 @@ async function convertToYemotWavChunks(audio, tempDir) {
   for (const name of names) {
     const file = path.join(chunksDir, name);
     const stat = await fs.stat(file);
-    if (stat.size < 44) throw new Error('Converted audio file is empty or invalid');
-    const header = await fs.readFile(file).then(buffer => buffer.subarray(0, 4).toString('ascii'));
+    if (stat.size < 16044) throw new Error('Converted audio file is empty or too short');
+    const wav = await fs.readFile(file);
+    const header = wav.subarray(0, 4).toString('ascii');
     if (header !== 'RIFF') throw new Error('Converted audio file is not a WAV/RIFF file');
+    const estimatedSeconds = Math.max(0, (stat.size - 44) / 16000);
+    if (estimatedSeconds < 1 || estimatedSeconds > 90) throw new Error('Converted audio duration is outside the safe range');
     files.push(file);
   }
   return files;
