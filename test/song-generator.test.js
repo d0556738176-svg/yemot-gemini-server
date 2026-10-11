@@ -15,10 +15,12 @@ test('composition plan contains structured chunks with valid durations', () => {
     lyrics: '[Intro]\nלילה נדלק\n[Verse 1]\nהאורות רצים איתי\n[Chorus]\nנוסעים עד האור'
   };
   const plan = buildCompositionPlan(spec);
-  assert.ok(plan.chunks.length >= 2);
-  assert.ok(plan.chunks.every(chunk => chunk.duration_ms >= 3000));
-  assert.ok(plan.chunks.every(chunk => Array.isArray(chunk.positive_styles)));
-  assert.ok(plan.chunks[0].text.includes('Intro'));
+  assert.ok(plan.sections.length >= 2);
+  assert.ok(plan.sections.every(section => section.duration_ms >= 3000));
+  assert.ok(plan.sections.every(section => Array.isArray(section.positive_local_styles)));
+  assert.equal(plan.sections[0].section_name, 'Intro');
+  assert.ok(plan.sections[0].lines.includes('לילה נדלק'));
+  assert.ok(Array.isArray(plan.positive_global_styles));
 });
 
 test('lyrics generator accepts a valid structured JSON response', async () => {
