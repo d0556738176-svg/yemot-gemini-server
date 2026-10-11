@@ -2531,7 +2531,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
             const item=existing || {title:page.title||page.url,url:page.url,snippet:''};
             item.title=page.title||item.title||page.url;
             item.url=page.url;
-            item.snippet=String(page.content||'').slice(0,12000);
+            item.snippet=String(page.content||'').slice(0,60000);
             merged.push(item);
             if(item.snippet.length>80) websitePageContentRead=true;
           }
@@ -2539,6 +2539,21 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
             if(!merged.some(page=>page.url===item.url)) merged.push(item);
           }
           unique.splice(0,unique.length,...merged);
+          if(turnContext) {
+            const openedUrl=String(unique[0]?.url||websiteRootUrl||'').replace(/#.*$/,'').replace(/\/+$/,'');
+            const ordered=[...merged].sort((a,b)=>{
+              const au=String(a.url||'').replace(/#.*$/,'').replace(/\/+$/,'');
+              const bu=String(b.url||'').replace(/#.*$/,'').replace(/\/+$/,'');
+              return Number(bu===openedUrl)-Number(au===openedUrl);
+            });
+            turnContext.currentWebsitePages=ordered.filter(item=>String(item.snippet||'').length>80)
+              .map(item=>({url:item.url,title:item.title||item.url,content:String(item.snippet||'')}));
+            turnContext.currentWebsitePageIndex=0;
+            turnContext.currentWebsiteReadOffset=0;
+            console.info('[WEBSITE_READ] opened site cached for voice reading',{
+              pages:turnContext.currentWebsitePages.length,chars:turnContext.currentWebsitePages[0]?.content?.length||0
+            });
+          }
           console.info('[DIRECT_WEB] direct public-site crawl completed',{
             requested:unique[0]?.url||websiteRootUrl,pages:directPages.length,contentRead:websitePageContentRead
           });
@@ -2684,7 +2699,7 @@ function getCurrentWebsitePage(turnContext) {
 function readWebsitePageChunk(turnContext, { restart = false, maxChars = 3600 } = {}) {
   const page = getCurrentWebsitePage(turnContext);
   if (!page || !String(page.content || '').trim()) return null;
-  const content = String(page.content).replace(/\\r/g, '').trim();
+  const content = String(page.content).replace(/\r/g, '').trim();
   let offset = restart ? 0 : Math.max(0, Number(turnContext.currentWebsiteReadOffset) || 0);
   if (offset >= content.length) {
     turnContext.currentWebsiteReadOffset = 0;
@@ -2693,7 +2708,7 @@ function readWebsitePageChunk(turnContext, { restart = false, maxChars = 3600 } 
   let end = Math.min(content.length, offset + maxChars);
   if (end < content.length) {
     const boundary = content.lastIndexOf(' ', end);
-    const paragraph = content.lastIndexOf('\\n', end);
+    const paragraph = content.lastIndexOf('\n', end);
     const safeBoundary = Math.max(boundary, paragraph);
     if (safeBoundary > offset + Math.floor(maxChars * 0.65)) end = safeBoundary;
   }
@@ -2759,6 +2774,12 @@ async function answerExplicitWebsiteUrl(question, historyText='', turnContext=nu
   const results=Array.isArray(extracted.results)?extracted.results:[];
   const item=results.find(x=>String(x.url||'').replace(/#.*$/,'')===url.replace(/#.*$/,'')) || results[0];
   const content=String(item?.rawContent||item?.content||'').trim();
+  if(content.length>=80 && turnContext) {
+    turnContext.currentWebsitePages=[{url:String(item?.url||url),title:String(item?.title||url),content}];
+    turnContext.currentWebsitePageIndex=0;
+    turnContext.currentWebsiteReadOffset=0;
+    console.info('[WEBSITE_READ] Tavily page cached for voice reading',{url:String(item?.url||url),chars:content.length});
+  }
   if(!content || content.length<80) {
     console.warn('[EXPLICIT_URL] extraction returned no useful content',{url,failed:Array.isArray(extracted.failedResults)?extracted.failedResults.length:0});
     return 'לא הצלחתי לקרוא את תוכן האתר מהכתובת שסיפקת. ייתכן שהאתר חוסם קריאה אוטומטית או דורש התחברות. אפשר לבקש שאחפש מידע על האתר במקורות אחרים.';
