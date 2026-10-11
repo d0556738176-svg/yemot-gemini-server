@@ -2514,7 +2514,10 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
       return {item,score,index};
     }).sort((a,b)=>b.score-a.score || a.index-b.index);
     const best=scored[0];
-    if(best && best.score>0) {
+    // Never treat the search engine's first result as a match unless at least
+    // one meaningful token from the requested site appears in its title or URL.
+    // The tiny ordering bonus is only for tie-breaking between actual matches.
+    if(best && best.score>0.1 && tokens.some(token=>(String(best.item.title||'')+' '+String(best.item.url||'')).toLowerCase().includes(token))) {
       const selected=best.item;
       try { websiteRootUrl=new URL(selected.url).origin; } catch {}
       if(websiteRootUrl) {
