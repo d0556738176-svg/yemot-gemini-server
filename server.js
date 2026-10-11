@@ -9,6 +9,7 @@ import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback } from './business-hours.js';
 import { rankWebsitePages } from './website-relevance.js';
+import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -797,10 +798,6 @@ function isWeatherQuestion(transcript) {
   return /(מזג.?האוויר|מזג האוויר|תחזית|טמפרטורה|כמה מעלות|גשם היום|ירד גשם|יהיה גשם|חם היום|קר היום|רוח היום)/i.test(String(transcript||''));
 }
 
-function isNewsQuestion(transcript) {
-  return /(מה החדשות|חדשות היום|החדשות היום|מה חדש היום|מבזקי היום|חדשות עכשיו|מה קרה היום|חדשות אחרונות|חדשות ב|חדשות של|כותרות של|כותרות ב|ערוץ 14|ערוץ c14|c14|חדשות 12|חדשות 13|כאן 11|כאן חדשות|וואלה חדשות|ynet|ווינט|מעריב|ישראל היום)/i.test(String(transcript||''));
-}
-
 function isComedySearchQuestion(transcript) {
   return /(בדיחות|בדיחה|מצחיק|מצחיקים|סטנד.?אפ|קומיקאי|קומיקאים|קטע קומי|מערכון|מערכונים)/i.test(String(transcript||''));
 }
@@ -856,32 +853,8 @@ async function answerWeatherDirect(transcript) {
 async function answerNewsDirect(transcript, historyText='') {
   const question=String(transcript||'').trim();
   const history=String(historyText||'').trim();
-  const sourceMatch=question.match(/(?:ערוץ|חדשות|כותרות)\s*(14|c14|12|13|11)/i);
-  const source=sourceMatch ? String(sourceMatch[1]).toUpperCase()==='C14' ? 'ערוץ 14' : 'ערוץ '+sourceMatch[1] : '';
-  const sourceQueries = {
-    'ערוץ 14': 'site:c14.co.il חדשות היום',
-    'ערוץ 12': 'site:mako.co.il/news חדשות היום',
-    'ערוץ 13': 'site:13tv.co.il חדשות היום',
-    'ערוץ 11': 'site:kan.org.il חדשות היום'
-  };
-  let q=source ? (sourceQueries[source] || source+' חדשות היום') :
-    /(חדשות היום|מה החדשות|החדשות היום|חדשות עכשיו|חדשות אחרונות|מה המצב בישראל|מה קורה בישראל)/i.test(question)
-      ? 'חדשות ישראל היום'
-      : question.slice(0,100);
-
-  const numberMatch=question.match(/(?:כותרת|הכותרת|חדשה)\s*(?:מספר\s*)?(\d+)/i);
-  if(numberMatch && history) {
-    const n=Number(numberMatch[1]);
-    const marker=new RegExp('(?:כותרת|תוצאה)\\s*'+n+'\\s*[:.]\\s*([\\s\\S]*?)(?=(?:כותרת|תוצאה)\\s*\\d+\\s*[:.]|$)','i');
-    const matches=history.match(marker);
-    const title=matches?.[1]?.trim();
-    if(title) q=title.slice(0,180);
-  }
-
-  const url='https://news.google.com/rss/search?q='+encodeURIComponent(q)+'&hl=he&gl=IL&ceid=IL:he';
-  const response=await withTimeout(fetch(url),REQUEST_TIMEOUT_MS,'news RSS');
-  if(!response.ok) throw Object.assign(new Error('News RSS HTTP '+response.status),{status:503});
-  const xml=await response.text();
+  const queries=buildNewsSearchQueries(question,history);
+  const rssTimeoutMs=Number(process.env.NEWS_RSS_TIMEOUT_MS||4500);
 
   function decodeXml(value) {
     return String(value||'')
@@ -897,38 +870,59 @@ async function answerNewsDirect(transcript, historyText='') {
     if(end<0) return '';
     return decodeXml(block.slice(start+1,end).replace(/<[^>]+>/g,' ').trim());
   }
+  async function fetchNews(query) {
+    const url='https://news.google.com/rss/search?q='+encodeURIComponent(query)+'&hl=he&gl=IL&ceid=IL:he';
+    const response=await withTimeout(fetch(url),rssTimeoutMs,'news RSS');
+    if(!response.ok) throw Object.assign(new Error('News RSS HTTP '+response.status),{status:503});
+    const xml=await response.text();
+    return xml.split('<item>').slice(1,9).map(block=>({
+      title:tagValue(block,'title'),
+      pub:tagValue(block,'pubDate'),
+      description:tagValue(block,'description'),
+      source:tagValue(block,'source')
+    })).filter(x=>x.title);
+  }
 
-  const items=xml.split('<item>').slice(1,13).map(block=>({
-    title:tagValue(block,'title'),
-    pub:tagValue(block,'pubDate'),
-    description:tagValue(block,'description'),
-    source:tagValue(block,'source')
-  })).filter(x=>x.title);
-  if(!items.length) throw Object.assign(new Error('No news items'),{status:503});
-
-  const raw=items.map((x,i)=>'מקור '+(i+1)+': '+x.title+(x.source?' | '+x.source:'')+(x.description?' | '+x.description.slice(0,700):'')).join('\n');
+  // Fetch topic lanes concurrently; never wait for one slow RSS feed before reading
+  // useful results from the others. Specific channel/topic requests use fewer queries.
+  const settled=await Promise.allSettled(queries.map(fetchNews));
+  const seen=new Set();
+  const items=[];
+  for(const result of settled) {
+    if(result.status!=='fulfilled') continue;
+    for(const item of result.value) {
+      const key=String(item.title||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+      if(!key||seen.has(key)) continue;
+      seen.add(key);
+      items.push(item);
+    }
+  }
+  if(!items.length) throw Object.assign(new Error('No news items from RSS sources'),{status:503});
+  const latest=items.slice(0,12);
+  const raw=latest.map((x,i)=>'מקור '+(i+1)+': '+x.title+(x.source?' | '+x.source:'')+(x.pub?' | '+x.pub:'')+(x.description?' | '+x.description.slice(0,500):'')).join('\n');
   try {
     const prompt=`${EXCLUSIVE_INSTRUCTION}
 אתה מסכם חדשות עדכניות למענה קולי בטלפון.
 השאלה: ${question}
-להלן עדכוני חדשות שנאספו עכשיו ממקורות חדשות:
+להלן כותרות ועדכונים שנאספו עכשיו מ-Google News RSS:
 ${raw}
 
-ענה בעברית ובצורה טבעית שמתאימה לטלפון.
-אם המתקשר ביקש מקור חדשות מסוים, למשל "מה החדשות בערוץ 14", "מה חדש ב-C14" או "מה החדשות בערוץ 12", אל תענה בחדשות כלליות: התמקד רק בדיווחים שמגיעים מהמקור שביקש, ובדוק שהכותרות באמת שייכות אליו. אם אין מספיק מידע מהמקור המדויק, אמור זאת והסבר בקצרה מה כן נמצא.
-אם נשאלת "מה החדשות היום" או "מה המצב בישראל" בלי מקור מסוים — תן תמונת מצב כללית של 3 עד 5 נושאים מרכזיים, עם משפט או שניים לכל נושא.
-אם נשאלת שאלה על נושא מסוים או מבקשים "יותר פרטים", התמקד רק בנושא הזה והרחב.
-הפרד בין עובדות שדווחו לבין טענות או דיווחים שעדיין אינם מאומתים.
-אל תמציא מידע שאינו מופיע בחומר.
-התשובה מיועדת להקראה בטלפון, ולכן קצרה, טבעית וברורה.`;
-    const result=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,false);
+ענה בעברית טבעית וברורה להקראה בטלפון.
+אם המתקשר ביקש תחום מסוים, התמקד בו ולא בחדשות כלליות.
+אם ביקש סקירה כללית, בחר 3 עד 5 עדכונים מתחומים שונים, למשל ביטחון ופוליטיקה, כלכלה, טכנולוגיה, בריאות, ספורט וכדורגל או חדשות בעולם — לפי החומר שנמצא.
+תן עדיפות לעדכונים החדשים ביותר, אך אל תמציא שעה או תאריך אם אינם זמינים.
+הבחן בין עובדה מאומתת לבין טענה או דיווח ראשוני. אם המקורות אינם מספקים פרטים, אמור זאת בקצרה.
+אל תציג כותרת כאילו אומתה ממקור מסוים אלא אם שם המקור מצורף לנתון.
+התשובה צריכה להיות ממוקדת, עם משפט או שניים לכל נושא, ובלי הקדמות ארוכות.`;
+    const synthesisTimeoutMs=Number(process.env.NEWS_SYNTHESIS_TIMEOUT_MS||6000);
+    const result=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,true,synthesisTimeoutMs);
     const answer=String(result?.response?.text?.()||'').trim();
     if(answer) return answer;
   } catch(e) {
-    console.warn('[News] synthesis unavailable',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,400)});
+    console.warn('[News] fast synthesis unavailable; returning current headlines',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,300)});
   }
-  const compact=items.slice(0,5).map(x=>sanitizeForYemot(x.title)).join('. ');
-  return 'תמונת המצב העיקרית בחדשות כרגע כוללת כמה נושאים מרכזיים: '+compact+'. אם תרצה, שאל אותי על אחד מהם ואפרט.';
+  const compact=latest.slice(0,5).map(x=>sanitizeForYemot(x.title)+(x.source?' ('+sanitizeForYemot(x.source)+')':'')).join('. ');
+  return 'אלה הכותרות העדכניות שמצאתי: '+compact+'. אפשר לבקש ממני להרחיב על כותרת מסוימת.';
 }
 async function analyzePublicYouTubeVideo(videoUrl, question) {
   const key = apiKeys[0] || '';
