@@ -89,7 +89,7 @@ async function fetchHtml(url, { timeoutMs, maxBytes }) {
   if (!reader) {
     const html = await response.text();
     if (Buffer.byteLength(html) > maxBytes) throw new Error('Website page exceeded size limit');
-    return html;
+    return { html, finalUrl: response.url || url };
   }
   const chunks = [];
   let size = 0;
@@ -107,7 +107,7 @@ async function fetchHtml(url, { timeoutMs, maxBytes }) {
   } finally {
     reader.releaseLock();
   }
-  return Buffer.concat(chunks, size).toString('utf8');
+  return { html: Buffer.concat(chunks, size).toString('utf8'), finalUrl: response.url || url };
 }
 
 /**
@@ -147,10 +147,12 @@ export async function readPublicWebsitePages({
       if (!visited.has(url)) { visited.add(url); batch.push(url); }
     }
     const fetched = await Promise.allSettled(batch.map(async url => {
-      const html = await fetchHtml(url, { timeoutMs, maxBytes });
-      const finalUrl = new URL(url);
+      const fetchedPage = await fetchHtml(url, { timeoutMs, maxBytes });
+      const finalUrl = new URL(fetchedPage.finalUrl);
+      if (finalUrl.origin !== origin) throw new Error('Website redirected outside selected origin');
+      const html = fetchedPage.html;
       const text = extractReadableText(html);
-      return { url, finalUrl: finalUrl.href, title: extractTitle(html), content: text, links: extractInternalLinks(html, finalUrl.href, origin) };
+      return { url: finalUrl.href, finalUrl: finalUrl.href, title: extractTitle(html), content: text, links: extractInternalLinks(html, finalUrl.href, origin) };
     }));
     for (const result of fetched) {
       if (result.status !== 'fulfilled') continue;
