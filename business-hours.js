@@ -1,11 +1,11 @@
-const TIME_RANGE = /\\b\\d{1,2}[:.]\\d{2}\\s*[-–—至]\s*\\d{1,2}[:.]\\d{2}\\b/;
+const TIME_RANGE = /\b\d{1,2}[:.]\d{2}\s*[-–—至]\s*\d{1,2}[:.]\d{2}\b/;
 
 function normalize(value) {
-  return String(value || '').replace(/\\s+/g, ' ').trim();
+  return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
 function isSuperPharmTarget(targets, question) {
-  return /סופר\\s*[-־]?\\s*פארם|super.?pharm/i.test([...(targets || []), question].join(' '));
+  return /סופר\s*[-־]?\s*פארם|super.?pharm/i.test([...(targets || []), question].join(' '));
 }
 
 export function buildBusinessHoursQueries({ targets = [], locationText = '', city = '', area = '', pharmacy = false, question = '' } = {}) {
@@ -44,7 +44,7 @@ function extractHoursEvidence(result) {
 
 function officialSuperPharm(result) {
   try {
-    const host = new URL(String(result?.url || '')).hostname.toLowerCase().replace(/^www\\./, '');
+    const host = new URL(String(result?.url || '')).hostname.toLowerCase().replace(/^www\./, '');
     return host === 'super-pharm.co.il' || host.endsWith('.super-pharm.co.il');
   } catch {
     return false;
@@ -62,9 +62,10 @@ export function buildBusinessHoursFallback({ question = '', business = 'הסני
 
   const matching = (results || []).filter(result => {
     const haystack = normalize([result?.title, result?.snippet, result?.url].join(' ')).toLowerCase();
-    const target = /סופר\\s*[-־]?\\s*פארם|super.?pharm/i.test(business + ' ' + q);
-    if (target && !/סופר\\s*[-־]?\\s*פארם|super.?pharm/i.test(haystack) && !officialSuperPharm(result)) return false;
-    if (city && !haystack.includes(city.toLowerCase()) && !haystack.includes('super-pharm.co.il')) return false;
+    const target = /סופר\s*[-־]?\s*פארם|super.?pharm/i.test(business + ' ' + q);
+    if (target && !/סופר\s*[-־]?\s*פארם|super.?pharm/i.test(haystack) && !officialSuperPharm(result)) return false;
+    if (city && !haystack.includes(city.toLowerCase())) return false;
+    if (/ביג/i.test(area) && !/(ביג|big)/i.test(haystack)) return false;
     return true;
   });
   const official = matching.find(result => officialSuperPharm(result) && extractHoursEvidence(result));
