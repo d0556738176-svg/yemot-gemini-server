@@ -7,6 +7,7 @@ import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
+import { buildBusinessHoursQueries, buildBusinessHoursFallback } from './business-hours.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -1831,18 +1832,18 @@ async function answerBusinessHoursDirect(transcript) {
   }
   const locationText=[area,city].filter(Boolean).join(' ');
   const targets=business ? [business] : pharmacy ? ['בית מרקחת'] : [generic];
-  const queries=[];
-  for(const target of targets) {
-    queries.push(target+' '+locationText+' שעות פתיחה היום');
-    queries.push(target+' '+locationText+' פתוח עכשיו כתובת אתר רשמי');
-    queries.push(target+' '+locationText+' שעות פעילות סניף');
-  }
-  if(pharmacy && /כללית/i.test(question)) queries.push('כללית בית מרקחת '+locationText+' שעות פתיחה אתר רשמי');
-  const settled=await Promise.allSettled([...new Set(queries)].map(q=>searchWebDirect(q,{timeoutMs:4500})));
+  const queries=buildBusinessHoursQueries({targets,locationText,city,area,pharmacy,question});
+  const settled=await Promise.allSettled(queries.map(q=>searchWebDirect(q,{timeoutMs:4500})));
   const all=[];
-  for(const item of settled) if(item.status==='fulfilled') all.push(...item.value);
+  for(let i=0;i<settled.length;i++) {
+    const item=settled[i];
+    if(item.status==='fulfilled') all.push(...item.value);
+    else console.warn('[BUSINESS_HOURS] search query failed',{query:queries[i],status:geminiErrorStatus(item.reason)});
+  }
   const unique=dedupeSearchResults(all).slice(0,12);
-  if(!unique.length) throw Object.assign(new Error('Business-hours search returned no results'),{status:503});
+  if(!unique.length) {
+    return buildBusinessHoursFallback({question,business:business||generic,city,area,locationText,results:[]});
+  }
   const evidence=unique.map((x,i)=>
     'מקור '+(i+1)+': '+x.title+'\nכתובת: '+x.url+'\nמידע: '+String(x.snippet||'').slice(0,1400)
   ).join('\n\n');
@@ -1855,9 +1856,9 @@ async function answerBusinessHoursDirect(transcript) {
     const answer=String(result?.response?.text?.()||'').trim();
     if(answer) return answer;
   } catch(e) {
-    console.warn('[BUSINESS_HOURS] synthesis unavailable',{status:geminiErrorStatus(e)});
+    console.warn('[BUSINESS_HOURS] synthesis unavailable; using source-grounded fallback',{status:geminiErrorStatus(e)});
   }
-  return 'לא הצלחתי לאמת כרגע את שעות הפתיחה של הסניף המבוקש. כדאי לבדוק באתר הרשמי של העסק.';
+  return buildBusinessHoursFallback({question,business:business||generic,city,area,locationText,results:unique});
 }
 
 async function answerPharmacySearchDirect(transcript) {
