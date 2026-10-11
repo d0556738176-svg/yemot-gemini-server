@@ -45,7 +45,7 @@ function extractReadableText(html) {
   const source = String(html || '');
   const main = source.match(/<(?:main|article)\b[^>]*>([\s\S]*?)<\/(?:main|article)\s*>/i);
   const body = main?.[1] || source;
-  return stripTags(body).slice(0, 18000);
+  return stripTags(body).slice(0, 60000);
 }
 
 function extractInternalLinks(html, baseUrl, origin) {
