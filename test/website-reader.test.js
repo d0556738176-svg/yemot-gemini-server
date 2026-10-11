@@ -11,7 +11,7 @@ test('returns an empty list for unsafe or unsupported URLs', async () => {
 test('does not follow cross-origin search URLs', async () => {
   assert.deepEqual(await readPublicWebsitePages({
     startUrl: 'https://example.com/',
-    rootUrl: 'https://example.com/',
+    rootUrl: 'https://other.example/',
     searchUrls: ['https://other.example/page']
   }), []);
 });
