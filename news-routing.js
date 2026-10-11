@@ -9,15 +9,17 @@ const CATEGORY_PATTERNS = [
   { name: 'world', pattern: /חדשות העולם|בעולם|בינלאומי|ארצות הברית|ארה.?ב|אירופה|אוקראינה|רוסיה|סין/i, query: 'חדשות בעולם היום' }
 ];
 
-const NEWS_CUES = /חדשות|מבזק|כותרות|עדכונים|מה חדש|מה קורה|מה המצב|מה קרה|מה מתרחש|אקטואלי|אחרונות|סקירת חדשות|סקור חדשות|דיווחים אחרונים/i;
+const EXPLICIT_NEWS_CUES = /חדשות|מבזק|כותרות|סקירת חדשות|סקור חדשות|דיווחים אחרונים|עדכוני חדשות/i;
+const CURRENT_AFFAIRS_CUES = /עדכונים|מה חדש|מה קורה|מה המצב|מה קרה|מה מתרחש|אקטואלי|אחרונ|היום|עכשיו|כרגע|סקור|סקירה/i;
 
 export function isNewsQuestion(transcript) {
   const q = String(transcript || '').trim();
   if (!q) return false;
   if (/(ערוץ\s*(?:14|12|13|11|c14)|c14\.co\.il|כאן חדשות|חדשות 12|חדשות 13|ynet|ווינט|וואלה חדשות|ישראל היום|מעריב)/i.test(q)) return true;
   const hasCategory = CATEGORY_PATTERNS.some(item => item.pattern.test(q));
-  if (NEWS_CUES.test(q)) return true;
-  return hasCategory && /(היום|עכשיו|כרגע|עדכון|אחרונ|מה חדש|מה קורה|מה המצב|סקור|סקירה|מה קרה)/i.test(q);
+  if (EXPLICIT_NEWS_CUES.test(q)) return true;
+  if (/(מה החדשות|מה חדש היום|מה קרה היום|מה קורה בישראל|מה המצב בישראל|מה מתרחש בישראל|עדכוני היום)/i.test(q)) return true;
+  return hasCategory && CURRENT_AFFAIRS_CUES.test(q);
 }
 
 export function buildNewsSearchQueries(question, historyText = '') {
