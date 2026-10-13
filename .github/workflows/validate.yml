@@ -27,6 +27,8 @@ jobs:
           node --check youtube-ivr.js
           node --check youtube-transcript.js
           node --check youtube-authorized-playback.js
+          node --check song-generator.js
+          node --check song-ivr.js
       - name: Run regression tests
         run: npm test
       - name: Check Tavily SDK initialization (offline)
