@@ -373,7 +373,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
       contents.every(item => Array.isArray(item?.parts) && item.parts.length &&
         item.parts.every(part => typeof part?.text === 'string'))
       ? contents.map(item => (item.role === 'model' ? 'Assistant: ' : 'User: ') +
-          item.parts.map(part => part.text).join('\\n')).join('\\n\\n')
+          item.parts.map(part => part.text).join('\n')).join('\n\n')
       : '';
     if (textOnlyInput && String(process.env.OPENAI_API_KEY || '').trim()) {
       try {
