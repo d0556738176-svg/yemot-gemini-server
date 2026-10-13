@@ -2576,7 +2576,9 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
 
   // Website-opening requests must read the page itself, not merely return a search result.
   // Keep the session anchored at the site's origin so follow-up requests navigate from the homepage.
-  const wantsPageContent=deepSearch || eventVenueLookup || openSiteRequest || /(פתח את האתר|תיכנס לאתר|תכנס לאתר|תקרא את הטקסט|קרא את הטקסט|מה כתוב באתר|תוכן מלא|העמוד המלא|פרטים מלאים|קרא את הכתבה|תקרא את הכתבה)/i.test(question);
+  // In emergency mode, do not spend extra seconds crawling pages after the model
+  // has already failed; the source snippets below are the bounded deep-search fallback.
+  const wantsPageContent=!skipSynthesis && (deepSearch || eventVenueLookup || openSiteRequest || /(פתח את האתר|תיכנס לאתר|תכנס לאתר|תקרא את הטקסט|קרא את הטקסט|מה כתוב באתר|תוכן מלא|העמוד המלא|פרטים מלאים|קרא את הכתבה|תקרא את הכתבה)/i.test(question));
   let websiteRootUrl=null;
   if(openSiteRequest) {
     // Do not silently open an unrelated top search result when the requested
@@ -2736,15 +2738,19 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
         .trim();
       return {snippet,title};
     }).filter(item=>item.snippet.length>35 || item.title.length>12);
-    const snippets=usable.slice(0,2).map(item=>{
-      // Search titles often phrase the topic as a question; reading those aloud
-      // made the old fallback sound like unrelated questions rather than an answer.
-      const text=item.snippet.length>35 ? item.snippet : item.title;
-      return text.slice(0,360).replace(/[.!?؟]+$/,'').trim();
-    }).filter(Boolean).join('. בנוסף, ');
+    const snippetLimit=deepSearch?4:2;
+    const snippets=usable.slice(0,snippetLimit).map((item,index)=>{
+      // Do not speak raw search titles: they are often phrased as questions.
+      // Use the actual excerpt and a short host label for source transparency.
+      const excerpt=(item.snippet.length>35 ? item.snippet : item.title)
+        .slice(0,deepSearch?420:360).replace(/[.!?؟]+$/,'').trim();
+      let host='';
+      try { host=new URL(item.url).hostname.replace(/^www\./i,''); } catch {}
+      return excerpt+(host ? '. מקור: '+sanitizeForYemot(host) : '');
+    }).filter(Boolean).join('. מקור נוסף: ');
     if(!snippets) throw Object.assign(new Error('Emergency direct fallback has no readable snippets'),{status:503});
-    console.warn('[BRANCH1 FALLBACK] returning concise source-grounded excerpts after answer-model outage',{results:Math.min(2,usable.length)});
-    return 'לפי המידע שמצאתי ברשת, '+snippets+'.';
+    console.warn('[BRANCH1 FALLBACK] returning source-grounded excerpts after answer-model outage',{results:Math.min(snippetLimit,usable.length),deepSearch});
+    return (deepSearch?'בחיפוש המעמיק מצאתי את המידע הבא. ':'לפי המידע שמצאתי ברשת, ')+snippets+'.';
   }
 
   // The direct provider is a retrieval layer, not the final answer. When Gemini
@@ -3522,10 +3528,12 @@ async function callHandler(call) {
     } catch(e) {
       logDetailedError('Gemini processing',e);
       const providerStatus=geminiErrorStatus(e);
+      const deepSearchFallback=isDeepWebSearchRequest(userTranscript) ||
+        /לעומק|מחקר מקיף|סקירה מקיפה|בדיקה יסודית|חיפוש מעמיק|חפש באינטרנט/i.test(userTranscript);
       const eligibleForQuickWebFallback=!!userTranscript && userTranscript.length>=3 &&
         [408,429,500,502,503,504].includes(providerStatus) &&
-        !isLongAnswerRequest(userTranscript) &&
-        !shouldForceWebSearch(userTranscript) &&
+        (!isLongAnswerRequest(userTranscript) || deepSearchFallback) &&
+        (!shouldForceWebSearch(userTranscript) || deepSearchFallback) &&
         !isWeatherQuestion(userTranscript) && !isNewsQuestion(userTranscript) &&
         !isTransitRequest(userTranscript) &&
         !isMultimodalAnalysisRequest(userTranscript).any &&
@@ -3536,7 +3544,10 @@ async function callHandler(call) {
         !isBusinessHoursRequest(userTranscript);
       if(eligibleForQuickWebFallback) {
         try {
-          const directFallback=await answerWithDirectWebFallback(userTranscript,historyText,turnContext,{skipSynthesis:true,timeoutMs:1800});
+          const directFallback=await answerWithDirectWebFallback(userTranscript,historyText,turnContext,{
+            skipSynthesis:true,
+            timeoutMs:deepSearchFallback?4200:1800
+          });
           if(directFallback && String(directFallback).trim()) {
             replyText=String(directFallback).trim();
             console.info('[CALL_FLOW] quick_web_fallback_used_after_model_failure',{callId:activeKey,status:providerStatus,chars:replyText.length});
