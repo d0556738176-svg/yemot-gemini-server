@@ -221,7 +221,7 @@ function parseAceStepResult(result) {
   return [];
 }
 
-async function generateWithAceStep(spec) {
+export async function generateWithAceStep(spec) {
   const base = aceStepApiBase();
   const headers = aceStepHeaders(true);
   const totalTimeout = Math.max(30000, Math.min(300000, Number(process.env.SONG_GENERATION_TIMEOUT_MS || 180000)));
