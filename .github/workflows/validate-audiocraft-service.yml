@@ -1,0 +1,29 @@
+name: Validate isolated AudioCraft service
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "audiocraft-service/**"
+      - ".github/workflows/validate-audiocraft-service.yml"
+  push:
+    branches: [feature/branch4-audiocraft-instrumental-service]
+    paths:
+      - "audiocraft-service/**"
+      - ".github/workflows/validate-audiocraft-service.yml"
+
+jobs:
+  static-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Compile Python syntax
+        run: python -m py_compile audiocraft-service/app.py
+      - name: Verify required service files
+        run: |
+          test -s audiocraft-service/Dockerfile
+          test -s audiocraft-service/requirements.txt
+          test -s audiocraft-service/README.md
