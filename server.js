@@ -11,7 +11,7 @@ import { buildBusinessHoursQueries, buildBusinessHoursFallback } from './busines
 import { rankWebsitePages } from './website-relevance.js';
 import { readPublicWebsitePages } from './website-reader.js';
 import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
-import { answerWithOpenAIWebSearch, isOpenAIWebSearchRequest, stripOpenAIWebSearchPrefix } from './openai-web-search.js';
+import { answerWithOpenAIText, answerWithOpenAIWebSearch, isOpenAIWebSearchRequest, stripOpenAIWebSearchPrefix } from './openai-web-search.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -274,7 +274,7 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, 
   const groups = useWebSearch ? webModelsByName : modelsByName;
   const timeoutMs = Number(timeoutOverrideMs || (fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS));
   const maxAttempts = fastPhone ? 1 : 2;
-  const phoneDeadline = fastPhone ? Date.now() + Number(process.env.PHONE_GEMINI_TOTAL_BUDGET_MS || 8500) : Infinity;
+  const phoneDeadline = fastPhone ? Date.now() + Math.min(4000, Math.max(1000, Number(process.env.PHONE_GEMINI_TOTAL_BUDGET_MS || 4000))) : Infinity;
   let lastError;
 
   for (let mi=0; mi<groups.length; mi++) {
@@ -367,6 +367,34 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
     return await generateWithRetry(contents, useWebSearch, fastPhone, timeoutOverrideMs);
   } catch (primaryError) {
     const primaryStatus=geminiErrorStatus(primaryError);
+    // Branch 1 now has an independent text-model fallback. Only plain text prompts
+    // are eligible; audio/image payloads must never be flattened into text.
+    const textOnlyInput = Array.isArray(contents) && contents.length &&
+      contents.every(item => Array.isArray(item?.parts) && item.parts.length &&
+        item.parts.every(part => typeof part?.text === 'string'))
+      ? contents.map(item => (item.role === 'model' ? 'Assistant: ' : 'User: ') +
+          item.parts.map(part => part.text).join('\n')).join('\n\n')
+      : '';
+    if (textOnlyInput && String(process.env.OPENAI_API_KEY || '').trim()) {
+      try {
+        const openAITimeout = Number(timeoutOverrideMs || (fastPhone ? 9000 : 12000));
+        const answer = await answerWithOpenAIText(textOnlyInput, {
+          timeoutMs: openAITimeout,
+          webSearch: useWebSearch,
+          deep: /לעומק|מחקר מקיף|סקירה מקיפה|בדיקה יסודית|כל הפרטים|בהרחבה/i.test(textOnlyInput)
+        });
+        console.info('[BRANCH1 FALLBACK] OpenAI succeeded after primary Gemini failure', {
+          status: primaryStatus, useWebSearch, fastPhone, chars: answer.length
+        });
+        return { response: { text: () => answer } };
+      } catch (openAIError) {
+        console.warn('[BRANCH1 FALLBACK] OpenAI fallback failed; continuing to separate Gemini project', {
+          status: geminiErrorStatus(openAIError),
+          message: String(openAIError?.message || openAIError).slice(0, 220),
+          useWebSearch, fastPhone
+        });
+      }
+    }
     const shouldFallback=[429,408,500,502,503,504].includes(primaryStatus);
     if(!shouldFallback || !branch1BackupGeminiClient || !branch1BackupModels.length) {
       throw primaryError;
@@ -375,7 +403,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
     const models=useWebSearch ? branch1BackupWebModels : branch1BackupModels;
     const timeoutMs=Number(timeoutOverrideMs || (fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS));
     let lastError=primaryError;
-    const backupDeadline=fastPhone ? Date.now()+Number(process.env.PHONE_GEMINI_BACKUP_BUDGET_MS || 8500) : Infinity;
+    const backupDeadline=fastPhone ? Date.now()+Math.min(3000, Math.max(1000, Number(process.env.PHONE_GEMINI_BACKUP_BUDGET_MS || 3000))) : Infinity;
 
     console.warn('[BRANCH1 FALLBACK] primary Gemini unavailable; trying separate backup Project', {
       status:primaryStatus, useWebSearch, fastPhone

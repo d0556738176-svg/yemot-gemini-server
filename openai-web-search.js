@@ -56,6 +56,53 @@ export function extractOpenAIResponseText(data) {
   return parts.join('\n').trim();
 }
 
+
+export async function answerWithOpenAIText(input, options = {}) {
+  const apiKey = String(options.apiKey ?? process.env.OPENAI_API_KEY ?? '').trim();
+  if (!apiKey) throw Object.assign(new Error('OPENAI_API_KEY is not configured'), { status: 503 });
+  const prompt = String(input || '').trim();
+  if (!prompt) throw Object.assign(new Error('OpenAI text input is empty'), { status: 400 });
+  const timeoutMs = Math.max(1000, Number(options.timeoutMs || process.env.OPENAI_PHONE_TIMEOUT_MS || 9000));
+  const payload = {
+    model: options.model || process.env.OPENAI_PHONE_MODEL || process.env.OPENAI_MODEL || process.env.OPENAI_WEB_SEARCH_MODEL || DEFAULT_MODEL,
+    input: prompt,
+    max_output_tokens: Number(options.maxOutputTokens || (options.webSearch ? 2200 : 1600))
+  };
+  if (options.webSearch) {
+    payload.tools = [{ type: 'web_search', search_context_size: options.deep ? 'high' : 'medium' }];
+    payload.tool_choice = 'required';
+    payload.include = ['web_search_call.action.sources'];
+  }
+  const fetchImpl = options.fetchImpl || fetch;
+  let response;
+  try {
+    response = await fetchImpl('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (error) {
+    const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    throw Object.assign(new Error(timedOut ? 'OpenAI text fallback timed out' : 'OpenAI text fallback network error'), {
+      status: timedOut ? 408 : 503,
+      cause: error
+    });
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const status = Number(response.status || 503);
+    const message = String(data?.error?.message || ('OpenAI Responses API HTTP ' + status)).slice(0, 300);
+    throw Object.assign(new Error(message), { status });
+  }
+  const answer = extractOpenAIResponseText(data);
+  if (!answer) throw Object.assign(new Error('OpenAI text fallback returned an empty answer'), { status: 502 });
+  return answer;
+}
+
 export async function answerWithOpenAIWebSearch(question, historyText = '', options = {}) {
   const apiKey = String(options.apiKey ?? process.env.OPENAI_API_KEY ?? '').trim();
   if (!apiKey) throw Object.assign(new Error('OPENAI_API_KEY is not configured'), { status: 503 });
