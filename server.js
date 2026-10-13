@@ -2685,15 +2685,29 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
   // labeled, source-grounded snippets without calling a failed generation model again.
   // This is intentionally a fallback, not a claim that snippets equal a synthesized answer.
   if(skipSynthesis) {
-    const snippets=unique.slice(0,3).map((item,i)=>{
-      const snippet=String(item.snippet||'').trim();
-      return (i+1)+'. '+sanitizeForYemot(String(item.title||'תוצאה ברשת'))+
-        (snippet ? '. '+sanitizeForYemot(snippet).slice(0,260) : '')+
-        (item.url ? '. מקור: '+sanitizeForYemot(item.url) : '');
-    }).join(' ');
+    // A phone caller needs the useful facts, not internal failure messages or a
+    // spoken list of search-result titles. Prefer snippet text; titles are only
+    // a last resort when a provider returns no readable excerpt.
+    const usable=unique.map(item=>{
+      const snippet=sanitizeForYemot(String(item.snippet||'').trim())
+        .replace(/^\s*(?:\d+[.)、:]\s*)+/,'')
+        .replace(/\s+/g,' ')
+        .trim();
+      const title=sanitizeForYemot(String(item.title||'').trim())
+        .replace(/^\s*(?:\d+[.)、:]\s*)+/,'')
+        .replace(/\s+/g,' ')
+        .trim();
+      return {snippet,title};
+    }).filter(item=>item.snippet.length>35 || item.title.length>12);
+    const snippets=usable.slice(0,2).map(item=>{
+      // Search titles often phrase the topic as a question; reading those aloud
+      // made the old fallback sound like unrelated questions rather than an answer.
+      const text=item.snippet.length>35 ? item.snippet : item.title;
+      return text.slice(0,360).replace(/[.!?؟]+$/,'').trim();
+    }).filter(Boolean).join('. בנוסף, ');
     if(!snippets) throw Object.assign(new Error('Emergency direct fallback has no readable snippets'),{status:503});
-    console.warn('[BRANCH1 FALLBACK] returning source-grounded web snippets after answer-model outage',{results:Math.min(3,unique.length)});
-    return 'מנוע התשובות לא הצליח להשיב כרגיל. כדי לא להמציא תשובה, הנה מידע ראשוני שמצאתי ברשת: '+snippets;
+    console.warn('[BRANCH1 FALLBACK] returning concise source-grounded excerpts after answer-model outage',{results:Math.min(2,usable.length)});
+    return 'לפי המידע שמצאתי ברשת, '+snippets+'.';
   }
 
   // The direct provider is a retrieval layer, not the final answer. When Gemini
