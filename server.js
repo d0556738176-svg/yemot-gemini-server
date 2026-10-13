@@ -268,13 +268,18 @@ function geminiErrorStatus(err) {
   return match ? Number(match[1]) : 0;
 }
 
-async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null) {
+async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null, phoneBudgetOverrideMs=null) {
   if (!modelsByName.length || !modelsByName[0]?.length)
     throw Object.assign(new Error('Gemini is not configured'), {status:400});
   const groups = useWebSearch ? webModelsByName : modelsByName;
   const timeoutMs = Number(timeoutOverrideMs || (fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS));
   const maxAttempts = fastPhone ? 1 : 2;
-  const phoneDeadline = fastPhone ? Date.now() + Math.min(4000, Math.max(1000, Number(process.env.PHONE_GEMINI_TOTAL_BUDGET_MS || 4000))) : Infinity;
+  // Keep the existing short budget for shared routes, but allow branch 1 alone to
+  // try more configured models before declaring a transient provider outage.
+  const phoneBudgetMs = phoneBudgetOverrideMs == null
+    ? Math.min(4000, Math.max(1000, Number(process.env.PHONE_GEMINI_TOTAL_BUDGET_MS || 4000)))
+    : Math.min(8500, Math.max(1000, Number(phoneBudgetOverrideMs || 7500)));
+  const phoneDeadline = fastPhone ? Date.now() + phoneBudgetMs : Infinity;
   let lastError;
 
   for (let mi=0; mi<groups.length; mi++) {
@@ -340,7 +345,7 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, 
       }
     }
   }
-  if (fastPhone && Date.now() >= phoneDeadline) console.warn('[Gemini] phone generation budget exhausted; stopping sequential retries', { budgetMs:Number(process.env.PHONE_GEMINI_TOTAL_BUDGET_MS || 8500) });
+  if (fastPhone && Date.now() >= phoneDeadline) console.warn('[Gemini] phone generation budget exhausted; stopping sequential retries', { budgetMs:phoneBudgetMs });
   // All API keys in the same Google Cloud project share the project's
   // quota. If every configured model/key was rejected with 429, do not
   // manufacture a different answer or hammer the same exhausted bucket.
@@ -362,9 +367,14 @@ const branch1BackupWebModels = branch1BackupGeminiClient
   ? branch1BackupModelNames.map(model => branch1BackupGeminiClient.getGenerativeModel({model, tools:[{googleSearch:{}}]}))
   : [];
 
+let openAIBillingCooldownUntil = 0;
+
 async function generateBranch1WithFallback(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null) {
   try {
-    return await generateWithRetry(contents, useWebSearch, fastPhone, timeoutOverrideMs);
+    const branch1PhoneBudget = fastPhone
+      ? Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS || 7500)
+      : null;
+    return await generateWithRetry(contents, useWebSearch, fastPhone, timeoutOverrideMs, branch1PhoneBudget);
   } catch (primaryError) {
     const primaryStatus=geminiErrorStatus(primaryError);
     // Branch 1 now has an independent text-model fallback. Only plain text prompts
@@ -376,8 +386,12 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
           item.parts.map(part => part.text).join('\n')).join('\n\n')
       : '';
     if (textOnlyInput && String(process.env.OPENAI_API_KEY || '').trim()) {
-      try {
-        const openAITimeout = Number(timeoutOverrideMs || (fastPhone ? 9000 : 12000));
+      if (Date.now() < openAIBillingCooldownUntil) {
+        console.warn('[BRANCH1 FALLBACK] skipping OpenAI during known billing cooldown', {
+          remainingMs: openAIBillingCooldownUntil - Date.now(), useWebSearch, fastPhone
+        });
+      } else try {
+        const openAITimeout = Number(timeoutOverrideMs || (fastPhone ? 3500 : 12000));
         const answer = await answerWithOpenAIText(textOnlyInput, {
           timeoutMs: openAITimeout,
           webSearch: useWebSearch,
@@ -388,9 +402,15 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
         });
         return { response: { text: () => answer } };
       } catch (openAIError) {
+        const openAIMessage = String(openAIError?.message || openAIError);
+        const openAIStatus = geminiErrorStatus(openAIError);
+        if (openAIStatus === 429 && /no credits remaining|credit_balance_exhausted|insufficient_quota/i.test(openAIMessage)) {
+          openAIBillingCooldownUntil = Date.now() + 10 * 60 * 1000;
+          console.warn('[BRANCH1 FALLBACK] OpenAI billing unavailable; cooling down for 10 minutes', { status:openAIStatus, useWebSearch, fastPhone });
+        }
         console.warn('[BRANCH1 FALLBACK] OpenAI fallback failed; continuing to separate Gemini project', {
-          status: geminiErrorStatus(openAIError),
-          message: String(openAIError?.message || openAIError).slice(0, 220),
+          status: openAIStatus,
+          message: openAIMessage.slice(0, 220),
           useWebSearch, fastPhone
         });
       }
