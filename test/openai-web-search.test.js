@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  answerWithOpenAIText,
   answerWithOpenAIWebSearch,
   buildOpenAIWebSearchPayload,
   extractOpenAIResponseText,
@@ -53,6 +54,43 @@ test('uses the configured key and returns a successful response', async () => {
 test('reports missing key without sending a request', async () => {
   await assert.rejects(
     answerWithOpenAIWebSearch('בדיקה', '', { apiKey: '', fetchImpl: async () => { throw new Error('must not call'); } }),
+    /OPENAI_API_KEY is not configured/
+  );
+});
+
+
+test('answers ordinary phone prompts through the OpenAI Responses API without forcing web search', async () => {
+  let captured = null;
+  const answer = await answerWithOpenAIText('ענה ב-JSON בלבד: {"answer":"שלום"}', {
+    apiKey: 'test-key',
+    fetchImpl: async (url, init) => {
+      captured = { url, init, body: JSON.parse(init.body) };
+      return { ok: true, status: 200, json: async () => ({ output_text: '{"answer":"שלום"}' }) };
+    }
+  });
+  assert.equal(answer, '{"answer":"שלום"}');
+  assert.equal(captured.url, 'https://api.openai.com/v1/responses');
+  assert.equal(captured.init.headers.Authorization, 'Bearer test-key');
+  assert.equal(captured.body.tools, undefined);
+});
+
+test('enables required live web search only when the branch 1 fallback requests it', async () => {
+  let payload = null;
+  await answerWithOpenAIText('חפש באינטרנט מידע עדכני', {
+    apiKey: 'test-key',
+    webSearch: true,
+    fetchImpl: async (_url, init) => {
+      payload = JSON.parse(init.body);
+      return { ok: true, status: 200, json: async () => ({ output_text: 'תשובה לאחר חיפוש' }) };
+    }
+  });
+  assert.equal(payload.tool_choice, 'required');
+  assert.equal(payload.tools[0].type, 'web_search');
+});
+
+test('ordinary OpenAI fallback refuses to call the API without a key', async () => {
+  await assert.rejects(
+    answerWithOpenAIText('בדיקה', { apiKey: '', fetchImpl: async () => { throw new Error('must not call'); } }),
     /OPENAI_API_KEY is not configured/
   );
 });
