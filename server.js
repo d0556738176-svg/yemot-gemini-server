@@ -2482,7 +2482,9 @@ function extractDirectSearchQueries(question){
   }
   return [...new Set(queries.filter(Boolean).map(x=>x.slice(0,240)))].slice(0,5);
 }
-async function answerWithDirectWebFallback(question, historyText='', turnContext=null){
+async function answerWithDirectWebFallback(question, historyText='', turnContext=null, options={}){
+  const skipSynthesis=options?.skipSynthesis===true;
+  const searchTimeoutMs=Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS, Math.max(900, Number(options?.timeoutMs || (skipSynthesis ? 1800 : DIRECT_WEB_QUERY_TIMEOUT_MS))));
   const deepSearch=isDeepWebSearchRequest(question) || /(לעומק|מחקר מקיף|סקירה מקיפה|השוואה מקיפה)/i.test(question);
   const eventVenueLookup=isCurrentVenueEventQuestion(question);
   const openSiteRequest=isWebsiteNavigationRequest(question) || /(פתח|תפתח|תיכנס|תכנס|קרא|תקרא).{0,35}(אתר|עמוד|דף|קישור)/i.test(question) || /^(?:אז\s*)?(?:תפתח|פתח)\s+(?:לי\s+)?את\s+[^?!.]+$/i.test(question);
@@ -2504,7 +2506,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     );
   }
   const settled=await Promise.allSettled(firstPass.map(q=>searchWebDirect(q,{
-    timeoutMs:Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,deepSearch?4200:3200),
+    timeoutMs:Math.min(searchTimeoutMs,deepSearch?4200:3200),
     deep:deepSearch
   })));
   const all=[];
@@ -2677,6 +2679,21 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
 
   if(openSiteRequest && !websitePageContentRead) {
     return 'מצאתי את כתובת האתר, אבל לא הצלחתי לקרוא את תוכן הדף עצמו. ייתכן שהאתר חוסם קריאה אוטומטית או דורש התחברות. לא אציג קישור כאילו קראתי את הדף.';
+  }
+
+  // Emergency branch-1 path: if all answer models are down, return a few clearly
+  // labeled, source-grounded snippets without calling a failed generation model again.
+  // This is intentionally a fallback, not a claim that snippets equal a synthesized answer.
+  if(skipSynthesis) {
+    const snippets=unique.slice(0,3).map((item,i)=>{
+      const snippet=String(item.snippet||'').trim();
+      return (i+1)+'. '+sanitizeForYemot(String(item.title||'תוצאה ברשת'))+
+        (snippet ? '. '+sanitizeForYemot(snippet).slice(0,260) : '')+
+        (item.url ? '. מקור: '+sanitizeForYemot(item.url) : '');
+    }).join(' ');
+    if(!snippets) throw Object.assign(new Error('Emergency direct fallback has no readable snippets'),{status:503});
+    console.warn('[BRANCH1 FALLBACK] returning source-grounded web snippets after answer-model outage',{results:Math.min(3,unique.length)});
+    return 'מנוע התשובות לא הצליח להשיב כרגיל. כדי לא להמציא תשובה, הנה מידע ראשוני שמצאתי ברשת: '+snippets;
   }
 
   // The direct provider is a retrieval layer, not the final answer. When Gemini
@@ -3453,7 +3470,31 @@ async function callHandler(call) {
       }
     } catch(e) {
       logDetailedError('Gemini processing',e);
-      replyText=e.status===429?'מצטערים מנוע התשובות הגיע כרגע למגבלת השימוש נסה שוב בעוד כמה רגעים':
+      const providerStatus=geminiErrorStatus(e);
+      const eligibleForQuickWebFallback=!!userTranscript && userTranscript.length>=3 &&
+        [408,429,500,502,503,504].includes(providerStatus) &&
+        !isLongAnswerRequest(userTranscript) &&
+        !shouldForceWebSearch(userTranscript) &&
+        !isWeatherQuestion(userTranscript) && !isNewsQuestion(userTranscript) &&
+        !isTransitRequest(userTranscript) &&
+        !isMultimodalAnalysisRequest(userTranscript).any &&
+        !isVisualContinuationRequest(userTranscript,historyText) &&
+        !isWebsiteCapabilityQuestion(userTranscript) && !isWebsiteNavigationRequest(userTranscript) &&
+        !isGenericWebsiteRequest(userTranscript) && !extractExplicitHttpUrl(userTranscript) &&
+        !isPhoneNumberRequest(userTranscript) && !isPharmacySearchRequest(userTranscript) &&
+        !isBusinessHoursRequest(userTranscript);
+      if(eligibleForQuickWebFallback) {
+        try {
+          const directFallback=await answerWithDirectWebFallback(userTranscript,historyText,turnContext,{skipSynthesis:true,timeoutMs:1800});
+          if(directFallback && String(directFallback).trim()) {
+            replyText=String(directFallback).trim();
+            console.info('[CALL_FLOW] quick_web_fallback_used_after_model_failure',{callId:activeKey,status:providerStatus,chars:replyText.length});
+          }
+        } catch(fallbackError) {
+          console.warn('[CALL_FLOW] quick web fallback unavailable',{callId:activeKey,status:geminiErrorStatus(fallbackError)});
+        }
+      }
+      if(!replyText) replyText=e.status===429?'מצטערים מנוע התשובות הגיע כרגע למגבלת השימוש נסה שוב בעוד כמה רגעים':
         e.status===503?'מצטערים מנוע התשובות אינו זמין כרגע נסה שוב בעוד רגע':
         e.status===408?'מצטערים לקח יותר מדי זמן לענות נסה שוב':
         'מצטער הייתה תקלה זמנית בעיבוד השאלה אפשר לנסות שוב';
