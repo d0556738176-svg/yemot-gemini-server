@@ -12,6 +12,7 @@ import { rankWebsitePages } from './website-relevance.js';
 import { readPublicWebsitePages } from './website-reader.js';
 import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
 import { answerWithOpenAIText, answerWithOpenAIWebSearch, isOpenAIWebSearchRequest, stripOpenAIWebSearchPrefix } from './openai-web-search.js';
+import { createCooldownRegistry } from './provider-cooldowns.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -116,7 +117,7 @@ const MEDIA_MAX_CANDIDATES = Number(process.env.MEDIA_MAX_CANDIDATES || 6);
 // Avoid repeatedly hammering Gemini after the API has explicitly reported quota exhaustion.
 // This is especially important on phone calls, where a second fallback request can turn one
 // quota event into several consecutive failures.
-const GEMINI_QUOTA_COOLDOWN_MS = Number(process.env.GEMINI_QUOTA_COOLDOWN_MS || 15000);
+const GEMINI_QUOTA_COOLDOWN_MS = Number(process.env.GEMINI_QUOTA_COOLDOWN_MS || 120000);
 // Cool down a specific model/key after a 429 so every new phone turn does not
 // repeatedly hit the same exhausted bucket before moving to a healthy fallback.
 const geminiQuotaCooldowns = new Map();
@@ -368,14 +369,35 @@ const branch1BackupWebModels = branch1BackupGeminiClient
   : [];
 
 let openAIBillingCooldownUntil = 0;
+// Branch 1 should stop repeatedly calling a provider after quota/overload failures.
+// This is deliberately isolated from the primary/backup call handlers for other branches.
+const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:90000, transientMs:25000});
+const branch1BackupCooldowns = createCooldownRegistry({quotaMs:90000, transientMs:25000});
 
 async function generateBranch1WithFallback(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null) {
-  try {
-    const branch1PhoneBudget = fastPhone
-      ? Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS || 7500)
-      : null;
-    return await generateWithRetry(contents, useWebSearch, fastPhone, timeoutOverrideMs, branch1PhoneBudget);
-  } catch (primaryError) {
+  let primaryError;
+  if (branch1PrimaryCooldown.isCoolingDown('primary')) {
+    const remainingMs=branch1PrimaryCooldown.remainingMs('primary');
+    primaryError=Object.assign(new Error('Branch 1 primary Gemini provider cooling down after recent failures'),{status:503});
+    console.warn('[BRANCH1 FALLBACK] skipping primary Gemini during provider cooldown',{remainingMs,useWebSearch,fastPhone});
+  } else {
+    try {
+      const branch1PhoneBudget = fastPhone
+        ? Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS || 7500)
+        : null;
+      const primaryResult=await generateWithRetry(contents, useWebSearch, fastPhone, timeoutOverrideMs, branch1PhoneBudget);
+      branch1PrimaryCooldown.clear('primary');
+      return primaryResult;
+    } catch (error) {
+      primaryError=error;
+      const status=geminiErrorStatus(error);
+      if ([429,408,500,502,503,504].includes(status)) {
+        const cooldownMs=branch1PrimaryCooldown.cool('primary',status);
+        console.warn('[BRANCH1 FALLBACK] opening primary Gemini circuit after provider failure',{status,cooldownMs,useWebSearch,fastPhone});
+      }
+    }
+  }
+  {
     const primaryStatus=geminiErrorStatus(primaryError);
     // Branch 1 now has an independent text-model fallback. Only plain text prompts
     // are eligible; audio/image payloads must never be flattened into text.
@@ -431,6 +453,13 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
 
     for(let i=0;i<models.length;i++) {
       if(fastPhone && Date.now()>=backupDeadline) break;
+      const backupModelKey=branch1BackupModelNames[i];
+      if(branch1BackupCooldowns.isCoolingDown(backupModelKey)) {
+        console.warn('[BRANCH1 FALLBACK] skipping backup model during cooldown',{
+          model:backupModelKey,remainingMs:branch1BackupCooldowns.remainingMs(backupModelKey),fastPhone
+        });
+        continue;
+      }
       try {
         const request={
           contents,
@@ -444,15 +473,23 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
           attemptTimeoutMs,
           'branch1 backup Gemini '+branch1BackupModelNames[i]
         );
+        branch1BackupCooldowns.clear(backupModelKey);
         console.info('[BRANCH1 FALLBACK] backup Project succeeded', {
           model:branch1BackupModelNames[i], useWebSearch, fastPhone
         });
         return result;
       } catch(e) {
         lastError=e;
+        const status=geminiErrorStatus(e);
+        if ([429,408,500,502,503,504].includes(status)) {
+          const cooldownMs=branch1BackupCooldowns.cool(backupModelKey,status);
+          console.warn('[BRANCH1 FALLBACK] cooling down failed backup model',{
+            model:backupModelKey,status,cooldownMs,useWebSearch,fastPhone
+          });
+        }
         console.warn('[BRANCH1 FALLBACK] backup model failed', {
           model:branch1BackupModelNames[i],
-          status:geminiErrorStatus(e),
+          status,
           useWebSearch, fastPhone
         });
       }
