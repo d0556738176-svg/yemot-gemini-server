@@ -62,3 +62,39 @@ test('missing credentials fail closed without making a request', async () => {
   );
   assert.equal(calls, 0);
 });
+
+test('429 honors Retry-After and never exposes provider response body', async () => {
+  const cooldowns = new Map();
+  let calls = 0;
+  const options = {
+    ...base, cooldowns, now: () => 1000, cooldownMs: 5000,
+    fetchImpl: async () => {
+      calls++;
+      return {
+        ok: false, status: 429,
+        headers: { get: name => name.toLowerCase() === 'retry-after' ? '120' : null },
+        text: async () => 'SECRET_PROVIDER_RESPONSE_SHOULD_NOT_APPEAR'
+      };
+    }
+  };
+  await assert.rejects(callCompatibleChatCompletion(options), error =>
+    error.status === 429 &&
+    !error.message.includes('SECRET_PROVIDER_RESPONSE_SHOULD_NOT_APPEAR')
+  );
+  await assert.rejects(callCompatibleChatCompletion(options), error =>
+    error.status === 429 && error.coolingDown === true && error.retryAfterMs === 120000
+  );
+  assert.equal(calls, 1);
+});
+
+test('402 credit exhaustion sets a quota cooldown without exposing body', async () => {
+  const cooldowns = new Map();
+  await assert.rejects(callCompatibleChatCompletion({
+    ...base, cooldowns, now: () => 1000,
+    fetchImpl: async () => ({
+      ok: false, status: 402,
+      text: async () => 'sensitive account details'
+    })
+  }), error => error.status === 402 && !error.message.includes('sensitive'));
+  assert.equal(cooldowns.get('Groq'), 91000);
+});
