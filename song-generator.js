@@ -26,8 +26,53 @@ function statusOf(provider) {
   const state = providerHealth.get(provider);
   if (!state) return { status: 'available', cooldownUntil: 0 };
   if (state.cooldownUntil > Date.now()) return { ...state, status: state.status };
-  if (state.status !== 'disabled') providerHealth.set(provider, { status: 'available', cooldownUntil: 0 });
+  // A transient or configuration failure must never disable a provider forever.
+  // Once its bounded cooldown expires, allow a fresh health attempt.
+  if (state.status !== 'available') providerHealth.set(provider, { status: 'available', cooldownUntil: 0 });
   return providerHealth.get(provider) || { status: 'available', cooldownUntil: 0 };
+}
+
+export function classifyProviderFailure(status) {
+  const code = Number(status || 0);
+  if (code === 429) return { status: 'rate_limited', cooldownMs: 60000 };
+  if ([400, 413, 422].includes(code)) return { status: 'disabled', cooldownMs: 30000 };
+  if ([401, 403, 404].includes(code)) return { status: 'disabled', cooldownMs: 60000 };
+  // Network errors, timeouts, and 5xx responses are temporary unless proven otherwise.
+  return { status: 'temporary_error', cooldownMs: 15000 };
+}
+
+async function readAudioResponseLimited(response, maxBytes, label) {
+  const declaredLength = Number(response.headers.get('content-length') || 0);
+  if (declaredLength > maxBytes) {
+    throw Object.assign(new Error(label + ' exceeded size limit'), { status: 413 });
+  }
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length || buffer.length > maxBytes) {
+      throw Object.assign(new Error(label + ' is empty or exceeds size limit'), { status: buffer.length ? 413 : 502 });
+    }
+    return buffer;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw Object.assign(new Error(label + ' exceeded size limit'), { status: 413 });
+    }
+    chunks.push(Buffer.from(value));
+  }
+  if (!total) throw Object.assign(new Error(label + ' returned an empty audio file'), { status: 502 });
+  return Buffer.concat(chunks, total);
+}
+
+function isSupportedAudioContentType(contentType) {
+  const type = String(contentType || '').toLowerCase().split(';')[0].trim();
+  return type.startsWith('audio/') || type === 'application/octet-stream' || type === 'binary/octet-stream';
 }
 
 function markProvider(provider, status, cooldownMs = 0) {
@@ -269,10 +314,12 @@ export async function generateWithAceStep(spec) {
     method: 'GET',
     headers: aceStepHeaders(false)
   }, Math.min(30000, totalTimeout), 'ACE-Step audio download');
-  const audio = Buffer.from(await audioResponse.arrayBuffer());
-  if (!audio.length || audio.length > MAX_AUDIO_BYTES) throw new Error('ACE-Step returned an empty or oversized audio file');
   const type = String(audioResponse.headers.get('content-type') || '').toLowerCase();
-  return { audio, provider: 'ace-step', model: String(process.env.ACESTEP_MODEL || 'acestep-v15-turbo'), contentType: type.includes('audio') ? type : 'audio/mpeg' };
+  if (!isSupportedAudioContentType(type)) {
+    throw Object.assign(new Error('ACE-Step returned a non-audio response'), { status: 502, provider: 'ace-step' });
+  }
+  const audio = await readAudioResponseLimited(audioResponse, MAX_AUDIO_BYTES, 'ACE-Step audio');
+  return { audio, provider: 'ace-step', model: String(process.env.ACESTEP_MODEL || 'acestep-v15-turbo'), contentType: type };
 }
 
 async function generateWithBackup(spec) {
@@ -292,14 +339,17 @@ async function generateWithBackup(spec) {
   }, Math.min(JOB_TIMEOUT_MS, 90000), 'Backup music provider');
   const type = String(response.headers.get('content-type') || '').toLowerCase();
   if (type.includes('application/json')) throw new Error('Backup provider contract requires an audio-byte response, not JSON');
-  const audio = Buffer.from(await response.arrayBuffer());
-  if (!audio.length || audio.length > MAX_AUDIO_BYTES) throw new Error('Backup provider returned an empty or oversized audio file');
-  return { audio, provider: 'backup', model: String(process.env.MUSIC_BACKUP_MODEL || 'configured-provider'), contentType: type || 'application/octet-stream' };
+  if (!isSupportedAudioContentType(type)) {
+    throw Object.assign(new Error('Backup provider returned a non-audio response'), { status: 502 });
+  }
+  const audio = await readAudioResponseLimited(response, MAX_AUDIO_BYTES, 'Backup audio');
+  return { audio, provider: 'backup', model: String(process.env.MUSIC_BACKUP_MODEL || 'configured-provider'), contentType: type };
 }
 
 async function generateAudio(spec) {
   const aceState = statusOf('ace-step');
   const aceConfigured = !!String(process.env.ACESTEP_API_URL || '').trim() && !!String(process.env.ACESTEP_API_KEY || '').trim();
+  let aceError = null;
   if (aceConfigured && aceState.status !== 'disabled' && aceState.cooldownUntil <= Date.now()) {
     try {
       log('MUSIC_PROVIDER_SELECTED', { provider: 'ace-step', model: String(process.env.ACESTEP_MODEL || 'acestep-v15-turbo') });
@@ -307,11 +357,10 @@ async function generateAudio(spec) {
       markProvider('ace-step', 'available');
       return result;
     } catch (error) {
+      aceError = error;
       const status = httpStatus(error);
-      const limited = status === 429;
-      const temporary = status === 408 || status === 500 || status === 502 || status === 503 || status === 504;
-      markProvider('ace-step', limited ? 'rate_limited' : temporary ? 'temporary_error' : 'disabled',
-        limited ? 60000 : temporary ? 15000 : 0);
+      const failure = classifyProviderFailure(status);
+      markProvider('ace-step', failure.status, failure.cooldownMs);
       log('MUSIC_PROVIDER_FAILED', { provider: 'ace-step', status: status || 'unknown' });
       if (!shouldFallbackToBackup(status)) throw error;
     }
@@ -331,7 +380,12 @@ async function generateAudio(spec) {
       throw error;
     }
   }
-  throw Object.assign(new Error('ACE-Step is not configured and no backup music provider is configured'), { status: 503 });
+  if (aceError) throw aceError;
+  throw Object.assign(new Error(
+    aceConfigured
+      ? 'Music provider is temporarily unavailable and no backup provider is configured'
+      : 'ACE-Step is not configured and no backup music provider is configured'
+  ), { status: 503 });
 }
 
 function runFfmpeg(args, timeoutMs = 30000) {
