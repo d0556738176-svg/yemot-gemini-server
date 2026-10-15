@@ -80,7 +80,6 @@ function valueFor(parameter, spec) {
   if (name === 'score_scale') return 0.5;
   if (name === 'lm_batch_chunk_size') return 8;
   if (name === 'instrumental_checkbox') return false;
-  if (name === 'guidance_scale') return 1;
   if (name.includes('lm_temperature')) return 0.85;
   if (parameter && Object.prototype.hasOwnProperty.call(parameter, 'parameter_default')) {
     return parameter.parameter_default;
@@ -101,7 +100,11 @@ function chooseEndpoint(info) {
   if (!candidates.length) {
     throw Object.assign(new Error('ACE-Step Space API schema has no endpoint accepting both caption and lyrics'), { status: 502 });
   }
-  const preferred = candidates.find(([name]) => /generate_with_progress|generate_music/i.test(name));
+  // The current official Space binds its Generate button through generation_wrapper.
+  // Older builds exposed generate_with_progress or generate_with_batch_management.
+  const preferred = candidates.find(([name]) => /generation_wrapper/i.test(name)) ||
+    candidates.find(([name]) => /generate_with_batch_management/i.test(name)) ||
+    candidates.find(([name]) => /generate_with_progress|generate_music/i.test(name));
   const [name, schema] = preferred || candidates[0];
   return { name: name.startsWith('/') ? name : '/' + name, schema };
 }
