@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAceStepPayload, normalizeSongRequest } from './song-generator.js';
+import { buildAceStepPayload, normalizeSongRequest, shouldFallbackToBackup, classifyProviderFailure } from './song-generator.js';
 
 test('ACE-Step payload preserves requested Hebrew lyrics and voice language', () => {
   const payload = buildAceStepPayload({
@@ -89,4 +89,21 @@ test('ACE-Step adapter submits, polls, and downloads audio using authenticated A
       else process.env[key] = value;
     }
   }
+});
+
+
+test('provider failures use bounded cooldowns and recover after the cooldown', () => {
+  assert.deepEqual(classifyProviderFailure(429), { status: 'rate_limited', cooldownMs: 60000 });
+  assert.deepEqual(classifyProviderFailure(401), { status: 'disabled', cooldownMs: 60000 });
+  assert.deepEqual(classifyProviderFailure(400), { status: 'disabled', cooldownMs: 30000 });
+  assert.deepEqual(classifyProviderFailure(0), { status: 'temporary_error', cooldownMs: 15000 });
+  assert.deepEqual(classifyProviderFailure(503), { status: 'temporary_error', cooldownMs: 15000 });
+});
+
+test('backup is not attempted for invalid client payloads but can recover from provider outages', () => {
+  assert.equal(shouldFallbackToBackup(400), false);
+  assert.equal(shouldFallbackToBackup(413), false);
+  assert.equal(shouldFallbackToBackup(422), false);
+  assert.equal(shouldFallbackToBackup(429), true);
+  assert.equal(shouldFallbackToBackup(503), true);
 });
