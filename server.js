@@ -270,7 +270,7 @@ function geminiErrorStatus(err) {
   return match ? Number(match[1]) : 0;
 }
 
-async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null, phoneBudgetOverrideMs=null) {
+async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null, phoneBudgetOverrideMs=null, stopOnQuota=false) {
   if (!modelsByName.length || !modelsByName[0]?.length)
     throw Object.assign(new Error('Gemini is not configured'), {status:400});
   const groups = useWebSearch ? webModelsByName : modelsByName;
@@ -321,10 +321,14 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, 
           if (status === 429) {
             lastGeminiQuotaError = e;
             geminiQuotaCooldowns.set(cooldownKey, Date.now() + GEMINI_QUOTA_COOLDOWN_MS);
-            console.warn('[Gemini] quota/rate limit; cooling down this model/key and trying next', {
+            console.warn('[Gemini] quota/rate limit; cooling down this model/key', {
               model: MODEL_NAMES[mi], key: ki + 1, status, fastPhone,
-              cooldownMs: GEMINI_QUOTA_COOLDOWN_MS
+              cooldownMs: GEMINI_QUOTA_COOLDOWN_MS,
+              stopOnQuota
             });
+            // Branch 1 must not burn time probing more keys/models after a project-level
+            // quota signal. Its isolated fallback chain will try non-Google providers.
+            if (stopOnQuota) throw e;
             break;
           }
           if (status === 404) {
@@ -380,7 +384,7 @@ console.info('[BRANCH1 FALLBACK] independent provider configuration', {
 });
 // Branch 1 should stop repeatedly calling a provider after quota/overload failures.
 // This is deliberately isolated from the primary/backup call handlers for other branches.
-const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:90000, transientMs:25000});
+const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:GEMINI_QUOTA_COOLDOWN_MS, transientMs:25000});
 const branch1BackupCooldowns = createCooldownRegistry({quotaMs:90000, transientMs:25000});
 
 async function generateBranch1WithFallback(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null) {
@@ -394,7 +398,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
       const branch1PhoneBudget = fastPhone
         ? Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS || 7500)
         : null;
-      const primaryResult=await generateWithRetry(contents, useWebSearch, fastPhone, timeoutOverrideMs, branch1PhoneBudget);
+      const primaryResult=await generateWithRetry(contents, useWebSearch, fastPhone, timeoutOverrideMs, branch1PhoneBudget, true);
       branch1PrimaryCooldown.clear('primary');
       return primaryResult;
     } catch (error) {
