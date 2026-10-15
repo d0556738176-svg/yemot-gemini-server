@@ -93,20 +93,49 @@ function chooseEndpoint(info) {
   if (!endpoints || typeof endpoints !== 'object') {
     throw Object.assign(new Error('ACE-Step Space did not expose named Gradio API endpoints'), { status: 502 });
   }
-  const candidates = Object.entries(endpoints).filter(([, schema]) => {
+  // Current official Space exposes generation_wrapper with generic names for
+  // many positional inputs because its Python signature uses *args.
+  const generationEntry = Object.entries(endpoints).find(([name]) => /(^|\/)generation_wrapper$/.test(name));
+  if (generationEntry) {
+    const [name, schema] = generationEntry;
+    return { name: name.startsWith('/') ? name : '/' + name, schema, positional: true };
+  }
+  // Older builds may expose the generation function directly. Never select a
+  // caption/lyrics formatting endpoint as a substitute for audio generation.
+  const candidates = Object.entries(endpoints).filter(([name, schema]) => {
+    if (!/generate_with_progress|generate_with_batch_management|generate_music/i.test(name)) return false;
     const params = Array.isArray(schema?.parameters) ? schema.parameters.map(parameterName) : [];
-    return params.some(name => name.includes('caption')) && params.some(name => name.includes('lyrics'));
+    return params.some(value => value.includes('caption')) && params.some(value => value.includes('lyrics'));
   });
   if (!candidates.length) {
-    throw Object.assign(new Error('ACE-Step Space API schema has no endpoint accepting both caption and lyrics'), { status: 502 });
+    throw Object.assign(new Error('ACE-Step Space API schema does not expose a supported music-generation endpoint'), { status: 502 });
   }
-  // The current official Space binds its Generate button through generation_wrapper.
-  // Older builds exposed generate_with_progress or generate_with_batch_management.
-  const preferred = candidates.find(([name]) => /generation_wrapper/i.test(name)) ||
-    candidates.find(([name]) => /generate_with_batch_management/i.test(name)) ||
-    candidates.find(([name]) => /generate_with_progress|generate_music/i.test(name));
-  const [name, schema] = preferred || candidates[0];
-  return { name: name.startsWith('/') ? name : '/' + name, schema };
+  const [name, schema] = candidates[0];
+  return { name: name.startsWith('/') ? name : '/' + name, schema, positional: false };
+}
+
+function defaultParameterValue(parameter) {
+  if (parameter && Object.prototype.hasOwnProperty.call(parameter, 'parameter_default')) return parameter.parameter_default;
+  if (parameter && Object.prototype.hasOwnProperty.call(parameter, 'default')) return parameter.default;
+  return null;
+}
+
+function generationWrapperData(parameters, spec) {
+  // Verified against the current official Space schema: the generation_wrapper
+  // has 49 positional inputs; caption/lyrics and most settings are named param_N.
+  if (parameters.length !== 49) {
+    throw Object.assign(new Error('Unsupported ACE-Step generation_wrapper schema length: ' + parameters.length), { status: 502 });
+  }
+  const data = parameters.map(defaultParameterValue);
+  data[1] = 'custom'; // generation_mode
+  data[4] = String(spec.musicPrompt || ''); // captions
+  data[5] = String(spec.lyrics || '');
+  data[9] = String(spec.language || 'he'); // vocal_language
+  data[15] = Math.max(30, Math.min(60, Number(spec.durationSeconds) || 45)); // audio_duration
+  data[16] = 1; // one audio per request to conserve shared GPU quota
+  data[23] = 'text2music'; // task_type
+  data[30] = 'mp3'; // audio_format
+  return data;
 }
 
 function findAudioFile(value, depth = 0) {
@@ -193,10 +222,14 @@ export async function generateWithHuggingFaceSpace(spec) {
   const infoUrl = new URL('/gradio_api/info', base);
   const infoResponse = await request(infoUrl, { headers: authHeaders() }, Math.min(timeoutMs, 15000), 'ACE-Step Space schema');
   const info = await infoResponse.json();
-  const { name, schema } = chooseEndpoint(info);
+  const { name, schema, positional } = chooseEndpoint(info);
   const parameters = Array.isArray(schema.parameters) ? schema.parameters : [];
-  const data = parameters.map(parameter => valueFor(parameter, spec));
-  if (!data.some((value, index) => parameterName(parameters[index]).includes('caption') && value) ||
+  const data = positional ? generationWrapperData(parameters, spec) : parameters.map(parameter => valueFor(parameter, spec));
+  if (positional) {
+    if (!data[4] || !data[5]) {
+      throw Object.assign(new Error('ACE-Step Space generation schema did not accept the requested caption and lyrics'), { status: 502 });
+    }
+  } else if (!data.some((value, index) => parameterName(parameters[index]).includes('caption') && value) ||
       !data.some((value, index) => parameterName(parameters[index]).includes('lyrics') && value)) {
     throw Object.assign(new Error('ACE-Step Space API schema did not accept the requested caption and lyrics'), { status: 502 });
   }
