@@ -43,15 +43,17 @@ function valueFor(parameter, spec) {
   if (name.includes('caption') || name === 'prompt' || name.includes('music_prompt')) return spec.musicPrompt || '';
   if (name.includes('lyrics')) return spec.lyrics || '';
   if (name.includes('vocal_language') || name === 'language') return spec.language || 'he';
+  // Match ACE-Step v1.5 Gradio defaults for fields not specified by the caller.
   if (name.includes('audio_duration') || name === 'duration') return Math.max(30, Math.min(60, Number(spec.durationSeconds) || 45));
   if (name.includes('task_type')) return 'text2music';
   if (name.includes('audio_format')) return 'mp3';
   if (name.includes('inference_steps')) return 8;
   if (name.includes('batch_size')) return 1;
   if (name.includes('random_seed_checkbox') || name.includes('use_random_seed')) return true;
-  if (name === 'seed') return -1;
-  if (name === 'bpm') return 0;
-  if (name.includes('key_scale') || name.includes('time_signature')) return 'NO USER INPUT';
+  if (name === 'seed') return '-1';
+  if (name === 'bpm') return null;
+  if (name.includes('key_scale')) return '';
+  if (name.includes('time_signature')) return '';
   if (name.includes('guidance_scale')) return 1;
   if (name.includes('reference_audio') || name === 'src_audio') return null;
   if (name.includes('audio_code')) return '';
@@ -62,6 +64,23 @@ function valueFor(parameter, spec) {
   if (name.includes('use_adg')) return false;
   if (name.includes('cfg_interval_start')) return 0;
   if (name.includes('cfg_interval_end')) return 1;
+  if (name === 'shift') return 3;
+  if (name === 'infer_method') return 'ode';
+  if (name === 'custom_timesteps') return '';
+  if (name === 'think_checkbox') return true;
+  if (name === 'lm_cfg_scale') return 2;
+  if (name === 'lm_top_k') return 0;
+  if (name === 'lm_top_p') return 0.9;
+  if (name === 'lm_negative_prompt') return 'NO USER INPUT';
+  if (name === 'use_cot_metas' || name === 'use_cot_caption' || name === 'use_cot_language') return true;
+  if (name === 'is_format_caption') return false;
+  if (name === 'constrained_decoding_debug') return false;
+  if (name === 'allow_lm_batch') return true;
+  if (name === 'auto_score' || name === 'auto_lrc') return false;
+  if (name === 'score_scale') return 0.5;
+  if (name === 'lm_batch_chunk_size') return 8;
+  if (name === 'instrumental_checkbox') return false;
+  if (name === 'guidance_scale') return 1;
   if (name.includes('lm_temperature')) return 0.85;
   if (parameter && Object.prototype.hasOwnProperty.call(parameter, 'parameter_default')) {
     return parameter.parameter_default;
