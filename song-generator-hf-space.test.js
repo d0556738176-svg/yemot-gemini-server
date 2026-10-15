@@ -11,11 +11,17 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
   };
   const calls = [];
   process.env.HF_MUSIC_SPACE_URL = 'https://ace-step-ace-step-v1-5.hf.space';
-  delete process.env.HF_TOKEN;
+  process.env.HF_TOKEN = 'unit-test-token';
   process.env.SONG_GENERATION_TIMEOUT_MS = '30000';
   globalThis.fetch = async (input, options = {}) => {
     const url = new URL(String(input));
-    calls.push({ path: url.pathname, method: options.method || 'GET', body: options.body });
+    calls.push({
+      path: url.pathname,
+      method: options.method || 'GET',
+      body: options.body,
+      authorization: options.headers?.authorization
+    });
+    assert.equal(options.headers?.authorization, 'Bearer unit-test-token');
     if (url.pathname === '/gradio_api/info') {
       const defaults = {
         0: 'acestep-v15-xl-turbo', 1: 'custom', 3: 'unknown', 6: 0, 7: '', 8: '',
