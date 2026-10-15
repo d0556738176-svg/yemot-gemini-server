@@ -17,6 +17,9 @@ ACE-Step is a separate Python/GPU service; it is not installed inside the Node/R
 
 - `ACESTEP_API_URL`: base URL of the separately hosted ACE-Step API (HTTPS required outside localhost).
 - `ACESTEP_API_KEY`: same secret configured as `ACESTEP_API_KEY` on the ACE-Step server.
+- `HF_MUSIC_SPACE_ENABLED`: optional opt-in (`true`/`false`, default `false`) to try the public Hugging Face ACE-Step Gradio Space when the direct ACE-Step API is unavailable or not configured. This is quota-limited and has no uptime guarantee; use for isolated testing only.
+- `HF_MUSIC_SPACE_URL`: defaults to `https://ace-step-ace-step-v1-5.hf.space`.
+- `HF_TOKEN`: optional Hugging Face access token; keep it only in Render secrets, never in source code or logs. The public Space can be called without it, but anonymous requests have stricter limits.
 - `ACESTEP_MODEL`: defaults to `acestep-v15-turbo`.
 - `ENABLE_BRANCH4`: must be explicitly set to `true` before automatic Yemot extension 4 setup is attempted; default is `false`.
 - `YEMOT_API_KEY`: existing Yemot upload credential.
@@ -25,7 +28,7 @@ ACE-Step is a separate Python/GPU service; it is not installed inside the Node/R
 - `SONG_MAX_CONCURRENT`, `SONG_MAX_QUEUE`, `SONG_MAX_PER_HOUR`: generation safeguards.
 - Optional `MUSIC_BACKUP_API_URL` and `MUSIC_BACKUP_API_KEY`: only use a verified provider whose API returns raw audio bytes.
 
-The ACE-Step API uses `/release_task`, `/query_result`, and `/v1/audio`. Responses, task failures, timeout, output size, and audio origin are checked. The default config leaves extension 4 untouched.
+The direct ACE-Step API uses `/release_task`, `/query_result`, and `/v1/audio`. The optional Hugging Face adapter discovers the Space's documented Gradio endpoint schema, submits through the queue API, polls for completion, and downloads audio only from the configured Space origin. Responses, task failures, timeout, output size, and audio origin are checked. The default config leaves extension 4 untouched.
 
 ## Validation and deployment safety
 
