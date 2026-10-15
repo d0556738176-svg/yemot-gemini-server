@@ -98,3 +98,38 @@ test('402 credit exhaustion sets a quota cooldown without exposing body', async 
   }), error => error.status === 402 && !error.message.includes('sensitive'));
   assert.equal(cooldowns.get('Groq'), 91000);
 });
+
+
+test('timeout while reading the response body is classified and cooled down', async () => {
+  const cooldowns = new Map();
+  await assert.rejects(callCompatibleChatCompletion({
+    ...base,
+    cooldowns,
+    now: () => 5000,
+    cooldownMs: 7000,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        throw error;
+      }
+    })
+  }), error => error.status === 408 && /response timed out/.test(error.message));
+  assert.equal(cooldowns.get('Groq'), 12000);
+});
+
+test('invalid credentials receive a longer cooldown without exposing response body', async () => {
+  const cooldowns = new Map();
+  await assert.rejects(callCompatibleChatCompletion({
+    ...base,
+    cooldowns,
+    now: () => 2000,
+    fetchImpl: async () => ({
+      ok: false,
+      status: 401,
+      text: async () => 'private credential diagnostics'
+    })
+  }), error => error.status === 401 && !error.message.includes('private credential diagnostics'));
+  assert.equal(cooldowns.get('Groq'), 602000);
+});

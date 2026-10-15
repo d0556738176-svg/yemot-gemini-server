@@ -103,6 +103,12 @@ export async function callCompatibleChatCompletion({
     try {
       data = await response.json();
     } catch (error) {
+      // The request timer remains active while the response body is being read.
+      // Treat an abort here as a timeout too, rather than mislabeling it invalid JSON.
+      if (controller.signal.aborted || error?.name === 'AbortError') {
+        cooldowns.set(provider, now() + cooldownMs);
+        throw makeProviderError(provider + ' response timed out', 408, provider, { cause: error });
+      }
       cooldowns.set(provider, now() + cooldownMs);
       throw makeProviderError(provider + ' returned invalid JSON', 502, provider, { cause: error });
     }
