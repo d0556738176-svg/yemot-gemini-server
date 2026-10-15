@@ -434,7 +434,8 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
       for (const provider of independentProviders) {
         if (!provider.apiKey) continue;
         try {
-          const timeoutMs = Number(timeoutOverrideMs || provider.timeoutMs);
+          // Keep alternate providers on their own strict latency budget; a long-answer Gemini timeout must not turn a phone fallback into a 90-second wait.
+          const timeoutMs = provider.timeoutMs;
           const answer = await callCompatibleChatCompletion({
             provider: provider.name,
             baseUrl: provider.baseUrl,
