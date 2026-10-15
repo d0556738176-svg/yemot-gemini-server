@@ -22,6 +22,14 @@ services:
         sync: false
       - key: TAVILY_API_KEY
         sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: openrouter/free
       - key: YOUTUBE_API_KEY
         sync: false
       - key: YOUTUBE_REGION_CODE
