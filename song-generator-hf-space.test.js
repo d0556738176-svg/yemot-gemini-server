@@ -19,7 +19,7 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
     if (url.pathname === '/gradio_api/info') {
       return new Response(JSON.stringify({
         named_endpoints: {
-          '/generate_with_progress': {
+          '/generation_wrapper': {
             parameters: [
               { parameter_name: 'captions' },
               { parameter_name: 'lyrics' },
@@ -32,7 +32,7 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
         }
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
-    if (url.pathname === '/gradio_api/call/generate_with_progress') {
+    if (url.pathname === '/gradio_api/call/generation_wrapper') {
       const payload = JSON.parse(options.body);
       assert.equal(payload.data[0], 'Hebrew pop, energetic');
       assert.equal(payload.data[1], 'מילים לבדיקה');
@@ -42,7 +42,7 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
         status: 200, headers: { 'content-type': 'application/json' }
       });
     }
-    if (url.pathname === '/gradio_api/call/generate_with_progress/event-123') {
+    if (url.pathname === '/gradio_api/call/generation_wrapper/event-123') {
       return new Response('event: complete\ndata: [{"url":"/gradio_api/file=/tmp/song.mp3","path":"/tmp/song.mp3"}]\n\n', {
         status: 200, headers: { 'content-type': 'text/event-stream' }
       });
