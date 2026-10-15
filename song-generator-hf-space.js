@@ -127,6 +127,7 @@ function generationWrapperData(parameters, spec) {
     throw Object.assign(new Error('Unsupported ACE-Step generation_wrapper schema length: ' + parameters.length), { status: 502 });
   }
   const data = parameters.map(defaultParameterValue);
+  data[0] = 'acestep-v15-turbo'; // smaller Turbo model for lower shared-GPU demand
   data[1] = 'custom'; // generation_mode
   data[4] = String(spec.musicPrompt || ''); // captions
   data[5] = String(spec.lyrics || '');
@@ -135,6 +136,16 @@ function generationWrapperData(parameters, spec) {
   data[16] = 1; // one audio per request to conserve shared GPU quota
   data[23] = 'text2music'; // task_type
   data[30] = 'mp3'; // audio_format
+  data[32] = false; // skip optional thinking pass for faster direct caption/lyrics generation
+  data[40] = false; // constrained_decoding_debug
+  data[41] = true; // allow_lm_batch
+  data[42] = false; // auto_score
+  data[43] = false; // auto_lrc
+  data[44] = 0.5; // score_scale
+  data[45] = 8; // lm_batch_chunk_size
+  data[46] = null; // track_name
+  data[47] = []; // complete_track_classes
+  data[48] = false; // autogen_checkbox
   return data;
 }
 
