@@ -652,6 +652,7 @@ export async function createSong({ prompt, callId = '', userKey = 'unknown', gen
 export function getSongProviderHealth() {
   return {
     aceStep: statusOf('ace-step'),
+    huggingFaceSpace: statusOf('huggingface-space'),
     backup: statusOf('backup'),
     activeJobs: activeCount,
     queuedJobs: queue.length
