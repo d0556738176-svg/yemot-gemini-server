@@ -134,14 +134,23 @@ function parseCompletionEvent(body) {
   const lines = String(body || '').split(/\r?\n/);
   let event = '';
   let data = '';
+  const seenEvents = [];
   for (const line of lines) {
-    if (line.startsWith('event:')) event = line.slice(6).trim();
-    else if (line.startsWith('data:')) data = line.slice(5).trim();
-    if (event === 'complete' && data) {
-      try { return JSON.parse(data); } catch { /* continue to final event */ }
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim();
+      if (event && !seenEvents.includes(event)) seenEvents.push(event);
+    } else if (line.startsWith('data:')) {
+      data = line.slice(5).trim();
+    }
+    if (data && (event === 'complete' || event === 'error')) {
+      if (event === 'error') {
+        throw Object.assign(new Error('ACE-Step Space generation event error: ' + data.slice(0, 220)), { status: 502 });
+      }
+      try { return JSON.parse(data); } catch { /* try the final event if this data frame is not JSON */ }
     }
   }
-  throw Object.assign(new Error('ACE-Step Space did not return a completed generation event'), { status: 502 });
+  const excerpt = String(body || '').replace(/[\r\n]+/g, ' ').slice(0, 260);
+  throw Object.assign(new Error('ACE-Step Space did not return a completed generation event; events=' + seenEvents.join(',') + '; response=' + excerpt), { status: 502 });
 }
 
 async function readLimited(response) {
