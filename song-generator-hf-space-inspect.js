@@ -1,4 +1,4 @@
-// One-off read-only schema inspection; this does not generate audio or use GPU quota.\n// Include all endpoint names and the exact generation wrapper schema.
+// One-off read-only schema inspection; this does not generate audio or use GPU quota.\n// Include all endpoint names and exact positional indices.
 const base = String(process.env.HF_MUSIC_SPACE_URL || 'https://ace-step-ace-step-v1-5.hf.space').replace(/\/$/, '');
 const response = await fetch(base + '/gradio_api/info', { signal: AbortSignal.timeout(15000) });
 if (!response.ok) throw new Error('Hugging Face Space info HTTP ' + response.status);
