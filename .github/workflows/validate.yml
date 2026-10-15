@@ -48,4 +48,4 @@ jobs:
         with:
           node-version: 22
       - name: Generate and validate a real 30-second test audio file through Hugging Face
-        run: node song-generator-hf-space.live-test.js
+        run: node song-generator-hf-space-live.js
