@@ -37,7 +37,7 @@ jobs:
           node --input-type=module -e "import { tavily } from '@tavily/core'; const client = tavily(); if (!client || typeof client.search !== 'function' || typeof client.extract !== 'function' || typeof client.crawl !== 'function') throw new Error('Tavily SDK methods are unavailable'); console.log('Tavily SDK initialization passed (offline; no API call made)');"
 
   live-hf-music-test:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' && contains(github.event.head_commit.message, '[live-hf-test]')
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' && contains(github.event.head_commit.message, '[live-hf-test]')) || (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/branch4-ace-step-song-generator' && contains(github.event.pull_request.title, '[live-hf-test]'))
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
