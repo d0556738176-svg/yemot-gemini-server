@@ -463,7 +463,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
             provider: provider.name,
             status: geminiErrorStatus(providerError),
             coolingDown: !!providerError?.coolingDown,
-            message: String(providerError?.message || providerError).slice(0, 180),
+            errorCategory: providerError?.coolingDown ? 'cooldown' : 'provider_error',
             useWebSearch, fastPhone
           });
         }
