@@ -65,6 +65,7 @@ export async function callCompatibleChatCompletion({
         cooldowns.set(provider, now() + cooldownMs);
         throw makeProviderError(provider + ' request timed out', 408, provider, { cause: error });
       }
+      cooldowns.set(provider, now() + cooldownMs);
       throw makeProviderError(provider + ' network request failed: ' + String(error?.message || error).slice(0, 180), 502, provider, { cause: error });
     }
 
@@ -85,10 +86,12 @@ export async function callCompatibleChatCompletion({
     try {
       data = await response.json();
     } catch (error) {
+      cooldowns.set(provider, now() + cooldownMs);
       throw makeProviderError(provider + ' returned invalid JSON', 502, provider, { cause: error });
     }
     const answer = data?.choices?.[0]?.message?.content;
     if (typeof answer !== 'string' || !answer.trim()) {
+      cooldowns.set(provider, now() + cooldownMs);
       throw makeProviderError(provider + ' returned an empty answer', 502, provider);
     }
 
