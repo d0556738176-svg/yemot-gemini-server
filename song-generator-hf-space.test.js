@@ -17,27 +17,36 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
     const url = new URL(String(input));
     calls.push({ path: url.pathname, method: options.method || 'GET', body: options.body });
     if (url.pathname === '/gradio_api/info') {
+      const defaults = {
+        0: 'acestep-v15-xl-turbo', 1: 'custom', 3: 'unknown', 6: 0, 7: '', 8: '',
+        9: 'unknown', 10: 8, 11: 7, 12: true, 13: '-1', 14: null, 15: -1,
+        16: 2, 17: null, 18: '', 19: 0, 20: -1,
+        21: 'Fill the audio semantic mask based on the given conditions:',
+        22: 1, 23: 'text2music', 24: false, 25: 0, 26: 1, 27: 3, 28: 'ode',
+        29: '', 30: 'mp3', 31: 0.85, 32: true, 33: 2, 34: 0, 35: 0.9,
+        36: 'NO USER INPUT', 37: true, 38: true, 39: true, 40: false,
+        41: false, 42: true, 43: false, 44: false, 45: 0.5, 46: 8, 47: null, 48: []
+      };
+      const parameters = Array.from({ length: 49 }, (_, index) => ({
+        parameter_name: ['selected_model', 'generation_mode', 'simple_query_input', 'simple_vocal_language'][index] ||
+          (index === 40 ? '' : 'param_' + index),
+        parameter_default: Object.prototype.hasOwnProperty.call(defaults, index) ? defaults[index] : null
+      }));
       return new Response(JSON.stringify({
-        named_endpoints: {
-          '/generation_wrapper': {
-            parameters: [
-              { parameter_name: 'captions' },
-              { parameter_name: 'lyrics' },
-              { parameter_name: 'vocal_language' },
-              { parameter_name: 'audio_duration' },
-              { parameter_name: 'task_type' },
-              { parameter_name: 'audio_format' }
-            ]
-          }
-        }
+        named_endpoints: { '/generation_wrapper': { parameters } }
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.pathname === '/gradio_api/call/generation_wrapper') {
       const payload = JSON.parse(options.body);
-      assert.equal(payload.data[0], 'Hebrew pop, energetic');
-      assert.equal(payload.data[1], 'מילים לבדיקה');
-      assert.equal(payload.data[2], 'he');
-      assert.equal(payload.data[3], 45);
+      assert.equal(payload.data.length, 49);
+      assert.equal(payload.data[1], 'custom');
+      assert.equal(payload.data[4], 'Hebrew pop, energetic');
+      assert.equal(payload.data[5], 'מילים לבדיקה');
+      assert.equal(payload.data[9], 'he');
+      assert.equal(payload.data[15], 45);
+      assert.equal(payload.data[16], 1);
+      assert.equal(payload.data[23], 'text2music');
+      assert.equal(payload.data[30], 'mp3');
       return new Response(JSON.stringify({ event_id: 'event-123' }), {
         status: 200, headers: { 'content-type': 'application/json' }
       });
