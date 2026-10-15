@@ -37,6 +37,12 @@ services:
         sync: false
       - key: ACESTEP_API_KEY
         sync: false
+      - key: HF_MUSIC_SPACE_ENABLED
+        value: "false"
+      - key: HF_MUSIC_SPACE_URL
+        value: "https://ace-step-ace-step-v1-5.hf.space"
+      - key: HF_TOKEN
+        sync: false
       - key: ACESTEP_MODEL
         value: acestep-v15-turbo
       - key: SONG_GENERATION_TIMEOUT_MS
