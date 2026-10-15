@@ -2,6 +2,7 @@ import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 
 process.env.HF_MUSIC_SPACE_URL ||= 'https://ace-step-ace-step-v1-5.hf.space';
 process.env.SONG_GENERATION_TIMEOUT_MS = '300000';
+// One-off live smoke test: this may consume shared free GPU quota.
 
 try {
   const result = await generateWithHuggingFaceSpace({
