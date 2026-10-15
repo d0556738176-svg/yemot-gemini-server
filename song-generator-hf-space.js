@@ -191,7 +191,7 @@ export async function generateWithHuggingFaceSpace(spec) {
   if (!file) throw Object.assign(new Error('ACE-Step Space completed without an audio file'), { status: 502 });
   let audioUrl;
   if (file.url) audioUrl = new URL(file.url, base);
-  else if (file.path) audioUrl = new URL('/gradio_api/file=' + file.path.replace(/^\//, ''), base);
+  else if (file.path) audioUrl = new URL('/gradio_api/file=' + file.path, base);
   else throw Object.assign(new Error('ACE-Step Space returned an invalid audio reference'), { status: 502 });
   if (audioUrl.origin !== base.origin || !/\/(gradio_api\/file=|file=)/.test(audioUrl.pathname)) {
     throw new Error('ACE-Step Space returned an unexpected audio URL');
