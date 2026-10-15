@@ -83,6 +83,8 @@ export async function callCompatibleChatCompletion({
 
     if (!response?.ok) {
       const status = Number(response?.status) || 502;
+      // Drain the response body for connection reuse, but never log its contents.
+      try { await response.text(); } catch {}
       if ([408, 500, 502, 503, 504].includes(status)) {
         cooldowns.set(provider, now() + cooldownMs);
       } else if ([402, 429].includes(status)) {
