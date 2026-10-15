@@ -13,6 +13,7 @@ import { readPublicWebsitePages } from './website-reader.js';
 import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
 import { answerWithOpenAIText, answerWithOpenAIWebSearch, isOpenAIWebSearchRequest, stripOpenAIWebSearchPrefix } from './openai-web-search.js';
 import { createCooldownRegistry } from './provider-cooldowns.js';
+import { callCompatibleChatCompletion } from './provider-fallback.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -369,6 +370,7 @@ const branch1BackupWebModels = branch1BackupGeminiClient
   : [];
 
 let openAIBillingCooldownUntil = 0;
+const branch1FallbackProviderCooldowns = new Map();
 // Branch 1 should stop repeatedly calling a provider after quota/overload failures.
 // This is deliberately isolated from the primary/backup call handlers for other branches.
 const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:90000, transientMs:25000});
@@ -407,6 +409,58 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
       ? contents.map(item => (item.role === 'model' ? 'Assistant: ' : 'User: ') +
           item.parts.map(part => part.text).join('\n')).join('\n\n')
       : '';
+    // Branch 1 only: use independent text-only providers when Gemini reports quota,
+    // timeout, or transient service failure. These providers do not replace web search
+    // grounding or multimodal handling; web-search requests continue through the
+    // existing retrieval/OpenAI/Gemini paths to avoid unsupported unsourced answers.
+    const independentFallbackStatus = [429,408,500,502,503,504].includes(primaryStatus);
+    if (textOnlyInput && !useWebSearch && independentFallbackStatus) {
+      const independentProviders = [
+        {
+          name: 'Groq',
+          baseUrl: 'https://api.groq.com/openai/v1',
+          apiKey: (process.env.GROQ_API_KEY || '').trim(),
+          model: (process.env.GROQ_MODEL || 'openai/gpt-oss-20b').trim(),
+          timeoutMs: Number(process.env.GROQ_TIMEOUT_MS || (fastPhone ? 2200 : 6500))
+        },
+        {
+          name: 'OpenRouter',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          apiKey: (process.env.OPENROUTER_API_KEY || '').trim(),
+          model: (process.env.OPENROUTER_MODEL || 'openrouter/free').trim(),
+          timeoutMs: Number(process.env.OPENROUTER_TIMEOUT_MS || (fastPhone ? 1800 : 5500))
+        }
+      ];
+      for (const provider of independentProviders) {
+        if (!provider.apiKey) continue;
+        try {
+          const timeoutMs = Number(timeoutOverrideMs || provider.timeoutMs);
+          const answer = await callCompatibleChatCompletion({
+            provider: provider.name,
+            baseUrl: provider.baseUrl,
+            apiKey: provider.apiKey,
+            model: provider.model,
+            messages: [{ role: 'user', content: textOnlyInput }],
+            timeoutMs,
+            maxTokens: fastPhone ? 700 : 1400,
+            cooldowns: branch1FallbackProviderCooldowns
+          });
+          console.info('[BRANCH1 FALLBACK] independent provider succeeded after Gemini failure', {
+            provider: provider.name, model: provider.model, status: primaryStatus,
+            useWebSearch, fastPhone, chars: answer.length
+          });
+          return { response: { text: () => answer } };
+        } catch (providerError) {
+          console.warn('[BRANCH1 FALLBACK] independent provider failed; trying next provider', {
+            provider: provider.name,
+            status: geminiErrorStatus(providerError),
+            coolingDown: !!providerError?.coolingDown,
+            message: String(providerError?.message || providerError).slice(0, 180),
+            useWebSearch, fastPhone
+          });
+        }
+      }
+    }
     if (textOnlyInput && String(process.env.OPENAI_API_KEY || '').trim()) {
       if (Date.now() < openAIBillingCooldownUntil) {
         console.warn('[BRANCH1 FALLBACK] skipping OpenAI during known billing cooldown', {
