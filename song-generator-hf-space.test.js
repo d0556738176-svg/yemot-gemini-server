@@ -66,8 +66,8 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
     assert.equal(result.audio.toString(), 'mock-audio');
     assert.deepEqual(calls.map(call => call.path), [
       '/gradio_api/info',
-      '/gradio_api/call/generate_with_progress',
-      '/gradio_api/call/generate_with_progress/event-123',
+      '/gradio_api/call/generation_wrapper',
+      '/gradio_api/call/generation_wrapper/event-123',
       '/gradio_api/file=/tmp/song.mp3'
     ]);
   } finally {
