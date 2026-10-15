@@ -103,3 +103,25 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
     }
   }
 });
+
+test('requires a Hugging Face token before making a ZeroGPU request', async () => {
+  const previousToken = process.env.HF_TOKEN;
+  const previousFetch = globalThis.fetch;
+  let requests = 0;
+  delete process.env.HF_TOKEN;
+  globalThis.fetch = async () => {
+    requests += 1;
+    throw new Error('fetch must not be called without HF_TOKEN');
+  };
+  try {
+    await assert.rejects(
+      generateWithHuggingFaceSpace({ musicPrompt: 'test', lyrics: 'test', language: 'he', durationSeconds: 30 }),
+      /HF_TOKEN is required/
+    );
+    assert.equal(requests, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousToken === undefined) delete process.env.HF_TOKEN;
+    else process.env.HF_TOKEN = previousToken;
+  }
+});
