@@ -4239,7 +4239,8 @@ async function configureYemotStructure() {
   const branch4Enabled = String(process.env.ENABLE_BRANCH4 || '').trim().toLowerCase() === 'true';
   const aceStepConfigured = !!String(process.env.ACESTEP_API_URL || '').trim() && !!String(process.env.ACESTEP_API_KEY || '').trim();
   const backupMusicConfigured = !!String(process.env.MUSIC_BACKUP_API_URL || '').trim() && !!String(process.env.MUSIC_BACKUP_API_KEY || '').trim();
-  if (branch4Enabled && (aceStepConfigured || backupMusicConfigured)) {
+  const hfMusicConfigured = String(process.env.HF_MUSIC_SPACE_ENABLED || '').trim().toLowerCase() === 'true';
+  if (branch4Enabled && (aceStepConfigured || backupMusicConfigured || hfMusicConfigured)) {
     try {
       await updateExtension('ivr2:/4',{type:'api',api_link:publicUrl + '/yemot-song'});
     } catch (branch4SetupError) {
