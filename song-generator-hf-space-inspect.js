@@ -14,9 +14,10 @@ console.log(JSON.stringify({
   endpointNames: Object.keys(endpoints),
   generationEndpoint: endpoints['/generation_wrapper'] ? {
     parameterCount: (endpoints['/generation_wrapper'].parameters || []).length,
-    parameters: (endpoints['/generation_wrapper'].parameters || []).map(p => ({
+    parameters: (endpoints['/generation_wrapper'].parameters || []).map((p, index) => ({
+      index,
       name: String(p.parameter_name || p.name || p.label || ''),
-      type: p.type || p.parameter_type || null,
+      type: p.type?.type || p.type || p.parameter_type || null,
       defaultType: (p.parameter_default ?? p.default) === null ? 'null' : Array.isArray(p.parameter_default ?? p.default) ? 'array' : typeof (p.parameter_default ?? p.default)
     }))
   } : null,
