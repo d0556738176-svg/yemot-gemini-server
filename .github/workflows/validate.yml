@@ -35,3 +35,17 @@ jobs:
       - name: Check Tavily SDK initialization (offline)
         run: |
           node --input-type=module -e "import { tavily } from '@tavily/core'; const client = tavily(); if (!client || typeof client.search !== 'function' || typeof client.extract !== 'function' || typeof client.crawl !== 'function') throw new Error('Tavily SDK methods are unavailable'); console.log('Tavily SDK initialization passed (offline; no API call made)');"
+
+  live-hf-music-test:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' && contains(github.event.head_commit.message, '[live-hf-test]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate and validate a real 30-second test audio file through Hugging Face
+        run: node song-generator-hf-space.live-test.js
