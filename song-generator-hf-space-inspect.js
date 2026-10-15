@@ -11,6 +11,7 @@ const matches = Object.entries(endpoints).filter(([, schema]) => {
 });
 console.log(JSON.stringify({
   endpointCount: Object.keys(endpoints).length,
+  endpointNames: Object.keys(endpoints),
   candidates: matches.map(([name, schema]) => ({
     name,
     parameterCount: (schema.parameters || []).length,
