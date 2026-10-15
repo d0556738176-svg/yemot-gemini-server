@@ -25,7 +25,7 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
         22: 1, 23: 'text2music', 24: false, 25: 0, 26: 1, 27: 3, 28: 'ode',
         29: '', 30: 'mp3', 31: 0.85, 32: true, 33: 2, 34: 0, 35: 0.9,
         36: 'NO USER INPUT', 37: true, 38: true, 39: true, 40: false,
-        41: false, 42: true, 43: false, 44: false, 45: 0.5, 46: 8, 47: null, 48: []
+        41: true, 42: false, 43: false, 44: 0.5, 45: 8, 46: null, 47: [], 48: false
       };
       const parameters = Array.from({ length: 49 }, (_, index) => ({
         parameter_name: ['selected_model', 'generation_mode', 'simple_query_input', 'simple_vocal_language'][index] ||
@@ -39,6 +39,7 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
     if (url.pathname === '/gradio_api/call/generation_wrapper') {
       const payload = JSON.parse(options.body);
       assert.equal(payload.data.length, 49);
+      assert.equal(payload.data[0], 'acestep-v15-turbo');
       assert.equal(payload.data[1], 'custom');
       assert.equal(payload.data[4], 'Hebrew pop, energetic');
       assert.equal(payload.data[5], 'מילים לבדיקה');
@@ -47,6 +48,11 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
       assert.equal(payload.data[16], 1);
       assert.equal(payload.data[23], 'text2music');
       assert.equal(payload.data[30], 'mp3');
+      assert.equal(payload.data[32], false);
+      assert.equal(payload.data[41], true);
+      assert.equal(payload.data[44], 0.5);
+      assert.equal(payload.data[47].length, 0);
+      assert.equal(payload.data[48], false);
       return new Response(JSON.stringify({ event_id: 'event-123' }), {
         status: 200, headers: { 'content-type': 'application/json' }
       });
