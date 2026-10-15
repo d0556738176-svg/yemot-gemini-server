@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import ffmpegPath from 'ffmpeg-static';
+import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const MAX_AUDIO_BYTES = 35 * 1024 * 1024;
@@ -362,6 +363,20 @@ async function generateAudio(spec) {
       const failure = classifyProviderFailure(status);
       markProvider('ace-step', failure.status, failure.cooldownMs);
       log('MUSIC_PROVIDER_FAILED', { provider: 'ace-step', status: status || 'unknown' });
+      if (!shouldFallbackToBackup(status)) throw error;
+    }
+  }
+  if (!aceConfigured && String(process.env.HF_MUSIC_SPACE_ENABLED || '').toLowerCase() === 'true') {
+    try {
+      log('MUSIC_PROVIDER_SELECTED', { provider: 'huggingface-space' });
+      const result = await generateWithHuggingFaceSpace(spec);
+      markProvider('huggingface-space', 'available');
+      return result;
+    } catch (error) {
+      const status = httpStatus(error);
+      const failure = classifyProviderFailure(status);
+      markProvider('huggingface-space', failure.status, failure.cooldownMs);
+      log('MUSIC_PROVIDER_FAILED', { provider: 'huggingface-space', status: status || 'unknown' });
       if (!shouldFallbackToBackup(status)) throw error;
     }
   }
