@@ -371,6 +371,13 @@ const branch1BackupWebModels = branch1BackupGeminiClient
 
 let openAIBillingCooldownUntil = 0;
 const branch1FallbackProviderCooldowns = new Map();
+ // Log configuration presence only; never print or partially reveal API keys.
+console.info('[BRANCH1 FALLBACK] independent provider configuration', {
+  groqConfigured: Boolean((process.env.GROQ_API_KEY || '').trim()),
+  groqModel: (process.env.GROQ_MODEL || 'openai/gpt-oss-20b').trim(),
+  openRouterConfigured: Boolean((process.env.OPENROUTER_API_KEY || '').trim()),
+  openRouterModel: (process.env.OPENROUTER_MODEL || 'openrouter/free').trim()
+});
 // Branch 1 should stop repeatedly calling a provider after quota/overload failures.
 // This is deliberately isolated from the primary/backup call handlers for other branches.
 const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:90000, transientMs:25000});
