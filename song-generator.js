@@ -366,13 +366,17 @@ async function generateAudio(spec) {
       if (!shouldFallbackToBackup(status)) throw error;
     }
   }
-  if (!aceConfigured && String(process.env.HF_MUSIC_SPACE_ENABLED || '').toLowerCase() === 'true') {
+  let hfError = null;
+  const hfState = statusOf('huggingface-space');
+  if (String(process.env.HF_MUSIC_SPACE_ENABLED || '').toLowerCase() === 'true' &&
+      hfState.status !== 'disabled' && hfState.cooldownUntil <= Date.now()) {
     try {
       log('MUSIC_PROVIDER_SELECTED', { provider: 'huggingface-space' });
       const result = await generateWithHuggingFaceSpace(spec);
       markProvider('huggingface-space', 'available');
       return result;
     } catch (error) {
+      hfError = error;
       const status = httpStatus(error);
       const failure = classifyProviderFailure(status);
       markProvider('huggingface-space', failure.status, failure.cooldownMs);
@@ -396,6 +400,7 @@ async function generateAudio(spec) {
     }
   }
   if (aceError) throw aceError;
+  if (hfError) throw hfError;
   throw Object.assign(new Error(
     aceConfigured
       ? 'Music provider is temporarily unavailable and no backup provider is configured'
