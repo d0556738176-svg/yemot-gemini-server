@@ -223,6 +223,9 @@ async function readLimited(response) {
  * This is intended for a quota-limited test/fallback, not guaranteed production SLA.
  */
 export async function generateWithHuggingFaceSpace(spec) {
+  if (!String(process.env.HF_TOKEN || '').trim()) {
+    throw Object.assign(new Error('HF_TOKEN is required for ACE-Step ZeroGPU generation; anonymous requests are not reliable'), { status: 503 });
+  }
   const rawBase = String(process.env.HF_MUSIC_SPACE_URL || DEFAULT_SPACE_URL).trim();
   const base = new URL(rawBase);
   if (base.protocol !== 'https:' || base.username || base.password) {
