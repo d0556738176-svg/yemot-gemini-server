@@ -19,7 +19,7 @@ ACE-Step is a separate Python/GPU service; it is not installed inside the Node/R
 - `ACESTEP_API_KEY`: same secret configured as `ACESTEP_API_KEY` on the ACE-Step server.
 - `HF_MUSIC_SPACE_ENABLED`: optional opt-in (`true`/`false`, default `false`) to try the public Hugging Face ACE-Step Gradio Space when the direct ACE-Step API is unavailable or not configured. This is quota-limited and has no uptime guarantee; use for isolated testing only.
 - `HF_MUSIC_SPACE_URL`: defaults to `https://ace-step-ace-step-v1-5.hf.space`.
-- `HF_TOKEN`: optional Hugging Face access token; keep it only in Render secrets, never in source code or logs. The public Space can be called without it, but anonymous requests have stricter limits.
+- `HF_TOKEN`: required Hugging Face access token for the ZeroGPU adapter. The live anonymous test returned an error instead of audio, so extension 4 will not auto-configure without this token. Keep it only in Render secrets, never in source code or logs. A free Hugging Face account still has shared GPU limits and no uptime guarantee.
 - `ACESTEP_MODEL`: defaults to `acestep-v15-turbo`.
 - `ENABLE_BRANCH4`: must be explicitly set to `true` before automatic Yemot extension 4 setup is attempted; default is `false`.
 - `YEMOT_API_KEY`: existing Yemot upload credential.
