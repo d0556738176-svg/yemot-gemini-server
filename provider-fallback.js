@@ -37,7 +37,7 @@ export async function callCompatibleChatCompletion({
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(250, Number(timeoutMs) || 4500));
-  const endpoint = String(baseUrl).replace(/\\/+$/, '') + '/chat/completions';
+  const endpoint = String(baseUrl).replace(/\/+$/, '') + '/chat/completions';
 
   try {
     let response;
