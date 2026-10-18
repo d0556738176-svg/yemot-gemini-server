@@ -66,7 +66,7 @@ curl -X POST http://localhost:3005/api/task \
   -d '{"task":"Read the public title and summary of https://example.com","mode":"read_only"}'
 ```
 
-Do not expose this endpoint publicly without HTTPS, network access controls, and a proper secret-management setup. The current scaffold does not implement a production-ready browser worker, remote desktop, encrypted persistent profile, request queue, or session-management flow.
+Do not expose this endpoint publicly without HTTPS, network access controls, and a proper secret-management setup. The current scaffold does not implement a production-ready browser worker, remote desktop, encrypted persistent profile, request queue, or session-management flow. The extension ZIP itself has no HTTP/WebSocket server API for external task submission; it communicates through Chrome extension messaging and the Gemini website UI. Therefore, the existing `/api/task` route cannot control it as-is. A separate, authenticated browser-control adapter must be designed and tested against the live extension UI before the API can be enabled.
 
 ## Safety limits
 
@@ -80,7 +80,7 @@ Do not expose this endpoint publicly without HTTPS, network access controls, and
 ## Current verification results
 
 - Isolated GitHub Actions workflow for the branch 5 HTTP/security tests passed.
-- The supplied extension archive was inspected; the static extension check passed all 8 checks and scanned 15 source files.
+- The supplied extension archive was recovered from the user's Library and inspected; the corrected static checker passed 10 checks, validated manifest-referenced assets, and scanned 18 source files.
 - The extension's supplied Node test suite passed: 62 passed, 0 failed.
 - A local attempt to start system Chromium and navigate to Gemini did not finish within the 25-second limit in this execution environment; therefore Chromium extension loading, Gemini sign-in, and a real read task are **not verified**.
 - No live Gemini prompt was sent.
