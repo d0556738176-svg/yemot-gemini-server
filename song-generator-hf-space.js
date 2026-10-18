@@ -127,7 +127,10 @@ function generationWrapperData(parameters, spec) {
     throw Object.assign(new Error('Unsupported ACE-Step generation_wrapper schema length: ' + parameters.length), { status: 502 });
   }
   const data = parameters.map(defaultParameterValue);
-  data[0] = 'acestep-v15-turbo'; // smaller Turbo model for lower shared-GPU demand
+  // Use the Space's currently advertised model value. Hard-coding the older
+  // 'acestep-v15-turbo' name caused the live generation call to fail because
+  // the current Space advertises 'acestep-v15-xl-turbo' as its selected model.
+  data[0] = String(defaultParameterValue(parameters[0]) || 'acestep-v15-xl-turbo');
   data[1] = 'custom'; // generation_mode
   data[4] = String(spec.musicPrompt || ''); // captions
   data[5] = String(spec.lyrics || '');
