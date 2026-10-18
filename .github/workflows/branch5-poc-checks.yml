@@ -1,8 +1,14 @@
 name: Branch 5 isolated PoC checks
 
 on:
+  push:
+    branches:
+      - 'poc/branch-5-*'
+    paths:
+      - 'branch5/**'
+      - '.github/workflows/branch5-poc-checks.yml'
   pull_request:
-    branches: [main]
+    branches: [main, 'poc/branch-5-*']
     paths:
       - 'branch5/**'
       - '.github/workflows/branch5-poc-checks.yml'
