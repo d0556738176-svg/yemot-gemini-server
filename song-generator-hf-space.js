@@ -137,10 +137,15 @@ function generationWrapperData(parameters, spec) {
   data[9] = String(spec.language || 'he'); // vocal_language
   data[15] = Math.max(30, Math.min(240, Number(spec.durationSeconds) || 180)); // audio_duration
   data[16] = 1; // one audio per request to conserve shared GPU quota
-  data[23] = 'text2music'; // task_type
-  data[30] = 'mp3'; // audio_format (shift, inference method, and custom timesteps precede it)
-  // Preserve all other live Space defaults. Generic param_N labels make it unsafe
-  // to override later indices without an exact named signature.
+  data[23] = 'text2music'; // task_type (generation_wrapper args index 19)
+  // The current Space's wrapper has four leading controls, then the generation
+  // callback inputs in UI order. audio_format is callback input 23, therefore
+  // absolute wrapper index 4 + 23 = 27. Writing "mp3" at index 30 corrupts an
+  // LM numeric/boolean input and makes Gradio emit the unhelpful "error: null".
+  data[27] = 'mp3'; // audio_format
+  data[28] = Number(defaultParameterValue(parameters[28]) ?? 0.85); // lm_temperature
+  data[29] = Boolean(defaultParameterValue(parameters[29]) ?? true); // think_checkbox
+  // Preserve other live Space defaults, which are read from the live schema.
   return data;
 }
 
