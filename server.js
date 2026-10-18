@@ -14,7 +14,7 @@ import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
 import { answerWithOpenAIText, answerWithOpenAIWebSearch, isOpenAIWebSearchRequest, stripOpenAIWebSearchPrefix } from './openai-web-search.js';
 import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
-import { buildBranch1FallbackMessages } from './branch1-fallback-context.js';
+import { buildBranch1FallbackMessages, formatBranch1FallbackPrompt } from './branch1-fallback-context.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -477,9 +477,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
         });
       } else try {
         const openAITimeout = Number(timeoutOverrideMs || (fastPhone ? 3500 : 12000));
-        const openAIFallbackPrompt = buildBranch1FallbackMessages(EXCLUSIVE_INSTRUCTION, textOnlyInput)
-          .map(message => (message.role === 'system' ? 'System instructions:\n' : 'Conversation:\n') + message.content)
-          .join('\n\n');
+        const openAIFallbackPrompt = formatBranch1FallbackPrompt(EXCLUSIVE_INSTRUCTION, textOnlyInput);
         const answer = await answerWithOpenAIText(openAIFallbackPrompt, {
           timeoutMs: openAITimeout,
           webSearch: useWebSearch,
