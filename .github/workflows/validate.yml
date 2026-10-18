@@ -2,7 +2,7 @@ name: Validate Node application
 
 on:
   push:
-    branches: [main, feature/tavily-branch1-search, fix/ivr-context-search-speed, feature-search-quality-2026-10-10, feature-search-recovery-2026-10-10, fix/branch1-website-context]
+    branches: [main, feature/tavily-branch1-search, fix/ivr-context-search-speed, feature-search-quality-2026-10-10, feature-search-recovery-2026-10-10, fix/branch1-website-context, fix/project-baseline-hardening]
   pull_request:
     branches: [main]
 
@@ -17,16 +17,18 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
+        # No lockfile is currently committed on main; npm install is temporary until
+        # a generated and reviewed package-lock.json can be committed.
         # youtube-dl-exec downloads its binary from GitHub during postinstall.
-        # GitHub's unauthenticated API rate limit made CI fail before tests ran.
-        # CI validates JS syntax and unit/regression tests, so skip install scripts here.
+        # Skip install scripts in CI to keep syntax/regression checks deterministic.
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Check JavaScript syntax
         run: |
-          node --check server.js
-          node --check youtube-ivr.js
-          node --check youtube-transcript.js
-          node --check youtube-authorized-playback.js
+          set -eu
+          find . -type f -name '*.js' -not -path './node_modules/*' -not -path './.git/*' -print0 | while IFS= read -r -d '' file; do
+            echo "Checking $file"
+            node --check "$file"
+          done
       - name: Run regression tests
         run: npm test
       - name: Check Tavily SDK initialization (offline)
