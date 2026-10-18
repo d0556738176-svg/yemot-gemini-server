@@ -1,10 +1,11 @@
+import { writeFile } from 'node:fs/promises';
 import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 
 process.env.HF_MUSIC_SPACE_URL ||= 'https://ace-step-ace-step-v1-5.hf.space';
 process.env.SONG_GENERATION_TIMEOUT_MS = '300000';
 
 // One-off live smoke test: this may consume shared free GPU quota.
-// Validate that the actual generation endpoint returns a real audio file using the live schema.
+// The generated file is retained as a private GitHub Actions artifact for listening.
 try {
   const result = await generateWithHuggingFaceSpace({
     musicPrompt: 'Upbeat Hebrew pop, bright synths, punchy drums, catchy melody, warm vocal performance',
@@ -21,12 +22,15 @@ try {
   if (audio.length < 10000 || (!hasId3Header && !hasMpegFrameHeader)) {
     throw new Error('Generated response did not look like a valid MP3 audio file');
   }
+  const outputPath = 'branch4-hf-test.mp3';
+  await writeFile(outputPath, audio);
   console.log('LIVE_HF_MUSIC_TEST_OK', JSON.stringify({
     provider: result.provider,
     model: result.model,
     contentType: result.contentType,
     bytes: audio.length,
-    mp3HeaderValid: true
+    mp3HeaderValid: true,
+    outputPath
   }));
 } catch (error) {
   console.error('LIVE_HF_MUSIC_TEST_FAILED', String(error?.message || error).slice(0, 500));
