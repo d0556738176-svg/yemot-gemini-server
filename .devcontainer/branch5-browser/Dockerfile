@@ -2,7 +2,7 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg wget unzip xz-utils \
+    ca-certificates curl gnupg wget unzip xz-utils x11-utils \
     xvfb xfce4 xfce4-terminal dbus-x11 x11vnc novnc websockify \
     fonts-liberation fonts-noto-color-emoji \
     && install -d -m 0755 /etc/apt/keyrings \
