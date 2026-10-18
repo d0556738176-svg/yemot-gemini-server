@@ -12,3 +12,13 @@ export function buildBranch1FallbackMessages(systemInstruction, userText) {
   }
   return messages;
 }
+
+/**
+ * Flatten the role-separated messages for text-only APIs that accept one input string.
+ * Label the system guidance explicitly so it cannot be mistaken for caller content.
+ */
+export function formatBranch1FallbackPrompt(systemInstruction, userText) {
+  return buildBranch1FallbackMessages(systemInstruction, userText)
+    .map(message => (message.role === 'system' ? 'System instructions:\\n' : 'Conversation:\\n') + message.content)
+    .join('\\n\\n');
+}
