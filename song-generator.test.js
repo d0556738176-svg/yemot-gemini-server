@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAceStepPayload, buildCompositionPlan, normalizeSongRequest, shouldFallbackToBackup, classifyProviderFailure } from './song-generator.js';
+import { buildAceStepPayload, buildCompositionPlan, normalizeSongRequest, shouldFallbackToBackup, classifyProviderFailure, YEMOT_AUDIO_CHUNK_SECONDS } from './song-generator.js';
 
 test('ACE-Step payload preserves requested Hebrew lyrics and voice language', () => {
   const payload = buildAceStepPayload({
@@ -36,6 +36,12 @@ test('song request normalization limits caller input length', () => {
 test('song request defaults to a full-song length and caps excessive durations', () => {
   assert.equal(normalizeSongRequest({ prompt: 'שיר לנסיעה' }).durationSeconds, 180);
   assert.equal(normalizeSongRequest({ prompt: 'שיר לנסיעה', duration_seconds: 999 }).durationSeconds, 240);
+});
+
+test('Yemot WAV chunks stay below the 90-second validation ceiling for full-length songs', () => {
+  assert.equal(YEMOT_AUDIO_CHUNK_SECONDS, 60);
+  assert.ok(YEMOT_AUDIO_CHUNK_SECONDS <= 90);
+  assert.equal(Math.ceil(240 / YEMOT_AUDIO_CHUNK_SECONDS), 4);
 });
 
 test('composition plan allocates all requested time across lyric sections', () => {
