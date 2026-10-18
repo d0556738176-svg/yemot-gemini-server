@@ -1,5 +1,5 @@
 import { writeFile } from 'node:fs/promises';
-import { generateWithAceStepRest } from './song-generator-hf-rest.js';
+import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 
 process.env.HF_MUSIC_SPACE_URL ||= 'https://ace-step-ace-step-v1-5.hf.space';
 process.env.SONG_GENERATION_TIMEOUT_MS = '300000';
@@ -9,7 +9,7 @@ if (!String(process.env.HF_TOKEN || '').trim()) {
 }
 
 try {
-  const result = await generateWithAceStepRest({
+  const result = await generateWithHuggingFaceSpace({
     musicPrompt: 'Upbeat Israeli pop, modern synths, warm bass, punchy drums, clear solo vocal singing Hebrew lyrics',
     lyrics: '[Verse 1]\nנוסעים קדימה, האור נדלק\nקצב בלב וכל רגע מתחזק\n[Chorus]\nעוד צעד ועוד חלום\nשרים ביחד עד סוף היום',
     language: 'he',
@@ -26,7 +26,7 @@ try {
   }
   const outputPath = 'branch4-ace-step-rest-hebrew-test.mp3';
   await writeFile(outputPath, audio);
-  console.log('LIVE_ACE_STEP_REST_MUSIC_TEST_OK', JSON.stringify({
+  console.log('LIVE_ACE_STEP_SPACE_MUSIC_TEST_OK', JSON.stringify({
     provider: result.provider,
     model: result.model,
     contentType: result.contentType,
@@ -35,6 +35,6 @@ try {
     outputPath
   }));
 } catch (error) {
-  console.error('LIVE_ACE_STEP_REST_MUSIC_TEST_FAILED', String(error?.message || error).slice(0, 700));
+  console.error('LIVE_ACE_STEP_SPACE_MUSIC_TEST_FAILED', String(error?.message || error).slice(0, 700));
   process.exitCode = 1;
 }
