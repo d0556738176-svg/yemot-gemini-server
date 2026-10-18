@@ -1,8 +1,14 @@
 name: Branch 5 isolated PoC checks
 
 on:
+  push:
+    branches:
+      - 'poc/branch-5-*'
+    paths:
+      - 'branch5/**'
+      - '.github/workflows/branch5-poc-checks.yml'
   pull_request:
-    branches: [main]
+    branches: [main, 'poc/branch-5-*']
     paths:
       - 'branch5/**'
       - '.github/workflows/branch5-poc-checks.yml'
@@ -22,9 +28,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Check isolated server syntax
-        run: node --check branch5/server.js
+      - name: Check isolated server and worker syntax
+        run: |
+          node --check branch5/server.js
+          node --check branch5/worker.js
       - name: Install branch 5 dependencies only
         run: npm --prefix branch5 install
-      - name: Run branch 5 security tests only
+      - name: Run branch 5 security and worker-contract tests only
         run: npm --prefix branch5 test

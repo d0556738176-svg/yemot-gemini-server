@@ -61,7 +61,7 @@ curl -X POST http://localhost:3005/api/status \
   -H "Authorization: Bearer $BRANCH5_TOKEN"
 ```
 
-Task requests require the user-facing Bearer token. The server now includes an **isolated in-memory worker queue protocol scaffold** with a separate worker token, a 20-job queue cap, five-minute job expiry, idempotency keys, and claim/result validation. The protocol is disabled by default. Even when enabled, this is only a server-side protocol test: it is **not connected to the Chrome extension**, does not persist jobs across restarts, and does not prove a real browser action. Keep it disabled until the extension-side adapter exists and passes live tests. When the protocol is disabled, task requests deliberately return `503 browser_adapter_not_ready`:
+Task requests require the user-facing Bearer token. The server includes an **isolated in-memory worker queue protocol** with a separate worker token, a 20-job queue cap, five-minute job expiry, idempotency keys, and claim/result validation. The protocol is disabled by default. The new `worker.js` is a fail-closed polling runner contract: it refuses to start without an explicitly injected adapter, rejects non-loopback HTTP URLs for worker credentials, times out tasks, and reports a task as completed only when the adapter returns `verified: true`. It is still **not connected to the Chrome extension**; no adapter is bundled, the queue is not durable, and no real browser action has been proven. Keep the protocol disabled until the extension-side adapter exists and passes live tests. When the protocol is disabled, task requests deliberately return `503 browser_adapter_not_ready`:
 ```sh
 curl -X POST http://localhost:3005/api/task \
   -H "Authorization: Bearer $BRANCH5_TOKEN" \
@@ -94,4 +94,4 @@ Do not expose this endpoint publicly without HTTPS, network access controls, and
 
 ## Next gate
 
-The next manual requirement is to provide a secured interactive cloud-browser session where an authorized person can sign in to a dedicated test account. Then rerun the extension smoke test and, only if the composer is genuinely available, perform one harmless read-only prompt and verify the actual response. Do not connect to Yemot or deploy until those checks pass and the change is separately approved.
+The next implementation gate is to build the **actual extension-side adapter** against the supplied 0.2.2 extension. The adapter must accept only read-only tasks, use the extension's existing trusted message path and selected tabs, and return a verifiable response without exposing a long-lived worker secret to webpage content. After code review and unit tests, provide a secured interactive cloud-browser session where an authorized person can sign in manually to a dedicated test account. Then run the extension smoke test and one harmless read-only prompt. Do not enable the worker protocol, connect to Yemot, or deploy until those checks pass and the change is separately approved.
