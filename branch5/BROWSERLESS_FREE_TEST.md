@@ -4,10 +4,10 @@
 
 ## Before starting
 
-1. Create a Browserless account yourself and confirm the dashboard shows the **Free $0/month** tier and its current limits. Do not enter payment details or enable paid overages.
-2. Upload the user-owned Gemini Browser Bridge 0.2.2 ZIP in the Browserless extension dashboard. Give it a simple name and copy the exact name.
+1. Create a Browserless account yourself and confirm the dashboard shows the **Free $0/month** tier and its current limits. The public pricing page currently lists 1,000 units/month, two concurrent browsers, and a one-minute maximum session. No payment card is required for the Free tier; do not enter payment details or enable paid overages.
+2. In the Browserless dashboard, open **Extensions** and upload the user-owned Gemini Browser Bridge 0.2.2 ZIP (max 100 MB). The ZIP must have `manifest.json` at its root, not inside an extra nested folder. Name it using only letters, digits, underscores or hyphens, then copy the exact name.
 3. Create/copy an API token. Keep it secret. Do not commit it, paste it into chat, put it in a URL that you share, or include it in screenshots.
-4. The free plan's published limit is 1,000 units/month and up to two concurrent browsers, with a maximum two-minute session. Check the dashboard again before testing because plan terms can change.
+4. Browserless counts each 30 seconds of browser time as a unit; reconnecting costs another unit. Check the dashboard again before testing because plan terms can change.
 
 ## Run locally
 
