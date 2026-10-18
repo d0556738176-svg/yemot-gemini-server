@@ -8,6 +8,8 @@ import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const MAX_AUDIO_BYTES = 35 * 1024 * 1024;
+// Keep each Yemot playback chunk below the 90-second validation ceiling below.
+export const YEMOT_AUDIO_CHUNK_SECONDS = 60;
 const DEFAULT_DURATION_SECONDS = 180;
 const MAX_DURATION_SECONDS = 240;
 const JOB_TIMEOUT_MS = Number(process.env.SONG_GENERATION_TIMEOUT_MS || 300000);
@@ -439,7 +441,7 @@ async function convertToYemotWavChunks(audio, tempDir) {
   await runFfmpeg([
     '-hide_banner', '-loglevel', 'error', '-y', '-i', mp3Path,
     '-vn', '-ar', '8000', '-ac', '1', '-c:a', 'pcm_s16le',
-    '-f', 'segment', '-segment_time', '120', '-reset_timestamps', '1', pattern
+    '-f', 'segment', '-segment_time', String(YEMOT_AUDIO_CHUNK_SECONDS), '-reset_timestamps', '1', pattern
   ]);
   const names = (await fs.readdir(chunksDir)).filter(name => /^song-\d{3}\.wav$/.test(name)).sort();
   if (!names.length) throw new Error('Audio converter produced no WAV files');
