@@ -36,7 +36,7 @@ jobs:
         run: npm test
       - name: Check Tavily SDK initialization (offline)
         run: |
-          node --input-type=module -e "import { tavily } from '@tavily/core'; const client = tavily(); if (!client || typeof client.search !== 'function' || typeof client.extract !== 'function' || typeof client.crawl !== 'function') throw new Error('Tavily SDK methods are unavailable'); console.log('Tavily SDK initialization passed (offline; no API call made');"
+          node --input-type=module -e "import { tavily } from '@tavily/core'; const client = tavily(); if (!client || typeof client.search !== 'function' || typeof client.extract !== 'function' || typeof client.crawl !== 'function') throw new Error('Tavily SDK methods are unavailable'); console.log('Tavily SDK initialization passed (offline; no API call made)');"
 
   live-hf-music-test:
     if: >-
