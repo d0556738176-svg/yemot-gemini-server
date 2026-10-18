@@ -8,8 +8,9 @@ const TIMEOUT_MS = 330000;
 
 function headers(json = false) {
   const token = String(process.env.HF_TOKEN || '').trim();
+  const forceAnonymous = String(process.env.HF_ANONYMOUS_TEST || '').toLowerCase() === 'true';
   return {
-    ...(token ? { authorization: 'Bearer ' + token } : {}),
+    ...(!forceAnonymous && token ? { authorization: 'Bearer ' + token } : {}),
     ...(json ? { 'content-type': 'application/json' } : {})
   };
 }
@@ -62,7 +63,7 @@ function findAudioFile(value, depth = 0) {
   if (depth > 10 || value == null) return null;
   // Some Gradio versions return temporary file paths as plain strings instead
   // of FileData objects.
-  if (typeof value === 'string' && /\\.(mp3|wav|flac)(?:[?#]|$)/i.test(value)) {
+  if (typeof value === 'string' && /\.(mp3|wav|flac)(?:[?#]|$)/i.test(value)) {
     return { path: value, url: '', mime: '' };
   }
   if (Array.isArray(value)) {
@@ -101,8 +102,8 @@ async function readAudio(response) {
   return { bytes, format: wav ? 'wav' : 'mp3' };
 }
 
-if (!String(process.env.HF_TOKEN || '').trim()) {
-  throw new Error('HF_TOKEN GitHub Secret is required for the free Hugging Face Space test');
+if (!String(process.env.HF_TOKEN || '').trim() && String(process.env.HF_ANONYMOUS_TEST || '').toLowerCase() !== 'true') {
+  throw new Error('HF_TOKEN is required unless the isolated anonymous test is explicitly enabled');
 }
 
 try {
