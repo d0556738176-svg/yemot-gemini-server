@@ -38,3 +38,5 @@ console.log(JSON.stringify({
     })
   }))
 }, null, 2));
+
+// Diagnostic-only probe: reads Gradio metadata; never submits a generation job or consumes GPU quota.
