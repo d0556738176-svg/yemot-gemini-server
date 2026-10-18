@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 
 process.env.HF_MUSIC_SPACE_URL ||= 'https://ace-step-ace-step-v1-5.hf.space';
-process.env.SONG_GENERATION_TIMEOUT_MS = '300000';
+process.env.SONG_GENERATION_TIMEOUT_MS = '300000'; // keep the live test bounded
 
 // One-off live smoke test, authorized after HF_TOKEN was saved: this may consume shared free GPU quota.
 // The generated file is retained as a private GitHub Actions artifact for listening.
