@@ -8,8 +8,8 @@ if (!token || token.length < 16) {
   console.error('Missing BROWSERLESS_TOKEN (keep it in a local environment variable; never paste it into chat or commit it).');
   process.exit(2);
 }
-if (!extensionName || !/^[a-zA-Z0-9._ -]{1,100}$/.test(extensionName)) {
-  console.error('Set BROWSERLESS_EXTENSION_NAME to the exact extension name uploaded in the Browserless dashboard.');
+if (!extensionName || !/^[a-zA-Z0-9_-]{1,99}$/.test(extensionName)) {
+  console.error('Set BROWSERLESS_EXTENSION_NAME to the exact Browserless extension name (letters, digits, underscore, hyphen only).');
   process.exit(2);
 }
 
@@ -26,20 +26,20 @@ if (parsed.protocol !== 'wss:' && !(parsed.protocol === 'ws:' && ['localhost', '
 }
 
 parsed.searchParams.set('token', token);
-parsed.searchParams.set('timeout', '110000');
+parsed.searchParams.set('timeout', '55000');
 parsed.searchParams.set('launch', JSON.stringify({ extensions: [extensionName] }));
 
 let browser;
 try {
-  browser = await chromium.connectOverCDP(parsed.toString(), { timeout: 25_000 });
+  browser = await chromium.connectOverCDP(parsed.toString(), { timeout: 20_000 });
   const contexts = browser.contexts();
   if (!contexts.length) throw new Error('browser_context_missing');
   const context = contexts[0];
 
   const page = await context.newPage();
-  await page.goto('https://example.com/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+  await page.goto('https://example.com/', { waitUntil: 'domcontentloaded', timeout: 12_000 });
   const pageTitle = await page.title();
-  const heading = (await page.locator('h1').first().textContent({ timeout: 5_000 }))?.trim() || '';
+  const heading = (await page.locator('h1').first().textContent({ timeout: 4_000 }))?.trim() || '';
 
   let extensionTargetSeen = false;
   try {
