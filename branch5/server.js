@@ -50,7 +50,7 @@ function readBody(req) {
   });
 }
 
-const HIGH_IMPACT_ACTIONS = /\\b(create account|open account|sign ?up|register|submit|send|publish|delete|remove|pay|purchase|buy|transfer|change password|change permissions|grant access|create user)\\b/i;
+const HIGH_IMPACT_ACTIONS = /\b(create account|open account|sign ?up|register|submit|send|publish|delete|remove|pay|purchase|buy|transfer|change password|change permissions|grant access|create user)\b/i;
 const HIGH_IMPACT_HEBREW = ['יצירת חשבון', 'פתיחת חשבון', 'הרשמה', 'שליחת טופס', 'שלח', 'פרסם', 'מחיקה', 'מחק', 'תשלום', 'שלם', 'רכישה', 'העברה', 'שינוי סיסמה', 'שינוי הרשאות'];
 
 export function validateTask(input) {
