@@ -26,7 +26,7 @@ This setup uses a Codespaces dev container with Google Chrome, XFCE and noVNC. P
    ```bash
    /usr/local/bin/branch5-start-desktop
    ```
-   Leave that terminal running. Open the forwarded port labelled **Private noVNC desktop for branch 5**. Confirm the port visibility is Private.
+   Leave that terminal running. Open the forwarded port labelled **Private noVNC desktop for branch 5**, then open its `/vnc.html?autoconnect=true&resize=remote` page. Confirm the port visibility is Private.
 4. Upload the supplied `Gemini-Browser-Bridge-0.2.2` ZIP into the private Codespace workspace using the VS Code file explorer. Extract it to a folder such as `/workspaces/branch5-extension`. Do not commit the ZIP or extracted extension into the project repository.
 5. In a second terminal, launch Chrome in the desktop:
    ```bash
