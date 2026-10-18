@@ -8,8 +8,8 @@ import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const MAX_AUDIO_BYTES = 35 * 1024 * 1024;
-const DEFAULT_DURATION_SECONDS = 45;
-const MAX_DURATION_SECONDS = 60;
+const DEFAULT_DURATION_SECONDS = 180;
+const MAX_DURATION_SECONDS = 240;
 const JOB_TIMEOUT_MS = Number(process.env.SONG_GENERATION_TIMEOUT_MS || 120000);
 const activeJobs = new Map();
 const providerHealth = new Map();
@@ -125,11 +125,11 @@ export async function generateSongSpec(request, generateText) {
   const llmPrompt = [
     'אתה מפיק שירים מקצועי. צור מפרט לשיר מקורי לחלוטין בעברית כברירת מחדל.',
     'החזר JSON תקין בלבד, ללא Markdown, עם השדות:',
-    '{"title":"...","language":"he","genre":"...","mood":"...","tempo":"...","duration_seconds":45,"lyrics":"...","music_prompt":"...","needs_clarification":false,"clarification_question":""}',
+    '{"title":"...","language":"he","genre":"...","mood":"...","tempo":"...","duration_seconds":180,"lyrics":"...","music_prompt":"...","needs_clarification":false,"clarification_question":""}',
     'אם הבקשה אינה ברורה מספיק כדי ליצור שיר סביר, החזר needs_clarification=true ושאלה קצרה בשדה clarification_question.',
     'כתוב מילים מקוריות בלבד; אל תצטט שיר קיים ואל תבקש חיקוי מדויק של אמן מסוים.',
     'במילים השתמש בסימוני מבנה [Intro], [Verse 1], [Chorus], [Verse 2], [Outro] לפי הצורך.',
-    'הגבל את אורך השיר ל-30 עד 60 שניות. ברירת המחדל היא ' + normalized.durationSeconds + ' שניות.',
+    'הגבל את אורך השיר ל-30 עד 240 שניות. ברירת המחדל היא ' + normalized.durationSeconds + ' שניות.',
     'genre, mood, tempo ו-music_prompt חייבים להיות באנגלית כדי שמנוע המוזיקה יבין אותם. שמור את מילות השיר בשפה שביקש המתקשר.',
     'בקשת המתקשר: ' + normalized.prompt,
     'משך מבוקש בשניות: ' + normalized.durationSeconds
@@ -214,7 +214,7 @@ async function fetchWithTimeout(url, options, timeoutMs, label) {
 }
 
 export function buildAceStepPayload(spec) {
-  const duration = Math.max(30, Math.min(60, Math.round(Number(spec.durationSeconds) || DEFAULT_DURATION_SECONDS)));
+  const duration = Math.max(30, Math.min(MAX_DURATION_SECONDS, Math.round(Number(spec.durationSeconds) || DEFAULT_DURATION_SECONDS)));
   return {
     prompt: String(spec.musicPrompt || [spec.genre, spec.mood, spec.tempo, 'full song with clear lead vocals'].filter(Boolean).join(', ')).slice(0, 1800),
     lyrics: String(spec.lyrics || '').slice(0, 8000),
@@ -270,7 +270,7 @@ function parseAceStepResult(result) {
 export async function generateWithAceStep(spec) {
   const base = aceStepApiBase();
   const headers = aceStepHeaders(true);
-  const totalTimeout = Math.max(30000, Math.min(300000, Number(process.env.SONG_GENERATION_TIMEOUT_MS || 180000)));
+  const totalTimeout = Math.max(30000, Math.min(600000, Number(process.env.SONG_GENERATION_TIMEOUT_MS || 300000)));
   const startedAt = Date.now();
   const submitUrl = new URL('/release_task', base);
   const submitted = await fetchWithTimeout(submitUrl, {
