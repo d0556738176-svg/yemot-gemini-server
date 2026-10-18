@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import { generateWithAceStepRest } from './song-generator-hf-rest.js';
 
 const DEFAULT_SPACE_URL = 'https://ace-step-ace-step-v1-5.hf.space';
 const MAX_AUDIO_BYTES = 35 * 1024 * 1024;
@@ -220,6 +221,15 @@ async function readLimited(response) {
  * This is intended for a quota-limited test/fallback, not guaranteed production SLA.
  */
 export async function generateWithHuggingFaceSpace(spec) {
+  // Prefer the current ACE-Step 1.5 REST API. Older public Space revisions may
+  // expose only Gradio's queue API, so fall back only when REST is unsupported;
+  // never repeat a generation after quota/auth/server failures.
+  try {
+    return await generateWithAceStepRest(spec);
+  } catch (error) {
+    const code = Number(error?.status || 0);
+    if (![404, 405, 501].includes(code) && error?.apiUnavailable !== true) throw error;
+  }
   if (!String(process.env.HF_TOKEN || '').trim()) {
     throw Object.assign(new Error('HF_TOKEN is required for ACE-Step ZeroGPU generation; anonymous requests are not reliable'), { status: 503 });
   }
