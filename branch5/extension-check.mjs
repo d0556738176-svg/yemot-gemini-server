@@ -26,6 +26,18 @@ const requiredFiles = [
   'background.js', 'panel.html', 'panel.js', 'gemini.js', 'reply-parser.js'
 ];
 const missingFiles = requiredFiles.filter(file => !fs.existsSync(path.join(root, file)));
+const sourceFiles = [];
+function walk(directory) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const fullPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) walk(fullPath);
+    else if (/\\.(js|json|html)$/i.test(entry.name)) sourceFiles.push(fullPath);
+  }
+}
+walk(root);
+const apiKeyPattern = /AIza[0-9A-Za-z_-]{30,}/;
+const literalApiKeyFound = sourceFiles.some(file => apiKeyPattern.test(fs.readFileSync(file, 'utf8')));
+
 const checks = {
   manifestVersion3: manifest.manifest_version === 3,
   expectedExtensionName: typeof manifest.name === 'string' && manifest.name.includes('Gemini Browser Bridge'),
@@ -34,7 +46,7 @@ const checks = {
   sidePanelDeclared: manifest.side_panel?.default_path === 'panel.html',
   geminiHostDeclared: Array.isArray(manifest.host_permissions) &&
     manifest.host_permissions.includes('https://gemini.google.com/*'),
-  noStaticGeminiApiKey: !fs.readFileSync(path.join(root, 'background.js'), 'utf8').match(/AIza[0-9A-Za-z_-]{30,}/),
+  noLiteralGoogleApiKeyPattern: !literalApiKeyFound,
   requiredFilesPresent: missingFiles.length === 0
 };
 
@@ -42,6 +54,7 @@ console.log(JSON.stringify({
   extensionDirectory: root,
   checks,
   missingFiles,
+  sourceFilesScanned: sourceFiles.length,
   note: 'Static package validation only. It does not prove Chrome loads the extension or that a Gemini session is authenticated.'
 }, null, 2));
 
