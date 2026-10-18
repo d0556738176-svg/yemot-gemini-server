@@ -35,8 +35,11 @@ function statusOf(provider) {
   return providerHealth.get(provider) || { status: 'available', cooldownUntil: 0 };
 }
 
-export function classifyProviderFailure(status) {
+export function classifyProviderFailure(status, message = '') {
   const code = Number(status || 0);
+  if (/zero.?gpu quota|free.{0,20}quota|requested GPU duration|quota.{0,30}(exceed|remaining)|try again in \\d/i.test(String(message || ''))) {
+    return { status: 'rate_limited', cooldownMs: 12 * 60 * 60 * 1000 };
+  }
   if (code === 429) return { status: 'rate_limited', cooldownMs: 60000 };
   if ([400, 413, 422].includes(code)) return { status: 'disabled', cooldownMs: 30000 };
   if ([401, 403, 404].includes(code)) return { status: 'disabled', cooldownMs: 60000 };
@@ -362,7 +365,7 @@ async function generateAudio(spec) {
     } catch (error) {
       aceError = error;
       const status = httpStatus(error);
-      const failure = classifyProviderFailure(status);
+      const failure = classifyProviderFailure(status, error?.message);
       markProvider('ace-step', failure.status, failure.cooldownMs);
       log('MUSIC_PROVIDER_FAILED', { provider: 'ace-step', status: status || 'unknown' });
       if (!shouldFallbackToBackup(status)) throw error;
