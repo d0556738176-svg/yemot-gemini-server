@@ -54,6 +54,11 @@ function parseEventStream(body) {
 
 function findAudioFile(value, depth = 0) {
   if (depth > 10 || value == null) return null;
+  // Some Gradio versions return temporary file paths as plain strings instead
+  // of FileData objects.
+  if (typeof value === 'string' && /\\.(mp3|wav|flac)(?:[?#]|$)/i.test(value)) {
+    return { path: value, url: '', mime: '' };
+  }
   if (Array.isArray(value)) {
     for (const item of value) {
       const found = findAudioFile(item, depth + 1);
@@ -137,7 +142,22 @@ try {
   );
   const outputs = parseEventStream(await resultResponse.text());
   const file = findAudioFile(outputs);
-  if (!file) throw new Error('YuE2 generation completed without an audio file object');
+  if (!file) {
+    const shape = value => {
+      if (Array.isArray(value)) return { type: 'array', length: value.length, items: value.slice(0, 5).map(shape) };
+      if (value && typeof value === 'object') return {
+        type: 'object',
+        keys: Object.keys(value).slice(0, 20),
+        fields: Object.fromEntries(Object.entries(value).slice(0, 12).map(([key, item]) => [
+          key,
+          typeof item === 'string' ? item.slice(0, 100) : (item && typeof item === 'object' ? shape(item) : item)
+        ]))
+      };
+      return typeof value === 'string' ? { type: 'string', sample: value.slice(0, 100) } : { type: typeof value };
+    };
+    console.error('YUE2_OUTPUT_SHAPE', JSON.stringify(shape(outputs)));
+    throw new Error('YuE2 generation completed without a recognized audio file; see YUE2_OUTPUT_SHAPE');
+  }
 
   let audioUrl;
   if (file.url) audioUrl = new URL(file.url, base);
