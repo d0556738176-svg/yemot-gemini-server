@@ -14,6 +14,7 @@ import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
 import { answerWithOpenAIText, answerWithOpenAIWebSearch, isOpenAIWebSearchRequest, stripOpenAIWebSearchPrefix } from './openai-web-search.js';
 import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
+import { buildBranch1FallbackMessages } from './branch1-fallback-context.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -448,10 +449,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
             baseUrl: provider.baseUrl,
             apiKey: provider.apiKey,
             model: provider.model,
-            messages: [
-              ...(EXCLUSIVE_INSTRUCTION ? [{ role: 'system', content: EXCLUSIVE_INSTRUCTION }] : []),
-              { role: 'user', content: textOnlyInput }
-            ],
+            messages: buildBranch1FallbackMessages(EXCLUSIVE_INSTRUCTION, textOnlyInput),
             timeoutMs,
             maxTokens: fastPhone ? 700 : 1400,
             cooldowns: branch1FallbackProviderCooldowns
