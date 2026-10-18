@@ -138,17 +138,9 @@ function generationWrapperData(parameters, spec) {
   data[15] = Math.max(30, Math.min(240, Number(spec.durationSeconds) || 180)); // audio_duration
   data[16] = 1; // one audio per request to conserve shared GPU quota
   data[23] = 'text2music'; // task_type
-  data[30] = 'mp3'; // audio_format
-  data[32] = false; // skip optional thinking pass for faster direct caption/lyrics generation
-  data[40] = false; // constrained_decoding_debug
-  data[41] = true; // allow_lm_batch
-  data[42] = false; // auto_score
-  data[43] = false; // auto_lrc
-  data[44] = 0.5; // score_scale
-  data[45] = 8; // lm_batch_chunk_size
-  data[46] = null; // track_name
-  data[47] = []; // complete_track_classes
-  data[48] = false; // autogen_checkbox
+  data[27] = 'mp3'; // audio_format (the API input order places this at index 27)
+  // Preserve all other live Space defaults. Generic param_N labels make it unsafe
+  // to override later indices without an exact named signature.
   return data;
 }
 
