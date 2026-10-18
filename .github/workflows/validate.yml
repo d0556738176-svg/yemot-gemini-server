@@ -5,6 +5,7 @@ on:
     branches: [main, feature/branch4-ace-step-song-generator, feature/tavily-branch1-search, fix/ivr-context-search-speed, feature-search-quality-2026-10-10, feature-search-recovery-2026-10-10, fix/branch1-website-context]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   validate:
@@ -29,15 +30,19 @@ jobs:
           node --check youtube-authorized-playback.js
           node --check song-generator.js
           node --check song-generator-hf-space.js
+          node --check song-generator-hf-space-live.js
           node --check song-ivr.js
       - name: Run regression tests
         run: npm test
       - name: Check Tavily SDK initialization (offline)
         run: |
-          node --input-type=module -e "import { tavily } from '@tavily/core'; const client = tavily(); if (!client || typeof client.search !== 'function' || typeof client.extract !== 'function' || typeof client.crawl !== 'function') throw new Error('Tavily SDK methods are unavailable'); console.log('Tavily SDK initialization passed (offline; no API call made)');"
+          node --input-type=module -e "import { tavily } from '@tavily/core'; const client = tavily(); if (!client || typeof client.search !== 'function' || typeof client.extract !== 'function' || typeof client.crawl !== 'function') throw new Error('Tavily SDK methods are unavailable'); console.log('Tavily SDK initialization passed (offline; no API call made');"
 
   live-hf-music-test:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' && contains(github.event.head_commit.message, '[live-hf-test]')
+    if: >-
+      github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-hf-test]')))
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -51,9 +56,20 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: node song-generator-hf-space-live.js
+      - name: Upload generated MP3 for listening and manual review
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch4-hf-test-audio
+          path: branch4-hf-test.mp3
+          if-no-files-found: error
+          retention-days: 7
 
   inspect-hf-space:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' && contains(github.event.head_commit.message, '[inspect-hf-space]')
+    if: >-
+      github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[inspect-hf-space]')))
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
