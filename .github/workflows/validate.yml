@@ -147,7 +147,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Inspect alternate ACE Music Studio schema without generating audio
+      - name: Inspect alternate ACE Music Generator schema without generating audio
         env:
-          HF_MUSIC_SPACE_URL: https://techfreakworm-ace-music-studio.hf.space
+          HF_MUSIC_SPACE_URL: https://acloudcenter-ace-music-generator.hf.space
         run: node song-generator-hf-space-inspect.js
