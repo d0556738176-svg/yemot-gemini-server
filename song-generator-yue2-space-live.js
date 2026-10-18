@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { writeFile } from 'node:fs/promises';
 
+// Free-only live experiment: this public ZeroGPU Space is not an officially Hebrew-trained model.
 const SPACE_URL = 'https://mrfakename-yue2-3b.hf.space';
 const MAX_AUDIO_BYTES = 35 * 1024 * 1024;
 const TIMEOUT_MS = 330000;
