@@ -1,0 +1,17 @@
+{
+  "name": "Branch 5 isolated browser test (free Codespaces quota)",
+  "build": { "dockerfile": "Dockerfile" },
+  "remoteUser": "vscode",
+  "forwardPorts": [6080],
+  "portsAttributes": {
+    "6080": {
+      "label": "Private noVNC desktop for branch 5",
+      "onAutoForward": "openBrowser",
+      "visibility": "private"
+    }
+  },
+  "postCreateCommand": "mkdir -p /workspaces/branch5-browser-profile && chmod 700 /workspaces/branch5-browser-profile",
+  "containerEnv": {
+    "DISPLAY": ":0"
+  }
+}
