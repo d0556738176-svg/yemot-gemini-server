@@ -1,0 +1,14 @@
+{
+  "name": "branch5-browser-bridge-poc",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "browser:smoke": "node browser-smoke.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}
