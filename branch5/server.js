@@ -61,7 +61,7 @@ export function validateTask(input) {
     return { ok: false, status: 400, error: 'task_required_or_too_long' };
   }
   // This PoC is intentionally read-only. High-impact actions are never executed.
-  if (HIGH_IMPACT_ACTIONS.test(task) || input.action === 'execute' || input.approved === true) {
+  if (HIGH_IMPACT_ACTIONS.test(task) || HIGH_IMPACT_HEBREW.some(term => task.includes(term)) || input.action === 'execute' || input.approved === true) {
     return { ok: false, status: 403, error: 'approval_required_and_not_supported_in_poc' };
   }
   if (input.mode && input.mode !== 'read_only') {
