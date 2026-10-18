@@ -22,7 +22,7 @@ async function request(url, options = {}, timeoutMs = 20000, label = 'ACE-Step R
     throw new Error(label + ' network/timeout: ' + (error?.name || 'Error'));
   }
   if (!response.ok) {
-    const body = (await response.text().catch(() => '')).replace(/Bearer\\s+\\S+/gi, 'Bearer [redacted]');
+    const body = (await response.text().catch(() => '')).replace(/Bearer\s+\S+/gi, 'Bearer [redacted]');
     throw new Error(label + ' HTTP ' + response.status + ': ' + body.slice(0, 350));
   }
   return response;
@@ -40,7 +40,7 @@ function summarize(value) {
 }
 
 async function downloadAudio(pathOrUrl, base) {
-  const audioUrl = /^https?:\\/\\//i.test(pathOrUrl)
+  const audioUrl = (pathOrUrl.startsWith('https://') || pathOrUrl.startsWith('http://'))
     ? new URL(pathOrUrl)
     : new URL('/v1/audio?path=' + encodeURIComponent(pathOrUrl), base);
   if (audioUrl.protocol !== 'https:' || audioUrl.origin !== base.origin) {
@@ -80,7 +80,7 @@ try {
     body: JSON.stringify({
       model: 'acestep-v15-turbo',
       caption: 'Upbeat Israeli pop, modern synths, warm bass, punchy drums, clear solo vocal singing Hebrew lyrics',
-      lyrics: '[Verse 1]\\nנוסעים קדימה, האור נדלק\\nקצב בלב וכל רגע מתחזק\\n[Chorus]\\nעוד צעד ועוד חלום\\nשרים ביחד עד סוף היום',
+      lyrics: '[Verse 1]\nנוסעים קדימה, האור נדלק\nקצב בלב וכל רגע מתחזק\n[Chorus]\nעוד צעד ועוד חלום\nשרים ביחד עד סוף היום',
       vocal_language: 'he',
       audio_format: 'mp3',
       audio_duration: 30,
