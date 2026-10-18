@@ -38,7 +38,7 @@ create table if not exists public.generated_songs (
  lyrics text not null default '',
  genre text not null default '',
  mood text not null default '',
- duration_seconds integer not null default 45 check (duration_seconds between 30 and 60),
+ duration_seconds integer not null default 180,
  provider text,
  model text,
  status text not null default 'generating_music'
@@ -48,6 +48,11 @@ create table if not exists public.generated_songs (
  created_at timestamptz not null default now(),
  completed_at timestamptz
 );
+-- Keep the database constraint aligned with the generator's supported 30–240 second range.
+-- Drop/re-add is safe to rerun and also repairs databases created with the earlier 30–60 limit.
+alter table public.generated_songs drop constraint if exists generated_songs_duration_seconds_check;
+alter table public.generated_songs add constraint generated_songs_duration_seconds_check
+ check (duration_seconds between 30 and 240);
 create index if not exists generated_songs_created_at_idx
  on public.generated_songs(created_at desc);
 create index if not exists generated_songs_status_created_at_idx
