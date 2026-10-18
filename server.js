@@ -14,6 +14,7 @@ import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
 import { answerWithOpenAIText, answerWithOpenAIWebSearch, isOpenAIWebSearchRequest, stripOpenAIWebSearchPrefix } from './openai-web-search.js';
 import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
+import { buildBranch1FallbackMessages, formatBranch1FallbackPrompt } from './branch1-fallback-context.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -448,7 +449,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
             baseUrl: provider.baseUrl,
             apiKey: provider.apiKey,
             model: provider.model,
-            messages: [{ role: 'user', content: textOnlyInput }],
+            messages: buildBranch1FallbackMessages(EXCLUSIVE_INSTRUCTION, textOnlyInput),
             timeoutMs,
             maxTokens: fastPhone ? 700 : 1400,
             cooldowns: branch1FallbackProviderCooldowns
@@ -476,7 +477,8 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
         });
       } else try {
         const openAITimeout = Number(timeoutOverrideMs || (fastPhone ? 3500 : 12000));
-        const answer = await answerWithOpenAIText(textOnlyInput, {
+        const openAIFallbackPrompt = formatBranch1FallbackPrompt(EXCLUSIVE_INSTRUCTION, textOnlyInput);
+        const answer = await answerWithOpenAIText(openAIFallbackPrompt, {
           timeoutMs: openAITimeout,
           webSearch: useWebSearch,
           deep: /לעומק|מחקר מקיף|סקירה מקיפה|בדיקה יסודית|כל הפרטים|בהרחבה/i.test(textOnlyInput)
