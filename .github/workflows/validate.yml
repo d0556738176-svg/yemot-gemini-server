@@ -41,6 +41,7 @@ jobs:
           node --check youtube-authorized-playback.js
           node --check song-generator.js
           node --check song-generator-hf-space.js
+          node --check song-generator-hf-rest.js
           node --check song-generator-hf-space-live.js
           node --check song-generator-yue2-space-live.js
           node --check song-generator-hf-rest-live.js
