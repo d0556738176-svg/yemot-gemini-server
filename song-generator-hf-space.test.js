@@ -22,6 +22,9 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
       authorization: options.headers?.authorization
     });
     assert.equal(options.headers?.authorization, 'Bearer unit-test-token');
+    if (url.pathname === '/v1/music/generate') {
+      return new Response(JSON.stringify({ type: 'error', error: { message: 'Method Not Allowed' } }), { status: 405, headers: { 'content-type': 'application/json' } });
+    }
     if (url.pathname === '/gradio_api/info') {
       const defaults = {
         0: 'acestep-v15-xl-turbo', 1: 'custom', 3: 'unknown', 6: 0, 7: '', 8: '',
@@ -85,6 +88,7 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
     assert.equal(result.contentType, 'audio/mpeg');
     assert.equal(result.audio.toString(), 'mock-audio');
     assert.deepEqual(calls.map(call => call.path), [
+      '/v1/music/generate',
       '/gradio_api/info',
       '/gradio_api/call/generation_wrapper',
       '/gradio_api/call/generation_wrapper/event-123',
