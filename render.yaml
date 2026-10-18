@@ -46,7 +46,7 @@ services:
       - key: ACESTEP_MODEL
         value: acestep-v15-turbo
       - key: SONG_GENERATION_TIMEOUT_MS
-        value: "180000"
+        value: "300000"
       - key: SONG_WAIT_PROMPT_TIMEOUT_MS
         value: "15000"
       - key: SONG_MAX_CONCURRENT
