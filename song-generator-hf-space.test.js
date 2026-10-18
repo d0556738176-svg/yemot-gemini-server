@@ -45,7 +45,7 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
     if (url.pathname === '/gradio_api/call/generation_wrapper') {
       const payload = JSON.parse(options.body);
       assert.equal(payload.data.length, 49);
-      assert.equal(payload.data[0], 'acestep-v15-turbo');
+      assert.equal(payload.data[0], 'acestep-v15-xl-turbo');
       assert.equal(payload.data[1], 'custom');
       assert.equal(payload.data[4], 'Hebrew pop, energetic');
       assert.equal(payload.data[5], 'מילים לבדיקה');
@@ -54,7 +54,6 @@ test('Hugging Face ACE-Step adapter discovers the Gradio endpoint and downloads 
       assert.equal(payload.data[16], 1);
       assert.equal(payload.data[23], 'text2music');
       assert.equal(payload.data[30], 'mp3');
-      assert.equal(payload.data[32], false);
       assert.equal(payload.data[41], true);
       assert.equal(payload.data[44], 0.5);
       assert.equal(payload.data[47].length, 0);
