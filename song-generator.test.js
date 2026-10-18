@@ -40,7 +40,7 @@ test('song request defaults to a full-song length and caps excessive durations',
 
 test('composition plan allocates all requested time across lyric sections', () => {
   const plan = buildCompositionPlan({
-    durationSeconds: 180, lyrics: '[Verse 1]\\nשורה אחת\\n[Chorus]\\nפזמון\\n[Verse 2]\\nשורה נוספת',
+    durationSeconds: 180, lyrics: '[Verse 1]\nשורה אחת\n[Chorus]\nפזמון\n[Verse 2]\nשורה נוספת',
     genre: 'pop', mood: 'upbeat', musicPrompt: 'Hebrew pop', tempo: 'mid-tempo'
   });
   assert.equal(plan.chunks.length, 3);
