@@ -90,7 +90,7 @@ export function createServer({
   token = process.env.BRANCH5_TOKEN,
   workerToken = process.env.BRANCH5_WORKER_TOKEN,
   adapterReady = false,
-  workerProtocolEnabled = false
+  workerProtocolEnabled = process.env.BRANCH5_WORKER_PROTOCOL_ENABLED === 'true'
 } = {}) {
   const requestsByIp = new Map();
   const jobs = new Map();
