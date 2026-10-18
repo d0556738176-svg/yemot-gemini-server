@@ -102,7 +102,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: branch4-yue2-hebrew-test-audio
-          path: branch4-yue2-hebrew-test.mp3
+          path: branch4-yue2-hebrew-test.*
           if-no-files-found: error
           retention-days: 7
 
