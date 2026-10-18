@@ -18,7 +18,9 @@ console.log(JSON.stringify({
       index,
       name: String(p.parameter_name || p.name || p.label || ''),
       type: p.type?.type || p.type || p.parameter_type || null,
-      defaultType: (p.parameter_default ?? p.default) === null ? 'null' : Array.isArray(p.parameter_default ?? p.default) ? 'array' : typeof (p.parameter_default ?? p.default)
+      defaultType: (p.parameter_default ?? p.default) === null ? 'null' : Array.isArray(p.parameter_default ?? p.default) ? 'array' : typeof (p.parameter_default ?? p.default),
+      defaultPreview: (() => { const d = Object.prototype.hasOwnProperty.call(p, 'parameter_default') ? p.parameter_default : p.default; if (d === undefined) return '[undefined]'; if (d === null) return null; if (Array.isArray(d)) return `[array length=${d.length}]`; if (typeof d === 'string') return d.slice(0, 100); if (typeof d === 'number' || typeof d === 'boolean') return d; return `[${typeof d}]`; })(),
+      choicesPreview: Array.isArray(p.options) ? p.options.slice(0, 12).map(o => typeof o === 'string' ? o : (o?.value ?? o?.label ?? '[option]')) : undefined
     }))
   } : null,
   candidates: matches.map(([name, schema]) => ({
