@@ -54,8 +54,8 @@ jobs:
   live-hf-music-test:
     if: >-
       github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' &&
-      ((github.event_name == 'push' && contains(github.event.head_commit.message, '[live-hf-test:ace-step]')) ||
-       ($4))
+      ((github.event_name == 'workflow_dispatch' && inputs.live_test_provider == 'ace-step') ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-hf-test:ace-step]')))
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -81,8 +81,8 @@ jobs:
   live-yue2-music-test:
     if: >-
       github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' &&
-      ((github.event_name == 'push' && contains(github.event.head_commit.message, '[live-hf-test:yue2]')) ||
-       ($4))
+      ((github.event_name == 'workflow_dispatch' && inputs.live_test_provider == 'yue2') ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-hf-test:yue2]')))
     runs-on: ubuntu-latest
     timeout-minutes: 7
     steps:
@@ -108,8 +108,8 @@ jobs:
   live-ace-step-rest-test:
     if: >-
       github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' &&
-      ((github.event_name == 'push' && contains(github.event.head_commit.message, '[live-hf-test:ace-step-rest]')) ||
-       ($4))
+      ((github.event_name == 'workflow_dispatch' && inputs.live_test_provider == 'ace-step-rest') ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-hf-test:ace-step-rest]')))
     runs-on: ubuntu-latest
     timeout-minutes: 7
     steps:
@@ -135,8 +135,8 @@ jobs:
   inspect-hf-space:
     if: >-
       github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' &&
-      ((github.event_name == 'push' && contains(github.event.head_commit.message, '[inspect-hf-space]')) ||
-       ($4))
+      ((github.event_name == 'workflow_dispatch' && inputs.live_test_provider == 'inspect') ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[inspect-hf-space]')))
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
