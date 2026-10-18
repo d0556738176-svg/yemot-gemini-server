@@ -22,3 +22,11 @@ test('empty system instructions are omitted and user text remains intact', () =>
 test('empty input does not create blank messages', () => {
   assert.deepEqual(buildBranch1FallbackMessages('  ', '  '), []);
 });
+
+test('single-input fallback prompt explicitly labels system guidance separately', async () => {
+  const { formatBranch1FallbackPrompt } = await import('./branch1-fallback-context.js');
+  assert.equal(
+    formatBranch1FallbackPrompt('ענה בעברית', 'מה השעה?'),
+    'System instructions:\\nענה בעברית\\n\\nConversation:\\nמה השעה?'
+  );
+});
