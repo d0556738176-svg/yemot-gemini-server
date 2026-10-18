@@ -27,3 +27,35 @@ create table if not exists public.authorized_audio_sources (
 alter table public.authorized_audio_sources enable row level security;
 revoke all on table public.authorized_audio_sources from anon, authenticated;
 
+-- Branch 4 generated-song metadata. Audio files themselves are stored in Yemot and
+-- optionally Supabase Storage; this table stores metadata only.
+create table if not exists public.generated_songs (
+ id uuid primary key,
+ call_id text,
+ user_id text,
+ prompt text not null default '',
+ title text not null default '',
+ lyrics text not null default '',
+ genre text not null default '',
+ mood text not null default '',
+ duration_seconds integer not null default 180,
+ provider text,
+ model text,
+ status text not null default 'generating_music'
+   check (status in ('generating_music', 'ready', 'failed')),
+ audio_url text,
+ error_message text,
+ created_at timestamptz not null default now(),
+ completed_at timestamptz
+);
+-- Keep the database constraint aligned with the generator's supported 30–240 second range.
+-- Drop/re-add is safe to rerun and also repairs databases created with the earlier 30–60 limit.
+alter table public.generated_songs drop constraint if exists generated_songs_duration_seconds_check;
+alter table public.generated_songs add constraint generated_songs_duration_seconds_check
+ check (duration_seconds between 30 and 240);
+create index if not exists generated_songs_created_at_idx
+ on public.generated_songs(created_at desc);
+create index if not exists generated_songs_status_created_at_idx
+ on public.generated_songs(status, created_at desc);
+alter table public.generated_songs enable row level security;
+revoke all on table public.generated_songs from anon, authenticated;

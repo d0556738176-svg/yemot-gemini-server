@@ -38,3 +38,34 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
+
+      - key: ENABLE_BRANCH4
+        value: "false"
+      - key: ACESTEP_API_URL
+        sync: false
+      - key: ACESTEP_API_KEY
+        sync: false
+      - key: HF_MUSIC_SPACE_ENABLED
+        value: "false"
+      - key: HF_MUSIC_SPACE_URL
+        value: "https://ace-step-ace-step-v1-5.hf.space"
+      - key: HF_TOKEN
+        sync: false
+      - key: ACESTEP_MODEL
+        value: acestep-v15-turbo
+      - key: SONG_GENERATION_TIMEOUT_MS
+        value: "300000"
+      - key: SONG_WAIT_PROMPT_TIMEOUT_MS
+        value: "15000"
+      - key: SONG_MAX_CONCURRENT
+        value: "1"
+      - key: SONG_MAX_QUEUE
+        value: "2"
+      - key: SONG_MAX_PER_HOUR
+        value: "2"
+      - key: MUSIC_BACKUP_API_URL
+        sync: false
+      - key: MUSIC_BACKUP_API_KEY
+        sync: false
+      - key: MUSIC_BACKUP_MODEL
+        sync: false

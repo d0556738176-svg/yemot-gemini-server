@@ -2,9 +2,21 @@ name: Validate Node application
 
 on:
   push:
-    branches: [main, feature/tavily-branch1-search, fix/ivr-context-search-speed, feature-search-quality-2026-10-10, feature-search-recovery-2026-10-10, fix/branch1-website-context]
+    branches: [main, feature/branch4-ace-step-song-generator, feature/tavily-branch1-search, fix/ivr-context-search-speed, feature-search-quality-2026-10-10, feature-search-recovery-2026-10-10, fix/branch1-website-context]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      live_test_provider:
+        description: 'Choose exactly one live music test; inspect is the safe default'
+        required: true
+        type: choice
+        default: inspect
+        options:
+          - inspect
+          - ace-step
+          - yue2
+          - ace-step-rest
 
 jobs:
   validate:
@@ -27,8 +39,113 @@ jobs:
           node --check youtube-ivr.js
           node --check youtube-transcript.js
           node --check youtube-authorized-playback.js
+          node --check song-generator.js
+          node --check song-generator-hf-space.js
+          node --check song-generator-hf-rest.js
+          node --check song-generator-hf-space-live.js
+          node --check song-generator-yue2-space-live.js
+          node --check song-generator-hf-rest-live.js
+          node --check song-ivr.js
       - name: Run regression tests
         run: npm test
       - name: Check Tavily SDK initialization (offline)
         run: |
           node --input-type=module -e "import { tavily } from '@tavily/core'; const client = tavily(); if (!client || typeof client.search !== 'function' || typeof client.extract !== 'function' || typeof client.crawl !== 'function') throw new Error('Tavily SDK methods are unavailable'); console.log('Tavily SDK initialization passed (offline; no API call made)');"
+
+  live-hf-music-test:
+    if: >-
+      github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' &&
+      ((github.event_name == 'workflow_dispatch' && inputs.live_test_provider == 'ace-step') ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-hf-test:ace-step]')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate and validate a real 30-second test audio file through ACE-Step Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: node song-generator-hf-space-live.js
+      - name: Upload generated ACE-Step MP3 for listening and manual review
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch4-ace-step-test-audio
+          path: branch4-hf-test.mp3
+          if-no-files-found: error
+          retention-days: 7
+
+  live-yue2-music-test:
+    if: >-
+      github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' &&
+      ((github.event_name == 'workflow_dispatch' && inputs.live_test_provider == 'yue2') ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-hf-test:yue2]')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate and validate a real Hebrew-lyrics test song through YuE2 Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: node song-generator-yue2-space-live.js
+      - name: Upload generated YuE2 MP3 for listening and manual review
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch4-yue2-hebrew-test-audio
+          path: branch4-yue2-hebrew-test.*
+          if-no-files-found: error
+          retention-days: 7
+
+  live-ace-step-rest-test:
+    if: >-
+      github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' &&
+      ((github.event_name == 'workflow_dispatch' && inputs.live_test_provider == 'ace-step-rest') ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[live-hf-test:ace-step-rest]')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test current ACE-Step REST API with legacy Gradio fallback and generate a real Hebrew-lyrics MP3
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: node song-generator-hf-rest-live.js
+      - name: Upload validated ACE-Step REST MP3 for listening
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch4-ace-step-rest-test-audio
+          path: branch4-ace-step-rest-hebrew-test.mp3
+          if-no-files-found: error
+          retention-days: 7
+
+  inspect-hf-space:
+    if: >-
+      github.ref == 'refs/heads/feature/branch4-ace-step-song-generator' &&
+      ((github.event_name == 'workflow_dispatch' && inputs.live_test_provider == 'inspect') ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[inspect-hf-space]')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Inspect public Gradio API schema and positional defaults without generating audio
+        run: node song-generator-hf-space-inspect.js

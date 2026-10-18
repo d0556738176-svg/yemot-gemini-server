@@ -7,6 +7,7 @@ import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
+import { createSongCallHandler } from './song-ivr.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback } from './business-hours.js';
 import { rankWebsitePages } from './website-relevance.js';
 import { readPublicWebsitePages } from './website-reader.js';
@@ -4109,9 +4110,23 @@ async function backupCallHandler(call) {
   }
 }
 
+const songCallHandler = createSongCallHandler({
+  yemotApi,
+  transcribePhoneAudio,
+  generateText: async prompt => {
+    const result = await generateWithRetry([{ role: 'user', parts: [{ text: prompt }] }], false, false, 30000);
+    return String(result?.response?.text?.() || '');
+  },
+  sanitizeForYemot,
+  withTimeout,
+  getCallerNumber,
+  logDetailedError
+});
+
 router.get('/yemot', callHandler);
 router.get('/yemot-backup', backupCallHandler);
 router.get('/yemot-youtube', youtubeCallHandler);
+router.get('/yemot-song', songCallHandler);
 app.use(router);
 
 app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDashboardAuth, (req,res)=>res.json({
@@ -4282,6 +4297,21 @@ async function configureYemotStructure() {
   await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
   // Extension 2 is the isolated YouTube robot; preserve voice selection under extension 3.
   await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
+  // Branch 4 remains untouched unless the owner explicitly enables it and configures ACE-Step.
+  const branch4Enabled = String(process.env.ENABLE_BRANCH4 || '').trim().toLowerCase() === 'true';
+  const aceStepConfigured = !!String(process.env.ACESTEP_API_URL || '').trim() && !!String(process.env.ACESTEP_API_KEY || '').trim();
+  const backupMusicConfigured = !!String(process.env.MUSIC_BACKUP_API_URL || '').trim() && !!String(process.env.MUSIC_BACKUP_API_KEY || '').trim();
+  const hfMusicConfigured = String(process.env.HF_MUSIC_SPACE_ENABLED || '').trim().toLowerCase() === 'true' &&
+    !!String(process.env.HF_TOKEN || '').trim();
+  if (branch4Enabled && (aceStepConfigured || backupMusicConfigured || hfMusicConfigured)) {
+    try {
+      await updateExtension('ivr2:/4',{type:'api',api_link:publicUrl + '/yemot-song'});
+    } catch (branch4SetupError) {
+      logDetailedError('Branch 4 automatic setup', branch4SetupError);
+    }
+  } else {
+    console.log('[Yemot automatic setup] Branch 4 left unchanged; set ENABLE_BRANCH4=true and configure a music provider after testing');
+  }
   if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
   else console.log('[Yemot automatic setup] Backup key missing; /3 was not changed');
 

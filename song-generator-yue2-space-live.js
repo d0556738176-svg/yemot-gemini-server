@@ -1,0 +1,195 @@
+import { Buffer } from 'node:buffer';
+import { writeFile } from 'node:fs/promises';
+
+// Free-only live experiment: this public ZeroGPU Space is not an officially Hebrew-trained model.
+const SPACE_URL = 'https://mrfakename-yue2-3b.hf.space';
+const MAX_AUDIO_BYTES = 35 * 1024 * 1024;
+const TIMEOUT_MS = 330000;
+
+function headers(json = false) {
+  const token = String(process.env.HF_TOKEN || '').trim();
+  const forceAnonymous = String(process.env.HF_ANONYMOUS_TEST || '').toLowerCase() === 'true';
+  return {
+    ...(!forceAnonymous && token ? { authorization: 'Bearer ' + token } : {}),
+    ...(json ? { 'content-type': 'application/json' } : {})
+  };
+}
+
+async function fetchWithTimeout(url, options, timeoutMs, label) {
+  let response;
+  try {
+    response = await fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    throw new Error(label + ' network/timeout failure (' +
+      (error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'timeout' : 'network') + ')');
+  }
+  if (!response.ok) {
+    const body = (await response.text().catch(() => '')).replace(/Bearer\s+\S+/gi, 'Bearer [redacted]');
+    throw new Error(label + ' HTTP ' + response.status + ': ' + body.slice(0, 220));
+  }
+  return response;
+}
+
+function parseEventStream(body) {
+  let event = '';
+  let data = '';
+  const seen = [];
+  for (const line of String(body || '').split(/\r?\n/)) {
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim();
+      if (event && !seen.includes(event)) seen.push(event);
+    } else if (line.startsWith('data:')) {
+      data = line.slice(5).trim();
+    }
+    if (!data) continue;
+    if (event === 'error') {
+      throw new Error('YuE2 Space returned a Gradio error event: ' + data.slice(0, 180));
+    }
+    if (event === 'complete') {
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed == null) throw new Error('YuE2 Space returned a null completion payload (no audio data)');
+        return parsed;
+      } catch (error) {
+        if (String(error?.message || '').includes('null completion payload')) throw error;
+        throw new Error('YuE2 Space completion event was not valid JSON');
+      }
+    }
+  }
+  throw new Error('YuE2 Space did not complete generation; events=' + seen.join(','));
+}
+
+function findAudioFile(value, depth = 0) {
+  if (depth > 10 || value == null) return null;
+  // Some Gradio versions return temporary file paths as plain strings instead
+  // of FileData objects.
+  if (typeof value === 'string' && /\.(mp3|wav|flac)(?:[?#]|$)/i.test(value)) {
+    return { path: value, url: '', mime: '' };
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findAudioFile(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof value === 'object') {
+    const url = typeof value.url === 'string' ? value.url : '';
+    const path = typeof value.path === 'string' ? value.path : '';
+    const mime = String(value.mime_type || value.mimeType || '').toLowerCase();
+    const name = String(value.orig_name || value.name || value.path || value.url || '').toLowerCase();
+    if ((url || path) && (mime.includes('audio') || /\.(mp3|wav|flac)(?:[?#]|$)/i.test(name) || depth < 3)) {
+      return { url, path, mime };
+    }
+    for (const child of Object.values(value)) {
+      const found = findAudioFile(child, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+async function readAudio(response) {
+  const declared = Number(response.headers.get('content-length') || 0);
+  if (declared > MAX_AUDIO_BYTES) throw new Error('Generated audio exceeds size limit');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > MAX_AUDIO_BYTES) throw new Error('Generated audio is empty or too large');
+  const id3 = bytes.subarray(0, 3).toString('ascii') === 'ID3';
+  const mpeg = bytes.length > 1 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0;
+  const wav = bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WAVE';
+  if (!id3 && !mpeg && !wav) throw new Error('Generated file did not have a valid MP3 or WAV header');
+  if (bytes.length < 10000) throw new Error('Generated audio is unexpectedly short');
+  return { bytes, format: wav ? 'wav' : 'mp3' };
+}
+
+if (!String(process.env.HF_TOKEN || '').trim() && String(process.env.HF_ANONYMOUS_TEST || '').toLowerCase() !== 'true') {
+  throw new Error('HF_TOKEN is required unless the isolated anonymous test is explicitly enabled');
+}
+
+try {
+  const base = new URL(SPACE_URL);
+  const infoResponse = await fetchWithTimeout(new URL('/gradio_api/info', base), {
+    headers: headers()
+  }, 15000, 'YuE2 Space schema');
+  const info = await infoResponse.json();
+  const endpoint = info?.named_endpoints?.['/generate_song'] || info?.named_endpoints?.generate_song;
+  if (!endpoint || !Array.isArray(endpoint.parameters)) {
+    throw new Error('YuE2 Space did not expose the documented /generate_song endpoint');
+  }
+  const parameters = endpoint.parameters;
+  console.log('YUE2_SCHEMA_OK', JSON.stringify({
+    endpoint: '/generate_song',
+    parameterCount: parameters.length,
+    labels: parameters.map(p => String(p.label || p.parameter_name || p.name || '')).slice(0, 8)
+  }));
+
+  // The public Space's documented generate_song signature is:
+  // style, lyrics, planning_mode, render_quality, seed.
+  const submitResponse = await fetchWithTimeout(new URL('/gradio_api/call/generate_song', base), {
+    method: 'POST',
+    headers: headers(true),
+    body: JSON.stringify({
+      data: [
+        'Hebrew-language upbeat Israeli pop, clear lead vocal singing in Hebrew, modern synths, punchy drums, warm bass, catchy melody',
+        '[Verse]\nנוסעים קדימה, האור נדלק\nקצב בלב וכל רגע מתחזק\n\n[Chorus]\nעוד צעד ועוד חלום\nשרים ביחד עד סוף היום',
+        'full',
+        16,
+        42
+      ]
+    })
+  }, 30000, 'YuE2 generation submission');
+  const submission = await submitResponse.json();
+  const eventId = String(submission?.event_id || '').trim();
+  if (!eventId) throw new Error('YuE2 Space did not return a Gradio event ID');
+
+  const resultResponse = await fetchWithTimeout(
+    new URL('/gradio_api/call/generate_song/' + encodeURIComponent(eventId), base),
+    { headers: headers() },
+    TIMEOUT_MS,
+    'YuE2 song generation'
+  );
+  const outputs = parseEventStream(await resultResponse.text());
+  const file = findAudioFile(outputs);
+  if (!file) {
+    const shape = value => {
+      if (Array.isArray(value)) return { type: 'array', length: value.length, items: value.slice(0, 5).map(shape) };
+      if (value && typeof value === 'object') return {
+        type: 'object',
+        keys: Object.keys(value).slice(0, 20),
+        fields: Object.fromEntries(Object.entries(value).slice(0, 12).map(([key, item]) => [
+          key,
+          typeof item === 'string' ? item.slice(0, 100) : (item && typeof item === 'object' ? shape(item) : item)
+        ]))
+      };
+      return typeof value === 'string' ? { type: 'string', sample: value.slice(0, 100) } : { type: typeof value };
+    };
+    console.error('YUE2_OUTPUT_SHAPE', JSON.stringify(shape(outputs)));
+    throw new Error('YuE2 generation completed without a recognized audio file; see YUE2_OUTPUT_SHAPE');
+  }
+
+  let audioUrl;
+  if (file.url) audioUrl = new URL(file.url, base);
+  else if (file.path) audioUrl = new URL('/gradio_api/file=' + file.path, base);
+  else throw new Error('YuE2 returned an invalid audio file reference');
+  if (audioUrl.protocol !== 'https:') throw new Error('YuE2 returned a non-HTTPS audio URL');
+
+  // Never forward the Hugging Face token to a different host.
+  const downloadHeaders = audioUrl.origin === base.origin ? headers() : {};
+  const audioResponse = await fetchWithTimeout(audioUrl, { headers: downloadHeaders }, 30000, 'YuE2 audio download');
+  const audioResult = await readAudio(audioResponse);
+  const audio = audioResult.bytes;
+  const outputPath = 'branch4-yue2-hebrew-test.' + audioResult.format;
+  await writeFile(outputPath, audio);
+  console.log('LIVE_YUE2_MUSIC_TEST_OK', JSON.stringify({
+    provider: 'huggingface-yue2-space',
+    model: 'm-a-p/YuE2-3B',
+    bytes: audio.length,
+    audioHeaderValid: true,
+    format: audioResult.format,
+    outputPath,
+    languageStatus: 'Hebrew pronunciation must be manually listened to; model UI officially lists other languages'
+  }));
+} catch (error) {
+  console.error('LIVE_YUE2_MUSIC_TEST_FAILED', String(error?.message || error).slice(0, 500));
+  process.exitCode = 1;
+}
