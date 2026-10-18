@@ -119,6 +119,7 @@ test('provider failures use bounded cooldowns and recover after the cooldown', (
   assert.deepEqual(classifyProviderFailure(400), { status: 'disabled', cooldownMs: 30000 });
   assert.deepEqual(classifyProviderFailure(0), { status: 'temporary_error', cooldownMs: 15000 });
   assert.deepEqual(classifyProviderFailure(503), { status: 'temporary_error', cooldownMs: 15000 });
+  assert.deepEqual(classifyProviderFailure(502, 'You have exceeded your free ZeroGPU quota (192s requested)'), { status: 'rate_limited', cooldownMs: 12 * 60 * 60 * 1000 });
 });
 
 test('backup is not attempted for invalid client payloads but can recover from provider outages', () => {
