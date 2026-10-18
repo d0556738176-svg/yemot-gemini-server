@@ -45,8 +45,14 @@ function parseEventStream(body) {
       throw new Error('YuE2 Space returned a Gradio error event: ' + data.slice(0, 180));
     }
     if (event === 'complete') {
-      try { return JSON.parse(data); }
-      catch { throw new Error('YuE2 Space completion event was not valid JSON'); }
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed == null) throw new Error('YuE2 Space returned a null completion payload (no audio data)');
+        return parsed;
+      } catch (error) {
+        if (String(error?.message || '').includes('null completion payload')) throw error;
+        throw new Error('YuE2 Space completion event was not valid JSON');
+      }
     }
   }
   throw new Error('YuE2 Space did not complete generation; events=' + seen.join(','));
