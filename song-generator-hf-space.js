@@ -44,7 +44,7 @@ function valueFor(parameter, spec) {
   if (name.includes('lyrics')) return spec.lyrics || '';
   if (name.includes('vocal_language') || name === 'language') return spec.language || 'he';
   // Match ACE-Step v1.5 Gradio defaults for fields not specified by the caller.
-  if (name.includes('audio_duration') || name === 'duration') return Math.max(30, Math.min(60, Number(spec.durationSeconds) || 45));
+  if (name.includes('audio_duration') || name === 'duration') return Math.max(30, Math.min(240, Number(spec.durationSeconds) || 180));
   if (name.includes('task_type')) return 'text2music';
   if (name.includes('audio_format')) return 'mp3';
   if (name.includes('inference_steps')) return 8;
@@ -132,7 +132,7 @@ function generationWrapperData(parameters, spec) {
   data[4] = String(spec.musicPrompt || ''); // captions
   data[5] = String(spec.lyrics || '');
   data[9] = String(spec.language || 'he'); // vocal_language
-  data[15] = Math.max(30, Math.min(60, Number(spec.durationSeconds) || 45)); // audio_duration
+  data[15] = Math.max(30, Math.min(240, Number(spec.durationSeconds) || 180)); // audio_duration
   data[16] = 1; // one audio per request to conserve shared GPU quota
   data[23] = 'text2music'; // task_type
   data[30] = 'mp3'; // audio_format
@@ -232,7 +232,7 @@ export async function generateWithHuggingFaceSpace(spec) {
     throw new Error('HF_MUSIC_SPACE_URL must be a valid HTTPS URL');
   }
   base.pathname = base.pathname.replace(/\/$/, '');
-  const timeoutMs = Math.max(30000, Math.min(300000, Number(process.env.SONG_GENERATION_TIMEOUT_MS || 180000)));
+  const timeoutMs = Math.max(30000, Math.min(600000, Number(process.env.SONG_GENERATION_TIMEOUT_MS || 300000)));
   const infoUrl = new URL('/gradio_api/info', base);
   const infoResponse = await request(infoUrl, { headers: authHeaders() }, Math.min(timeoutMs, 15000), 'ACE-Step Space schema');
   const info = await infoResponse.json();
