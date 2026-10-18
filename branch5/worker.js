@@ -58,12 +58,21 @@ export function createWorker({
     let result = 'No verified result was returned.';
     const controller = new AbortController();
     activeAbortController = controller;
-    const timeout = setTimeout(() => controller.abort(new Error('task_timeout')), taskTimeoutMs);
+    let timeout;
     try {
       if (mode !== 'read_only' || typeof task !== 'string' || !task.trim()) {
         throw Object.assign(new Error('invalid_claimed_task'), { code: 'invalid_claimed_task' });
       }
-      const adapterResult = await adapter.executeReadOnlyTask({ id, task, signal: controller.signal });
+      const timeoutPromise = new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort(new Error('task_timeout'));
+          reject(Object.assign(new Error('task_timeout'), { code: 'task_timeout' }));
+        }, taskTimeoutMs);
+      });
+      const adapterResult = await Promise.race([
+        adapter.executeReadOnlyTask({ id, task, signal: controller.signal }),
+        timeoutPromise
+      ]);
       if (!adapterResult || adapterResult.verified !== true || typeof adapterResult.text !== 'string') {
         throw Object.assign(new Error('unverified_adapter_result'), { code: 'unverified_adapter_result' });
       }
