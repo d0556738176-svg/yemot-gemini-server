@@ -34,7 +34,7 @@ By default it uses a temporary profile, so sign-in will not persist. To use a de
 
 ## Manual sign-in requirement — not yet solved for cloud
 
-A first-time Google sign-in can require an interactive browser, MFA, CAPTCHA, or account recovery. This code does not automate or bypass those checks. A secure cloud sign-in requires an independently secured interactive browser session (for example, a private remote desktop/tunnel with authentication), a dedicated test account, restricted persistent storage, and a documented session-expiry/re-authentication procedure. No such remote desktop or cloud browser has been deployed by this PR, and no Google account is signed in here.
+A first-time Google sign-in can require an interactive browser, MFA, CAPTCHA, or account recovery. This code does not automate or bypass those checks. A secure cloud sign-in requires an independently secured interactive browser session (for example, a private remote desktop/tunnel with authentication), a dedicated test account, restricted persistent storage, and a documented session-expiry/re-authentication procedure. No such remote desktop or cloud browser has been deployed by this PR, and no Google account is signed in here. To continue, a separate cloud VM/container with an authenticated, private remote desktop or an SSH-tunneled browser must be provisioned, then a human must sign in manually using a dedicated test account. The access channel and persistent profile storage must be secured before the login is attempted.
 
 Do not paste passwords, one-time codes, cookies, or browser storage into GitHub, Render environment variables, or this chat. If the provider's security checks cannot be completed manually through a secured interactive session, stop.
 
@@ -80,7 +80,8 @@ Do not expose this endpoint publicly without HTTPS, network access controls, and
 ## Current verification results
 
 - Isolated GitHub Actions workflow for the branch 5 HTTP/security tests passed.
-- The supplied extension archive was inspected and its manifest/files are now checked by `extension:check`.
+- The supplied extension archive was inspected; the static extension check passed all 8 checks and scanned 15 source files.
+- The extension's supplied Node test suite passed: 62 passed, 0 failed.
 - A local attempt to start system Chromium and navigate to Gemini did not finish within the 25-second limit in this execution environment; therefore Chromium extension loading, Gemini sign-in, and a real read task are **not verified**.
 - No live Gemini prompt was sent.
 - No cloud browser service or remote sign-in session has been created.
