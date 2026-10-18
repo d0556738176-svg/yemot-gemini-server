@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAceStepPayload, normalizeSongRequest, shouldFallbackToBackup, classifyProviderFailure } from './song-generator.js';
+import { buildAceStepPayload, buildCompositionPlan, normalizeSongRequest, shouldFallbackToBackup, classifyProviderFailure } from './song-generator.js';
 
 test('ACE-Step payload preserves requested Hebrew lyrics and voice language', () => {
   const payload = buildAceStepPayload({
@@ -23,13 +23,28 @@ test('ACE-Step payload preserves requested Hebrew lyrics and voice language', ()
 
 test('ACE-Step payload clamps duration to the IVR-safe range', () => {
   assert.equal(buildAceStepPayload({ durationSeconds: 5 }).audio_duration, 30);
-  assert.equal(buildAceStepPayload({ durationSeconds: 900 }).audio_duration, 60);
+  assert.equal(buildAceStepPayload({ durationSeconds: 210 }).audio_duration, 210);
+  assert.equal(buildAceStepPayload({ durationSeconds: 900 }).audio_duration, 240);
 });
 
 test('song request normalization limits caller input length', () => {
-  const request = normalizeSongRequest({ prompt: 'א'.repeat(1000), duration_seconds: 45 });
+  const request = normalizeSongRequest({ prompt: 'א'.repeat(1000), duration_seconds: 210 });
   assert.equal(request.prompt.length, 700);
-  assert.equal(request.durationSeconds, 45);
+  assert.equal(request.durationSeconds, 210);
+});
+
+test('song request defaults to a full-song length and caps excessive durations', () => {
+  assert.equal(normalizeSongRequest({ prompt: 'שיר לנסיעה' }).durationSeconds, 180);
+  assert.equal(normalizeSongRequest({ prompt: 'שיר לנסיעה', duration_seconds: 999 }).durationSeconds, 240);
+});
+
+test('composition plan allocates all requested time across lyric sections', () => {
+  const plan = buildCompositionPlan({
+    durationSeconds: 180, lyrics: '[Verse 1]\\nשורה אחת\\n[Chorus]\\nפזמון\\n[Verse 2]\\nשורה נוספת',
+    genre: 'pop', mood: 'upbeat', musicPrompt: 'Hebrew pop', tempo: 'mid-tempo'
+  });
+  assert.equal(plan.chunks.length, 3);
+  assert.equal(plan.chunks.reduce((sum, chunk) => sum + chunk.duration_ms, 0), 180000);
 });
 
 test('ACE-Step adapter submits, polls, and downloads audio using authenticated API calls', async () => {
