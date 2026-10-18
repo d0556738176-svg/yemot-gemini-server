@@ -132,7 +132,7 @@ try {
         'Hebrew-language upbeat Israeli pop, clear lead vocal singing in Hebrew, modern synths, punchy drums, warm bass, catchy melody',
         '[Verse]\nנוסעים קדימה, האור נדלק\nקצב בלב וכל רגע מתחזק\n\n[Chorus]\nעוד צעד ועוד חלום\nשרים ביחד עד סוף היום',
         'full',
-        8,
+        16,
         42
       ]
     })
