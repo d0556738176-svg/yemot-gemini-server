@@ -44,6 +44,9 @@ Set a random secret of at least 32 characters, then start:
 
 ```sh
 export BRANCH5_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")"
+export BRANCH5_WORKER_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")"
+# Keep the worker protocol disabled until a real extension adapter is implemented and reviewed.
+# Do not set BRANCH5_WORKER_PROTOCOL_ENABLED=true yet.
 npm start
 ```
 
@@ -58,7 +61,7 @@ curl -X POST http://localhost:3005/api/status \
   -H "Authorization: Bearer $BRANCH5_TOKEN"
 ```
 
-Task requests require the same Bearer token. The PoC accepts only read-only requests and deliberately returns `503 browser_adapter_not_ready` until a real adapter is live-tested:
+Task requests require the user-facing Bearer token. The server now includes an **isolated in-memory worker queue protocol scaffold** with a separate worker token, a 20-job queue cap, five-minute job expiry, idempotency keys, and claim/result validation. The protocol is disabled by default. Even when enabled, this is only a server-side protocol test: it is **not connected to the Chrome extension**, does not persist jobs across restarts, and does not prove a real browser action. Keep it disabled until the extension-side adapter exists and passes live tests. When the protocol is disabled, task requests deliberately return `503 browser_adapter_not_ready`:
 ```sh
 curl -X POST http://localhost:3005/api/task \
   -H "Authorization: Bearer $BRANCH5_TOKEN" \
@@ -66,11 +69,14 @@ curl -X POST http://localhost:3005/api/task \
   -d '{"task":"Read the public title and summary of https://example.com","mode":"read_only"}'
 ```
 
-Do not expose this endpoint publicly without HTTPS, network access controls, and a proper secret-management setup. The current scaffold does not implement a production-ready browser worker, remote desktop, encrypted persistent profile, request queue, or session-management flow. The extension ZIP itself has no HTTP/WebSocket server API for external task submission; it communicates through Chrome extension messaging and the Gemini website UI. Therefore, the existing `/api/task` route cannot control it as-is. A separate, authenticated browser-control adapter must be designed and tested against the live extension UI before the API can be enabled.
+Do not expose this endpoint publicly without HTTPS, network access controls, and a proper secret-management setup. The current scaffold does not implement a production-ready browser worker, remote desktop, encrypted persistent profile, or session-management flow. The queue is in-memory only and is intended for protocol tests, not production use. The extension ZIP itself has no HTTP/WebSocket server API for external task submission; it communicates through Chrome extension messaging and the Gemini website UI. Therefore, this queue cannot control it as-is. A separate extension-side bridge must poll/claim tasks securely, pass them through the extension's existing safe message flow, and report verified results. That integration must be reviewed and tested against the live extension UI before the protocol flag can be enabled.
 
 ## Safety limits
 
 - No automatic account creation, login submission, form submission, publication, deletion, payment, permission changes, or other high-impact actions.
+- User API and worker endpoints use separate Bearer secrets; generate both independently and never log them.
+- The worker protocol is disabled by default and must remain disabled until the extension adapter is live-tested.
+- Jobs live only in process memory and disappear on restart; this is not durable production queueing.
 - No task is claimed successful without a verified browser result.
 - Rate limit: 10 authenticated requests per source IP per minute; request body capped at 8 KiB.
 - No prompt body or authorization token is written to logs.
