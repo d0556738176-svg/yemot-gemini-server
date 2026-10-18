@@ -2,21 +2,41 @@
 
 **Status: scaffold only; not production-ready, not deployed, not connected to Yemot.**
 
-This directory is deliberately independent. It does not import the root `server.js`, does not read Yemot management credentials, does not call Yemot APIs, and does not edit the root `render.yaml`. The server starts only when run directly from this directory.
+This directory is deliberately independent. It does not import the root `server.js`, does not read Yemot management credentials, does not call Yemot APIs, and does not edit the root `render.yaml`.
 
-## Verified technical boundary
+## What was checked from Gemini Browser Bridge 0.2.2
 
-Gemini Browser Bridge 0.2.2 is a Chrome extension for a live browser tab and side panel; it is not an HTTP backend. Playwright can load Chromium extensions when using a persistent context, but that alone does not prove this extension can drive a live Gemini session in a headless cloud container. This PoC therefore fails closed: it does not send a Gemini prompt and its task endpoint returns `503 browser_adapter_not_ready`.
+The supplied package is a Manifest V3 Chrome extension. Its manifest declares a background service worker (`background.js`), a side panel (`panel.html`), content scripts on `https://gemini.google.com/*`, and optional broad HTTP/HTTPS host permissions. It does not expose a server API endpoint or include a Gemini API key in the manifest. The extension itself still relies on an authenticated Gemini web tab and DOM selectors that may change.
 
-## Local checks
+Run a static check against the extracted, user-supplied extension directory:
 
-Requires Node.js 22+.
+```sh
+cd branch5
+BRIDGE_EXTENSION_DIR=/absolute/path/to/Gemini-Browser-Bridge npm run extension:check
+```
+
+This verifies the manifest version and expected files only; it is not proof that the extension can control a live Gemini session.
+
+## Browser smoke test
+
+Requires Node.js 22+, package install, and the Playwright-bundled Chromium:
 
 ```sh
 cd branch5
 npm install
-npm test
+npx playwright install chromium
+BRIDGE_EXTENSION_DIR=/absolute/path/to/Gemini-Browser-Bridge npm run browser:smoke
 ```
+
+The smoke test attempts to launch Chromium with the extension, wait for its service worker, open Gemini, and report only coarse UI indicators. It never types credentials, submits a login, clicks sensitive controls, or sends a Gemini prompt.
+
+By default it uses a temporary profile, so sign-in will not persist. To use a dedicated persistent profile in a secured private test machine, set `BRIDGE_PROFILE_DIR` to a dedicated directory with restricted access. The script applies owner-only directory permissions where supported. The profile may contain authentication cookies and must be treated as a secret: never commit it, upload it to GitHub, or send it in chat. Do not use your everyday Chrome profile.
+
+## Manual sign-in requirement — not yet solved for cloud
+
+A first-time Google sign-in can require an interactive browser, MFA, CAPTCHA, or account recovery. This code does not automate or bypass those checks. A secure cloud sign-in requires an independently secured interactive browser session (for example, a private remote desktop/tunnel with authentication), a dedicated test account, restricted persistent storage, and a documented session-expiry/re-authentication procedure. No such remote desktop or cloud browser has been deployed by this PR, and no Google account is signed in here.
+
+Do not paste passwords, one-time codes, cookies, or browser storage into GitHub, Render environment variables, or this chat. If the provider's security checks cannot be completed manually through a secured interactive session, stop.
 
 ## Isolated HTTP service
 
@@ -27,7 +47,7 @@ export BRANCH5_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(
 npm start
 ```
 
-Health check (intentionally public, no secrets):
+Health check:
 ```sh
 curl http://localhost:3005/health
 ```
@@ -38,7 +58,7 @@ curl -X POST http://localhost:3005/api/status \
   -H "Authorization: Bearer $BRANCH5_TOKEN"
 ```
 
-Task requests require the same Bearer token. The PoC only accepts read-only requests and deliberately returns 503 until a live-tested adapter exists:
+Task requests require the same Bearer token. The PoC accepts only read-only requests and deliberately returns `503 browser_adapter_not_ready` until a real adapter is live-tested:
 ```sh
 curl -X POST http://localhost:3005/api/task \
   -H "Authorization: Bearer $BRANCH5_TOKEN" \
@@ -46,27 +66,25 @@ curl -X POST http://localhost:3005/api/task \
   -d '{"task":"Read the public title and summary of https://example.com","mode":"read_only"}'
 ```
 
-Do not expose this endpoint publicly without HTTPS and access controls. Never place the token in a URL or logs. This prototype does not yet implement a production-ready session store, browser worker, persistent profile encryption, remote desktop/login bootstrap, or request queue.
-
-## Optional browser extension smoke test
-
-Copy the *extracted* Gemini Browser Bridge extension directory to a private test environment and run:
-
-```sh
-BRIDGE_EXTENSION_DIR=/absolute/path/to/Gemini-Browser-Bridge npm run browser:smoke
-```
-
-The script checks whether Playwright can launch Chromium with the extension and open the Gemini website. It does not sign in, send prompts, click sensitive controls, or verify live Gemini selectors. Use a dedicated test account/profile, never a personal Chrome profile. Cloud login/session bootstrap remains a manual feasibility gate; do not commit cookies, storage state, credentials, or the extension ZIP to Git.
+Do not expose this endpoint publicly without HTTPS, network access controls, and a proper secret-management setup. The current scaffold does not implement a production-ready browser worker, remote desktop, encrypted persistent profile, request queue, or session-management flow.
 
 ## Safety limits
 
 - No automatic account creation, login submission, form submission, publication, deletion, payment, permission changes, or other high-impact actions.
-- The server never claims that a task succeeded.
+- No task is claimed successful without a verified browser result.
 - Rate limit: 10 authenticated requests per source IP per minute; request body capped at 8 KiB.
 - No prompt body or authorization token is written to logs.
 - No Gemini API key is used by this scaffold, but it also does not yet provide Gemini responses.
 - No branch 1–3 changes, no Yemot settings changes, no deployment, no merge.
 
+## Current verification results
+
+- Isolated GitHub Actions workflow for the branch 5 HTTP/security tests passed.
+- The supplied extension archive was inspected and its manifest/files are now checked by `extension:check`.
+- A local attempt to start system Chromium and navigate to Gemini did not finish within the 25-second limit in this execution environment; therefore Chromium extension loading, Gemini sign-in, and a real read task are **not verified**.
+- No live Gemini prompt was sent.
+- No cloud browser service or remote sign-in session has been created.
+
 ## Next gate
 
-Before implementing an adapter, validate current Google terms and account eligibility, confirm that automating the Gemini web UI is allowed for the intended use, and prove the extension works against a real cloud Chromium session. If it fails or requires unsupported quota circumvention, stop and report the limitation.
+The next manual requirement is to provide a secured interactive cloud-browser session where an authorized person can sign in to a dedicated test account. Then rerun the extension smoke test and, only if the composer is genuinely available, perform one harmless read-only prompt and verify the actual response. Do not connect to Yemot or deploy until those checks pass and the change is separately approved.
