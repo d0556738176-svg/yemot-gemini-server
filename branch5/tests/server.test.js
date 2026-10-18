@@ -79,3 +79,33 @@ test('invalid JSON returns a safe error', async () => {
     assert.deepEqual(await response.json(), { error: 'invalid_json' });
   });
 });
+
+test('oversized request returns HTTP 413 without forcibly dropping the connection', async () => {
+  await withServer(async base => {
+    const response = await fetch(base + '/api/task', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task: 'x'.repeat(9000) })
+    });
+    assert.equal(response.status, 413);
+    assert.deepEqual(await response.json(), { error: 'body_too_large' });
+  });
+});
+
+test('rate limit rejects the eleventh authenticated request in one minute', async () => {
+  await withServer(async base => {
+    for (let i = 0; i < 10; i++) {
+      const response = await fetch(base + '/api/status', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + TOKEN }
+      });
+      assert.equal(response.status, 200);
+    }
+    const limited = await fetch(base + '/api/status', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + TOKEN }
+    });
+    assert.equal(limited.status, 429);
+    assert.deepEqual(await limited.json(), { error: 'rate_limited' });
+  });
+});
