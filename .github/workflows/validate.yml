@@ -96,6 +96,7 @@ jobs:
       - name: Generate and validate a real Hebrew-lyrics test song through YuE2 Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_ANONYMOUS_TEST: 'true'
         run: node song-generator-yue2-space-live.js
       - name: Upload generated YuE2 MP3 for listening and manual review
         if: success()
