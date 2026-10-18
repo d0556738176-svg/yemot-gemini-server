@@ -11,8 +11,9 @@ function audioType(value) {
 
 function authHeaders(json = false) {
   const token = String(process.env.HF_TOKEN || '').trim();
+  const anonymous = String(process.env.HF_ANONYMOUS_TEST || '').toLowerCase() === 'true';
   return {
-    ...(token ? { authorization: 'Bearer ' + token } : {}),
+    ...(!anonymous && token ? { authorization: 'Bearer ' + token } : {}),
     ...(json ? { 'content-type': 'application/json' } : {})
   };
 }
@@ -221,16 +222,18 @@ async function readLimited(response) {
  * This is intended for a quota-limited test/fallback, not guaranteed production SLA.
  */
 export async function generateWithHuggingFaceSpace(spec) {
-  // Prefer the current ACE-Step 1.5 REST API. Older public Space revisions may
-  // expose only Gradio's queue API, so fall back only when REST is unsupported;
-  // never repeat a generation after quota/auth/server failures.
-  try {
-    return await generateWithAceStepRest(spec);
-  } catch (error) {
-    const code = Number(error?.status || 0);
-    if (![404, 405, 501].includes(code) && error?.apiUnavailable !== true) throw error;
+  const anonymous = String(process.env.HF_ANONYMOUS_TEST || '').toLowerCase() === 'true';
+  // Prefer REST for authenticated use. The isolated anonymous probe bypasses
+  // REST so it can test whether public Gradio access has a separate quota.
+  if (!anonymous) {
+    try {
+      return await generateWithAceStepRest(spec);
+    } catch (error) {
+      const code = Number(error?.status || 0);
+      if (![404, 405, 501].includes(code) && error?.apiUnavailable !== true) throw error;
+    }
   }
-  if (!String(process.env.HF_TOKEN || '').trim()) {
+  if (!String(process.env.HF_TOKEN || '').trim() && !anonymous) {
     throw Object.assign(new Error('HF_TOKEN is required for ACE-Step ZeroGPU generation; anonymous requests are not reliable'), { status: 503 });
   }
   const rawBase = String(process.env.HF_MUSIC_SPACE_URL || DEFAULT_SPACE_URL).trim();
