@@ -120,7 +120,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Test the documented ACE-Step REST API and generate a real Hebrew-lyrics MP3
+      - name: Test current ACE-Step REST API with legacy Gradio fallback and generate a real Hebrew-lyrics MP3
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: node song-generator-hf-rest-live.js
