@@ -28,6 +28,18 @@ async function request(url, options = {}, timeoutMs = 20000, label = 'ACE-Step R
   return response;
 }
 
+async function readJson(response, label) {
+  const textBody = await response.text();
+  try {
+    return JSON.parse(textBody);
+  } catch {
+    const contentType = response.headers.get('content-type') || 'unknown';
+    const html = /^\\s*<!doctype html|^\\s*<html/i.test(textBody);
+    throw new Error(label + ' did not return JSON (content-type=' + contentType +
+      ', response=' + (html ? 'HTML page' : textBody.slice(0, 180).replace(/\\s+/g, ' ')) + ')');
+  }
+}
+
 function summarize(value) {
   if (!value || typeof value !== 'object') return { type: value === null ? 'null' : typeof value };
   return {
@@ -67,11 +79,11 @@ const started = Date.now();
 try {
   // Probe the documented REST API first; do not fall back to Gradio silently.
   const health = await request(new URL('/health', base), { headers: authHeaders() }, 15000, 'ACE-Step health');
-  const healthData = await health.json();
+  const healthData = await readJson(health, 'ACE-Step health endpoint');
   console.log('ACE_STEP_REST_HEALTH_OK', JSON.stringify(summarize(healthData)));
 
   const modelsResponse = await request(new URL('/v1/models', base), { headers: authHeaders() }, 15000, 'ACE-Step models');
-  const modelsData = await modelsResponse.json();
+  const modelsData = await readJson(modelsResponse, 'ACE-Step models endpoint');
   console.log('ACE_STEP_REST_MODELS_OK', JSON.stringify(summarize(modelsData)));
 
   const submitResponse = await request(new URL('/v1/music/generate', base), {
@@ -89,7 +101,7 @@ try {
       thinking: true
     })
   }, 30000, 'ACE-Step REST generation submit');
-  const submitted = await submitResponse.json();
+  const submitted = await readJson(submitResponse, 'ACE-Step generation submission');
   const jobId = String(submitted?.job_id || '').trim();
   console.log('ACE_STEP_REST_SUBMITTED', JSON.stringify({ ...summarize(submitted), job_id: jobId ? '[present]' : undefined }));
   if (!jobId) throw new Error('ACE-Step REST API returned no job_id');
@@ -100,7 +112,7 @@ try {
     const poll = await request(new URL('/v1/jobs/' + encodeURIComponent(jobId), base), {
       headers: authHeaders()
     }, 15000, 'ACE-Step job poll');
-    finalJob = await poll.json();
+    finalJob = await readJson(poll, 'ACE-Step job status');
     console.log('ACE_STEP_REST_STATUS', JSON.stringify({
       status: finalJob?.status,
       queue_position: finalJob?.queue_position,
