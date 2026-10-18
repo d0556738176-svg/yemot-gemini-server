@@ -83,3 +83,27 @@ test('worker never reports an unverified adapter response as completed', async (
     assert.equal((await claim.json()).task, null);
   });
 });
+
+test('worker times out even if adapter ignores abort signal', async () => {
+  await withServer(async baseUrl => {
+    const enqueue = await fetch(baseUrl + '/api/task', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + USER_TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ task: 'Read a public page' })
+    });
+    assert.equal(enqueue.status, 202);
+    const worker = createWorker({
+      baseUrl,
+      token: WORKER_TOKEN,
+      taskTimeoutMs: 10,
+      adapter: { async executeReadOnlyTask() { return new Promise(() => {}); } }
+    });
+    assert.equal(await worker.runOnce(), true);
+    const next = await fetch(baseUrl + '/api/worker/claim', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + WORKER_TOKEN, 'content-type': 'application/json' },
+      body: '{}'
+    });
+    assert.equal((await next.json()).task, null);
+  });
+});
