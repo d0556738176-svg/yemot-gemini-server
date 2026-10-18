@@ -69,6 +69,7 @@ jobs:
       - name: Generate and validate a real 30-second test audio file through ACE-Step Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_ANONYMOUS_TEST: 'true'
         run: node song-generator-hf-space-live.js
       - name: Upload generated ACE-Step MP3 for listening and manual review
         if: success()
