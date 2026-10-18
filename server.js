@@ -477,7 +477,10 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
         });
       } else try {
         const openAITimeout = Number(timeoutOverrideMs || (fastPhone ? 3500 : 12000));
-        const answer = await answerWithOpenAIText(textOnlyInput, {
+        const openAIFallbackPrompt = buildBranch1FallbackMessages(EXCLUSIVE_INSTRUCTION, textOnlyInput)
+          .map(message => (message.role === 'system' ? 'System instructions:\n' : 'Conversation:\n') + message.content)
+          .join('\n\n');
+        const answer = await answerWithOpenAIText(openAIFallbackPrompt, {
           timeoutMs: openAITimeout,
           webSearch: useWebSearch,
           deep: /לעומק|מחקר מקיף|סקירה מקיפה|בדיקה יסודית|כל הפרטים|בהרחבה/i.test(textOnlyInput)
