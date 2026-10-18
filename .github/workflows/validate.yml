@@ -147,5 +147,5 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Inspect public Gradio API schema without generating audio
+      - name: Inspect public Gradio API schema and positional defaults without generating audio
         run: node song-generator-hf-space-inspect.js
