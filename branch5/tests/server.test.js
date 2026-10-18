@@ -185,11 +185,16 @@ test('worker cannot complete unknown or unclaimed tasks and results are size-lim
     });
     const task = await taskResponse.json();
 
+    const claim = await fetch(base + '/api/worker/claim', {
+      method: 'POST', headers: workerHeaders, body: '{}'
+    });
+    assert.equal((await claim.json()).task.id, task.id);
+
     const tooLarge = await fetch(base + '/api/worker/result', {
       method: 'POST',
       headers: workerHeaders,
       body: JSON.stringify({ id: task.id, status: 'completed', result: 'x'.repeat(4001) })
     });
-    assert.equal(tooLarge.status, 404, 'unclaimed tasks must not be completed');
+    assert.equal(tooLarge.status, 400, 'worker results must be size-limited');
   }, { workerProtocolEnabled: true });
 });
