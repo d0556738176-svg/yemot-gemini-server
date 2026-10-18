@@ -69,7 +69,6 @@ jobs:
       - name: Generate and validate a real 30-second test audio file through ACE-Step Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_ANONYMOUS_TEST: 'true'
         run: node song-generator-hf-space-live.js
       - name: Upload generated ACE-Step MP3 for listening and manual review
         if: success()
@@ -97,7 +96,6 @@ jobs:
       - name: Generate and validate a real Hebrew-lyrics test song through YuE2 Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_ANONYMOUS_TEST: 'true'
         run: node song-generator-yue2-space-live.js
       - name: Upload generated YuE2 MP3 for listening and manual review
         if: success()
@@ -149,7 +147,5 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Inspect legacy ACE-Step Space schema without generating audio
-        env:
-          HF_MUSIC_SPACE_URL: https://ace-step-ace-step.hf.space
+      - name: Inspect public Gradio API schema and positional defaults without generating audio
         run: node song-generator-hf-space-inspect.js
