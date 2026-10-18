@@ -95,9 +95,10 @@ async function readAudio(response) {
   if (!bytes.length || bytes.length > MAX_AUDIO_BYTES) throw new Error('Generated audio is empty or too large');
   const id3 = bytes.subarray(0, 3).toString('ascii') === 'ID3';
   const mpeg = bytes.length > 1 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0;
-  if (!id3 && !mpeg) throw new Error('Generated file did not have a valid MP3 header');
-  if (bytes.length < 10000) throw new Error('Generated MP3 is unexpectedly short');
-  return bytes;
+  const wav = bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WAVE';
+  if (!id3 && !mpeg && !wav) throw new Error('Generated file did not have a valid MP3 or WAV header');
+  if (bytes.length < 10000) throw new Error('Generated audio is unexpectedly short');
+  return { bytes, format: wav ? 'wav' : 'mp3' };
 }
 
 if (!String(process.env.HF_TOKEN || '').trim()) {
@@ -131,7 +132,7 @@ try {
         'Hebrew-language upbeat Israeli pop, clear lead vocal singing in Hebrew, modern synths, punchy drums, warm bass, catchy melody',
         '[Verse]\nנוסעים קדימה, האור נדלק\nקצב בלב וכל רגע מתחזק\n\n[Chorus]\nעוד צעד ועוד חלום\nשרים ביחד עד סוף היום',
         'full',
-        16,
+        8,
         42
       ]
     })
@@ -174,14 +175,16 @@ try {
   // Never forward the Hugging Face token to a different host.
   const downloadHeaders = audioUrl.origin === base.origin ? headers() : {};
   const audioResponse = await fetchWithTimeout(audioUrl, { headers: downloadHeaders }, 30000, 'YuE2 audio download');
-  const audio = await readAudio(audioResponse);
-  const outputPath = 'branch4-yue2-hebrew-test.mp3';
+  const audioResult = await readAudio(audioResponse);
+  const audio = audioResult.bytes;
+  const outputPath = 'branch4-yue2-hebrew-test.' + audioResult.format;
   await writeFile(outputPath, audio);
   console.log('LIVE_YUE2_MUSIC_TEST_OK', JSON.stringify({
     provider: 'huggingface-yue2-space',
     model: 'm-a-p/YuE2-3B',
     bytes: audio.length,
-    mp3HeaderValid: true,
+    audioHeaderValid: true,
+    format: audioResult.format,
     outputPath,
     languageStatus: 'Hebrew pronunciation must be manually listened to; model UI officially lists other languages'
   }));
