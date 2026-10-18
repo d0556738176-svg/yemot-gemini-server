@@ -138,7 +138,7 @@ function generationWrapperData(parameters, spec) {
   data[15] = Math.max(30, Math.min(240, Number(spec.durationSeconds) || 180)); // audio_duration
   data[16] = 1; // one audio per request to conserve shared GPU quota
   data[23] = 'text2music'; // task_type
-  data[27] = 'mp3'; // audio_format (the API input order places this at index 27)
+  data[30] = 'mp3'; // audio_format (shift, inference method, and custom timesteps precede it)
   // Preserve all other live Space defaults. Generic param_N labels make it unsafe
   // to override later indices without an exact named signature.
   return data;
