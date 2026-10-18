@@ -448,7 +448,10 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
             baseUrl: provider.baseUrl,
             apiKey: provider.apiKey,
             model: provider.model,
-            messages: [{ role: 'user', content: textOnlyInput }],
+            messages: [
+              ...(EXCLUSIVE_INSTRUCTION ? [{ role: 'system', content: EXCLUSIVE_INSTRUCTION }] : []),
+              { role: 'user', content: textOnlyInput }
+            ],
             timeoutMs,
             maxTokens: fastPhone ? 700 : 1400,
             cooldowns: branch1FallbackProviderCooldowns
