@@ -7,7 +7,7 @@ test('extracts the city from a Super-Pharm Azrieli mall request', () => {
   const q = 'מה שעות הפתיחה של סניף סופר-פארם בקניון עזריאלי בתל אביב?';
   assert.equal(extractSearchCity(q), 'תל אביב');
   assert.match(extractLocalArea(q), /עזריאלי/);
-  assert.deepEqual(extractExplicitLocation(q), { city: 'תל אביב', area: 'עזריאלי' });
+  assert.deepEqual(extractExplicitLocation(q), { city: 'תל אביב', area: 'קניון עזריאלי' });
 });
 
 test('recognizes a neighborhood and its city instead of a nearby neighborhood', () => {
