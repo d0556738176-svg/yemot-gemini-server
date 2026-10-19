@@ -44,7 +44,9 @@ export function buildLocalBusinessQueries(question, { city = '', area = '' } = {
     'site:easy.co.il ' + [category, area, city].filter(Boolean).join(' '),
     // Local voice transcription sometimes turns "חנויות" into "חניות". Search
     // both interpretations so we do not silently lose the requested neighborhood.
-    ...(parkingIntent ? ['חנויות ועסקים '+area+' '+city, 'site:easy.co.il חנויות '+area+' '+city] : ['חניונים וחניות '+area+' '+city'])
+    ...(parkingIntent
+      ? ['חנויות ועסקים ' + area + ' ' + city, 'site:easy.co.il חנויות ' + area + ' ' + city]
+      : ['חניונים וחניות ' + area + ' ' + city])
   ];
   return [...new Set(queries.map(x => x.trim()).filter(Boolean))].slice(0, 9);
 }
