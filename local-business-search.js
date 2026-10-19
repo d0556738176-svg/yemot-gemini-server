@@ -15,7 +15,7 @@ const CITY_ALIASES = {
 
 export function isLocalBusinessDiscoveryRequest(question, location = {}) {
   const q = String(question || '');
-  if (!location.area && !location.city) return false;
+  if (!location.area || !location.city) return false;
   if (/(?:שעות פתיחה|שעות פעילות|מתי פתוח|מתי נסגר|פתוח עכשיו|מספר טלפון|טלפון של|מוקד|שירות לקוחות)/i.test(q)) return false;
   return /(חנויות|חנות|עסקים|עסק|בתי עסק|מסעדות|מסעדה|מכולת|סופרמרקט|מרכז מסחרי|מקומות בשכונה|מה יש בשכונה|אילו מקומות)/i.test(q);
 }
