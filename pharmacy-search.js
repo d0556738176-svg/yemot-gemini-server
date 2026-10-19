@@ -1,4 +1,4 @@
-const PHONE_RE = /(?:0[2-489]-?\\d{7}|0[57]\\d-?\\d{7}|07\\d-?\\d{7}|\\*\\d{3,5})/g;
+const PHONE_RE = /(?:0[2-489]-?\d{7}|0[57]\d-?\d{7}|07\d-?\d{7}|\*\d{3,5})/g;
 
 export function buildPharmacySearchQueries(city) {
   const place=String(city||'').trim();
@@ -21,8 +21,8 @@ export function buildPharmacySearchAnswer({city='',results=[]}={}) {
   const items=(Array.isArray(results)?results:[])
     .filter(x=>String(x?.title||'').trim() && String(x?.url||'').trim())
     .map(x=>{
-      const title=String(x.title).replace(/\\s+/g,' ').trim();
-      const snippet=String(x.snippet||'').replace(/\\s+/g,' ').trim();
+      const title=String(x.title).replace(/\s+/g,' ').trim();
+      const snippet=String(x.snippet||'').replace(/\s+/g,' ').trim();
       const key=title.toLocaleLowerCase('he');
       if(seen.has(key)) return null;
       seen.add(key);
