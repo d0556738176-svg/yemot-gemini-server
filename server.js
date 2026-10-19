@@ -2062,6 +2062,7 @@ async function answerLocalBusinessDiscoveryDirect(transcript) {
     'אל תמציא כתובת, טלפון, שעות או שם עסק. אם תוצאה היא רק דף קטגוריה כללי ולא שם עסק, אל תציג אותה כחנות מסוימת. '+
     'אל תיתן רשימת כותרות כללית במקום לענות. אם אין מספיק מידע, ציין במדויק מה לא אומת.';
   try {
+    const generated=await generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true);
     const answer=String(generated?.response?.text?.()||'').trim();
     const expectedResults=exactResults.length ? exactResults : cityResults;
     // Do not accept a fluent but generic answer that omits every business found.
