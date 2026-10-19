@@ -3824,6 +3824,7 @@ async function youtubeCallHandler(call) {
               chunks: playback.chunkCount
             });
 
+            const playedVideoId = selectedVideo.videoId;
             const messages = [
               { type: 'text', data: 'מתחיל להשמיע את הסרטון המאושר.' },
               ...playback.playbackPaths.map(file => ({ type: 'file', data: file }))
@@ -3833,7 +3834,7 @@ async function youtubeCallHandler(call) {
             // Yemot-router2 supports file messages directly. This makes the
             // phone call play the uploaded WAV chunks instead of waiting for
             // another HTTP request or trying to stream a remote YouTube URL.
-            console.info('[YouTube IVR] playback response ready', { videoId: selectedVideo?.videoId || null, files: playback.playbackPaths.length });
+            console.info('[YouTube IVR] playback response ready', { videoId: playedVideoId, files: playback.playbackPaths.length });
             return call.id_list_message(messages, { removeInvalidChars: true });
           } catch (playbackError) {
             logDetailedError('YouTube authorized playback', playbackError);
