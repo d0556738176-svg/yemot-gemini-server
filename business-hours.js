@@ -1,3 +1,12 @@
+export function isBusinessHoursQuestion(transcript) {
+  const t=String(transcript||'').toLowerCase().replace(/\s+/g,' ').trim();
+  // Hebrew callers naturally say both "שעות פתיחה" and "שעות הפתיחה";
+  // speech recognition also commonly yields "מה השעות פתיחה".
+  const asksHours=/(פתוח עכשיו|פתוחה עכשיו|פתוחים עכשיו|פתוחות עכשיו|פתוח היום|פתוחה היום|מתי פתוח|מתי פתוחה|מתי הם פתוחים|מתי נסגר|מתי סוגר|שעות\s*ה?פתיחה|מה\s+השעות|השעות\s*(?:ה?פתיחה|פעילות)?|שעות פעילות|זמני פתיחה|עד מתי פתוח|באיזה שעות|מתי פותח)/i.test(t);
+  const hasBusiness=/(בית מרקחת|בתי מרקחת|סופר.?פארם|פארם|כללית|מכבי|מאוחדת|לאומית|בנק|סניף|חנות|חנויות|עסק|מרכז קניות|קניון|דואר|סופר|מכולת|מסעדה|מספרה|דיסקונט|הפועלים|לאומי|מזרחי|איקאה|רמי לוי|שופרסל|ויקטורי|מחסני השוק|משרד)/i.test(t);
+  return asksHours && hasBusiness;
+}
+
 const TIME_RANGE = /\b\d{1,2}[:.]\d{2}\s*[-–—至]\s*\d{1,2}[:.]\d{2}\b/;
 
 function normalize(value) {
