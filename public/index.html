@@ -23,9 +23,23 @@
 <h2>היסטוריית שיחות</h2><div id="calls">אין נתונים</div>
 </section>
 <section class="card">
-<h2>YouTube</h2>
+<h2>חיפוש YouTube וחיבור מקור שמע</h2>
+<p class="notice">החיפוש מציג פרטי סרטונים בלבד. כדי להשמיע בטלפון, יש לחבר לכל סרטון קובץ שמע/וידאו ישיר ממקור שיש לך הרשאה להשתמש בו. אין להדביק כאן קישור צפייה של YouTube; השרת אינו קורע או מוריד אוטומטית את זרם YouTube.</p>
 <div class="row"><input id="ytq" placeholder="חיפוש YouTube"><button id="yt">חפש</button></div>
 <div id="ytresults"></div>
+<hr>
+<h3>מקור שמע לסרטון שנבחר</h3>
+<p id="selectedVideo" class="muted">בחר סרטון בתוצאות החיפוש כדי להתחיל.</p>
+<label>מזהה סרטון <input id="sourceVideoId" placeholder="מזהה ימולא בבחירה" readonly></label>
+<label>קישור HTTPS ישיר לקובץ שמע או וידאו מורשה <input id="sourceUrl" type="url" placeholder="https://media.example.com/audio.mp3" autocomplete="off"></label>
+<label class="check"><input id="rightsConfirmed" type="checkbox"> אני מאשר שיש לי זכויות או הרשאה מתאימה להשתמש בקובץ המקור ולהשמיע אותו במערכת הטלפונית.</label>
+<div class="row">
+<button id="registerSource">שמור מיפוי מקור</button>
+<button id="checkSource" class="secondary">בדוק מיפוי</button>
+<button id="removeSource" class="danger">הסר מיפוי</button>
+</div>
+<pre id="sourceStatus" role="status"></pre>
+<p class="muted">לאחר שמירת המיפוי, בשלוחה 2 בוחרים את אותו סרטון ואומרים ״כן״. השרת מושך את הקובץ מהכתובת הישירה, ממיר ל־WAV מונו 8 kHz, מפצל למקטעים, מעלה לימות המשיח ומוודא שהקבצים קיימים. השמעה אמיתית עדיין דורשת מפתחות ושירותים מוגדרים.</p>
 </section>
 </main>
 <script src="/dashboard/app.js" defer></script>
