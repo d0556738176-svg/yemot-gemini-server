@@ -30,8 +30,7 @@ export function buildBusinessHoursQueries({ targets = [], locationText = '', cit
     if (isSuperPharmTarget([target], question)) {
       queries.push(
         'site:super-pharm.co.il ' + [target, cleanArea, cleanCity].filter(Boolean).join(' ') + ' שעות פתיחה',
-        'site:super-pharm.co.il ' + [cleanCity, cleanArea, 'סניפים סופר-פארם'].filter(Boolean).join(' '),
-        'סופר פארם ' + [cleanArea, cleanCity, 'שעות פתיחה סניף רשמי'].filter(Boolean).join(' ')
+        'site:super-pharm.co.il ' + [cleanCity, cleanArea, 'סניפים סופר-פארם'].filter(Boolean).join(' ')
       );
     }
   }
@@ -46,7 +45,7 @@ export function buildBusinessHoursQueries({ targets = [], locationText = '', cit
 
   // Search engines often normalize mall and city names differently. Keep both
   // the full location and separate area/city variants, without sending duplicates.
-  return [...new Set(queries.map(normalize).filter(Boolean))].slice(0, 12);
+  return [...new Set(queries.map(normalize).filter(Boolean))].slice(0, 8);
 }
 
 function extractHoursEvidence(result) {
