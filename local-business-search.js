@@ -79,3 +79,32 @@ export function buildNoVerifiedLocalResultsAnswer({ city = '', area = '' } = {})
   return 'לא הצלחתי לאמת כרגע שמות של חנויות שנמצאות דווקא ב' + location +
     '. חיפשתי גם ברשימות עסקים של העיר, אבל אין לי כרגע תוצאה שאפשר לזהות בביטחון. לא אציג חנויות משכונה אחרת כאילו הן בתוך השכונה שביקשת.';
 }
+
+
+// Build a useful, source-grounded phone answer without depending on a generative model.
+// Exact-neighborhood results and city-level leads are deliberately labelled separately.
+export function buildLocalBusinessResultsAnswer({ city = '', area = '', exactResults = [], cityResults = [] } = {}) {
+  const cleanResults = items => (Array.isArray(items) ? items : [])
+    .filter(item => String(item?.title || '').trim() && String(item?.url || '').trim())
+    .filter(item => !/^(?:חנויות ועסקים|חנויות|עסקים|מסעדות|מכולות וסופרמרקטים)\s+(?:ב|של|ל)?\s*(?:קריית גת|קרית גת)$/i.test(String(item.title || '').trim()))
+    .slice(0, 5);
+  const exact = cleanResults(exactResults);
+  const nearby = cleanResults(cityResults);
+  const format = item => {
+    const title = String(item.title || '').trim().replace(/\s+/g, ' ');
+    const snippet = String(item.snippet || '').replace(/\s+/g, ' ').trim();
+    const detail = snippet && snippet.length > 24 ? snippet.slice(0, 150).replace(/[<>]/g, ' ') : '';
+    return title + (detail ? ': ' + detail : '');
+  };
+  if (exact.length) {
+    return 'מצאתי תוצאות לעסקים שמופיעים במקורות באזור ' + area + ' ב' + city + ': ' +
+      exact.map(format).join('. ') +
+      '. אלה תוצאות חיפוש; מומלץ לאמת כתובת ושעות לפני הגעה.';
+  }
+  if (nearby.length) {
+    return 'לא הצלחתי לאמת חנויות שנמצאות דווקא בתוך ' + area + '. כן מצאתי אפשרויות ברמת העיר ' + city +
+      ', אך לא אומת שהן בתוך השכונה: ' + nearby.map(format).join('. ') +
+      '. לא אציג אותן כאילו הן בתוך ' + area + '.';
+  }
+  return buildNoVerifiedLocalResultsAnswer({ city, area });
+}
