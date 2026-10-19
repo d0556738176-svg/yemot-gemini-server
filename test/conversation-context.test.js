@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { selectRelevantHistoryForTurn } from '../conversation-context.js';
+import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion } from '../conversation-context.js';
 
 const oldHistory = 'תור 1 — מתקשר: מה המחיר של מוצר א?\nתשובה: המחיר הוא מאה שקלים.';
 
@@ -33,4 +33,13 @@ test('short status follow-ups retain the pending request', () => {
 test('a new topic does not receive current-call history just because it follows another turn', () => {
   const current = [{ user: 'מה המחיר של מוצר א?', assistant: 'מאה שקלים.' }];
   assert.equal(selectRelevantHistoryForTurn('איך עובד מנוע חשמלי?', oldHistory, current), '');
+});
+
+
+test('status follow-up reruns a pending branch-1 lookup instead of asking what was searched', () => {
+  const current = [{ user: 'מה המספר של דיסקונט?', assistant: 'אני מיד בודק מה מספר הטלפון של דיסקונט ומביא לך אותו.' }];
+  const isLookup = q => /מה המספר|טלפון של/.test(q);
+  assert.equal(resolvePendingLookupQuestion('נו, מצאת?', current, isLookup), 'מה המספר של דיסקונט?');
+  assert.equal(resolvePendingLookupQuestion('איך עובד מנוע חשמלי?', current, isLookup), '');
+  assert.equal(resolvePendingLookupQuestion('נו, מצאת?', [{ user: 'מה המספר של דיסקונט?', assistant: 'מספר הטלפון הוא 03-1234567.' }], isLookup), '');
 });
