@@ -1,1 +1,23 @@
-body{font-family:system-ui,sans-serif;margin:0;background:#f4f6f8;color:#17202a}header{padding:20px;background:#fff;border-bottom:1px solid #ddd;display:flex;justify-content:space-between}main{max-width:1100px;margin:20px auto;padding:0 12px}.card{background:#fff;border:1px solid #ddd;border-radius:12px;padding:18px;margin-bottom:16px}input{padding:9px;border:1px solid #bbb;border-radius:7px;margin:6px}button{padding:9px 14px;border:0;border-radius:7px;cursor:pointer}.row{display:flex;gap:8px}.row input{flex:1}.item{border-top:1px solid #eee;padding:12px 0}.muted{color:#667}.yt{display:flex;gap:12px;align-items:flex-start}.yt img{width:180px}.yt iframe{width:100%;max-width:560px;height:315px;border:0}
+body{font-family:system-ui,sans-serif;margin:0;background:#f4f6f8;color:#17202a}
+header{padding:20px;background:#fff;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;gap:12px;align-items:center}
+main{max-width:1100px;margin:20px auto;padding:0 12px}
+.card{background:#fff;border:1px solid #ddd;border-radius:12px;padding:18px;margin-bottom:16px}
+input{padding:9px;border:1px solid #bbb;border-radius:7px;margin:6px;max-width:100%;box-sizing:border-box}
+label{display:block;margin:10px 0}
+button{padding:9px 14px;border:0;border-radius:7px;cursor:pointer;margin:4px;background:#e5eaf0;color:#17202a}
+button:disabled{opacity:.5;cursor:wait}
+button.secondary{background:#eef1f5}
+button.danger{background:#fbe9e7;color:#922b21}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.row input{flex:1;min-width:200px}
+.item{border-top:1px solid #eee;padding:12px 0}
+.muted{color:#667}
+.notice{background:#f5f7fa;border-right:4px solid #738399;padding:10px 12px}
+.check{display:flex;gap:8px;align-items:flex-start}
+.check input{margin-top:5px}
+.yt{display:flex;gap:12px;align-items:flex-start}
+.yt img{width:180px;max-width:35%;object-fit:cover}
+.yt iframe{width:100%;max-width:560px;height:315px;border:0}
+pre{white-space:pre-wrap;overflow-wrap:anywhere}
+hr{border:0;border-top:1px solid #ddd;margin:22px 0}
+@media(max-width:600px){header{align-items:flex-start;flex-direction:column}.yt{flex-direction:column}.yt img{width:100%;max-width:300px}.yt iframe{height:220px}.card{padding:12px}}
