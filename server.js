@@ -3514,13 +3514,14 @@ async function callHandler(call) {
 
     let replyText='';
     let userTranscript='';
+    let originalSpokenTranscript='';
     try {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
       userTranscript=await transcribePhoneAudio(audioBuffer);
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
-      const spokenTranscript=userTranscript;
+      originalSpokenTranscript=userTranscript;
       const pendingLookup=resolvePendingLookupQuestion(userTranscript,turnHistory, q =>
         !/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(q) &&
         (isPhoneNumberRequest(q) || isBusinessHoursRequest(q) ||
@@ -3711,7 +3712,7 @@ async function callHandler(call) {
     }
     console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length });
     const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
-      phone:normalizePhone(callerPhone),callId:String(callId||''),user:(typeof spokenTranscript==='string' ? spokenTranscript : userTranscript) || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText};
+      phone:normalizePhone(callerPhone),callId:String(callId||''),user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript) || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText};
     conversationLog.push(entry);
     if(conversationLog.length>MAX_CONVERSATION_LOG)
       conversationLog.splice(0,conversationLog.length-MAX_CONVERSATION_LOG);
