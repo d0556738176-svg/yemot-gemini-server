@@ -14,7 +14,7 @@ function normalize(value) {
 }
 
 function isSuperPharmTarget(targets, question) {
-  return /סופר\s*[-־]?\s*פ(?:א)?רם|super.?pharm/i.test([...(targets || []), question].join(' '));
+  return /סופר\s*(?:[-־]?\s*פ(?:א)?רם|אפרים|אפרם|פרם)|super.?pharm/i.test([...(targets || []), question].join(' '));
 }
 
 export function buildBusinessHoursQueries({ targets = [], locationText = '', city = '', area = '', pharmacy = false, question = '' } = {}) {
