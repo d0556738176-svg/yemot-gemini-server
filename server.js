@@ -9,7 +9,7 @@ import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
 import { extractExplicitLocation, extractLocalArea, extractSearchCity } from './business-location.js';
-import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, buildNoVerifiedLocalResultsAnswer } from './local-business-search.js';
+import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, filterNearbyLocalBusinessResults, buildNoVerifiedLocalResultsAnswer } from './local-business-search.js';
 import { rankWebsitePages } from './website-relevance.js';
 import { readPublicWebsitePages } from './website-reader.js';
 import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
@@ -2004,8 +2004,10 @@ async function answerBusinessHoursDirect(transcript) {
   const evidence=evidenceResults.map((x,i)=>
     'מקור '+(i+1)+': '+x.title+'\nכתובת: '+x.url+'\nמידע: '+String(x.snippet||'').slice(0,1800)
   ).join('\n\n');
+  const allDaysRequested=/(?:כל יום|כל הימים|לכל יום|כל יום בשבוע|כל השבוע|יום יום|לפי ימים|לכל אחד מהימים)/i.test(question);
   const prompt='שאלת המתקשר: '+question+'\nעסק מבוקש: '+(business||generic)+'\nאזור מבוקש: '+locationText+'\nמקורות שנאספו עכשיו:\n'+evidence+'\n\n'+
     'ענה בעברית ובקצרה להקראה בטלפון. התייחס רק לעסק ולסניף שהמתקשר ביקש; אין להחליף רשת או מותג ברשת אחרת. '+
+    (allDaysRequested ? 'המתקשר ביקש שעות לכל יום בשבוע: הצג בנפרד יום ראשון, שני, שלישי, רביעי, חמישי, שישי ושבת. אפשר לקבץ ימים רק אם המקור מאשר במפורש שעות זהות; לכל יום שאין עבורו ראיה כתוב שהשעות לא אומתו, ואל תסיק אותן מיום אחר. ' : '')+
     'ציין אם פתוח עכשיו ושעת סגירה רק אם יש לכך ראיה עדכנית וברורה במקורות. ציין כתובת סניף כשנמצאה. העדף אתר רשמי. '+
     'אם המקורות אינם מאמתים את שעות היום או אם יש כמה סניפים אפשריים, אמור מה חסר ואל תנחש. אל תמציא שעות ואל תציג תוצאה של עסק אחר כאילו היא התוצאה המבוקשת.';
   try {
@@ -2035,13 +2037,16 @@ async function answerLocalBusinessDiscoveryDirect(transcript) {
     else console.warn('[LOCAL_BUSINESS] search query failed',{index:i,status:geminiErrorStatus(result.reason)});
   }
 
-  const exactResults=filterLocalBusinessResults(dedupeSearchResults(collected),location).slice(0,8);
-  console.info('[LOCAL_BUSINESS] exact-location result count',{
-    city:location.city,area:location.area,results:exactResults.length
+  const uniqueResults=dedupeSearchResults(collected);
+  const exactResults=filterLocalBusinessResults(uniqueResults,location).slice(0,8);
+  const cityResults=filterNearbyLocalBusinessResults(uniqueResults,location).slice(0,8);
+  console.info('[LOCAL_BUSINESS] result counts',{
+    city:location.city,area:location.area,exactResults:exactResults.length,cityResults:cityResults.length
   });
-  if(!exactResults.length) return buildNoVerifiedLocalResultsAnswer(location);
+  if(!exactResults.length && !cityResults.length) return buildNoVerifiedLocalResultsAnswer(location);
 
-  const evidence=exactResults.map((item,i)=>
+  const evidenceResults=exactResults.length ? exactResults : cityResults;
+  const evidence=evidenceResults.map((item,i)=>
     'מקור '+(i+1)+': '+String(item.title||'').slice(0,240)+
     '\nכתובת מקור: '+String(item.url||'')+
     '\nקטע מקור: '+String(item.snippet||'').slice(0,900)
@@ -2050,8 +2055,11 @@ async function answerLocalBusinessDiscoveryDirect(transcript) {
     '\n\nבקשת המתקשר: '+question+
     '\nהמיקום המדויק המבוקש: '+location.area+', '+location.city+
     '\nתוצאות חיפוש שמכילות במפורש גם את האזור וגם את העיר:\n'+evidence+
-    '\n\nענה בעברית קצרה וטבעית להקראה בטלפון. הצג רק שמות עסקים שמופיעים במפורש במקורות ושיש בהם ראיה שהם נמצאים בתוך האזור המדויק שביקש המתקשר. '+
-    'אל תציג עסק מכרמי גת או משכונה סמוכה כאילו הוא ברמות דוד. אל תמציא כתובת, טלפון, שעות או שם עסק. אם המקור רק מזכיר את השכונה אך לא מוכיח שעסק מסוים נמצא בה, אמור שלא ניתן לאמת זאת. '+
+    '\n\nענה בעברית קצרה וטבעית להקראה בטלפון. '+
+    (exactResults.length
+      ? 'הצג רק שמות עסקים שמופיעים במפורש במקורות ושיש בהם ראיה שהם נמצאים בתוך האזור המדויק שביקש המתקשר. '
+      : 'לא נמצאו תוצאות שמוכיחות שעסקים נמצאים בתוך השכונה המדויקת. הצג את התוצאות רק כרשומות או אפשרויות ברמת העיר, והדגש במפורש שלא אומת שהן בתוך השכונה. אל תטען שעסק מכרמי גת או משכונה סמוכה נמצא ברמות דוד. ') +
+    'אל תמציא כתובת, טלפון, שעות או שם עסק. אם תוצאה היא רק דף קטגוריה כללי ולא שם עסק, אל תציג אותה כחנות מסוימת. '+
     'אל תיתן רשימת כותרות כללית במקום לענות. אם אין מספיק מידע, ציין במדויק מה לא אומת.';
   try {
     const generated=await generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true);
@@ -2060,8 +2068,12 @@ async function answerLocalBusinessDiscoveryDirect(transcript) {
   } catch(e) {
     console.warn('[LOCAL_BUSINESS] synthesis unavailable; returning source-grounded results',{status:geminiErrorStatus(e)});
   }
-  return 'מצאתי תוצאות שמזכירות במפורש את '+location.area+' ב'+location.city+': '+
-    exactResults.slice(0,3).map(x=>sanitizeForYemot(x.title)+(x.snippet?' — '+sanitizeForYemot(String(x.snippet).slice(0,180)):'' )).join('. ')+
+  const fallbackResults=exactResults.length ? exactResults : cityResults;
+  const prefix=exactResults.length
+    ? 'מצאתי תוצאות שמאמתות עסקים באזור '+location.area+' ב'+location.city+': '
+    : 'לא הצלחתי לאמת חנויות בתוך '+location.area+' עצמה. מצאתי את התוצאות העירוניות הבאות בקריית גת, אך לא אומת שהן בתוך השכונה: ';
+  return prefix+
+    fallbackResults.slice(0,3).map(x=>sanitizeForYemot(x.title)+(x.snippet?' — '+sanitizeForYemot(String(x.snippet).slice(0,180)):'' )).join('. ')+
     '. הפרטים שלא מופיעים במקור לא אומתו.';
 }
 
