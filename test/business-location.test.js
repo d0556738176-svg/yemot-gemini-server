@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { extractExplicitLocation, extractLocalArea, extractSearchCity } from '../business-location.js';
-import { buildBusinessHoursQueries, buildBusinessHoursFallback } from '../business-hours.js';
+import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from '../business-hours.js';
 
 test('extracts the city from a Super-Pharm Azrieli mall request', () => {
   const q = 'מה שעות הפתיחה של סניף סופר-פארם בקניון עזריאלי בתל אביב?';
@@ -45,4 +45,18 @@ test('no-result fallback does not falsely claim that the branch does not exist',
   });
   assert.match(answer, /לא הציגו שעות פתיחה|לא נמצאו שעות פתיחה|לא הצלחתי/i);
   assert.doesNotMatch(answer, /אין סניף|לא קיים סניף/);
+});
+
+test('recognizes the spoken ASR variant סופר פרם and builds official Super-Pharm queries', () => {
+  const q = 'מה השעות הפתיחה של סניף סופר פרם בקניון עזריאלי בתל אביב? תן לי את השעות לכל יום בשבוע';
+  assert.equal(isBusinessHoursQuestion(q), true);
+  const queries = buildBusinessHoursQueries({
+    targets: ['סופר-פארם'],
+    locationText: 'קניון עזריאלי תל אביב',
+    city: 'תל אביב',
+    area: 'קניון עזריאלי',
+    question: q
+  });
+  assert.ok(queries.some(item => item.includes('site:super-pharm.co.il')));
+  assert.ok(queries.some(item => item.includes('סופר-פארם')));
 });
