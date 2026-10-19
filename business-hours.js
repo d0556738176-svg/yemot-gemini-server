@@ -3,7 +3,7 @@ export function isBusinessHoursQuestion(transcript) {
   // Hebrew callers naturally say both "שעות פתיחה" and "שעות הפתיחה";
   // speech recognition also commonly yields "מה השעות פתיחה".
   const asksHours=/(פתוח עכשיו|פתוחה עכשיו|פתוחים עכשיו|פתוחות עכשיו|פתוח היום|פתוחה היום|מתי פתוח|מתי פתוחה|מתי הם פתוחים|מתי נסגר|מתי סוגר|שעות\s*ה?פתיחה|מה\s+השעות|השעות\s*(?:ה?פתיחה|פעילות)?|שעות פעילות|זמני פתיחה|עד מתי פתוח|באיזה שעות|מתי פותח)/i.test(t);
-  const hasBusiness=/(בית מרקחת|בתי מרקחת|סופר.?פארם|פארם|כללית|מכבי|מאוחדת|לאומית|בנק|סניף|חנות|חנויות|עסק|מרכז קניות|קניון|דואר|סופר|מכולת|מסעדה|מספרה|דיסקונט|הפועלים|לאומי|מזרחי|איקאה|רמי לוי|שופרסל|ויקטורי|מחסני השוק|משרד)/i.test(t);
+  const hasBusiness=/(בית מרקחת|בתי מרקחת|סופר\s*[-־]?\s*פ(?:א)?רם|פארם|כללית|מכבי|מאוחדת|לאומית|בנק|סניף|חנות|חנויות|עסק|מרכז קניות|קניון|דואר|סופר|מכולת|מסעדה|מספרה|דיסקונט|הפועלים|לאומי|מזרחי|איקאה|רמי לוי|שופרסל|ויקטורי|מחסני השוק|משרד)/i.test(t);
   return asksHours && hasBusiness;
 }
 
@@ -14,7 +14,7 @@ function normalize(value) {
 }
 
 function isSuperPharmTarget(targets, question) {
-  return /סופר\s*[-־]?\s*פארם|super.?pharm/i.test([...(targets || []), question].join(' '));
+  return /סופר\s*[-־]?\s*פ(?:א)?רם|super.?pharm/i.test([...(targets || []), question].join(' '));
 }
 
 export function buildBusinessHoursQueries({ targets = [], locationText = '', city = '', area = '', pharmacy = false, question = '' } = {}) {
@@ -89,7 +89,7 @@ export function buildBusinessHoursFallback({ question = '', business = 'הסני
   const matching = (results || []).filter(result => {
     const haystack = normalize([result?.title, result?.snippet, result?.url].join(' '))
       .toLowerCase().replace(/[״׳]/g, "'").replace(/[-־]/g, ' ');
-    const target = /סופר\s*[-־]?\s*פארם|super.?pharm/i.test(business + ' ' + q);
+    const target = /סופר\s*[-־]?\s*פ(?:א)?רם|super.?pharm/i.test(business + ' ' + q);
     if (target && !/סופר\s*[-־]?\s*פארם|super.?pharm/i.test(haystack) && !officialSuperPharm(result)) return false;
     // Never substitute a different branch just because it is in the same city.
     // If the caller named a mall/neighborhood, require that location in the evidence.
