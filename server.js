@@ -9,6 +9,7 @@ import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback } from './business-hours.js';
 import { extractExplicitLocation, extractLocalArea, extractSearchCity } from './business-location.js';
+import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, buildNoVerifiedLocalResultsAnswer } from './local-business-search.js';
 import { rankWebsitePages } from './website-relevance.js';
 import { readPublicWebsitePages } from './website-reader.js';
 import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
@@ -2020,6 +2021,53 @@ async function answerBusinessHoursDirect(transcript) {
   return buildBusinessHoursFallback({question,business:business||generic,city,area,locationText,results:evidenceResults});
 }
 
+
+async function answerLocalBusinessDiscoveryDirect(transcript) {
+  const question=String(transcript||'').trim();
+  const location=extractExplicitLocation(question);
+  if(!location.area || !location.city) {
+    return 'כדי לא להטעות אותך, צריך לזהות גם את השכונה וגם את העיר שבה אתה מחפש חנויות.';
+  }
+
+  const queries=buildLocalBusinessQueries(question,location);
+  const settled=await Promise.allSettled(queries.map(q=>searchWebDirect(q,{timeoutMs:3800})));
+  const collected=[];
+  for(let i=0;i<settled.length;i++) {
+    const result=settled[i];
+    if(result.status==='fulfilled') collected.push(...result.value);
+    else console.warn('[LOCAL_BUSINESS] search query failed',{index:i,status:geminiErrorStatus(result.reason)});
+  }
+
+  const exactResults=filterLocalBusinessResults(dedupeSearchResults(collected),location).slice(0,8);
+  console.info('[LOCAL_BUSINESS] exact-location result count',{
+    city:location.city,area:location.area,results:exactResults.length
+  });
+  if(!exactResults.length) return buildNoVerifiedLocalResultsAnswer(location);
+
+  const evidence=exactResults.map((item,i)=>
+    'מקור '+(i+1)+': '+String(item.title||'').slice(0,240)+
+    '\nכתובת מקור: '+String(item.url||'')+
+    '\nקטע מקור: '+String(item.snippet||'').slice(0,900)
+  ).join('\n\n');
+  const prompt=EXCLUSIVE_INSTRUCTION+
+    '\n\nבקשת המתקשר: '+question+
+    '\nהמיקום המדויק המבוקש: '+location.area+', '+location.city+
+    '\nתוצאות חיפוש שמכילות במפורש גם את האזור וגם את העיר:\n'+evidence+
+    '\n\nענה בעברית קצרה וטבעית להקראה בטלפון. הצג רק שמות עסקים שמופיעים במפורש במקורות ושיש בהם ראיה שהם נמצאים בתוך האזור המדויק שביקש המתקשר. '+
+    'אל תציג עסק מכרמי גת או משכונה סמוכה כאילו הוא ברמות דוד. אל תמציא כתובת, טלפון, שעות או שם עסק. אם המקור רק מזכיר את השכונה אך לא מוכיח שעסק מסוים נמצא בה, אמור שלא ניתן לאמת זאת. '+
+    'אל תיתן רשימת כותרות כללית במקום לענות. אם אין מספיק מידע, ציין במדויק מה לא אומת.';
+  try {
+    const generated=await generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true);
+    const answer=String(generated?.response?.text?.()||'').trim();
+    if(answer) return answer;
+  } catch(e) {
+    console.warn('[LOCAL_BUSINESS] synthesis unavailable; returning source-grounded results',{status:geminiErrorStatus(e)});
+  }
+  return 'מצאתי תוצאות שמזכירות במפורש את '+location.area+' ב'+location.city+': '+
+    exactResults.slice(0,3).map(x=>sanitizeForYemot(x.title)+(x.snippet?' — '+sanitizeForYemot(String(x.snippet).slice(0,180)):'' )).join('. ')+
+    '. הפרטים שלא מופיעים במקור לא אומתו.';
+}
+
 async function answerPharmacySearchDirect(transcript) {
   return answerBusinessHoursDirect(transcript);
 }
@@ -3571,6 +3619,9 @@ async function callHandler(call) {
         } catch(e) {
           replyText=await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext);
         }
+      }
+      else if(isLocalBusinessDiscoveryRequest(userTranscript,extractExplicitLocation(userTranscript))) {
+        replyText=await answerLocalBusinessDiscoveryDirect(userTranscript);
       }
       else if(shouldForceWebSearch(userTranscript) ||
         /(חפש|תחפש|תמצא|חיפוש|באינטרנט|בגוגל|מה קורה עכשיו|מידע עדכני)/i.test(userTranscript) ||
