@@ -2088,7 +2088,7 @@ async function answerLocalBusinessDiscoveryDirect(transcript) {
 
 async function answerPharmacySearchDirect(transcript) {
   const question=String(transcript||'').trim();
-  const city=extractSearchCity(question) || extractExplicitLocation(question).city || (/(?:בית|דבר|בת)\s*שמש/i.test(question)?'בית שמש':'');
+  const city=/(?:בית|דבר|בת)\s*שמש/i.test(question) ? 'בית שמש' : (extractSearchCity(question) || extractExplicitLocation(question).city || '');
   if(!city) return 'באיזו עיר לחפש בתי מרקחת?';
   const queries=buildPharmacySearchQueries(city);
   // Keep this phone path short and independent of a language-model synthesis call.
