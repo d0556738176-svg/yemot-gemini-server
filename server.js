@@ -2071,7 +2071,7 @@ async function answerLocalBusinessDiscoveryDirect(transcript) {
   const fallbackResults=exactResults.length ? exactResults : cityResults;
   const prefix=exactResults.length
     ? 'מצאתי תוצאות שמאמתות עסקים באזור '+location.area+' ב'+location.city+': '
-    : 'לא הצלחתי לאמת חנויות בתוך '+location.area+' עצמה. מצאתי את התוצאות העירוניות הבאות בקריית גת, אך לא אומת שהן בתוך השכונה: ';
+    : 'לא הצלחתי לאמת חנויות בתוך '+location.area+' עצמה. מצאתי את התוצאות העירוניות הבאות ב'+location.city+', אך לא אומת שהן בתוך השכונה: ';
   return prefix+
     fallbackResults.slice(0,3).map(x=>sanitizeForYemot(x.title)+(x.snippet?' — '+sanitizeForYemot(String(x.snippet).slice(0,180)):'' )).join('. ')+
     '. הפרטים שלא מופיעים במקור לא אומתו.';
