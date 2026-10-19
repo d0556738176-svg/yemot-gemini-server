@@ -9,7 +9,7 @@ import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
 import { extractExplicitLocation, extractLocalArea, extractSearchCity } from './business-location.js';
-import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, filterNearbyLocalBusinessResults, buildNoVerifiedLocalResultsAnswer } from './local-business-search.js';
+import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, filterNearbyLocalBusinessResults, buildNoVerifiedLocalResultsAnswer, buildLocalBusinessResultsAnswer } from './local-business-search.js';
 import { rankWebsitePages } from './website-relevance.js';
 import { readPublicWebsitePages } from './website-reader.js';
 import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
@@ -2062,19 +2062,20 @@ async function answerLocalBusinessDiscoveryDirect(transcript) {
     'אל תמציא כתובת, טלפון, שעות או שם עסק. אם תוצאה היא רק דף קטגוריה כללי ולא שם עסק, אל תציג אותה כחנות מסוימת. '+
     'אל תיתן רשימת כותרות כללית במקום לענות. אם אין מספיק מידע, ציין במדויק מה לא אומת.';
   try {
-    const generated=await generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true);
     const answer=String(generated?.response?.text?.()||'').trim();
-    if(answer) return answer;
+    const expectedResults=exactResults.length ? exactResults : cityResults;
+    // Do not accept a fluent but generic answer that omits every business found.
+    const mentionsSourceResult=expectedResults.some(item => {
+      const title=String(item.title||'').trim();
+      return title.length >= 3 && answer.toLocaleLowerCase('he').includes(title.toLocaleLowerCase('he'));
+    });
+    if(answer && mentionsSourceResult) return answer;
   } catch(e) {
     console.warn('[LOCAL_BUSINESS] synthesis unavailable; returning source-grounded results',{status:geminiErrorStatus(e)});
   }
-  const fallbackResults=exactResults.length ? exactResults : cityResults;
-  const prefix=exactResults.length
-    ? 'מצאתי תוצאות שמאמתות עסקים באזור '+location.area+' ב'+location.city+': '
-    : 'לא הצלחתי לאמת חנויות בתוך '+location.area+' עצמה. מצאתי את התוצאות העירוניות הבאות ב'+location.city+', אך לא אומת שהן בתוך השכונה: ';
-  return prefix+
-    fallbackResults.slice(0,3).map(x=>sanitizeForYemot(x.title)+(x.snippet?' — '+sanitizeForYemot(String(x.snippet).slice(0,180)):'' )).join('. ')+
-    '. הפרטים שלא מופיעים במקור לא אומתו.';
+  return buildLocalBusinessResultsAnswer({
+    city:location.city, area:location.area, exactResults, cityResults
+  });
 }
 
 async function answerPharmacySearchDirect(transcript) {
