@@ -17,7 +17,7 @@ import { answerWithOpenAIText, answerWithOpenAIWebSearch, isOpenAIWebSearchReque
 import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
 import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visual-intent.js';
-import { selectRelevantHistoryForTurn } from './conversation-context.js';
+import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion } from './conversation-context.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -3520,6 +3520,18 @@ async function callHandler(call) {
       userTranscript=await transcribePhoneAudio(audioBuffer);
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
+      const spokenTranscript=userTranscript;
+      const pendingLookup=resolvePendingLookupQuestion(userTranscript,turnHistory, q =>
+        !/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(q) &&
+        (isPhoneNumberRequest(q) || isBusinessHoursRequest(q) ||
+          isLocalBusinessDiscoveryRequest(q,extractExplicitLocation(q)) || shouldForceWebSearch(q))
+      );
+      if(pendingLookup) {
+        console.info('[CALL_FLOW] retrying_pending_branch1_lookup',{callId:activeKey,requestType:
+          isPhoneNumberRequest(pendingLookup)?'phone':isBusinessHoursRequest(pendingLookup)?'business-hours':
+          isLocalBusinessDiscoveryRequest(pendingLookup,extractExplicitLocation(pendingLookup))?'local-business':'web-search'});
+        userTranscript=pendingLookup;
+      }
       const relevantHistoryText=selectRelevantHistoryForTurn(userTranscript,historyText,turnHistory);
       // Avoid spending a Gemini generation call on requests that are already
       // handled by deterministic/direct data paths below. This reduces quota use,
@@ -3699,14 +3711,14 @@ async function callHandler(call) {
     }
     console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length });
     const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
-      phone:normalizePhone(callerPhone),callId:String(callId||''),user:userTranscript || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText};
+      phone:normalizePhone(callerPhone),callId:String(callId||''),user:(typeof spokenTranscript==='string' ? spokenTranscript : userTranscript) || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText};
     conversationLog.push(entry);
     if(conversationLog.length>MAX_CONVERSATION_LOG)
       conversationLog.splice(0,conversationLog.length-MAX_CONVERSATION_LOG);
     await persistConversationEntry(entry);
     console.info('[CALL_FLOW] conversation_saved', { callId: activeKey, transcriptReady: !!userTranscript });
     if(userTranscript) {
-      turnHistory.push({user:userTranscript,assistant:replyText});
+      turnHistory.push({user:(typeof spokenTranscript==='string' ? spokenTranscript : userTranscript),assistant:replyText});
       if(turnHistory.length>8) turnHistory.shift();
     }
     console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
