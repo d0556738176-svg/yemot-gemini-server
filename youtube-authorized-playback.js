@@ -52,6 +52,8 @@ function authorizedSourceFromEnv(videoId) {
 function validateSourceUrl(value) {
   const url = new URL(String(value || '').trim());
   if (url.protocol !== 'https:') throw new Error('Authorized audio source must use HTTPS');
+  if (url.username || url.password) throw new Error('Audio source URL must not contain credentials');
+  if (url.port && url.port !== '443') throw new Error('Audio source must use the standard HTTPS port');
   const allowedHosts = String(process.env.AUTHORIZED_AUDIO_HOSTS || '')
     .split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
   if (!allowedHosts.length) throw new Error('AUTHORIZED_AUDIO_HOSTS is not configured');
@@ -69,19 +71,46 @@ async function fetchAuthorizedSource(videoId, output) {
     console.warn('[YouTube IVR] playback stopped: no authorized source mapping', { videoId: id });
     throw new Error('No authorized audio source mapped to this video');
   }
-  console.info('[YouTube IVR] playback step 2: authorized source found', { videoId: id, host: new URL(mapped).hostname });
 
-  const sourceUrl = validateSourceUrl(mapped);
-  const response = await fetch(sourceUrl, {
-    headers: { accept: 'audio/*,application/octet-stream;q=0.9,*/*;q=0.1' },
-    signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS)
-  });
-  if (!response.ok || !response.body) {
-    throw new Error('Authorized audio source HTTP ' + response.status);
+  let sourceUrl = validateSourceUrl(mapped);
+  console.info('[YouTube IVR] playback step 2: authorized source found', { videoId: id, host: sourceUrl.hostname });
+
+  // Validate every redirect independently. Never let a trusted mapping redirect
+  // the server to an unapproved host or to a non-HTTPS endpoint.
+  let response;
+  for (let redirects = 0; redirects <= 3; redirects++) {
+    response = await fetch(sourceUrl, {
+      headers: { accept: 'audio/*,video/*,application/octet-stream;q=0.9,*/*;q=0.1' },
+      signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS),
+      redirect: 'manual'
+    });
+    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    if (redirects === 3) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error('Authorized audio source redirected too many times');
+    }
+    const location = response.headers.get('location');
+    await response.body?.cancel().catch(() => {});
+    if (!location) throw new Error('Authorized audio source redirect had no location');
+    sourceUrl = validateSourceUrl(new URL(location, sourceUrl).toString());
   }
 
+  if (!response || !response.ok || !response.body) {
+    const status = response?.status || 0;
+    await response?.body?.cancel().catch(() => {});
+    throw new Error('Authorized audio source HTTP ' + status);
+  }
+
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+  if (contentType.includes('text/html')) {
+    await response.body.cancel().catch(() => {});
+    throw new Error('Authorized audio source returned an HTML page, not a media file');
+  }
   const contentLength = Number(response.headers.get('content-length') || 0);
-  if (contentLength > MAX_SOURCE_BYTES) throw new Error('Authorized audio source is too large');
+  if (contentLength > MAX_SOURCE_BYTES) {
+    await response.body.cancel().catch(() => {});
+    throw new Error('Authorized audio source is too large');
+  }
 
   const file = await fs.open(output, 'w');
   let total = 0;
