@@ -14,6 +14,8 @@ import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
 import { answerWithOpenAIText, answerWithOpenAIWebSearch, isOpenAIWebSearchRequest, stripOpenAIWebSearchPrefix } from './openai-web-search.js';
 import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
+import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visual-intent.js';
+import { selectRelevantHistoryForTurn } from './conversation-context.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -146,6 +148,7 @@ const DIALOGUE_STYLE_INSTRUCTION = [
   'אם תוכן העמוד לא נטען, אמור זאת בבירור והצע ניסיון חלופי. אל תחליף את האתר המבוקש באתר אחר ואל תציג מידע כללי או תוכן שנוצר על ידי המודל כאילו נצפה בעמוד.',
   'בקשה למידע ציבורי באתר של בנק אינה בקשה להיכנס לחשבון אישי. סייע במידע ציבורי, בפרטי קשר ובהסברים כלליים; אל תבקש סיסמאות או קודי אימות ואל תטען שיש לך גישה לחשבון פרטי.',
   'ענה קודם כול על הפעולה המדויקת שהתבקשה. אל תוסיף סיכום כללי במקום ביצוע הבקשה. אם התבקשה קריאה, קרא בנאמנות את הטקסט הזמין; אם התבקשה הרחבה, הרחב רק על הפרט שאליו המתקשר מתייחס.',
+  'אם המתקשר אומר שלא ענית לשאלה, שואל אם הקשבת, או אומר שזו לא התשובה שביקש, אל תסתפק בהתנצלות או בתשובת כן/לא. בדוק מחדש את השאלה האחרונה שלו מתוך ההקשר המיידי, ענה עליה ישירות, ואל תחזור לנושא ישן שאינו קשור.',
   'בתשובה קולית העדף עברית טבעית, משפטים שקל לשמוע בטלפון, ניסוח זורם והגייה פשוטה. הימנע מרשימות ארוכות וממשפטים מסורבלים.'
 ].join('\n');
 const EXCLUSIVE_INSTRUCTION = [CONTENT_FILTER_INSTRUCTION, DIALOGUE_STYLE_INSTRUCTION, process.env.AI_SYSTEM_INSTRUCTION || '']
@@ -1126,16 +1129,6 @@ function extractPublicUrl(text) {
   return match[0].replace(/[.,!?;:]+$/,'');
 }
 
-function isMultimodalAnalysisRequest(text) {
-  const q=String(text||'').toLowerCase();
-  const asksVisual=/(תמונה|תמונות|צילום|צילום מסך|תצלום|מה רואים|איך נראה|איך הוא נראה|איך היא נראית|תמחיש|המחשה|להמחיש|תראה לי|תאר לי איך|מה הייתי רואה|תתאר.*תמונה|נתח.*תמונה|תנתח.*תמונה|תאר.*תמונה|תיאור.*תמונה|מה מופיע בתמונה|מה יש בתמונה)/i.test(q);
-  const asksVideo=/(סרטון|סירטון|סרט|וידאו|קליפ|הסרט הזה|הסרטון הזה|מה רואים בסרטון|מה שומעים בסרטון|תנתח.*סרטון|נתח.*סרטון|תיאור.*סרטון|מה קורה בסרטון|מה מופיע בסרטון|מה הוא עושה בסרטון|מה היא עושה בסרטון|תספר.*סרטון|תמחיש.*סרט|המחשה.*סרט|תמחיש.*וידאו)/i.test(q);
-  const genericVideoVisual=/(תמחיש|המחשה|להמחיש|איך הוא נראה|איך היא נראית|מה רואים|מה קורה|מה הוא עושה|מה היא עושה|תראה לי|תאר לי)/i.test(q) &&
-    /(סרט|סרטון|וידאו|קליפ|יוטיוב|יוטוב|ביויוטב)/i.test(q);
-  const asksSite=/(תנתח.*אתר|נתח.*אתר|תסביר.*אתר|מה יש באתר|מה כתוב באתר|תיאור.*אתר)/i.test(q);
-  return {image:asksVisual&&!asksVideo,video:asksVideo||genericVideoVisual,site:asksSite,any:asksVisual||asksVideo||genericVideoVisual||asksSite};
-}
-
 function extractMetaUrl(html, wantedNames) {
   const source=String(html||'');
   const wanted=new Set(wantedNames.map(x=>x.toLowerCase()));
@@ -1404,14 +1397,6 @@ function extractVisualSubject(question, historyText='') {
     }
   }
   return direct;
-}
-
-function isVisualContinuationRequest(text, historyText='') {
-  const q=String(text||'').trim();
-  const h=String(historyText||'');
-  const continuation=/(תמצא|תמצאי|מצא|חפש|תחפש|מחפש|מחפשת|חיפוש|משהו ציבורי|מקור ציבורי|תמונה ציבורית|תמונה כלשהי|תמונה כל שהוא|קישור ציבורי|קישור כלשהו|תנסה שוב|נסה שוב|שוב|תיאור הפיזי|תיאור חזותי|איך הוא|איך היא|שלו|שלה|אותו|אותה)/i.test(q);
-  const visualHistory=/(איך נראה|איך היא נראית|איך הוא נראה|תמחיש|המחשה|תמונה|צילום|סרטון|וידאו|תיאור חזותי|תיאור הפיזי|מה רואים)/i.test(h);
-  return continuation && visualHistory;
 }
 
 async function findPublicImageFromOpenSources(question, historyText='') {
@@ -3447,6 +3432,9 @@ async function callHandler(call) {
     console.info('[CALL_FLOW] recording_downloaded', { callId: activeKey, bytes: audioBuffer?.length || 0 });
 
     const historyText=await buildCallHistoryText(callerPhone,callId,turnHistory);
+    // Visual routing may use only the immediately preceding turn in this call.
+    // Older calls and older topics must never trigger unsolicited image analysis.
+    const visualHistoryText=turnHistory.slice(-1).map((t,i)=>'תור '+(i+1)+' — מתקשר: '+String(t.user||'')+'\nתשובה: '+String(t.assistant||'')).join('\n\n');
 
     let replyText='';
     let userTranscript='';
@@ -3456,12 +3444,13 @@ async function callHandler(call) {
       userTranscript=await transcribePhoneAudio(audioBuffer);
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
+      const relevantHistoryText=selectRelevantHistoryForTurn(userTranscript,historyText,turnHistory);
       // Avoid spending a Gemini generation call on requests that are already
       // handled by deterministic/direct data paths below. This reduces quota use,
       // improves phone latency, and leaves more capacity for real conversation/advice.
       const directDataRequest =
         isMultimodalAnalysisRequest(userTranscript).any ||
-        isVisualContinuationRequest(userTranscript,historyText) ||
+        isVisualContinuationRequest(userTranscript,visualHistoryText) ||
         !!answerIsraelTimeQuestion(userTranscript) ||
         !!answerDailyDateQuestion(userTranscript) ||
         isWeatherQuestion(userTranscript) ||
@@ -3476,7 +3465,7 @@ async function callHandler(call) {
 
       if(!directDataRequest) {
         const longAnswer=isLongAnswerRequest(userTranscript);
-        const answerPrompt=EXCLUSIVE_INSTRUCTION+'\\n\\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\\n\\nהקשר קודם של השיחה, לפי הסדר:\\n'+(historyText || 'אין עדיין הקשר קודם.')+'\\n\\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\\n'+userTranscript+'\\n\\n'+(longAnswer
+        const answerPrompt=EXCLUSIVE_INSTRUCTION+'\\n\\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\\n\\nהקשר קודם של השיחה, לפי הסדר:\\n'+(relevantHistoryText || 'אין עדיין הקשר קודם.')+'\\n\\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\\n'+userTranscript+'\\n\\n'+(longAnswer
           ? 'זו בקשה לתשובה ארוכה ומפורטת. אל תקצר ל-1 עד 4 משפטים. בנה תשובה רציפה ומסודרת, בדרך כלל 8 עד 20 פסקאות או משפטים קצרים לפי הצורך, עד כ-'+LONG_ANSWER_MAX_CHARS+' תווים. שמור על רצף טבעי להקראה בטלפון, בלי כותרות טכניות ובלי לחזור על עצמך. '
           : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. ')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
         const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
@@ -3507,31 +3496,31 @@ async function callHandler(call) {
       else if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
       else if(isWeatherQuestion(userTranscript)) {
         try { replyText=await answerWeatherDirect(userTranscript); }
-        catch(e) { replyText=await answerWithWebSearch(userTranscript, historyText, turnContext); }
+        catch(e) { replyText=await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext); }
       }
       else if(isNewsQuestion(userTranscript)) {
-        try { replyText=await answerNewsDirect(userTranscript, historyText); }
-        catch(e) { replyText=await answerWithWebSearch(userTranscript, historyText, turnContext); }
+        try { replyText=await answerNewsDirect(userTranscript, relevantHistoryText); }
+        catch(e) { replyText=await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext); }
       }
       else if(isTransitRequest(userTranscript)) {
         try {
           const transitAnswer=await answerTransitDirect(userTranscript);
-          replyText=transitAnswer || await answerWithWebSearch(userTranscript, historyText, turnContext);
+          replyText=transitAnswer || await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext);
         } catch(e) {
           console.warn('[TRANSIT] direct route unavailable; falling back to live web search',{status:geminiErrorStatus(e)});
-          replyText=await answerWithWebSearch(userTranscript, historyText, turnContext);
+          replyText=await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext);
         }
       }
-      else if(isMultimodalAnalysisRequest(userTranscript).any || isVisualContinuationRequest(userTranscript,historyText)) {
-        const visualFollowUp=isVisualContinuationRequest(userTranscript,historyText);
+      else if(isMultimodalAnalysisRequest(userTranscript).any || isVisualContinuationRequest(userTranscript,visualHistoryText)) {
+        const visualFollowUp=isVisualContinuationRequest(userTranscript,visualHistoryText);
         console.info('[MULTIMODAL] visual_route_selected',{
           callId:activeKey,
           visualFollowUp,
           transcriptChars:userTranscript.length,
-          historyHasVisualCue:/(איך נראה|איך היא נראית|איך הוא נראה|תמחיש|תמונה|צילום|תיאור חזותי|תיאור הפיזי|מה רואים)/i.test(historyText)
+          historyHasVisualCue:/(איך נראה|איך היא נראית|איך הוא נראה|תמונה|צילום|תיאור חזותי|תיאור הפיזי|מה רואים)/i.test(visualHistoryText)
         });
         try {
-          replyText=await analyzeRequestedMedia(userTranscript,{...turnContext,historyText});
+          replyText=await analyzeRequestedMedia(userTranscript,{...turnContext,historyText:visualHistoryText});
           if(!replyText) throw Object.assign(new Error('Media analysis returned empty answer'),{status:503});
         } catch(e) {
           console.warn('[MULTIMODAL] analysis unavailable; falling back safely',{
@@ -3551,7 +3540,7 @@ async function callHandler(call) {
       else if(isWebsiteCapabilityQuestion(userTranscript) || isWebsiteNavigationRequest(userTranscript) || isGenericWebsiteRequest(userTranscript) || extractExplicitHttpUrl(userTranscript)) {
         // Website requests must use the real retrieval/extraction path, not the generic no-tools answer.
         try {
-          replyText=await answerWithWebSearch(userTranscript,historyText,turnContext);
+          replyText=await answerWithWebSearch(userTranscript,relevantHistoryText,turnContext);
         } catch(e) {
           console.warn('[WEBSITE_REQUEST] direct website retrieval failed',{status:geminiErrorStatus(e)});
           replyText='לא הצלחתי לפתוח ולקרוא את האתר כרגע. אפשר לנסות שוב עם שם האתר או כתובת מדויקת.';
@@ -3561,14 +3550,14 @@ async function callHandler(call) {
         try {
           replyText=await answerBusinessHoursDirect(userTranscript);
         } catch(e) {
-          replyText=await answerWithWebSearch(userTranscript, historyText, turnContext);
+          replyText=await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext);
         }
       }
       else if(shouldForceWebSearch(userTranscript) ||
         /(חפש|תחפש|תמצא|חיפוש|באינטרנט|בגוגל|מה קורה עכשיו|מידע עדכני)/i.test(userTranscript) ||
         /(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript)) {
         try {
-          const youtubeAnswer=await searchYouTubeForPhone(userTranscript, historyText, turnContext);
+          const youtubeAnswer=await searchYouTubeForPhone(userTranscript, relevantHistoryText, turnContext);
           if (youtubeAnswer) {
             replyText=youtubeAnswer;
           } else if (/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript)) {
@@ -3577,10 +3566,10 @@ async function callHandler(call) {
             // can consume the remaining quota and make the phone call fail twice.
             replyText='לא הצלחתי כרגע לקבל תוצאות מיוטיוב. נא לנסות שוב בעוד כמה רגעים.';
           } else {
-            replyText=await answerWithWebSearch(userTranscript, historyText, turnContext);
+            replyText=await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext);
           }
         } catch(searchError) {
-          const fallback=knownContactFallback(userTranscript, historyText);
+          const fallback=knownContactFallback(userTranscript, relevantHistoryText);
           if(fallback && [429,503,408].includes(geminiErrorStatus(searchError))) {
             console.warn('[CALL_FLOW] web_search_unavailable_using_known_contact_fallback');
             replyText=fallback;
@@ -3599,14 +3588,14 @@ async function callHandler(call) {
         !isWeatherQuestion(userTranscript) && !isNewsQuestion(userTranscript) &&
         !isTransitRequest(userTranscript) &&
         !isMultimodalAnalysisRequest(userTranscript).any &&
-        !isVisualContinuationRequest(userTranscript,historyText) &&
+        !isVisualContinuationRequest(userTranscript,visualHistoryText) &&
         !isWebsiteCapabilityQuestion(userTranscript) && !isWebsiteNavigationRequest(userTranscript) &&
         !isGenericWebsiteRequest(userTranscript) && !extractExplicitHttpUrl(userTranscript) &&
         !isPhoneNumberRequest(userTranscript) && !isPharmacySearchRequest(userTranscript) &&
         !isBusinessHoursRequest(userTranscript);
       if(eligibleForQuickWebFallback) {
         try {
-          const directFallback=await answerWithDirectWebFallback(userTranscript,historyText,turnContext,{
+          const directFallback=await answerWithDirectWebFallback(userTranscript,relevantHistoryText,turnContext,{
             skipSynthesis:true,
             timeoutMs:deepSearchFallback?4200:1800
           });
@@ -3860,11 +3849,11 @@ async function youtubeCallHandler(call) {
   }
 }
 
-async function answerBackupWithWebSearch(transcript, historyText='') {
+async function answerBackupWithWebSearch(transcript, relevantHistoryText='') {
   const question=String(transcript||'').trim();
   if(!question) throw Object.assign(new Error('Backup web search requested but transcript is empty'),{status:400});
   const prompt=EXCLUSIVE_INSTRUCTION+
-    '\\n\\nהקשר קודם של השיחה:\\n'+(historyText||'אין עדיין הקשר קודם.')+
+    '\\n\\nהקשר קודם של השיחה:\\n'+(relevantHistoryText||'אין עדיין הקשר קודם.')+
     '\\n\\nהשאלה המדויקת של המתקשר לחיפוש באינטרנט:\\n'+question+
     '\\n\\nבצע חיפוש אינטרנט חי ורחב באמצעות Google Search. פרק את הבקשה לכמה כיווני חיפוש כשצריך, העדף מקורות רשמיים ועדכניים, השווה בין מקורות ואל תמציא מידע. ענה בעברית טבעית, ברורה וקצרה להקראה בטלפון.';
   const result=await generateBackupWithRetry(
