@@ -14,6 +14,7 @@ import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
 import { answerWithOpenAIText, answerWithOpenAIWebSearch, isOpenAIWebSearchRequest, stripOpenAIWebSearchPrefix } from './openai-web-search.js';
 import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
+import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visual-intent.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -1126,16 +1127,6 @@ function extractPublicUrl(text) {
   return match[0].replace(/[.,!?;:]+$/,'');
 }
 
-function isMultimodalAnalysisRequest(text) {
-  const q=String(text||'').toLowerCase();
-  const asksVisual=/(תמונה|תמונות|צילום|צילום מסך|תצלום|מה רואים|איך נראה|איך הוא נראה|איך היא נראית|תמחיש|המחשה|להמחיש|תראה לי|תאר לי איך|מה הייתי רואה|תתאר.*תמונה|נתח.*תמונה|תנתח.*תמונה|תאר.*תמונה|תיאור.*תמונה|מה מופיע בתמונה|מה יש בתמונה)/i.test(q);
-  const asksVideo=/(סרטון|סירטון|סרט|וידאו|קליפ|הסרט הזה|הסרטון הזה|מה רואים בסרטון|מה שומעים בסרטון|תנתח.*סרטון|נתח.*סרטון|תיאור.*סרטון|מה קורה בסרטון|מה מופיע בסרטון|מה הוא עושה בסרטון|מה היא עושה בסרטון|תספר.*סרטון|תמחיש.*סרט|המחשה.*סרט|תמחיש.*וידאו)/i.test(q);
-  const genericVideoVisual=/(תמחיש|המחשה|להמחיש|איך הוא נראה|איך היא נראית|מה רואים|מה קורה|מה הוא עושה|מה היא עושה|תראה לי|תאר לי)/i.test(q) &&
-    /(סרט|סרטון|וידאו|קליפ|יוטיוב|יוטוב|ביויוטב)/i.test(q);
-  const asksSite=/(תנתח.*אתר|נתח.*אתר|תסביר.*אתר|מה יש באתר|מה כתוב באתר|תיאור.*אתר)/i.test(q);
-  return {image:asksVisual&&!asksVideo,video:asksVideo||genericVideoVisual,site:asksSite,any:asksVisual||asksVideo||genericVideoVisual||asksSite};
-}
-
 function extractMetaUrl(html, wantedNames) {
   const source=String(html||'');
   const wanted=new Set(wantedNames.map(x=>x.toLowerCase()));
@@ -1404,14 +1395,6 @@ function extractVisualSubject(question, historyText='') {
     }
   }
   return direct;
-}
-
-function isVisualContinuationRequest(text, historyText='') {
-  const q=String(text||'').trim();
-  const h=String(historyText||'');
-  const continuation=/(תמצא|תמצאי|מצא|חפש|תחפש|מחפש|מחפשת|חיפוש|משהו ציבורי|מקור ציבורי|תמונה ציבורית|תמונה כלשהי|תמונה כל שהוא|קישור ציבורי|קישור כלשהו|תנסה שוב|נסה שוב|שוב|תיאור הפיזי|תיאור חזותי|איך הוא|איך היא|שלו|שלה|אותו|אותה)/i.test(q);
-  const visualHistory=/(איך נראה|איך היא נראית|איך הוא נראה|תמחיש|המחשה|תמונה|צילום|סרטון|וידאו|תיאור חזותי|תיאור הפיזי|מה רואים)/i.test(h);
-  return continuation && visualHistory;
 }
 
 async function findPublicImageFromOpenSources(question, historyText='') {
@@ -3447,6 +3430,9 @@ async function callHandler(call) {
     console.info('[CALL_FLOW] recording_downloaded', { callId: activeKey, bytes: audioBuffer?.length || 0 });
 
     const historyText=await buildCallHistoryText(callerPhone,callId,turnHistory);
+    // Visual routing may use only the immediately preceding turn in this call.
+    // Older calls and older topics must never trigger unsolicited image analysis.
+    const visualHistoryText=turnHistory.slice(-1).map((t,i)=>'תור '+(i+1)+' — מתקשר: '+String(t.user||'')+'\\nתשובה: '+String(t.assistant||'')).join('\\n\\n');
 
     let replyText='';
     let userTranscript='';
@@ -3461,7 +3447,7 @@ async function callHandler(call) {
       // improves phone latency, and leaves more capacity for real conversation/advice.
       const directDataRequest =
         isMultimodalAnalysisRequest(userTranscript).any ||
-        isVisualContinuationRequest(userTranscript,historyText) ||
+        isVisualContinuationRequest(userTranscript,visualHistoryText) ||
         !!answerIsraelTimeQuestion(userTranscript) ||
         !!answerDailyDateQuestion(userTranscript) ||
         isWeatherQuestion(userTranscript) ||
@@ -3528,10 +3514,10 @@ async function callHandler(call) {
           callId:activeKey,
           visualFollowUp,
           transcriptChars:userTranscript.length,
-          historyHasVisualCue:/(איך נראה|איך היא נראית|איך הוא נראה|תמחיש|תמונה|צילום|תיאור חזותי|תיאור הפיזי|מה רואים)/i.test(historyText)
+          historyHasVisualCue:/(איך נראה|איך היא נראית|איך הוא נראה|תמונה|צילום|תיאור חזותי|תיאור הפיזי|מה רואים)/i.test(visualHistoryText)
         });
         try {
-          replyText=await analyzeRequestedMedia(userTranscript,{...turnContext,historyText});
+          replyText=await analyzeRequestedMedia(userTranscript,{...turnContext,historyText:visualHistoryText});
           if(!replyText) throw Object.assign(new Error('Media analysis returned empty answer'),{status:503});
         } catch(e) {
           console.warn('[MULTIMODAL] analysis unavailable; falling back safely',{
