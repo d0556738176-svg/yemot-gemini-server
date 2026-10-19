@@ -1923,7 +1923,7 @@ function isBusinessHoursRequest(transcript) {
 function extractRequestedBusinessName(question) {
   const t=String(question||'').replace(/\s+/g,' ').trim();
   const known=[
-    ['סופר-פארם',/סופר\s*[-־]?\s*פארם/i],
+    ['סופר-פארם',/סופר\s*[-־]?\s*פ(?:א)?רם/i],
     ['כללית',/כללית/i],
     ['מכבי פארם',/מכבי\s*פארם/i],
     ['Be פארם',/\bbe\s*פארם|בי פארם/i],
@@ -1948,7 +1948,7 @@ async function answerBusinessHoursDirect(transcript) {
   const city=loc.city || extractSearchCity(question);
   const area=loc.area || '';
   const business=extractRequestedBusinessName(question);
-  const pharmacy=/(בית מרקחת|בתי מרקחת|פארם)/i.test(question);
+  const pharmacy=/(בית מרקחת|בתי מרקחת|סופר\s*[-־]?\s*פ(?:א)?רם|פארם|פרם)/i.test(question);
   const generic=pharmacy?'בית מרקחת':business || (question.match(/(?:של|ב|ה)‏?\s*([^,.?]{2,45})/i)?.[1]||'עסק');
   if(!city && !area) {
     return 'באיזו עיר או באיזה אזור נמצא הסניף? כך אוכל לבדוק את שעות הפתיחה של המקום הנכון.';
