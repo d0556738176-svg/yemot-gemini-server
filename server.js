@@ -1965,13 +1965,47 @@ async function answerBusinessHoursDirect(transcript) {
     if(item.status==='fulfilled') all.push(...item.value);
     else console.warn('[BUSINESS_HOURS] search query failed',{query:queries[i],status:geminiErrorStatus(item.reason)});
   }
-  const unique=dedupeSearchResults(all).slice(0,12);
+  const unique=dedupeSearchResults(all).slice(0,18);
+  if(!unique.length) {
+    // One short broad retry protects against search engines that fail to index
+    // Hebrew prepositions or mall/neighborhood names in the first query set.
+    const broadQueries=[business||generic, area, city, 'שעות פתיחה סניף כתובת'].filter(Boolean).join(' ');
+    try {
+      const retry=await searchWebDirect(broadQueries,{timeoutMs:4500});
+      unique.push(...dedupeSearchResults(retry).slice(0,8));
+    } catch(e) {
+      console.warn('[BUSINESS_HOURS] broadened search failed',{status:geminiErrorStatus(e)});
+    }
+  }
   if(!unique.length) {
     return buildBusinessHoursFallback({question,business:business||generic,city,area,locationText,results:[]});
   }
-  const evidence=unique.map((x,i)=>
-    'מקור '+(i+1)+': '+x.title+'\nכתובת: '+x.url+'\nמידע: '+String(x.snippet||'').slice(0,1400)
-  ).join('\n\n');
+
+  // Search snippets often show a store page but omit its actual hours. When an
+  // official brand result exists, extract its public page before giving up.
+  const domains=officialDomainsForQuestion(question);
+  const official=unique.filter(x=>domains.length ? isOfficialSearchUrl(x.url,domains) : officialSuperPharm(x));
+  const hoursPattern=/(?:\\b\\d{1,2}[:.]\\d{2}\\s*[-–—至]\\s*\\d{1,2}[:.]\\d{2}\\b|שעות פתיחה|שעות פעילות|פתוח היום|ימי א.?ה)/i;
+  const evidenceResults=[...unique];
+  if(official.length && !unique.some(x=>hoursPattern.test(String(x.title||'')+' '+String(x.snippet||'')))) {
+    try {
+      const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
+      const extracted=await withTimeout(client.extract(official.slice(0,3).map(x=>x.url),{extractDepth:'basic',timeout:4}),4800,'Official business hours page extraction');
+      for(const page of (Array.isArray(extracted.results)?extracted.results:[])) {
+        const content=String(page.rawContent||page.content||'').trim();
+        if(content.length>80) evidenceResults.push({
+          title:String(page.title||page.url||'עמוד רשמי'),
+          url:String(page.url||''),
+          snippet:content.slice(0,12000)
+        });
+      }
+    } catch(e) {
+      console.warn('[BUSINESS_HOURS] official page extraction unavailable',{status:geminiErrorStatus(e)});
+    }
+  }
+  const evidence=evidenceResults.map((x,i)=>
+    'מקור '+(i+1)+': '+x.title+'\\nכתובת: '+x.url+'\\nמידע: '+String(x.snippet||'').slice(0,1800)
+  ).join('\\n\\n');
   const prompt='שאלת המתקשר: '+question+'\nעסק מבוקש: '+(business||generic)+'\nאזור מבוקש: '+locationText+'\nמקורות שנאספו עכשיו:\n'+evidence+'\n\n'+
     'ענה בעברית ובקצרה להקראה בטלפון. התייחס רק לעסק ולסניף שהמתקשר ביקש; אין להחליף רשת או מותג ברשת אחרת. '+
     'ציין אם פתוח עכשיו ושעת סגירה רק אם יש לכך ראיה עדכנית וברורה במקורות. ציין כתובת סניף כשנמצאה. העדף אתר רשמי. '+
@@ -1983,7 +2017,7 @@ async function answerBusinessHoursDirect(transcript) {
   } catch(e) {
     console.warn('[BUSINESS_HOURS] synthesis unavailable; using source-grounded fallback',{status:geminiErrorStatus(e)});
   }
-  return buildBusinessHoursFallback({question,business:business||generic,city,area,locationText,results:unique});
+  return buildBusinessHoursFallback({question,business:business||generic,city,area,locationText,results:evidenceResults});
 }
 
 async function answerPharmacySearchDirect(transcript) {
