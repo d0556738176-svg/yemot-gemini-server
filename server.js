@@ -1985,7 +1985,7 @@ async function answerBusinessHoursDirect(transcript) {
   // official brand result exists, extract its public page before giving up.
   const domains=officialDomainsForQuestion(question);
   const official=domains.length ? unique.filter(x=>isOfficialSearchUrl(x.url,domains)) : [];
-  const hoursPattern=/(?:\\b\\d{1,2}[:.]\\d{2}\\s*[-–—至]\\s*\\d{1,2}[:.]\\d{2}\\b|שעות פתיחה|שעות פעילות|פתוח היום|ימי א.?ה)/i;
+  const hoursPattern=/(?:\b\d{1,2}[:.]\d{2}\s*[-–—至]\s*\d{1,2}[:.]\d{2}\b|שעות פתיחה|שעות פעילות|פתוח היום|ימי א.?ה)/i;
   const evidenceResults=[...unique];
   if(official.length && !unique.some(x=>hoursPattern.test(String(x.title||'')+' '+String(x.snippet||'')))) {
     try {
@@ -2004,8 +2004,8 @@ async function answerBusinessHoursDirect(transcript) {
     }
   }
   const evidence=evidenceResults.map((x,i)=>
-    'מקור '+(i+1)+': '+x.title+'\\nכתובת: '+x.url+'\\nמידע: '+String(x.snippet||'').slice(0,1800)
-  ).join('\\n\\n');
+    'מקור '+(i+1)+': '+x.title+'\nכתובת: '+x.url+'\nמידע: '+String(x.snippet||'').slice(0,1800)
+  ).join('\n\n');
   const prompt='שאלת המתקשר: '+question+'\nעסק מבוקש: '+(business||generic)+'\nאזור מבוקש: '+locationText+'\nמקורות שנאספו עכשיו:\n'+evidence+'\n\n'+
     'ענה בעברית ובקצרה להקראה בטלפון. התייחס רק לעסק ולסניף שהמתקשר ביקש; אין להחליף רשת או מותג ברשת אחרת. '+
     'ציין אם פתוח עכשיו ושעת סגירה רק אם יש לכך ראיה עדכנית וברורה במקורות. ציין כתובת סניף כשנמצאה. העדף אתר רשמי. '+
@@ -4006,7 +4006,7 @@ async function backupCallHandler(call) {
       const audioBuffer=response.data;
       const historyText=turnHistory.map((t,i)=>
         'תור '+(i+1)+' — מתקשר: '+t.user+'\\nתשובה: '+t.assistant
-      ).join('\\n\\n');
+  ).join('\n\n');
 
       const userTranscript=await transcribeBackupPhoneAudio(audioBuffer);
       console.info('[BACKUP CALL_FLOW] transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length});
