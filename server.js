@@ -3432,7 +3432,7 @@ async function callHandler(call) {
     const historyText=await buildCallHistoryText(callerPhone,callId,turnHistory);
     // Visual routing may use only the immediately preceding turn in this call.
     // Older calls and older topics must never trigger unsolicited image analysis.
-    const visualHistoryText=turnHistory.slice(-1).map((t,i)=>'תור '+(i+1)+' — מתקשר: '+String(t.user||'')+'\\nתשובה: '+String(t.assistant||'')).join('\\n\\n');
+    const visualHistoryText=turnHistory.slice(-1).map((t,i)=>'תור '+(i+1)+' — מתקשר: '+String(t.user||'')+'\nתשובה: '+String(t.assistant||'')).join('\n\n');
 
     let replyText='';
     let userTranscript='';
@@ -3508,8 +3508,8 @@ async function callHandler(call) {
           replyText=await answerWithWebSearch(userTranscript, historyText, turnContext);
         }
       }
-      else if(isMultimodalAnalysisRequest(userTranscript).any || isVisualContinuationRequest(userTranscript,historyText)) {
-        const visualFollowUp=isVisualContinuationRequest(userTranscript,historyText);
+      else if(isMultimodalAnalysisRequest(userTranscript).any || isVisualContinuationRequest(userTranscript,visualHistoryText)) {
+        const visualFollowUp=isVisualContinuationRequest(userTranscript,visualHistoryText);
         console.info('[MULTIMODAL] visual_route_selected',{
           callId:activeKey,
           visualFollowUp,
@@ -3585,7 +3585,7 @@ async function callHandler(call) {
         !isWeatherQuestion(userTranscript) && !isNewsQuestion(userTranscript) &&
         !isTransitRequest(userTranscript) &&
         !isMultimodalAnalysisRequest(userTranscript).any &&
-        !isVisualContinuationRequest(userTranscript,historyText) &&
+        !isVisualContinuationRequest(userTranscript,visualHistoryText) &&
         !isWebsiteCapabilityQuestion(userTranscript) && !isWebsiteNavigationRequest(userTranscript) &&
         !isGenericWebsiteRequest(userTranscript) && !extractExplicitHttpUrl(userTranscript) &&
         !isPhoneNumberRequest(userTranscript) && !isPharmacySearchRequest(userTranscript) &&
