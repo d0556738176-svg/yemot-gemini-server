@@ -8,6 +8,7 @@ import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback } from './business-hours.js';
+import { extractExplicitLocation, extractLocalArea, extractSearchCity } from './business-location.js';
 import { rankWebsitePages } from './website-relevance.js';
 import { readPublicWebsitePages } from './website-reader.js';
 import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
@@ -1920,11 +1921,6 @@ function isBusinessHoursRequest(transcript) {
   return asksHours && hasBusiness;
 }
 
-function extractSearchCity(transcript) {
-  const t=String(transcript||'').replace(/\s+/g,' ').trim();
-  const cities=['בית שמש','ירושלים','רעננה','ביתר עילית','בני ברק','פתח תקווה','תל אביב','חיפה','אשדוד','נתניה','רחובות','מודיעין','באר שבע','ראשון לציון','חולון','אשקלון','כפר סבא','הרצליה','רמת גן','גבעתיים','קריית גת','קרית גת','קריית שמונה','קרית שמונה','עפולה','טבריה','צפת','אילת','לוד','רמלה'];
-  return cities.find(city=>t.includes(city)) || '';
-}
 
 function extractRequestedBusinessName(question) {
   const t=String(question||'').replace(/\s+/g,' ').trim();
@@ -2244,18 +2240,7 @@ function decodeHtmlEntities(value){
     .replace(/&lt;/gi,'<').replace(/&gt;/gi,'>')
     .replace(/&#x2F;/gi,'/').replace(/&#x27;/gi,"'");
 }
-function extractLocalArea(question){
-  const t=String(question||'').replace(/\s+/g,' ').trim();
-  const areas=['רמה א','רמה א׳','רמה ב','רמה ב׳','רמה ג','רמה ג׳','רמה ד','רמה ד׳','רמה ה','רמה ה׳','רמת בית שמש','מרכז העיר','מגדל המים','נחם','גבעת שרת','גבעת משקף','נווה שמיר','המשקפיים','הקניון','ביג'];
-  return areas.find(x=>t.includes(x)) || '';
-}
-function extractExplicitLocation(question){
-  const t=String(question||'').replace(/\s+/g,' ').trim();
-  const cityMatch=t.match(/(?:ב|ל|מ|אזור)\s+(בית שמש|ירושלים|רעננה|ביתר עילית|בני ברק|פתח תקווה|תל אביב|חיפה|אשדוד|נתניה|רחובות|מודיעין|באר שבע)/i);
-  const city=cityMatch?cityMatch[1]:'';
-  const area=extractLocalArea(t);
-  return {city,area};
-}
+
 function isPhoneNumberRequest(question){
   return /(מספר טלפון|טלפון|טלפון של|מספר של|מה המספר|איך מתקשרים|מוקד|שירות לקוחות)/i.test(String(question||''));
 }
