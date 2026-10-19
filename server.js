@@ -9,7 +9,7 @@ import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
 import { extractExplicitLocation, extractLocalArea, extractSearchCity } from './business-location.js';
-import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, filterNearbyLocalBusinessResults, buildNoVerifiedLocalResultsAnswer } from './local-business-search.js';
+import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, filterNearbyLocalBusinessResults, buildNoVerifiedLocalResultsAnswer, buildLocalBusinessResultsAnswer } from './local-business-search.js';
 import { rankWebsitePages } from './website-relevance.js';
 import { readPublicWebsitePages } from './website-reader.js';
 import { isNewsQuestion, buildNewsSearchQueries } from './news-routing.js';
@@ -18,6 +18,7 @@ import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
 import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visual-intent.js';
 import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion } from './conversation-context.js';
+import { buildPharmacySearchQueries, buildPharmacySearchAnswer } from './pharmacy-search.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -1911,8 +1912,9 @@ async function answerTransitDirect(question) {
 
 function isPharmacySearchRequest(transcript) {
   const t=String(transcript||'').toLowerCase().replace(/\s+/g,' ').trim();
-  return /(בית מרקחת|בתי מרקחת|סופר.?פארם|פארם|כללית|מכבי פארם|be פארם)/i.test(t) &&
-    /(פתוח|פתוחה|פתוחים|פתוחות|שעות|מתי|נסגר|סוגר|פתיחה|פעילות|מומלץ|הכי טוב|בית שמש)/i.test(t);
+  const pharmacyIntent=/(?:(?:בית|בתי)\s*(?:מרקחת|מרקח|מקרחת|נקראה)|סופר.?פארם|סופר.?אפרים|סופר.?אפרם|פארם|כללית|מכבי פארם|be פארם)/i.test(t);
+  const listingIntent=/(תמצא|מצא|חפש|תחפש|מספרי? טלפון|טלפון לכל|כתובת|רשימה|פתוח|פתוחה|פתוחים|פתוחות|שעות|מתי|נסגר|סוגר|פתיחה|פעילות|מומלץ|הכי טוב|בית שמש)/i.test(t);
+  return pharmacyIntent && listingIntent;
 }
 
 function isBusinessHoursRequest(transcript) {
@@ -1923,7 +1925,7 @@ function isBusinessHoursRequest(transcript) {
 function extractRequestedBusinessName(question) {
   const t=String(question||'').replace(/\s+/g,' ').trim();
   const known=[
-    ['סופר-פארם',/סופר\s*[-־]?\s*פ(?:א)?רם/i],
+    ['סופר-פארם',/סופר\s*(?:[-־]?\s*פ(?:א)?רם|אפרים|אפרם|פרם)/i],
     ['כללית',/כללית/i],
     ['מכבי פארם',/מכבי\s*פארם/i],
     ['Be פארם',/\bbe\s*פארם|בי פארם/i],
@@ -1984,6 +1986,12 @@ async function answerBusinessHoursDirect(transcript) {
   const domains=officialDomainsForQuestion(question);
   const official=domains.length ? unique.filter(x=>isOfficialSearchUrl(x.url,domains)) : [];
   const hoursPattern=/(?:\b\d{1,2}[:.]\d{2}\s*[-–—至]\s*\d{1,2}[:.]\d{2}\b|שעות פתיחה|שעות פעילות|פתוח היום|ימי א.?ה)/i;
+  const allDaysRequested=/(?:כל יום|כל הימים|לכל יום|כל יום בשבוע|כל השבוע|יום יום|לפי ימים|לכל אחד מהימים)/i.test(question);
+  // If an official result already contains the requested hours, answer from that
+  // source immediately instead of spending another model round-trip on synthesis.
+  if(official.some(x=>hoursPattern.test(String(x.title||'')+' '+String(x.snippet||'')))) {
+    return buildBusinessHoursFallback({question,business:business||generic,city,area,locationText,results:unique});
+  }
   const evidenceResults=[...unique];
   if(official.length && !unique.some(x=>hoursPattern.test(String(x.title||'')+' '+String(x.snippet||'')))) {
     try {
@@ -2004,7 +2012,6 @@ async function answerBusinessHoursDirect(transcript) {
   const evidence=evidenceResults.map((x,i)=>
     'מקור '+(i+1)+': '+x.title+'\nכתובת: '+x.url+'\nמידע: '+String(x.snippet||'').slice(0,1800)
   ).join('\n\n');
-  const allDaysRequested=/(?:כל יום|כל הימים|לכל יום|כל יום בשבוע|כל השבוע|יום יום|לפי ימים|לכל אחד מהימים)/i.test(question);
   const prompt='שאלת המתקשר: '+question+'\nעסק מבוקש: '+(business||generic)+'\nאזור מבוקש: '+locationText+'\nמקורות שנאספו עכשיו:\n'+evidence+'\n\n'+
     'ענה בעברית ובקצרה להקראה בטלפון. התייחס רק לעסק ולסניף שהמתקשר ביקש; אין להחליף רשת או מותג ברשת אחרת. '+
     (allDaysRequested ? 'המתקשר ביקש שעות לכל יום בשבוע: הצג בנפרד יום ראשון, שני, שלישי, רביעי, חמישי, שישי ושבת. אפשר לקבץ ימים רק אם המקור מאשר במפורש שעות זהות; לכל יום שאין עבורו ראיה כתוב שהשעות לא אומתו, ואל תסיק אותן מיום אחר. ' : '')+
@@ -2064,21 +2071,34 @@ async function answerLocalBusinessDiscoveryDirect(transcript) {
   try {
     const generated=await generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true);
     const answer=String(generated?.response?.text?.()||'').trim();
-    if(answer) return answer;
+    const expectedResults=exactResults.length ? exactResults : cityResults;
+    // Do not accept a fluent but generic answer that omits every business found.
+    const mentionsSourceResult=expectedResults.some(item => {
+      const title=String(item.title||'').trim();
+      return title.length >= 3 && answer.toLocaleLowerCase('he').includes(title.toLocaleLowerCase('he'));
+    });
+    if(answer && mentionsSourceResult) return answer;
   } catch(e) {
     console.warn('[LOCAL_BUSINESS] synthesis unavailable; returning source-grounded results',{status:geminiErrorStatus(e)});
   }
-  const fallbackResults=exactResults.length ? exactResults : cityResults;
-  const prefix=exactResults.length
-    ? 'מצאתי תוצאות שמאמתות עסקים באזור '+location.area+' ב'+location.city+': '
-    : 'לא הצלחתי לאמת חנויות בתוך '+location.area+' עצמה. מצאתי את התוצאות העירוניות הבאות ב'+location.city+', אך לא אומת שהן בתוך השכונה: ';
-  return prefix+
-    fallbackResults.slice(0,3).map(x=>sanitizeForYemot(x.title)+(x.snippet?' — '+sanitizeForYemot(String(x.snippet).slice(0,180)):'' )).join('. ')+
-    '. הפרטים שלא מופיעים במקור לא אומתו.';
+  return buildLocalBusinessResultsAnswer({
+    city:location.city, area:location.area, exactResults, cityResults
+  });
 }
 
 async function answerPharmacySearchDirect(transcript) {
-  return answerBusinessHoursDirect(transcript);
+  const question=String(transcript||'').trim();
+  const city=/(?:בית|דבר|בת)\s*שמש/i.test(question) ? 'בית שמש' : (extractSearchCity(question) || extractExplicitLocation(question).city || '');
+  if(!city) return 'באיזו עיר לחפש בתי מרקחת?';
+  const queries=buildPharmacySearchQueries(city);
+  // Keep this phone path short and independent of a language-model synthesis call.
+  const settled=await Promise.allSettled(queries.map(q=>searchWebDirect(q,{timeoutMs:2800})));
+  const results=[];
+  for(let i=0;i<settled.length;i++) {
+    if(settled[i].status==='fulfilled') results.push(...settled[i].value);
+    else console.warn('[PHARMACY_SEARCH] query failed',{index:i,status:geminiErrorStatus(settled[i].reason)});
+  }
+  return buildPharmacySearchAnswer({city,results:dedupeSearchResults(results)});
 }
 
 function isLongAnswerRequest(text) {
@@ -2091,7 +2111,7 @@ function shouldForceWebSearch(transcript) {
   // Explicit search language always means live web search, even when the topic
   // is something the server did not anticipate in a hard-coded category list.
   if (/(חפש|תחפש|תמצא|תאתר|בדוק|תבדוק|תברר|בירור|חיפוש|חפש לי|תבדוק לי|תמצא לי|באינטרנט|בגוגל|ברשת|באתר|באתרים|מה כתוב באתר|מה כתבו על|מצא לי מידע|תן לי מידע עדכני|תדפדף|דפדף|תפתח.{0,20}את האתר|פתח.{0,20}את האתר|תיכנס לאתר|תכנס לאתר|תעבור לעמוד|עמוד הבא|דף הבא|תקרא את האתר|קרא את האתר|באתר הזה|בעמוד הזה|מה כתוב בעמוד)/i.test(t)) return true;
-  return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|שעות פעילות|פתוח עכשיו|סגור היום|מתי נסגר|מתי סוגר|מתי פתוח|יצירת קשר|איך יוצרים קשר|אתר רשמי|רשתות חברתיות|רשת חברתית|אינסטגרם|פייסבוק|טיקטוק|טוויטר|עדכון אחרון|מה חדש|הופעה|הופעות|מופע|מופעים|אירוע|אירועים|כרטיסים|רכישת כרטיסים|לקנות כרטיסים|איפה קונים|מחיר כרטיס|מכירת כרטיסים|בית מרקחת|בתי מרקחת|חנות|חנויות|עסק|עסקים|סניף|סניפים|כתובת של|מייל של|דוא.?ל|אימייל|קישור|האתר של|מידע מהאתר|חפש באתר|תחפש באתר|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם|אוטובוס|אוטובוסים|תחנת אוטובוס|תחבורה ציבורית|קו אוטובוס|קווי אוטובוס|רכבת|תחנת רכבת|מסלול נסיעה|איך מגיעים|איך להגיע|הגעה ל|טיול|טיולים|מסלול טיול|אירוע היום|אירועים היום|פעילות היום|פעילויות היום|פעילות קהילתית|פעילויות קהילתיות|מה יש היום|מה יש בסוף השבוע|מה יש בעיר)/i.test(t);
+  return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|שעות פעילות|פתוח עכשיו|סגור היום|מתי נסגר|מתי סוגר|מתי פתוח|יצירת קשר|איך יוצרים קשר|אתר רשמי|רשתות חברתיות|רשת חברתית|אינסטגרם|פייסבוק|טיקטוק|טוויטר|עדכון אחרון|מה חדש|הופעה|הופעות|מופע|מופעים|אירוע|אירועים|כרטיסים|רכישת כרטיסים|לקנות כרטיסים|איפה קונים|מחיר כרטיס|מכירת כרטיסים|בית מרקחת|בתי מרקחת|חנות|חנויות|עסק|עסקים|סניף|סניפים|כתובת של|מייל של|דוא.?ל|אימייל|קישור|האתר של|מידע מהאתר|חפש באתר|תחפש באתר|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם|אוטובוס|אוטובוסים|תחנת אוטובוס|תחבורה ציבורית|קו אוטובוס|קווי אוטובוס|רכבת|תחנת רכבת|מסלול נסיעה|איך מגיעים|איך להגיע|הגעה ל|טיול|טיולים|מסלול טיול|אירוע היום|אירועים היום|פעילות היום|פעילויות היום|פעילות קהילתית|פעילויות קהילתיות|מה יש היום|מה יש בסוף השבוע|מה יש בעיר|חניות|חניונים|חניון|חניה|איפה יש|איפה נמצא|איפה נמצאת|איפה אפשר לקנות|מי מוכר|כמה עולה|מה המחיר|מחיר עדכני|זמין במלאי|זמינות במלאי|תפריט|תפריטים|מלאי בחנות|שירותים באזור|עסקים באזור|חנויות באזור)/i.test(t);
 }
 
 function parseJinaSearchResults(body){
@@ -2355,7 +2375,7 @@ function officialDomainsForQuestion(question){
     [/מכבי|maccabi/,['maccabi4u.co.il']],
     [/מאוחדת|meuhedet/,['meuhedet.co.il']],
     [/לאומית|leumit/,['leumit.co.il']],
-    [/סופר.?פארם|super.?pharm/,['super-pharm.co.il']],
+    [/סופר.?פארם|סופר.?אפרים|סופר.?אפרם|סופר.?פרם|super.?pharm/,['super-pharm.co.il']],
     [/בנק הפועלים|הפועלים|poalim/,['bankhapoalim.co.il']],
     [/לאומי|בנק לאומי|leumi/,['leumi.co.il']],
     [/מזרחי|מזרחי טפחות|mizrahi/,['mizrahitefahot.co.il']]
@@ -3676,7 +3696,10 @@ async function callHandler(call) {
       const eligibleForQuickWebFallback=!!userTranscript && userTranscript.length>=3 &&
         [408,429,500,502,503,504].includes(providerStatus) &&
         (!isLongAnswerRequest(userTranscript) || deepSearchFallback) &&
-        (!shouldForceWebSearch(userTranscript) || deepSearchFallback) &&
+        // If a normal web-backed answer fails (including quota or timeout), allow
+        // the independent direct-search layer to return source-grounded excerpts.
+        // Specialized phone/hours/website routes remain excluded below so they
+        // can enforce their stricter verification rules.
         !isWeatherQuestion(userTranscript) && !isNewsQuestion(userTranscript) &&
         !isTransitRequest(userTranscript) &&
         !isMultimodalAnalysisRequest(userTranscript).any &&

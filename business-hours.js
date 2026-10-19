@@ -14,7 +14,7 @@ function normalize(value) {
 }
 
 function isSuperPharmTarget(targets, question) {
-  return /סופר\s*[-־]?\s*פ(?:א)?רם|super.?pharm/i.test([...(targets || []), question].join(' '));
+  return /סופר\s*(?:[-־]?\s*פ(?:א)?רם|אפרים|אפרם|פרם)|super.?pharm/i.test([...(targets || []), question].join(' '));
 }
 
 export function buildBusinessHoursQueries({ targets = [], locationText = '', city = '', area = '', pharmacy = false, question = '' } = {}) {
@@ -77,6 +77,22 @@ function officialSuperPharm(result) {
   }
 }
 
+function formatHoursByDay(hoursText, question) {
+  const q=normalize(question);
+  if(!/(?:כל יום|כל הימים|לכל יום|כל יום בשבוע|כל השבוע|יום יום|לפי ימים|לכל אחד מהימים)/i.test(q)) return '';
+  const text=normalize(hoursText);
+  const range='(\\d{1,2}[:.]\\d{2}\\s*[-–—]\\s*\\d{1,2}[:.]\\d{2})';
+  const weekday=text.match(new RegExp("(?:א['׳]?\\s*[-–—]\\s*ה['׳]?|א׳\\s*[-–—]\\s*ה׳?)\\s*[:：]?\\s*"+range,'i'))?.[1];
+  const friday=text.match(new RegExp('שישי\\s*[:：]?\\s*'+range,'i'))?.[1];
+  const saturday=text.match(new RegExp('שבת\\s*[:：]?\\s*'+range,'i'))?.[1];
+  if(!weekday && !friday && !saturday) return '';
+  const days=[
+    ['יום ראשון',weekday],['יום שני',weekday],['יום שלישי',weekday],
+    ['יום רביעי',weekday],['יום חמישי',weekday],['יום שישי',friday],['יום שבת',saturday]
+  ];
+  return days.map(([day,hours])=>day+': '+(hours||'השעות לא מופיעות במקור שקיבלתי')).join('. ');
+}
+
 export function buildBusinessHoursFallback({ question = '', business = 'הסניף', city = '', area = '', locationText = '', results = [] } = {}) {
   const q = normalize(question);
   const location = normalize(locationText || [area, city].filter(Boolean).join(' '));
@@ -107,7 +123,10 @@ export function buildBusinessHoursFallback({ question = '', business = 'הסני
   if (official) {
     const hours = extractHoursEvidence(official);
     const branch = normalize(official.title || business);
-    return 'מצאתי באתר הרשמי של סופר-פארם את פרטי הסניף ' + branch + '. שעות שמופיעות בתוצאת המקור: ' + hours + '. כדאי לוודא מול עמוד הסניף אם מדובר ביום חג או בשעות חריגות.';
+    const perDay = formatHoursByDay(hours, q);
+    return 'מצאתי באתר הרשמי של סופר-פארם את פרטי הסניף ' + branch + '. ' +
+      (perDay ? 'שעות הפתיחה לפי ימות השבוע: ' + perDay + '. ' : 'שעות שמופיעות בתוצאת המקור: ' + hours + '. ') +
+      'כדאי לוודא מול עמוד הסניף אם מדובר ביום חג או בשעות חריגות.';
   }
   if (matching.length) {
     const candidate = matching.find(result => normalize(result?.title)) || matching[0];
