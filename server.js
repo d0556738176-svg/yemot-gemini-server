@@ -18,6 +18,7 @@ import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
 import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visual-intent.js';
 import { selectRelevantHistoryForTurn } from './conversation-context.js';
+import { normalizeHebrewPhoneTranscript } from './transcript-normalization.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -673,7 +674,7 @@ async function transcribePhoneAudio(audioBuffer) {
   if((process.env.DEEPGRAM_API_KEY||'').trim()) {
     try {
       const deepgramText=await transcribeWithDeepgram(audioBuffer);
-      if(deepgramText) return deepgramText;
+      if(deepgramText) return normalizeHebrewPhoneTranscript(deepgramText);
     } catch(err) {
       console.warn('[TRANSCRIBE] Deepgram primary failed',{
         status:geminiErrorStatus(err),
@@ -790,7 +791,7 @@ async function transcribePhoneAudio(audioBuffer) {
           console.info('[TRANSCRIBE] gemini_35_direct_ok',{
             key:ki+1,mimeType,chars:cleaned.length
           });
-          return cleaned;
+          return normalizeHebrewPhoneTranscript(cleaned);
         }
       }
 
@@ -846,7 +847,7 @@ async function transcribePhoneAudio(audioBuffer) {
             console.info('[TRANSCRIBE] gemini_35_interactions_ok',{
               key:ki+1,mimeType,chars:cleaned.length
             });
-            return cleaned;
+            return normalizeHebrewPhoneTranscript(cleaned);
           }
         }
         throw Object.assign(new Error('Gemini Transcribe Interactions returned empty text'),{status:503});
@@ -875,7 +876,7 @@ async function transcribePhoneAudio(audioBuffer) {
           console.info('[TRANSCRIBE] legacy_audio_fallback_ok',{
             key:ki+1,chars:cleaned.length
           });
-          if(cleaned) return cleaned;
+          if(cleaned) return normalizeHebrewPhoneTranscript(cleaned);
         }
       } catch(fallbackError) {
         lastError=fallbackError;
