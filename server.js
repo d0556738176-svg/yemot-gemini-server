@@ -1912,7 +1912,7 @@ async function answerTransitDirect(question) {
 
 function isPharmacySearchRequest(transcript) {
   const t=String(transcript||'').toLowerCase().replace(/\s+/g,' ').trim();
-  const pharmacyIntent=/(?:בית|בתי)\s*(?:מרקחת|מרקח|מקרחת|נקראה)|סופר.?פארם|סופר.?אפרים|סופר.?אפרם|פארם|כללית|מכבי פארם|be פארם)/i.test(t);
+  const pharmacyIntent=/(?:(?:בית|בתי)\s*(?:מרקחת|מרקח|מקרחת|נקראה)|סופר.?פארם|סופר.?אפרים|סופר.?אפרם|פארם|כללית|מכבי פארם|be פארם)/i.test(t);
   const listingIntent=/(תמצא|מצא|חפש|תחפש|מספרי? טלפון|טלפון לכל|כתובת|רשימה|פתוח|פתוחה|פתוחים|פתוחות|שעות|מתי|נסגר|סוגר|פתיחה|פעילות|מומלץ|הכי טוב|בית שמש)/i.test(t);
   return pharmacyIntent && listingIntent;
 }
