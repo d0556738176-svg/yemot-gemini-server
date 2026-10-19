@@ -4,6 +4,7 @@ import {
   isLocalBusinessDiscoveryRequest,
   buildLocalBusinessQueries,
   filterLocalBusinessResults,
+  filterNearbyLocalBusinessResults,
   buildNoVerifiedLocalResultsAnswer
 } from '../local-business-search.js';
 
@@ -19,15 +20,16 @@ test('does not intercept opening-hours or phone requests', () => {
   assert.equal(isLocalBusinessDiscoveryRequest('מה הטלפון של החנות בקניון עזריאלי בתל אביב?', location), false);
 });
 
-test('creates exact area and city search variants', () => {
+test('creates exact-area and city-wide search variants', () => {
   const queries = buildLocalBusinessQueries('אילו חנויות יש בשכונת רמות דוד בקריית גת?', {
     city: 'קריית גת', area: 'רמות דוד'
   });
   assert.ok(queries.some(q => q.includes('רמות דוד') && q.includes('קריית גת')));
   assert.ok(queries.some(q => q.includes('site:easy.co.il')));
+  assert.ok(queries.some(q => q.includes('קריית גת') && q.includes('כתובות טלפון')));
 });
 
-test('excludes nearby Karmi Gat results when Ramat David was requested', () => {
+test('excludes nearby Karmi Gat results from the exact neighborhood set', () => {
   const results = [
     { title: 'חנות שכונת רמות דוד, קריית גת', url: 'https://example.com/ramot-david', snippet: 'עסק בשכונת רמות דוד בקריית גת' },
     { title: 'חנויות כרמי גת, קריית גת', url: 'https://example.com/karmi-gat', snippet: 'מרכז מסחרי בכרמי גת' },
@@ -37,8 +39,18 @@ test('excludes nearby Karmi Gat results when Ramat David was requested', () => {
   assert.deepEqual(filtered.map(x => x.url), ['https://example.com/ramot-david']);
 });
 
-test('does not claim nearby results are inside the requested neighborhood', () => {
+test('returns city-level leads separately so they are not misrepresented as inside the neighborhood', () => {
+  const results = [
+    { title: 'חנויות כרמי גת, קריית גת', url: 'https://example.com/karmi-gat', snippet: 'מרכז מסחרי בכרמי גת' },
+    { title: 'סופרמרקט במרכז קריית גת', url: 'https://example.com/market', snippet: 'כתובת בקריית גת' },
+    { title: 'חנות רמות דוד, עיר אחרת', url: 'https://example.com/other', snippet: 'רמות דוד' }
+  ];
+  const nearby = filterNearbyLocalBusinessResults(results, { city: 'קריית גת', area: 'רמות דוד' });
+  assert.deepEqual(nearby.map(x => x.url), ['https://example.com/karmi-gat', 'https://example.com/market']);
+});
+
+test('does not overclaim when no local sources verify a store', () => {
   const answer = buildNoVerifiedLocalResultsAnswer({ city: 'קריית גת', area: 'רמות דוד' });
   assert.match(answer, /דווקא ב/);
-  assert.match(answer, /אזורים סמוכים/);
+  assert.match(answer, /שכונה אחרת/);
 });
