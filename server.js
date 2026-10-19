@@ -3696,7 +3696,10 @@ async function callHandler(call) {
       const eligibleForQuickWebFallback=!!userTranscript && userTranscript.length>=3 &&
         [408,429,500,502,503,504].includes(providerStatus) &&
         (!isLongAnswerRequest(userTranscript) || deepSearchFallback) &&
-        (!shouldForceWebSearch(userTranscript) || deepSearchFallback) &&
+        // If a normal web-backed answer fails (including quota or timeout), allow
+        // the independent direct-search layer to return source-grounded excerpts.
+        // Specialized phone/hours/website routes remain excluded below so they
+        // can enforce their stricter verification rules.
         !isWeatherQuestion(userTranscript) && !isNewsQuestion(userTranscript) &&
         !isTransitRequest(userTranscript) &&
         !isMultimodalAnalysisRequest(userTranscript).any &&
