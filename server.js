@@ -3719,7 +3719,7 @@ async function callHandler(call) {
     await persistConversationEntry(entry);
     console.info('[CALL_FLOW] conversation_saved', { callId: activeKey, transcriptReady: !!userTranscript });
     if(userTranscript) {
-      turnHistory.push({user:(typeof spokenTranscript==='string' ? spokenTranscript : userTranscript),assistant:replyText});
+      turnHistory.push({user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript),assistant:replyText});
       if(turnHistory.length>8) turnHistory.shift();
     }
     console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
