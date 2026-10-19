@@ -4360,25 +4360,30 @@ async function configureYemotStructure() {
   catch { throw new Error('PUBLIC_BASE_URL is invalid'); }
   if(parsedBase.protocol !== 'https:') throw new Error('PUBLIC_BASE_URL must use HTTPS');
 
+  // This release is intentionally scoped to branch 1. Do not rewrite branch 2,
+  // branch 3, or their voice menu on a branch-1 deployment: another workstream owns them.
   await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
-  // Extension 2 is the isolated YouTube robot; preserve voice selection under extension 3.
-  await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
-  if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
-  else console.log('[Yemot automatic setup] Backup key missing; /3 was not changed');
+  if (process.env.YEMOT_AUTO_CONFIGURE_ALL_EXTENSIONS === 'true') {
+    await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
+    if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
+    else console.log('[Yemot automatic setup] Backup key missing; /3 was not changed');
 
-  const voiceMap=(process.env.YEMOT_VOICE_OPTIONS||'1:Elik_2100,2:Jacob,3:ymMale').split(',');
-  for(const item of voiceMap) {
-    const [extension,voice]=item.split(':');
-    if(!extension||!voice) continue;
-    await updateExtension('ivr2:/' + '3/' + extension,{
-      type:'add_id_to_list',
-      add_id_to_list_location_list:'/ivr',
-      add_id_to_list_key:'voice',
-      add_id_to_list_value:voice,
-      add_id_to_list_value_change:'yes',
-      add_id_to_list_end_goto:'/1',
-      add_id_to_list_error_end_goto:'/2'
-    });
+    const voiceMap=(process.env.YEMOT_VOICE_OPTIONS||'1:Elik_2100,2:Jacob,3:ymMale').split(',');
+    for(const item of voiceMap) {
+      const [extension,voice]=item.split(':');
+      if(!extension||!voice) continue;
+      await updateExtension('ivr2:/' + '3/' + extension,{
+        type:'add_id_to_list',
+        add_id_to_list_location_list:'/ivr',
+        add_id_to_list_key:'voice',
+        add_id_to_list_value:voice,
+        add_id_to_list_value_change:'yes',
+        add_id_to_list_end_goto:'/1',
+        add_id_to_list_error_end_goto:'/2'
+      });
+    }
+  } else {
+    console.log('[Yemot automatic setup] branch-1-only mode; extensions 2, 3 and voice menus were left untouched');
   }
 }
 
