@@ -3914,8 +3914,13 @@ async function youtubeCallHandler(call) {
     // Do not try to speak a second response after the caller has disconnected
     // or YemotRouter has already ended the action; that can trigger an uncaught
     // "invalid characters/headers already sent" failure.
-    if(error instanceof ExitError || isCallerHangupError(error)) {
-      console.info('[YouTube IVR] call ended before another response could be sent');
+    // ExitError is YemotRouter's normal control-flow signal after id_list_message.
+    // Re-throw it so the router can complete its cleanup; swallowing it here would
+    // leave the call lifecycle in the wrong state.
+    if(error instanceof ExitError) throw error;
+    // A disconnected caller cannot receive another response.
+    if(isCallerHangupError(error)) {
+      console.info('[YouTube IVR] caller disconnected before another response could be sent');
       return;
     }
     logDetailedError('YouTube IVR',error);
