@@ -23,6 +23,13 @@ test('caller correction retains the immediately relevant question context', () =
   assert.match(selectRelevantHistoryForTurn('שמעת מה שאלתי אותך?', oldHistory, current), /שעות הפתיחה של הסניף/);
 });
 
+test('short status follow-ups retain the pending request', () => {
+  const current = [{ user: 'מה המספר של דיסקונט?', assistant: 'אני בודק את מספר הטלפון של דיסקונט.' }];
+  for (const q of ['נו, מצאת?', 'מצאת?', 'הצלחת?', 'מה עם המספר?', 'יש עדכון?']) {
+    assert.match(selectRelevantHistoryForTurn(q, oldHistory, current), /מה המספר של דיסקונט/);
+  }
+});
+
 test('a new topic does not receive current-call history just because it follows another turn', () => {
   const current = [{ user: 'מה המחיר של מוצר א?', assistant: 'מאה שקלים.' }];
   assert.equal(selectRelevantHistoryForTurn('איך עובד מנוע חשמלי?', oldHistory, current), '');
