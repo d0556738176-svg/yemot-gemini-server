@@ -1984,7 +1984,7 @@ async function answerBusinessHoursDirect(transcript) {
   // Search snippets often show a store page but omit its actual hours. When an
   // official brand result exists, extract its public page before giving up.
   const domains=officialDomainsForQuestion(question);
-  const official=unique.filter(x=>domains.length ? isOfficialSearchUrl(x.url,domains) : officialSuperPharm(x));
+  const official=domains.length ? unique.filter(x=>isOfficialSearchUrl(x.url,domains)) : [];
   const hoursPattern=/(?:\\b\\d{1,2}[:.]\\d{2}\\s*[-–—至]\\s*\\d{1,2}[:.]\\d{2}\\b|שעות פתיחה|שעות פעילות|פתוח היום|ימי א.?ה)/i;
   const evidenceResults=[...unique];
   if(official.length && !unique.some(x=>hoursPattern.test(String(x.title||'')+' '+String(x.snippet||'')))) {
