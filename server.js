@@ -18,6 +18,7 @@ import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
 import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visual-intent.js';
 import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion } from './conversation-context.js';
+import { buildPharmacySearchQueries, buildPharmacySearchAnswer } from './pharmacy-search.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -2080,7 +2081,18 @@ async function answerLocalBusinessDiscoveryDirect(transcript) {
 }
 
 async function answerPharmacySearchDirect(transcript) {
-  return answerBusinessHoursDirect(transcript);
+  const question=String(transcript||'').trim();
+  const city=extractSearchCity(question) || extractExplicitLocation(question).city || '';
+  if(!city) return 'באיזו עיר לחפש בתי מרקחת?';
+  const queries=buildPharmacySearchQueries(city);
+  // Keep this phone path short and independent of a language-model synthesis call.
+  const settled=await Promise.allSettled(queries.map(q=>searchWebDirect(q,{timeoutMs:2800})));
+  const results=[];
+  for(let i=0;i<settled.length;i++) {
+    if(settled[i].status==='fulfilled') results.push(...settled[i].value);
+    else console.warn('[PHARMACY_SEARCH] query failed',{index:i,status:geminiErrorStatus(settled[i].reason)});
+  }
+  return buildPharmacySearchAnswer({city,results:dedupeSearchResults(results)});
 }
 
 function isLongAnswerRequest(text) {
