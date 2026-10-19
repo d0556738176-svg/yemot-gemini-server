@@ -10,17 +10,31 @@ function isSuperPharmTarget(targets, question) {
 
 export function buildBusinessHoursQueries({ targets = [], locationText = '', city = '', area = '', pharmacy = false, question = '' } = {}) {
   const location = normalize(locationText);
+  const cleanCity = normalize(city);
+  const cleanArea = normalize(area);
   const businesses = targets.length ? targets : [isSuperPharmTarget([], question) ? 'סופר-פארם' : 'בית עסק'];
   const queries = [];
+
   for (const target of businesses) {
-    queries.push(target + ' ' + location + ' שעות פתיחה היום');
-    queries.push(target + ' ' + location + ' פתוח עכשיו כתובת אתר רשמי');
-    queries.push(target + ' ' + location + ' שעות פעילות סניף');
-    queries.push(target + ' ' + location + ' שעות פתיחה מפה');
+    const targetLocation = [target, cleanArea, cleanCity].filter(Boolean).join(' ');
+    const variants = [
+      targetLocation + ' שעות פתיחה סניף כתובת',
+      targetLocation + ' שעות פעילות היום טלפון',
+      targetLocation + ' אתר רשמי סניפים',
+      targetLocation + ' שעות פתיחה מפה',
+      target + ' ' + location + ' שעות פתיחה',
+      target + ' ' + location + ' כתובת סניף שעות פעילות'
+    ];
+    queries.push(...variants);
+
     if (isSuperPharmTarget([target], question)) {
-      queries.push('site:super-pharm.co.il ' + target + ' ' + location + ' שעות פתיחה סניף');
+      queries.push(
+        'site:super-pharm.co.il ' + [target, cleanArea, cleanCity].filter(Boolean).join(' ') + ' שעות פתיחה',
+        'site:super-pharm.co.il ' + [cleanCity, cleanArea, 'סניפים סופר-פארם'].filter(Boolean).join(' ')
+      );
     }
   }
+
   if (/ביג/i.test(area) && !city) {
     queries.push('סופר-פארם מתחם BIG שעות פתיחה כתובת סניף');
     queries.push('סופר פארם BIG Fashion שעות פתיחה');
@@ -28,6 +42,9 @@ export function buildBusinessHoursQueries({ targets = [], locationText = '', cit
   if (pharmacy && /כללית/i.test(question)) {
     queries.push('כללית בית מרקחת ' + location + ' שעות פתיחה אתר רשמי');
   }
+
+  // Search engines often normalize mall and city names differently. Keep both
+  // the full location and separate area/city variants, without sending duplicates.
   return [...new Set(queries.map(normalize).filter(Boolean))].slice(0, 8);
 }
 
@@ -61,10 +78,19 @@ export function buildBusinessHoursFallback({ question = '', business = 'הסני
   }
 
   const matching = (results || []).filter(result => {
-    const haystack = normalize([result?.title, result?.snippet, result?.url].join(' ')).toLowerCase();
+    const haystack = normalize([result?.title, result?.snippet, result?.url].join(' '))
+      .toLowerCase().replace(/[״׳]/g, "'").replace(/[-־]/g, ' ');
     const target = /סופר\s*[-־]?\s*פארם|super.?pharm/i.test(business + ' ' + q);
     if (target && !/סופר\s*[-־]?\s*פארם|super.?pharm/i.test(haystack) && !officialSuperPharm(result)) return false;
-    if (city && !haystack.includes(city.toLowerCase())) return false;
+    // Never substitute a different branch just because it is in the same city.
+    // If the caller named a mall/neighborhood, require that location in the evidence.
+    const normalizedArea = normalize(area).toLowerCase().replace(/[״׳]/g, "'").replace(/[-־]/g, ' ');
+    const areaCore = normalizedArea.replace(/^(?:קניון|מתחם)\s+/, '').trim();
+    if (normalizedArea && !haystack.includes(normalizedArea) &&
+        !(areaCore && haystack.includes(areaCore)) &&
+        !(normalizedArea === 'ביג' && /\bbig\b|ביג/i.test(haystack))) return false;
+    // City mentions are often omitted from search snippets; exact area match is stronger.
+    if (city && !haystack.includes(city.toLowerCase()) && !normalizedArea) return false;
     if (/ביג/i.test(area) && !/(ביג|big)/i.test(haystack)) return false;
     return true;
   });
