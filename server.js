@@ -7,7 +7,7 @@ import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
-import { buildBusinessHoursQueries, buildBusinessHoursFallback } from './business-hours.js';
+import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
 import { extractExplicitLocation, extractLocalArea, extractSearchCity } from './business-location.js';
 import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, buildNoVerifiedLocalResultsAnswer } from './local-business-search.js';
 import { rankWebsitePages } from './website-relevance.js';
@@ -1916,10 +1916,7 @@ function isPharmacySearchRequest(transcript) {
 }
 
 function isBusinessHoursRequest(transcript) {
-  const t=String(transcript||'').toLowerCase().replace(/\s+/g,' ').trim();
-  const asksHours=/(פתוח עכשיו|פתוחה עכשיו|פתוחים עכשיו|פתוחות עכשיו|פתוח היום|פתוחה היום|מתי פתוח|מתי פתוחה|מתי הם פתוחים|מתי נסגר|מתי סוגר|שעות פתיחה|שעות פעילות|זמני פתיחה|עד מתי פתוח|באיזה שעות|מתי פותח)/i.test(t);
-  const hasBusiness=/(בית מרקחת|בתי מרקחת|סופר.?פארם|פארם|כללית|מכבי|מאוחדת|לאומית|בנק|סניף|חנות|חנויות|עסק|מרכז קניות|קניון|דואר|סופר|מכולת|מסעדה|מספרה|דיסקונט|הפועלים|לאומי|מזרחי|איקאה|רמי לוי|שופרסל|ויקטורי|מחסני השוק|משרד)/i.test(t);
-  return asksHours && hasBusiness;
+  return isBusinessHoursQuestion(transcript);
 }
 
 
