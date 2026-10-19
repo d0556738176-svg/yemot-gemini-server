@@ -1912,8 +1912,9 @@ async function answerTransitDirect(question) {
 
 function isPharmacySearchRequest(transcript) {
   const t=String(transcript||'').toLowerCase().replace(/\s+/g,' ').trim();
-  return /(בית מרקחת|בתי מרקחת|סופר.?פארם|פארם|כללית|מכבי פארם|be פארם)/i.test(t) &&
-    /(פתוח|פתוחה|פתוחים|פתוחות|שעות|מתי|נסגר|סוגר|פתיחה|פעילות|מומלץ|הכי טוב|בית שמש)/i.test(t);
+  const pharmacyIntent=/(בתי?\s*(?:מרקחת|מרקח|מקרחת|נקראה)|סופר.?פארם|סופר.?אפרים|סופר.?אפרם|פארם|כללית|מכבי פארם|be פארם)/i.test(t);
+  const listingIntent=/(תמצא|מצא|חפש|תחפש|מספרי? טלפון|טלפון לכל|כתובת|רשימה|פתוח|פתוחה|פתוחים|פתוחות|שעות|מתי|נסגר|סוגר|פתיחה|פעילות|מומלץ|הכי טוב|בית שמש)/i.test(t);
+  return pharmacyIntent && listingIntent;
 }
 
 function isBusinessHoursRequest(transcript) {
@@ -1924,7 +1925,7 @@ function isBusinessHoursRequest(transcript) {
 function extractRequestedBusinessName(question) {
   const t=String(question||'').replace(/\s+/g,' ').trim();
   const known=[
-    ['סופר-פארם',/סופר\s*[-־]?\s*פ(?:א)?רם/i],
+    ['סופר-פארם',/סופר\s*(?:[-־]?\s*פ(?:א)?רם|אפרים|אפרם|פרם)/i],
     ['כללית',/כללית/i],
     ['מכבי פארם',/מכבי\s*פארם/i],
     ['Be פארם',/\bbe\s*פארם|בי פארם/i],
@@ -1985,6 +1986,12 @@ async function answerBusinessHoursDirect(transcript) {
   const domains=officialDomainsForQuestion(question);
   const official=domains.length ? unique.filter(x=>isOfficialSearchUrl(x.url,domains)) : [];
   const hoursPattern=/(?:\b\d{1,2}[:.]\d{2}\s*[-–—至]\s*\d{1,2}[:.]\d{2}\b|שעות פתיחה|שעות פעילות|פתוח היום|ימי א.?ה)/i;
+  const allDaysRequested=/(?:כל יום|כל הימים|לכל יום|כל יום בשבוע|כל השבוע|יום יום|לפי ימים|לכל אחד מהימים)/i.test(question);
+  // If an official result already contains the requested hours, answer from that
+  // source immediately instead of spending another model round-trip on synthesis.
+  if(official.some(x=>hoursPattern.test(String(x.title||'')+' '+String(x.snippet||'')))) {
+    return buildBusinessHoursFallback({question,business:business||generic,city,area,locationText,results:unique});
+  }
   const evidenceResults=[...unique];
   if(official.length && !unique.some(x=>hoursPattern.test(String(x.title||'')+' '+String(x.snippet||'')))) {
     try {
@@ -2005,7 +2012,6 @@ async function answerBusinessHoursDirect(transcript) {
   const evidence=evidenceResults.map((x,i)=>
     'מקור '+(i+1)+': '+x.title+'\nכתובת: '+x.url+'\nמידע: '+String(x.snippet||'').slice(0,1800)
   ).join('\n\n');
-  const allDaysRequested=/(?:כל יום|כל הימים|לכל יום|כל יום בשבוע|כל השבוע|יום יום|לפי ימים|לכל אחד מהימים)/i.test(question);
   const prompt='שאלת המתקשר: '+question+'\nעסק מבוקש: '+(business||generic)+'\nאזור מבוקש: '+locationText+'\nמקורות שנאספו עכשיו:\n'+evidence+'\n\n'+
     'ענה בעברית ובקצרה להקראה בטלפון. התייחס רק לעסק ולסניף שהמתקשר ביקש; אין להחליף רשת או מותג ברשת אחרת. '+
     (allDaysRequested ? 'המתקשר ביקש שעות לכל יום בשבוע: הצג בנפרד יום ראשון, שני, שלישי, רביעי, חמישי, שישי ושבת. אפשר לקבץ ימים רק אם המקור מאשר במפורש שעות זהות; לכל יום שאין עבורו ראיה כתוב שהשעות לא אומתו, ואל תסיק אותן מיום אחר. ' : '')+
@@ -2369,7 +2375,7 @@ function officialDomainsForQuestion(question){
     [/מכבי|maccabi/,['maccabi4u.co.il']],
     [/מאוחדת|meuhedet/,['meuhedet.co.il']],
     [/לאומית|leumit/,['leumit.co.il']],
-    [/סופר.?פארם|super.?pharm/,['super-pharm.co.il']],
+    [/סופר.?פארם|סופר.?אפרים|סופר.?אפרם|סופר.?פרם|super.?pharm/,['super-pharm.co.il']],
     [/בנק הפועלים|הפועלים|poalim/,['bankhapoalim.co.il']],
     [/לאומי|בנק לאומי|leumi/,['leumi.co.il']],
     [/מזרחי|מזרחי טפחות|mizrahi/,['mizrahitefahot.co.il']]
