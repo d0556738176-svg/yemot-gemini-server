@@ -18,7 +18,12 @@ test('an explicit follow-up within a call uses current-call turns, not older cal
   assert.doesNotMatch(selectRelevantHistoryForTurn('ומה לגבי האחריות שלהם?', oldHistory, current), /מוצר א/);
 });
 
-test('caller correction retains the immediately relevant question context', () => {\n  const current = [{ user: 'מה שעות הפתיחה של הסניף?', assistant: 'הסניף פתוח עד חמש.' }];\n  assert.match(selectRelevantHistoryForTurn('שמעת מה שאלתי אותך?', oldHistory, current), /שעות הפתיחה של הסניף/);\n});\n\ntest('a new topic does not receive current-call history just because it follows another turn', () => {
+test('caller correction retains the immediately relevant question context', () => {
+  const current = [{ user: 'מה שעות הפתיחה של הסניף?', assistant: 'הסניף פתוח עד חמש.' }];
+  assert.match(selectRelevantHistoryForTurn('שמעת מה שאלתי אותך?', oldHistory, current), /שעות הפתיחה של הסניף/);
+});
+
+test('a new topic does not receive current-call history just because it follows another turn', () => {
   const current = [{ user: 'מה המחיר של מוצר א?', assistant: 'מאה שקלים.' }];
   assert.equal(selectRelevantHistoryForTurn('איך עובד מנוע חשמלי?', oldHistory, current), '');
 });
