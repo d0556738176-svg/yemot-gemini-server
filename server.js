@@ -3519,7 +3519,7 @@ async function callHandler(call) {
           historyHasVisualCue:/(איך נראה|איך היא נראית|איך הוא נראה|תמונה|צילום|תיאור חזותי|תיאור הפיזי|מה רואים)/i.test(visualHistoryText)
         });
         try {
-          replyText=await analyzeRequestedMedia(userTranscript,{...turnContext,relevantHistoryText:visualHistoryText});
+          replyText=await analyzeRequestedMedia(userTranscript,{...turnContext,historyText:visualHistoryText});
           if(!replyText) throw Object.assign(new Error('Media analysis returned empty answer'),{status:503});
         } catch(e) {
           console.warn('[MULTIMODAL] analysis unavailable; falling back safely',{
