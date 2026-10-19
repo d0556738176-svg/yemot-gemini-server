@@ -622,7 +622,7 @@ async function transcribeWithDeepgram(audioBuffer, overrideKey='') {
   const bytes=Buffer.isBuffer(audioBuffer)?audioBuffer:Buffer.from(audioBuffer);
   const mimeType=(process.env.YEMOT_AUDIO_MIME_TYPE||detectAudioMime(bytes)||'audio/wav').trim();
   const vocabulary=(process.env.DEEPGRAM_KEYTERMS ||
-    'יוטיוב,YouTube,גוגל,Google,ChatGPT,GPT,Gemini,גמיני,ג׳מיני,ימות,ימות המשיח,רנולד,רנולד שוורצנגר,Deepgram,Render,Supabase,API,אילן גוזל,רעננה,סופר פארם,בנק הפועלים,בנק דיסקונט,בנק לאומי,בנק מזרחי טפחות,מכבי,כללית,מאוחדת,לאומית')
+    'יוטיוב,YouTube,ביוטיוב,ביוטוב,ביויוטב,גוגל,Google,ChatGPT,GPT,Gemini,גמיני,ג׳מיני,ימות,ימות המשיח,רנולד,רנולד שוורצנגר,Deepgram,Render,Supabase,API,אילן גוזל,רעננה,סופר פארם,סופר-פארם,סופר פרם,סופרפרם,בנק הפועלים,בנק דיסקונט,בנק דיווחון,בנק לאומי,בנק מזרחי טפחות,מכבי,כללית,מאוחדת,לאומית')
     .split(',').map(x=>x.trim()).filter(Boolean).slice(0,100);
 
   const url=new URL('https://api.deepgram.com/v1/listen');
@@ -691,7 +691,7 @@ async function transcribePhoneAudio(audioBuffer) {
   const bytes=Buffer.isBuffer(audioBuffer)?audioBuffer:Buffer.from(audioBuffer);
   const mimeType=configuredMime || detectAudioMime(bytes);
   const vocabulary=(process.env.GEMINI_TRANSCRIBE_VOCABULARY ||
-    'Gemini,YouTube,יוטיוב,גוגל,Google,YouTube,API,Render,Supabase')
+    'Gemini,YouTube,יוטיוב,ביוטוב,ביויוטב,גוגל,Google,API,Render,Supabase,סופר פארם,סופר-פארם,סופר פרם,סופרפרם,בנק דיסקונט,בנק דיווחון')
     .split(',').map(x=>x.trim()).filter(Boolean).slice(0,100);
 
   let lastError;
