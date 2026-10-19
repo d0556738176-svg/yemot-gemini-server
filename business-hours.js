@@ -10,17 +10,32 @@ function isSuperPharmTarget(targets, question) {
 
 export function buildBusinessHoursQueries({ targets = [], locationText = '', city = '', area = '', pharmacy = false, question = '' } = {}) {
   const location = normalize(locationText);
+  const cleanCity = normalize(city);
+  const cleanArea = normalize(area);
   const businesses = targets.length ? targets : [isSuperPharmTarget([], question) ? 'סופר-פארם' : 'בית עסק'];
   const queries = [];
+
   for (const target of businesses) {
-    queries.push(target + ' ' + location + ' שעות פתיחה היום');
-    queries.push(target + ' ' + location + ' פתוח עכשיו כתובת אתר רשמי');
-    queries.push(target + ' ' + location + ' שעות פעילות סניף');
-    queries.push(target + ' ' + location + ' שעות פתיחה מפה');
+    const targetLocation = [target, cleanArea, cleanCity].filter(Boolean).join(' ');
+    const variants = [
+      targetLocation + ' שעות פתיחה סניף כתובת',
+      targetLocation + ' שעות פעילות היום טלפון',
+      targetLocation + ' אתר רשמי סניפים',
+      targetLocation + ' שעות פתיחה מפה',
+      target + ' ' + location + ' שעות פתיחה',
+      target + ' ' + location + ' כתובת סניף שעות פעילות'
+    ];
+    queries.push(...variants);
+
     if (isSuperPharmTarget([target], question)) {
-      queries.push('site:super-pharm.co.il ' + target + ' ' + location + ' שעות פתיחה סניף');
+      queries.push(
+        'site:super-pharm.co.il ' + [target, cleanArea, cleanCity].filter(Boolean).join(' ') + ' שעות פתיחה',
+        'site:super-pharm.co.il ' + [cleanCity, cleanArea, 'סניפים סופר-פארם'].filter(Boolean).join(' '),
+        'סופר פארם ' + [cleanArea, cleanCity, 'שעות פתיחה סניף רשמי'].filter(Boolean).join(' ')
+      );
     }
   }
+
   if (/ביג/i.test(area) && !city) {
     queries.push('סופר-פארם מתחם BIG שעות פתיחה כתובת סניף');
     queries.push('סופר פארם BIG Fashion שעות פתיחה');
@@ -28,7 +43,10 @@ export function buildBusinessHoursQueries({ targets = [], locationText = '', cit
   if (pharmacy && /כללית/i.test(question)) {
     queries.push('כללית בית מרקחת ' + location + ' שעות פתיחה אתר רשמי');
   }
-  return [...new Set(queries.map(normalize).filter(Boolean))].slice(0, 8);
+
+  // Search engines often normalize mall and city names differently. Keep both
+  // the full location and separate area/city variants, without sending duplicates.
+  return [...new Set(queries.map(normalize).filter(Boolean))].slice(0, 12);
 }
 
 function extractHoursEvidence(result) {
