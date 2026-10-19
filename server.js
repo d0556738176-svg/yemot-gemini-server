@@ -4116,40 +4116,22 @@ async function backupCallHandler(call) {
       } else if(isNewsQuestion(userTranscript)) {
         replyText=await answerBackupWithWebSearch(userTranscript,historyText);
       } else {
-        const webRequested=shouldForceWebSearch(userTranscript);
         const youtubeRequested=/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript);
 
         if(isOpenAIWebSearchRequest(userTranscript)) {
           // Explicit ChatGPT search uses the Responses API route; if unavailable,
           // answerWithWebSearch retains the existing Gemini/Tavily fallback chain.
           replyText=await answerWithWebSearch(userTranscript,historyText,turnContext);
-        } else if(webRequested && !youtubeRequested) {
-          replyText=await answerBackupWithWebSearch(userTranscript,historyText);
         } else if(youtubeRequested) {
+          // Keep the dedicated YouTube search/selection flow isolated from generic web search.
           const youtubeAnswer=await searchYouTubeForPhone(userTranscript,historyText,turnContext,(process.env.YOUTUBE_BACKUP_API_KEY||'').trim());
           replyText=youtubeAnswer || 'לא הצלחתי כרגע לקבל תוצאות מיוטיוב. נא לנסות שוב בעוד כמה רגעים.';
         } else {
-          const answerPrompt=EXCLUSIVE_INSTRUCTION+
-            '\\n\\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+
-            '. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+
-            '\\n\\nהקשר קודם של השיחה, לפי הסדר:\\n'+
-            (historyText||'אין עדיין הקשר קודם.')+
-            '\\n\\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\\n'+
-            userTranscript+
-            '\\n\\nענה על השאלה בלבד. החזר אובייקט JSON תקין בלבד עם שדה "answer". '+
-            'התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. '+
-            'אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
-          const result=await generateBackupWithRetry(
-            [{role:'user',parts:[{text:answerPrompt}]}],
-            false
-          );
-          const raw=String(result?.response?.text?.()||'').trim();
-          let parsed=null;
-          try { parsed=JSON.parse(raw); } catch {
-            const m=raw.match(/\{[\s\S]*\}/);
-            if(m) { try { parsed=JSON.parse(m[0]); } catch {} }
-          }
-          replyText=String(parsed?.answer||raw||'לא הצלחתי לענות כרגע').trim();
+          // Branch 3's default is live web-grounded answering. Callers no longer
+          // need to say "search the internet"; ordinary factual questions use Google Search.
+          // Deterministic time, fixed-phone, website, weather and news routes above stay unchanged.
+          console.info('[BACKUP SEARCH] automatic web search enabled',{callId:activeKey});
+          replyText=await answerBackupWithWebSearch(userTranscript,historyText);
         }
       }
 
