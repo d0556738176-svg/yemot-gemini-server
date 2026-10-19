@@ -19,3 +19,15 @@ export function selectRelevantHistoryForTurn(question, persistedHistoryText = ''
   }
   return String(persistedHistoryText || '').trim();
 }
+
+
+// If the caller asks for a status update while a branch-1 lookup was left pending,
+// rerun the original request instead of generating a generic reply that asks them to repeat it.
+export function resolvePendingLookupQuestion(question, currentTurnHistory = [], isLookupRequest = () => false) {
+  const q = String(question || '').trim();
+  if (!/^(?:אז\\s*)?(?:נו[, ]*)?(?:מצאת|הצלחת|בדקת|חיפשת|מה יצא|מה התוצאה|יש תשובה|יש עדכון|תעדכן|מה עם המספר|מה עם זה)[?!. ]*$/i.test(q)) return '';
+  const previous = Array.isArray(currentTurnHistory) ? currentTurnHistory.at(-1) : null;
+  if (!previous || !String(previous.user || '').trim() || !isLookupRequest(String(previous.user || ''))) return '';
+  if (!/(בודק|בודקת|בודקים|אבדוק|מחפש|מחפשת|חיפשתי[, ]*אבל|מנסה לאתר|מיד בודק|צריך שתזכיר|תזכיר לי|לא הצלחתי כרגע)/i.test(String(previous.assistant || ''))) return '';
+  return String(previous.user).trim();
+}
