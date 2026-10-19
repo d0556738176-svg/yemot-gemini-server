@@ -2,7 +2,7 @@ const normalize = value => String(value || '')
   .toLowerCase()
   .replace(/[״׳]/g, "'")
   .replace(/[-־–—]/g, ' ')
-  .replace(/[.,!?;:()[\]{}]/g, ' ')
+  .replace(/[.,!?;:(){}]/g, ' ')
   .replace(/\s+/g, ' ')
   .trim();
 
