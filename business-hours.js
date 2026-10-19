@@ -85,10 +85,10 @@ export function buildBusinessHoursFallback({ question = '', business = 'הסני
     // Never substitute a different branch just because it is in the same city.
     // If the caller named a mall/neighborhood, require that location in the evidence.
     const normalizedArea = normalize(area).toLowerCase().replace(/[״׳]/g, "'").replace(/[-־]/g, ' ');
-    const areaCore = normalizedArea.replace(/^(?:קניון|מתחם)\\s+/, '').trim();
+    const areaCore = normalizedArea.replace(/^(?:קניון|מתחם)\s+/, '').trim();
     if (normalizedArea && !haystack.includes(normalizedArea) &&
         !(areaCore && haystack.includes(areaCore)) &&
-        !(normalizedArea === 'ביג' && /\\bbig\\b|ביג/i.test(haystack))) return false;
+        !(normalizedArea === 'ביג' && /\bbig\b|ביג/i.test(haystack))) return false;
     // City mentions are often omitted from search snippets; exact area match is stronger.
     if (city && !haystack.includes(city.toLowerCase()) && !normalizedArea) return false;
     if (/ביג/i.test(area) && !/(ביג|big)/i.test(haystack)) return false;
