@@ -4248,6 +4248,8 @@ app.post('/api/youtube/authorized-source', rateLimit(30, 60 * 1000, 'youtube-aut
   if(!/^[A-Za-z0-9_-]{6,20}$/.test(videoId))
     return res.status(400).json({error:'Invalid videoId'});
   if(!sourceUrl) return res.status(400).json({error:'Missing sourceUrl'});
+  if(req.body?.rightsConfirmed !== true)
+    return res.status(400).json({error:'Explicit rights confirmation is required'});
   if(!SUPABASE_ENABLED) return res.status(503).json({error:'Supabase is not configured'});
 
   try {
