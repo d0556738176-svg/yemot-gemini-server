@@ -79,10 +79,18 @@ export function buildBusinessHoursFallback({ question = '', business = 'הסני
   }
 
   const matching = (results || []).filter(result => {
-    const haystack = normalize([result?.title, result?.snippet, result?.url].join(' ')).toLowerCase();
+    const haystack = normalize([result?.title, result?.snippet, result?.url].join(' '))
+      .toLowerCase().replace(/[״׳]/g, "'").replace(/[-־]/g, ' ');
     const target = /סופר\s*[-־]?\s*פארם|super.?pharm/i.test(business + ' ' + q);
     if (target && !/סופר\s*[-־]?\s*פארם|super.?pharm/i.test(haystack) && !officialSuperPharm(result)) return false;
-    if (city && !haystack.includes(city.toLowerCase())) return false;
+    // Never substitute a different branch just because it is in the same city.
+    // If the caller named a mall/neighborhood, require that location in the evidence.
+    const normalizedArea = normalize(area).toLowerCase().replace(/[״׳]/g, "'").replace(/[-־]/g, ' ');
+    if (normalizedArea && !haystack.includes(normalizedArea) &&
+        !(normalizedArea === 'עזריאלי' && /azrieli|עזריאלי/i.test(haystack)) &&
+        !(normalizedArea === 'ביג' && /\bbig\b|ביג/i.test(haystack))) return false;
+    // City mentions are often omitted from search snippets; exact area match is stronger.
+    if (city && !haystack.includes(city.toLowerCase()) && !normalizedArea) return false;
     if (/ביג/i.test(area) && !/(ביג|big)/i.test(haystack)) return false;
     return true;
   });
