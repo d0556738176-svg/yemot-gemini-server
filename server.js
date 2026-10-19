@@ -3911,6 +3911,13 @@ async function youtubeCallHandler(call) {
         : 'לא מצאתי תוצאות מתאימות. אמור חיפוש חדש. ולסיום ההקלטה הקש סולמית';
     }
   } catch(error) {
+    // Do not try to speak a second response after the caller has disconnected
+    // or YemotRouter has already ended the action; that can trigger an uncaught
+    // "invalid characters/headers already sent" failure.
+    if(error instanceof ExitError || isCallerHangupError(error)) {
+      console.info('[YouTube IVR] call ended before another response could be sent');
+      return;
+    }
     logDetailedError('YouTube IVR',error);
     const status=geminiErrorStatus(error);
     const message=status===429?'החיפוש עמוס כרגע. נא לנסות שוב':status===503?'שירות יוטיוב אינו זמין כרגע':'אירעה תקלה זמנית בחיפוש ביוטיוב. נא לנסות שוב';
