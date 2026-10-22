@@ -488,6 +488,17 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
         }
       }
     }
+    // Hard latency boundary for ordinary phone conversation. If primary Gemini and
+    // the independent low-latency providers have already failed, do not stack slower
+    // OpenAI + backup-Gemini waits. The call handler can immediately use its local/
+    // retrieval fallback and hand control back to Yemot before the phone timeout.
+    if (fastPhone && !useWebSearch && textOnlyInput && independentFallbackStatus) {
+      console.warn('[BRANCH1 FALLBACK] hard phone deadline reached after fast providers; skipping slow fallback chain', {
+        status: primaryStatus, useWebSearch, fastPhone
+      });
+      throw primaryError;
+    }
+
     if (textOnlyInput && String(process.env.OPENAI_API_KEY || '').trim()) {
       if (Date.now() < openAIBillingCooldownUntil) {
         console.warn('[BRANCH1 FALLBACK] skipping OpenAI during known billing cooldown', {
