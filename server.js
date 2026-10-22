@@ -3996,13 +3996,29 @@ async function youtubeCallHandler(call) {
   }
 }
 
-async function answerBackupWithWebSearch(transcript, relevantHistoryText='') {
+async function answerBackupWithWebSearch(transcript, relevantHistoryText='', turnContext=null) {
   const question=String(transcript||'').trim();
   if(!question) throw Object.assign(new Error('Backup web search requested but transcript is empty'),{status:400});
+
+  // Branch 3 first performs real multi-provider retrieval. This gives the backup
+  // branch independent live-web coverage even when Gemini Search grounding is slow
+  // or quota-limited, and it can open/read public pages through the existing reader.
+  try {
+    const direct=await answerWithDirectWebFallback(question,relevantHistoryText,turnContext);
+    if(direct && String(direct).trim()) {
+      console.info('[BACKUP SEARCH] direct live-web retrieval succeeded',{chars:String(direct).trim().length});
+      return String(direct).trim();
+    }
+  } catch(e) {
+    console.warn('[BACKUP SEARCH] direct live-web retrieval failed; trying Google grounding',{
+      status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,180)
+    });
+  }
+
   const prompt=EXCLUSIVE_INSTRUCTION+
     '\\n\\nהקשר קודם של השיחה:\\n'+(relevantHistoryText||'אין עדיין הקשר קודם.')+
     '\\n\\nהשאלה המדויקת של המתקשר לחיפוש באינטרנט:\\n'+question+
-    '\\n\\nבצע חיפוש אינטרנט חי ורחב באמצעות Google Search. פרק את הבקשה לכמה כיווני חיפוש כשצריך, העדף מקורות רשמיים ועדכניים, השווה בין מקורות ואל תמציא מידע. ענה בעברית טבעית, ברורה וקצרה להקראה בטלפון.';
+    '\\n\\nבצע חיפוש אינטרנט חי ורחב באמצעות Google Search. פרק את הבקשה לכמה כיווני חיפוש כשצריך, העדף מקורות רשמיים ועדכניים, השווה בין מקורות ואל תמציא מידע. אם הבקשה מתייחסת לאתר, עמוד או קישור, השתמש רק בתוכן שנמצא בפועל ואל תטען שפתחת עמוד שלא נקרא. ענה בעברית טבעית, ברורה וקצרה להקראה בטלפון.';
   const result=await generateBackupWithRetry(
     [{role:'user',parts:[{text:prompt}]}],
     true
@@ -4161,15 +4177,15 @@ async function backupCallHandler(call) {
           replyText=await answerWithWebSearch(userTranscript,historyText,turnContext);
         } catch(e) {
           console.warn('[BACKUP WEBSITE] direct browsing failed; trying backup search',{status:geminiErrorStatus(e)});
-          replyText=await answerBackupWithWebSearch(userTranscript,historyText);
+          replyText=await answerBackupWithWebSearch(userTranscript,historyText,turnContext);
         }
       } else if(deterministicTime) {
         replyText=deterministicTime;
       } else if(isWeatherQuestion(userTranscript)) {
         try { replyText=await answerWeatherDirect(userTranscript); }
-        catch { replyText=await answerBackupWithWebSearch(userTranscript,historyText); }
+        catch { replyText=await answerBackupWithWebSearch(userTranscript,historyText,turnContext); }
       } else if(isNewsQuestion(userTranscript)) {
-        replyText=await answerBackupWithWebSearch(userTranscript,historyText);
+        replyText=await answerBackupWithWebSearch(userTranscript,historyText,turnContext);
       } else {
         const youtubeRequested=/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript);
 
@@ -4186,7 +4202,7 @@ async function backupCallHandler(call) {
           // need to say "search the internet"; ordinary factual questions use Google Search.
           // Deterministic time, fixed-phone, website, weather and news routes above stay unchanged.
           console.info('[BACKUP SEARCH] automatic web search enabled',{callId:activeKey});
-          replyText=await answerBackupWithWebSearch(userTranscript,historyText);
+          replyText=await answerBackupWithWebSearch(userTranscript,historyText,turnContext);
         }
       }
 
