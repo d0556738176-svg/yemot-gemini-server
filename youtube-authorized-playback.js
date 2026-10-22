@@ -61,10 +61,10 @@ function validateSourceUrl(value) {
   return url;
 }
 
-async function fetchAuthorizedSource(videoId, output) {
+async function fetchAuthorizedSource(videoId, output, fallbackUrl=null) {
   const id = String(videoId || '').trim();
   console.info('[YouTube IVR] playback step 1: looking up authorized source', { videoId: id });
-  const mapped = await authorizedSourceFromSupabase(id) || authorizedSourceFromEnv(id);
+  const mapped = await authorizedSourceFromSupabase(id) || authorizedSourceFromEnv(id) || fallbackUrl;
   if (!mapped) {
     console.warn('[YouTube IVR] playback stopped: no authorized source mapping', { videoId: id });
     throw new Error('No authorized audio source mapped to this video');
@@ -193,7 +193,7 @@ async function ensureUploadedAndVerified(filePath, remotePath) {
   });
 }
 
-async function build(videoId) {
+async function build(videoId, fallbackUrl=null) {
   const id=String(videoId||'').trim();
   if(!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'authorized-audio-'));
@@ -201,7 +201,7 @@ async function build(videoId) {
   const chunksDir=path.join(temp,'chunks');
   const paths=[];
   try {
-    await fetchAuthorizedSource(id,source);
+    await fetchAuthorizedSource(id,source,fallbackUrl);
     const chunks=await makeChunks(source,chunksDir);
     console.info('[YouTube IVR] playback step 9: uploading chunks', { videoId: id, chunks: chunks.length });
     for(let i=0;i<chunks.length;i++) {
@@ -215,10 +215,12 @@ async function build(videoId) {
   }
 }
 
-export async function downloadAuthorizedAudioToYemot(videoId) {
+export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
   const id=String(videoId||'').trim();
-  if(activeJobs.has(id)) return activeJobs.get(id);
-  const job=build(id).finally(()=>activeJobs.delete(id));
-  activeJobs.set(id,job);
+  const fallbackUrl=String(options?.fallbackUrl||'').trim()||null;
+  const jobKey=id+(fallbackUrl?'|alternate':'');
+  if(activeJobs.has(jobKey)) return activeJobs.get(jobKey);
+  const job=build(id,fallbackUrl).finally(()=>activeJobs.delete(jobKey));
+  activeJobs.set(jobKey,job);
   return job;
 }
