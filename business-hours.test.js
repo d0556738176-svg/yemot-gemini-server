@@ -31,7 +31,7 @@ test('generic official business schedule is parsed day by day without Super-Phar
     results:[{title:'בנק דיסקונט - מרכז העיר',url:'https://www.discountbank.co.il/branches/center',
       snippet:"מרכז העיר תל אביב. יום ראשון: 09:00-15:00 יום שני: 09:00-18:00 יום שלישי: 09:00-15:00 יום רביעי: 09:00-18:00 יום חמישי: 09:00-15:00 יום שישי: 08:30-12:00 שבת: 00:00-00:00"}]
   });
-  assert.match(answer,/האתר הרשמי של בנק דיסקונט/);
+  assert.match(answer,/באתר הרשמי של בנק דיסקונט/);
   assert.match(answer,/יום ראשון: 09:00-15:00/);
   assert.match(answer,/יום שני: 09:00-18:00/);
   assert.match(answer,/יום שישי: 08:30-12:00/);
