@@ -3024,6 +3024,60 @@ function readWebsitePageChunk(turnContext, { restart = false, maxChars = 3600 } 
   return 'הקראת '+part+' מתוך '+(page.title || 'העמוד הפתוח')+'. '+chunk+ending;
 }
 
+function isWebsiteBrowserCommand(text, turnContext) {
+  if(!getCurrentWebsitePage(turnContext)) return false;
+  const q=String(text||'').trim();
+  return /(?:עמוד|דף|קישור|לינק|תפריט|קטגוריה|מדור|כתבה|צור קשר|אודות|שירותים|סניפים|מחירים|הבא|הקודם|קדימה|אחורה|תחזור|חזור|תעבור|עבור|פתח|תפתח|תיכנס|תכנס|תמשיך|המשך|תקרא|תקריא)/i.test(q);
+}
+
+function websitePageLabel(page,index) {
+  const title=String(page?.title||'').trim();
+  if(title && !/^https?:/i.test(title)) return title.slice(0,120);
+  try {
+    const u=new URL(String(page?.url||''));
+    const path=decodeURIComponent(u.pathname).replace(/[-_]+/g,' ').replace(/\/+$/,'').split('/').filter(Boolean).pop();
+    return (path||u.hostname).slice(0,120);
+  } catch { return 'עמוד '+(index+1); }
+}
+
+function handleCachedWebsiteBrowserCommand(question, turnContext) {
+  const pages=Array.isArray(turnContext?.currentWebsitePages)?turnContext.currentWebsitePages:[];
+  if(!pages.length) return null;
+  const q=String(question||'').trim();
+  const current=Math.max(0,Math.min(Number(turnContext.currentWebsitePageIndex)||0,pages.length-1));
+
+  if(/(?:איזה עמודים|אילו עמודים|מה העמודים|רשימת עמודים|איזה קישורים|אילו קישורים|מה הקישורים|תפריט האתר)/i.test(q)) {
+    return 'מצאתי באתר '+pages.length+' עמודים זמינים. '+pages.slice(0,10).map((p,i)=>(i+1)+'. '+websitePageLabel(p,i)).join('. ')+'. אמור למשל: פתח עמוד 2, או אמור את שם העמוד.';
+  }
+
+  let target=-1;
+  const numberMatch=q.match(/(?:עמוד|דף|קישור)\s*(?:מספר\s*)?(\d{1,2})/i);
+  if(numberMatch) target=Number(numberMatch[1])-1;
+  else if(/(?:העמוד|הדף|הקישור)?\s*(?:הבא|הבאה)|(?:קדימה)/i.test(q)) target=current+1;
+  else if(/(?:העמוד|הדף|הקישור)?\s*(?:הקודם|הקודמת)|(?:אחורה|תחזור|חזור)/i.test(q)) target=current-1;
+  else {
+    const normalized=q.toLowerCase();
+    let bestScore=0;
+    pages.forEach((p,i)=>{
+      const hay=(websitePageLabel(p,i)+' '+String(p.url||'')).toLowerCase();
+      const words=normalized.split(/\s+/).filter(w=>w.length>2 && !/^(?:פתח|תפתח|תיכנס|תכנס|עבור|תעבור|עמוד|דף|קישור|של|את|לי)$/.test(w));
+      const score=words.reduce((sum,w)=>sum+(hay.includes(w)?1:0),0);
+      if(score>bestScore){bestScore=score;target=i;}
+    });
+    if(bestScore===0) target=-1;
+  }
+
+  if(target>=0) {
+    if(target>=pages.length) return 'אין כרגע עמוד מספר '+(target+1)+' ברשימת העמודים שקראתי מהאתר. אמור: איזה עמודים מצאת, ואקריא את הרשימה.';
+    turnContext.currentWebsitePageIndex=target;
+    turnContext.currentWebsiteReadOffset=0;
+    turnContext.currentWebsiteUrl=pages[target].url||turnContext.currentWebsiteUrl;
+    console.info('[BACKUP WEBSITE] cached page selected',{index:target+1,pages:pages.length,url:pages[target].url});
+    return readWebsitePageChunk(turnContext,{restart:true,maxChars:3200});
+  }
+  return null;
+}
+
 async function explainCurrentWebsitePage(question, turnContext) {
   const page = getCurrentWebsitePage(turnContext);
   if (!page?.content) return null;
@@ -4174,15 +4228,17 @@ async function backupCallHandler(call) {
       const fixedPhoneAnswer=knownPrimaryPhoneAnswer(userTranscript);
       const explicitSiteUrl=extractExplicitHttpUrl(userTranscript);
       const websiteRequest=isWebsiteNavigationRequest(userTranscript) ||
-        !!explicitSiteUrl || isGenericWebsiteRequest(userTranscript);
+        !!explicitSiteUrl || isGenericWebsiteRequest(userTranscript) ||
+        isWebsiteBrowserCommand(userTranscript,turnContext);
       const deterministicTime=answerIsraelTimeQuestion(userTranscript);
       if(fixedPhoneAnswer) {
         replyText=fixedPhoneAnswer;
       } else if(websiteRequest) {
         try {
-          // Use the same direct page-extraction path as the main branch, rather
-          // than letting a generic language-model reply claim it cannot browse.
-          replyText=await answerWithWebSearch(userTranscript,historyText,turnContext);
+          // Branch 3 keeps an explicit browser-like state. Resolve navigation
+          // commands against already-read pages before starting a new web search.
+          replyText=handleCachedWebsiteBrowserCommand(userTranscript,turnContext);
+          if(!replyText) replyText=await answerWithWebSearch(userTranscript,historyText,turnContext);
         } catch(e) {
           console.warn('[BACKUP WEBSITE] direct browsing failed; trying backup search',{status:geminiErrorStatus(e)});
           replyText=await answerBackupWithWebSearch(userTranscript,historyText,turnContext);
