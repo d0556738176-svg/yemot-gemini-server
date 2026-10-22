@@ -162,7 +162,12 @@ export function buildBusinessHoursFallback({ question = '', business = 'הסני
     if (/ביג/i.test(area) && !/(ביג|big)/i.test(haystack)) return false;
     return true;
   });
-  const official = matching.find(result => officialResultForBusiness(result,business,q) && extractHoursEvidence(result));
+  const official = matching
+    .filter(result => officialResultForBusiness(result,business,q) && extractHoursEvidence(result))
+    .sort((a,b) => {
+      const score=result => (normalize([result?.title,result?.snippet].join(' ')).match(/\d{1,2}[:.]\d{2}\s*[-–—]\s*\d{1,2}[:.]\d{2}/g)||[]).length;
+      return score(b)-score(a);
+    })[0];
   if (official) {
     // Keep the complete official snippet for grouped weekday/weekend schedules.
     // extractHoursEvidence() intentionally returns one range, which is useful for

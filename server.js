@@ -1971,20 +1971,24 @@ async function answerBusinessHoursDirect(transcript) {
   const locationText=[area,city].filter(Boolean).join(' ');
   const targets=business ? [business] : pharmacy ? ['בית מרקחת'] : [generic];
   const queries=buildBusinessHoursQueries({targets,locationText,city,area,pharmacy,question});
-  const settled=await Promise.allSettled(queries.map(q=>searchWebDirect(q,{timeoutMs:4500})));
+  // Phone search must be fast: start with the highest-signal queries instead of
+  // waiting for up to eight broad searches. Broaden only when these do not yield
+  // usable evidence.
+  const firstPassQueries=queries.slice(0,3);
+  const settled=await Promise.allSettled(firstPassQueries.map(q=>searchWebDirect(q,{timeoutMs:2800})));
   const all=[];
   for(let i=0;i<settled.length;i++) {
     const item=settled[i];
     if(item.status==='fulfilled') all.push(...item.value);
-    else console.warn('[BUSINESS_HOURS] search query failed',{query:queries[i],status:geminiErrorStatus(item.reason)});
+    else console.warn('[BUSINESS_HOURS] search query failed',{query:firstPassQueries[i],status:geminiErrorStatus(item.reason)});
   }
-  const unique=dedupeSearchResults(all).slice(0,18);
+  const unique=dedupeSearchResults(all).slice(0,12);
   if(!unique.length) {
     // One short broad retry protects against search engines that fail to index
     // Hebrew prepositions or mall/neighborhood names in the first query set.
     const broadQueries=[business||generic, area, city, 'שעות פתיחה סניף כתובת'].filter(Boolean).join(' ');
     try {
-      const retry=await searchWebDirect(broadQueries,{timeoutMs:4500});
+      const retry=await searchWebDirect(broadQueries,{timeoutMs:2800});
       unique.push(...dedupeSearchResults(retry).slice(0,8));
     } catch(e) {
       console.warn('[BUSINESS_HOURS] broadened search failed',{status:geminiErrorStatus(e)});
@@ -2009,7 +2013,7 @@ async function answerBusinessHoursDirect(transcript) {
   if(official.length && !unique.some(x=>hoursPattern.test(String(x.title||'')+' '+String(x.snippet||'')))) {
     try {
       const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
-      const extracted=await withTimeout(client.extract(official.slice(0,3).map(x=>x.url),{extractDepth:'basic',timeout:4}),4800,'Official business hours page extraction');
+      const extracted=await withTimeout(client.extract(official.slice(0,3).map(x=>x.url),{extractDepth:'basic',timeout:4}),3000,'Official business hours page extraction');
       for(const page of (Array.isArray(extracted.results)?extracted.results:[])) {
         const content=String(page.rawContent||page.content||'').trim();
         if(content.length>80) evidenceResults.push({

@@ -56,3 +56,19 @@ test('does not invent hours when source lacks a schedule', () => {
   assert.match(answer, /לא נמצאו שעות פתיחה ברורות/);
   assert.doesNotMatch(answer, /09:00|22:00/);
 });
+
+
+test('richest matching official result wins over generic official result', () => {
+  const answer = buildBusinessHoursFallback({
+    question:'מה שעות הפתיחה של בנק דיסקונט בסניף מרכז העיר לכל יום בשבוע',
+    business:'בנק דיסקונט',
+    city:'תל אביב',
+    area:'מרכז העיר',
+    locationText:'מרכז העיר תל אביב',
+    results:[
+      {title:'בנק דיסקונט מרכז העיר',url:'https://www.discountbank.co.il/branches',snippet:'שעות פעילות 09:00-14:00'},
+      {title:'בנק דיסקונט מרכז העיר תל אביב',url:'https://www.discountbank.co.il/branches/61',snippet:"א'-ה': 08:00-18:30 שישי: 08:00-13:00"}
+    ]
+  });
+  assert.match(answer,/08:00-18:30/);
+});
