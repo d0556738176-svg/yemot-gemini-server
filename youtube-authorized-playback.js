@@ -49,13 +49,14 @@ function authorizedSourceFromEnv(videoId) {
   return typeof entry === 'string' ? entry : entry?.url || null;
 }
 
-function validateSourceUrl(value) {
+function validateSourceUrl(value, dynamicAllowedHost='') {
   const url = new URL(String(value || '').trim());
   if (url.protocol !== 'https:') throw new Error('Authorized audio source must use HTTPS');
   const allowedHosts = String(process.env.AUTHORIZED_AUDIO_HOSTS || '')
     .split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
-  if (!allowedHosts.length) throw new Error('AUTHORIZED_AUDIO_HOSTS is not configured');
-  if (!allowedHosts.includes(url.hostname.toLowerCase())) {
+  const dynamicHost=String(dynamicAllowedHost||'').trim().toLowerCase();
+  if (!allowedHosts.length && !dynamicHost) throw new Error('AUTHORIZED_AUDIO_HOSTS is not configured');
+  if (!allowedHosts.includes(url.hostname.toLowerCase()) && url.hostname.toLowerCase()!==dynamicHost) {
     throw new Error('Audio source host is not allowlisted');
   }
   return url;
