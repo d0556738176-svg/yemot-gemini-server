@@ -43,3 +43,25 @@ test('status follow-up reruns a pending branch-1 lookup instead of asking what w
   assert.equal(resolvePendingLookupQuestion('איך עובד מנוע חשמלי?', current, isLookup), '');
   assert.equal(resolvePendingLookupQuestion('נו, מצאת?', [{ user: 'מה המספר של דיסקונט?', assistant: 'מספר הטלפון הוא 03-1234567.' }], isLookup), '');
 });
+
+
+test('natural answer-transformation follow-ups retain the current topic', () => {
+  const current = [{
+    user: 'מה היתרונות של אנרגיה סולארית?',
+    assistant: 'אנרגיה סולארית מפחיתה עלויות, מפחיתה זיהום ומקטינה תלות ברשת.'
+  }];
+  for (const q of [
+    'תן לי שלושה יתרונות מרכזיים בקצרה',
+    'תסכם לי את זה בשלוש נקודות',
+    'תן לי דוגמאות',
+    'תסביר את השני'
+  ]) {
+    const history = selectRelevantHistoryForTurn(q, oldHistory, current);
+    assert.match(history, /אנרגיה סולארית/);
+    assert.doesNotMatch(history, /מוצר א/);
+  }
+});
+
+test('transformation words without current-call history do not pull stale calls', () => {
+  assert.equal(selectRelevantHistoryForTurn('תן לי שלושה יתרונות מרכזיים בקצרה', oldHistory, []), '');
+});
