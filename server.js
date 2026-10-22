@@ -103,13 +103,13 @@ const MODEL_NAMES = [...new Set([
   'gemini-3.1-flash-lite'
 ])];
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
-const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 12000);
+const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 8500);
 // Long answers are intentionally given the normal generation budget instead of the
 // low-latency phone budget. This prevents multi-minute answers from being cut off
 // by the short-turn timeout while keeping ordinary turns fast.
 const LONG_ANSWER_TIMEOUT_MS = Number(process.env.LONG_ANSWER_TIMEOUT_MS || 90000);
 const LONG_ANSWER_MAX_CHARS = Number(process.env.LONG_ANSWER_MAX_CHARS || 12000);
-const DIRECT_WEB_QUERY_TIMEOUT_MS = Number(process.env.DIRECT_WEB_QUERY_TIMEOUT_MS || 4500);
+const DIRECT_WEB_QUERY_TIMEOUT_MS = Number(process.env.DIRECT_WEB_QUERY_TIMEOUT_MS || 3500);
 // Deepgram is the primary Hebrew phone ASR. Keep its timeout separate from Gemini so
 // a slow Deepgram request does not inherit Gemini's tighter phone-answer timeout.
 // 18s is only a safety ceiling; successful requests should return much sooner.
@@ -133,6 +133,8 @@ const CONTENT_FILTER_INSTRUCTION = '';
 
 const DIALOGUE_STYLE_INSTRUCTION = [
   'דבר בעברית טבעית, חמה, חכמה ואישית. השיחה צריכה להרגיש כמו שיחה עם אדם חד, רגוע, קשוב ומעניין, לא כמו מוקד אוטומטי.',
+  'פנה אל המתקשר בלשון זכר באופן עקבי: תרצה, אמרת, ביקשת, דיברת. אל תעבור ללשון נקבה אלא אם המתקשר ביקש זאת במפורש.',
+  'אל תפתח תשובות במשפטי מוקד כמו "איך אפשר לעזור", "אמור בבקשה", "אני מיד בודק" או "מצאתי מידע". ענה או המשך את השיחה מיד, באופן אנושי.',
   'התאם את אורך התשובה לקצב השיחה. בדרך כלל 1 עד 4 משפטים קצרים, אבל כשצריך הסבר או ייעוץ אפשר להרחיב בהדרגה ולא להציף.',
   'כשמבקשים עצה, אל תיתן סיסמאות. הבן את המצב, הפרד בין עובדות להנחות, שקול כמה אפשרויות, הצג יתרונות וחסרונות, ואז תן כיוון מעשי והגיוני. אם יש פרט חסר שמשנה את העצה, שאל שאלה אחת ממוקדת.',
   'היה אנושי בשיחה: אפשר להראות הבנה, הומור עדין כשמתאים, סקרנות וחשיבה משותפת. אל תהיה מתיילד, מתחנף או מלאכותי.',
@@ -2672,9 +2674,10 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
   // Most voice requests are specific lookups. One strong search is faster than
   // waiting for five parallel queries; broaden only for explicit deep research.
   const specificLookup=/מספר\s*טלפון|טלפון|כוכבית|שעות\s*(?:פתיחה|פעילות)|פתוח\s*(?:היום|עכשיו)|מתי\s*(?:נסגר|פתוח)|אתר\s*רשמי/i.test(question);
+  const fastVoiceSearch=!deepSearch && !eventVenueLookup && !openSiteRequest;
   // Run multiple focused searches in parallel for specific factual lookups, not just
   // the first generic query. This improves official-source coverage without serial waits.
-  const firstPass=(deepSearch||eventVenueLookup)?queries.slice(0,3):openSiteRequest?queries.slice(0,3):specificLookup?queries.slice(0,2):queries.slice(0,1);
+  const firstPass=(deepSearch||eventVenueLookup)?queries.slice(0,3):openSiteRequest?queries.slice(0,3):specificLookup?queries.slice(0,2):queries.slice(0,2);
   const communitySearch=deepSearch || /(פורום|פורומים|קהילות|דיונים|רשתות חברתיות|רשת חברתית|פייסבוק|אינסטגרם|טיקטוק|טוויטר|reddit|facebook|instagram|tiktok|twitter|x\.com|threads)/i.test(question);
   if(communitySearch) {
     const topic=String(question||'').slice(0,180);
@@ -2922,7 +2925,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     (openSiteRequest?'המשתמש ביקש לפתוח אתר ולקרוא את הדף עצמו: אל תחזיר רק כתובת או קישור. סכם מה כתוב בדף שחולץ, ציין את הכותרת, הנושאים והפרטים המעשיים שנמצאו. אם התוכן לא חולץ, אמור זאת במפורש. ':'')+
     'אל תמציא עובדות שאינן במקורות.';
   try {
-    const result=await generateBranch1WithFallback([{role:'user',parts:[{text:EXCLUSIVE_INSTRUCTION+'\\n\\n'+synthesisPrompt}]}],false,true);
+    const result=await generateBranch1WithFallback([{role:'user',parts:[{text:EXCLUSIVE_INSTRUCTION+'\\n\\n'+synthesisPrompt}]}],false,true,fastVoiceSearch?6500:null);
     const answer=String(result?.response?.text?.()||'').trim();
     if(answer) return answer;
   } catch(e) {
@@ -3432,13 +3435,14 @@ function buildOpeningForCaller(phone) {
   }
   const last=previous[previous.length-1];
   const lastAnswer=sanitizeForYemot(String(last && last.gemini || '').replace(/\\s+/g,' ').trim().slice(0,260));
-  let opening='שלום שוב. איזה כיף לשמוע אותך.';
-  if(topics.length===1) opening+=' בפעם האחרונה דיברנו על '+topics[0]+'.';
-  else if(topics.length===2) opening+=' בפעם האחרונה דיברנו על '+topics[0]+', ולפני זה על '+topics[1]+'.';
-  else if(topics.length>=3) opening+=' לאחרונה דיברנו על כמה דברים, בין השאר על '+topics[0]+', '+topics[1]+' וגם '+topics[2]+'.';
-  if(lastAnswer) opening+=' עצרנו בערך כאן: '+lastAnswer+'.';
-  opening+=' מה בא לך לעשות עכשיו? אפשר להמשיך בדיוק משם, או לפתוח נושא חדש.';
-  return opening;
+  // Returning callers should feel that the same conversation is continuing.
+  // Keep the spoken recap short: long greetings/history make the phone line feel slow.
+  let opening='';
+  if(topics.length===1) opening='בפעם האחרונה דיברנו על '+topics[0]+'.';
+  else if(topics.length>=2) opening='בפעם האחרונה דיברנו על '+topics[0]+', ולפני זה על '+topics[1]+'.';
+  if(lastAnswer) opening+=' עצרנו כאן: '+lastAnswer+'.';
+  opening+=' אפשר להמשיך משם.';
+  return opening.trim();
 }
 async function callHandler(call) {
   const callerPhone = getCallerNumber(call);
@@ -3465,8 +3469,8 @@ async function callHandler(call) {
     // This avoids ending the Yemot action between turns and keeps the Call object,
     // turnHistory and YouTube result context alive.
     const prompt=nextPrompt || (firstTurn?(openingPrompt || process.env.FIRST_CALL_MESSAGE ||
-      'שלום איך אפשר לעזור לך היום אמור בבקשה על מה תרצה לדבר אחרי הצפצוף ולסיום ההקלטה הקש סולמית'):
-      'אמור שאלה נוספת ולסיום הקש סולמית או הקש כוכבית ליציאה');
+      'היי. אני איתך, דבר חופשי.'):
+      'אני איתך. תמשיך.');
     firstTurn=false;
     let recordPath;
     try {
