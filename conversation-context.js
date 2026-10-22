@@ -8,16 +8,19 @@ export function selectRelevantHistoryForTurn(question, persistedHistoryText = ''
   // These must stay attached to the pending request ("נו, מצאת?", "הצלחת?", "מה עם זה?").
   const explicitFollowUp = /(?:נו[, ]*)?(?:מצאת|הצלחת|בדקת|חיפשת|מה יצא|מה התוצאה|מה עם זה|מה עם המספר|יש תשובה|יש עדכון|עדכון|תעדכן|תזכיר לי מה חיפשתי|מה בדיוק חיפשתי|תמשיך|המשך|תרחיב|תפרט|תסביר יותר|הפרט הראשון|הדבר הראשון|מה שאמרת|מה אמרת קודם|תמשיך מאיפה|מאיפה שעצרת|ומה לגבי|ומה עם|כמה זה עולה|מה המחיר|שלהם|שלהן|שלו|שלה|אותו|אותה|באתר הזה|בדף הזה|בעמוד הזה|תבדוק את זה|תנסה שוב|נסה שוב|תמשיך שוב|שמעת מה שאלתי|מה שאלתי אותך|זה לא מה ששאלתי|לא ענית(?: על השאלה)?|לא הבנת אותי|תענה על השאלה|תענה למה ששאלתי)/i.test(q);
   const shortReferential = q.length <= 90 && /^(?:אז\s*)?(?:נו[, ]*)?(?:כן[, ]*)?(?:מצאת|הצלחת|בדקת|חיפשת|מה יצא|מה התוצאה|ומה עם זה|מה עם המספר|יש תשובה|יש עדכון|למה|איך זה|מה לגבי|ומה עם|כמה זה|איפה זה|מתי זה|תבדוק|בדוק|תחפש|חפש|תמשיך|תרחיב|תפרט|תסביר|זה|אותו|אותה)\b/i.test(q);
-  if (!explicitFollowUp && !shortReferential) return '';
-
   const current = Array.isArray(currentTurnHistory) ? currentTurnHistory.slice(-4) : [];
-  if (current.length) {
-    return current.map((t, i) =>
-      'תור ' + (i + 1) + ' — מתקשר: ' + String(t.user || '') +
-      '\nתשובה: ' + String(t.assistant || '')
-    ).join('\n\n');
-  }
-  return String(persistedHistoryText || '').trim();
+  const currentText = current.map((t, i) =>
+    'תור ' + (i + 1) + ' — מתקשר: ' + String(t.user || '') +
+    '\nתשובה: ' + String(t.assistant || '')
+  ).join('\n\n');
+  const persisted = String(persistedHistoryText || '').trim();
+
+  // Always make durable caller memory available. For an explicit follow-up the
+  // current call comes first; for a new topic the model still receives the
+  // persisted memory but is instructed by the system prompt not to force it
+  // into unrelated answers.
+  if (explicitFollowUp || shortReferential) return [currentText, persisted].filter(Boolean).join('\n\n');
+  return [persisted, currentText].filter(Boolean).join('\n\n');
 }
 
 
