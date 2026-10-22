@@ -27,7 +27,14 @@ export function selectRelevantHistoryForTurn(question, persistedHistoryText = ''
   // Keep durable memory available for genuine follow-ups, but do not inject
   // unrelated old calls into every new question. Within a live call, the
   // immediately relevant turns take precedence over persisted history.
-  if (explicitFollowUp || shortReferential || answerTransformationFollowUp) {
+  if (answerTransformationFollowUp) return currentText;
+  if (explicitFollowUp || shortReferential) {
+    // Transformation-style requests such as "give me three advantages briefly"
+    // are only meaningful against the immediately preceding turn. Never bind them
+    // to an older persisted call when the current call has no prior turn.
+    const transformationWithoutCurrent = !currentText &&
+      /(?:^|\s)(?:תן לי|תביא לי|תציג|תמנה|מנה|סכם|תסכם|תקצר|בקצרה|בכמה מילים|נקודות|יתרונות|חסרונות|דוגמאות|דוגמה|הראשון|השני|השלישי|האחרון|עיקרי|עיקריים|מרכזי|מרכזיים)(?:\s|$)/i.test(q);
+    if (transformationWithoutCurrent) return '';
     if (currentText) return currentText;
     return persisted;
   }
