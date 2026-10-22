@@ -103,13 +103,13 @@ const MODEL_NAMES = [...new Set([
   'gemini-3.1-flash-lite'
 ])];
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
-const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 8500);
+const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 6000);
 // Long answers are intentionally given the normal generation budget instead of the
 // low-latency phone budget. This prevents multi-minute answers from being cut off
 // by the short-turn timeout while keeping ordinary turns fast.
 const LONG_ANSWER_TIMEOUT_MS = Number(process.env.LONG_ANSWER_TIMEOUT_MS || 90000);
 const LONG_ANSWER_MAX_CHARS = Number(process.env.LONG_ANSWER_MAX_CHARS || 12000);
-const DIRECT_WEB_QUERY_TIMEOUT_MS = Number(process.env.DIRECT_WEB_QUERY_TIMEOUT_MS || 3500);
+const DIRECT_WEB_QUERY_TIMEOUT_MS = Number(process.env.DIRECT_WEB_QUERY_TIMEOUT_MS || 2800);
 // Deepgram is the primary Hebrew phone ASR. Keep its timeout separate from Gemini so
 // a slow Deepgram request does not inherit Gemini's tighter phone-answer timeout.
 // 18s is only a safety ceiling; successful requests should return much sooner.
@@ -400,7 +400,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
   } else {
     try {
       const branch1PhoneBudget = fastPhone
-        ? Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS || 7500)
+        ? Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS || 5200)
         : null;
       const primaryResult=await generateWithRetry(contents, useWebSearch, fastPhone, timeoutOverrideMs, branch1PhoneBudget);
       branch1PrimaryCooldown.clear('primary');
@@ -436,14 +436,14 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
           baseUrl: 'https://api.groq.com/openai/v1',
           apiKey: (process.env.GROQ_API_KEY || '').trim(),
           model: (process.env.GROQ_MODEL || 'openai/gpt-oss-20b').trim(),
-          timeoutMs: Number(process.env.GROQ_TIMEOUT_MS || (fastPhone ? 2200 : 6500))
+          timeoutMs: Number(process.env.GROQ_TIMEOUT_MS || (fastPhone ? 1600 : 6500))
         },
         {
           name: 'OpenRouter',
           baseUrl: 'https://openrouter.ai/api/v1',
           apiKey: (process.env.OPENROUTER_API_KEY || '').trim(),
           model: (process.env.OPENROUTER_MODEL || 'openrouter/free').trim(),
-          timeoutMs: Number(process.env.OPENROUTER_TIMEOUT_MS || (fastPhone ? 1800 : 5500))
+          timeoutMs: Number(process.env.OPENROUTER_TIMEOUT_MS || (fastPhone ? 1400 : 5500))
         }
       ];
       for (const provider of independentProviders) {
@@ -515,7 +515,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
     const models=useWebSearch ? branch1BackupWebModels : branch1BackupModels;
     const timeoutMs=Number(timeoutOverrideMs || (fastPhone ? PHONE_GEMINI_TIMEOUT_MS : REQUEST_TIMEOUT_MS));
     let lastError=primaryError;
-    const backupDeadline=fastPhone ? Date.now()+Math.min(3000, Math.max(1000, Number(process.env.PHONE_GEMINI_BACKUP_BUDGET_MS || 3000))) : Infinity;
+    const backupDeadline=fastPhone ? Date.now()+Math.min(2200, Math.max(800, Number(process.env.PHONE_GEMINI_BACKUP_BUDGET_MS || 2000))) : Infinity;
 
     console.warn('[BRANCH1 FALLBACK] primary Gemini unavailable; trying separate backup Project', {
       status:primaryStatus, useWebSearch, fastPhone
@@ -2925,7 +2925,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     (openSiteRequest?'המשתמש ביקש לפתוח אתר ולקרוא את הדף עצמו: אל תחזיר רק כתובת או קישור. סכם מה כתוב בדף שחולץ, ציין את הכותרת, הנושאים והפרטים המעשיים שנמצאו. אם התוכן לא חולץ, אמור זאת במפורש. ':'')+
     'אל תמציא עובדות שאינן במקורות.';
   try {
-    const result=await generateBranch1WithFallback([{role:'user',parts:[{text:EXCLUSIVE_INSTRUCTION+'\\n\\n'+synthesisPrompt}]}],false,true,fastVoiceSearch?6500:null);
+    const result=await generateBranch1WithFallback([{role:'user',parts:[{text:EXCLUSIVE_INSTRUCTION+'\\n\\n'+synthesisPrompt}]}],false,true,fastVoiceSearch?4800:null);
     const answer=String(result?.response?.text?.()||'').trim();
     if(answer) return answer;
   } catch(e) {
@@ -3437,11 +3437,12 @@ function buildOpeningForCaller(phone) {
   const lastAnswer=sanitizeForYemot(String(last && last.gemini || '').replace(/\\s+/g,' ').trim().slice(0,260));
   // Returning callers should feel that the same conversation is continuing.
   // Keep the spoken recap short: long greetings/history make the phone line feel slow.
-  let opening='';
-  if(topics.length===1) opening='בפעם האחרונה דיברנו על '+topics[0]+'.';
-  else if(topics.length>=2) opening='בפעם האחרונה דיברנו על '+topics[0]+', ולפני זה על '+topics[1]+'.';
+  // Start every returning call with one compact human recap of the last topic.
+  // Do not add a generic greeting or enumerate older topics: the caller should
+  // immediately hear what we were discussing and where the conversation stopped.
+  let opening='דיברנו בפעם האחרונה על '+(topics[0]||'הנושא האחרון')+'.';
   if(lastAnswer) opening+=' עצרנו כאן: '+lastAnswer+'.';
-  opening+=' אפשר להמשיך משם.';
+  opening+=' נמשיך משם.';
   return opening.trim();
 }
 async function callHandler(call) {
@@ -3743,8 +3744,15 @@ async function callHandler(call) {
     conversationLog.push(entry);
     if(conversationLog.length>MAX_CONVERSATION_LOG)
       conversationLog.splice(0,conversationLog.length-MAX_CONVERSATION_LOG);
-    await persistConversationEntry(entry);
-    console.info('[CALL_FLOW] conversation_saved', { callId: activeKey, transcriptReady: !!userTranscript });
+    // The spoken answer is already ready. Do not make the caller wait for
+    // Supabase/network persistence before Yemot starts the next playback/read.
+    // In-memory history is updated synchronously; durable persistence continues
+    // asynchronously and reports failures without interrupting the call.
+    void persistConversationEntry(entry)
+      .then(()=>console.info('[CALL_FLOW] conversation_saved', { callId: activeKey, transcriptReady: !!userTranscript }))
+      .catch(err=>console.warn('[CALL_FLOW] background_conversation_save_failed',{
+        callId:activeKey,status:geminiErrorStatus(err),message:String(err?.message||err).slice(0,180)
+      }));
     if(userTranscript) {
       turnHistory.push({user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript),assistant:replyText});
       if(turnHistory.length>8) turnHistory.shift();
