@@ -68,13 +68,48 @@ function extractHoursEvidence(result) {
   return normalize(text.slice(start, end)).slice(0, 180);
 }
 
-function officialSuperPharm(result) {
-  try {
-    const host = new URL(String(result?.url || '')).hostname.toLowerCase().replace(/^www\./, '');
-    return host === 'super-pharm.co.il' || host.endsWith('.super-pharm.co.il');
-  } catch {
-    return false;
-  }
+function hostOf(result) {
+  try { return new URL(String(result?.url || '')).hostname.toLowerCase().replace(/^www\./, ''); }
+  catch { return ''; }
+}
+
+function businessTokens(value) {
+  const stop=new Set(['של','הסניף','סניף','חנות','החנות','עסק','העסק','בית','מרקחת','בקניון','קניון','במתחם','מתחם']);
+  return normalize(value).toLowerCase().replace(/[״׳"'\-־]/g,' ').split(/\s+/)
+    .filter(x=>x.length>=2 && !stop.has(x));
+}
+
+function resultMatchesBusiness(result,business,question) {
+  const hay=normalize([result?.title,result?.snippet,result?.url].join(' ')).toLowerCase().replace(/[״׳"'\-־]/g,' ');
+  const tokens=businessTokens(business);
+  if(!tokens.length) return true;
+  return tokens.some(token=>hay.includes(token)) ||
+    (/סופר\s*פארם|super.?pharm/i.test(business+' '+question) && /סופר\s*פארם|super.?pharm/i.test(hay));
+}
+
+function officialResultForBusiness(result,business,question) {
+  const host=hostOf(result);
+  if(!host) return false;
+  // Search queries explicitly target the official site. For known brands we can
+  // identify it deterministically; for every other business, prefer a branded
+  // first-party-looking result only when its title/snippet also matches the business.
+  const known=[
+    [/סופר\s*[-־]?\s*פ(?:א)?רם|super.?pharm/i,'super-pharm.co.il'],
+    [/דיסקונט|discount/i,'discountbank.co.il'],
+    [/בנק\s*הפועלים|הפועלים|poalim/i,'bankhapoalim.co.il'],
+    [/בנק\s*לאומי|לאומי|leumi/i,'leumi.co.il'],
+    [/מזרחי|mizrahi/i,'mizrahitefahot.co.il'],
+    [/כללית|clalit/i,'clalit.co.il'],
+    [/מכבי|maccabi/i,'maccabi4u.co.il'],
+    [/מאוחדת|meuhedet/i,'meuhedet.co.il'],
+    [/לאומית|leumit/i,'leumit.co.il']
+  ];
+  const q=business+' '+question;
+  const hit=known.find(([re])=>re.test(q));
+  if(hit) return host===hit[1] || host.endsWith('.'+hit[1]);
+  const firstToken=businessTokens(business)[0]||'';
+  return !!firstToken && host.replace(/[^a-z0-9א-ת]/g,'').includes(firstToken.replace(/[^a-z0-9א-ת]/g,'')) &&
+    resultMatchesBusiness(result,business,question);
 }
 
 function formatHoursByDay(hoursText, question) {
@@ -83,14 +118,23 @@ function formatHoursByDay(hoursText, question) {
   const text=normalize(hoursText);
   const range='(\\d{1,2}[:.]\\d{2}\\s*[-–—]\\s*\\d{1,2}[:.]\\d{2})';
   const weekday=text.match(new RegExp("(?:א['׳]?\\s*[-–—]\\s*ה['׳]?|א׳\\s*[-–—]\\s*ה׳?)\\s*[:：]?\\s*"+range,'i'))?.[1];
-  const friday=text.match(new RegExp('שישי\\s*[:：]?\\s*'+range,'i'))?.[1];
-  const saturday=text.match(new RegExp('שבת\\s*[:：]?\\s*'+range,'i'))?.[1];
-  if(!weekday && !friday && !saturday) return '';
-  const days=[
-    ['יום ראשון',weekday],['יום שני',weekday],['יום שלישי',weekday],
-    ['יום רביעי',weekday],['יום חמישי',weekday],['יום שישי',friday],['יום שבת',saturday]
-  ];
-  return days.map(([day,hours])=>day+': '+(hours||'השעות לא מופיעות במקור שקיבלתי')).join('. ');
+  const friday=text.match(new RegExp('(?:יום\\s*)?שישי\\s*[:：]?\\s*'+range,'i'))?.[1];
+  const saturday=text.match(new RegExp('(?:יום\\s*)?שבת\\s*[:：]?\\s*'+range,'i'))?.[1];
+  const names=[['ראשון','א'],['שני','ב'],['שלישי','ג'],['רביעי','ד'],['חמישי','ה'],['שישי','ו'],['שבת','שבת']];
+  const individual={};
+  for(const [name,letter] of names) {
+    const re=letter==='שבת'
+      ? new RegExp('(?:יום\\s*)?שבת\\s*[:：]?\\s*'+range,'i')
+      : new RegExp('(?:יום\\s*'+name+'|יום\\s*'+letter+"['׳]?|"+letter+"['׳]?)\\s*[:：]?\\s*"+range,'i');
+    individual[name]=text.match(re)?.[1]||'';
+  }
+  const values={
+    ראשון:individual.ראשון||weekday, שני:individual.שני||weekday, שלישי:individual.שלישי||weekday,
+    רביעי:individual.רביעי||weekday, חמישי:individual.חמישי||weekday,
+    שישי:individual.שישי||friday, שבת:individual.שבת||saturday
+  };
+  if(!Object.values(values).some(Boolean)) return '';
+  return Object.entries(values).map(([day,hours])=>'יום '+day+': '+(hours||'השעות לא מופיעות במקור שקיבלתי')).join('. ');
 }
 
 export function buildBusinessHoursFallback({ question = '', business = 'הסניף', city = '', area = '', locationText = '', results = [] } = {}) {
@@ -105,8 +149,7 @@ export function buildBusinessHoursFallback({ question = '', business = 'הסני
   const matching = (results || []).filter(result => {
     const haystack = normalize([result?.title, result?.snippet, result?.url].join(' '))
       .toLowerCase().replace(/[״׳]/g, "'").replace(/[-־]/g, ' ');
-    const target = /סופר\s*[-־]?\s*פ(?:א)?רם|super.?pharm/i.test(business + ' ' + q);
-    if (target && !/סופר\s*[-־]?\s*פארם|super.?pharm/i.test(haystack) && !officialSuperPharm(result)) return false;
+    if (!resultMatchesBusiness(result,business,q)) return false;
     // Never substitute a different branch just because it is in the same city.
     // If the caller named a mall/neighborhood, require that location in the evidence.
     const normalizedArea = normalize(area).toLowerCase().replace(/[״׳]/g, "'").replace(/[-־]/g, ' ');
@@ -119,12 +162,17 @@ export function buildBusinessHoursFallback({ question = '', business = 'הסני
     if (/ביג/i.test(area) && !/(ביג|big)/i.test(haystack)) return false;
     return true;
   });
-  const official = matching.find(result => officialSuperPharm(result) && extractHoursEvidence(result));
+  const official = matching.find(result => officialResultForBusiness(result,business,q) && extractHoursEvidence(result));
   if (official) {
+    // Keep the complete official snippet for grouped weekday/weekend schedules.
+    // extractHoursEvidence() intentionally returns one range, which is useful for
+    // a simple answer but loses Friday/Saturday ranges and previously caused
+    // "not verified" replies even when the official page contained every day.
+    const officialText = normalize([official.title, official.snippet].filter(Boolean).join(' | '));
     const hours = extractHoursEvidence(official);
     const branch = normalize(official.title || business);
-    const perDay = formatHoursByDay(hours, q);
-    return 'מצאתי באתר הרשמי של סופר-פארם את פרטי הסניף ' + branch + '. ' +
+    const perDay = formatHoursByDay(officialText, q);
+    return 'מצאתי באתר הרשמי של '+business+' את פרטי הסניף ' + branch + '. ' +
       (perDay ? 'שעות הפתיחה לפי ימות השבוע: ' + perDay + '. ' : 'שעות שמופיעות בתוצאת המקור: ' + hours + '. ') +
       'כדאי לוודא מול עמוד הסניף אם מדובר ביום חג או בשעות חריגות.';
   }

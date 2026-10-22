@@ -388,8 +388,8 @@ console.info('[BRANCH1 FALLBACK] independent provider configuration', {
 });
 // Branch 1 should stop repeatedly calling a provider after quota/overload failures.
 // This is deliberately isolated from the primary/backup call handlers for other branches.
-const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:90000, transientMs:25000});
-const branch1BackupCooldowns = createCooldownRegistry({quotaMs:90000, transientMs:25000});
+const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:180000, transientMs:45000});
+const branch1BackupCooldowns = createCooldownRegistry({quotaMs:180000, transientMs:45000});
 
 async function generateBranch1WithFallback(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null) {
   let primaryError;
@@ -400,7 +400,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
   } else {
     try {
       const branch1PhoneBudget = fastPhone
-        ? Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS || 5200)
+        ? Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS || 2200)
         : null;
       const primaryResult=await generateWithRetry(contents, useWebSearch, fastPhone, timeoutOverrideMs, branch1PhoneBudget);
       branch1PrimaryCooldown.clear('primary');
@@ -446,34 +446,45 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
           timeoutMs: Number(process.env.OPENROUTER_TIMEOUT_MS || (fastPhone ? 1400 : 5500))
         }
       ];
-      for (const provider of independentProviders) {
-        if (!provider.apiKey) continue;
+      const configuredIndependentProviders=independentProviders.filter(provider=>provider.apiKey);
+      if (fastPhone && configuredIndependentProviders.length > 1) {
+        // Phone latency matters more than preserving provider order after Gemini has
+        // already failed. Race independent providers and use the first healthy answer;
+        // one broken/slow provider must not add its timeout before the next one starts.
         try {
-          // Keep alternate providers on their own strict latency budget; a long-answer Gemini timeout must not turn a phone fallback into a 90-second wait.
-          const timeoutMs = provider.timeoutMs;
-          const answer = await callCompatibleChatCompletion({
-            provider: provider.name,
-            baseUrl: provider.baseUrl,
-            apiKey: provider.apiKey,
-            model: provider.model,
-            messages: [{ role: 'user', content: textOnlyInput }],
-            timeoutMs,
-            maxTokens: fastPhone ? 700 : 1400,
-            cooldowns: branch1FallbackProviderCooldowns
+          const winner=await Promise.any(configuredIndependentProviders.map(async provider=>{
+            const answer=await callCompatibleChatCompletion({
+              provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
+              messages:[{role:'user',content:textOnlyInput}],timeoutMs:provider.timeoutMs,
+              maxTokens:700,cooldowns:branch1FallbackProviderCooldowns
+            });
+            return {provider,answer};
+          }));
+          console.info('[BRANCH1 FALLBACK] raced independent provider succeeded after Gemini failure',{
+            provider:winner.provider.name,model:winner.provider.model,status:primaryStatus,useWebSearch,fastPhone,chars:winner.answer.length
           });
-          console.info('[BRANCH1 FALLBACK] independent provider succeeded after Gemini failure', {
-            provider: provider.name, model: provider.model, status: primaryStatus,
-            useWebSearch, fastPhone, chars: answer.length
-          });
-          return { response: { text: () => answer } };
-        } catch (providerError) {
-          console.warn('[BRANCH1 FALLBACK] independent provider failed; trying next provider', {
-            provider: provider.name,
-            status: geminiErrorStatus(providerError),
-            coolingDown: !!providerError?.coolingDown,
-            errorCategory: providerError?.coolingDown ? 'cooldown' : 'provider_error',
-            useWebSearch, fastPhone
-          });
+          return {response:{text:()=>winner.answer}};
+        } catch (raceError) {
+          console.warn('[BRANCH1 FALLBACK] all raced independent providers failed',{status:primaryStatus,useWebSearch,fastPhone});
+        }
+      } else {
+        for (const provider of configuredIndependentProviders) {
+          try {
+            const answer=await callCompatibleChatCompletion({
+              provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
+              messages:[{role:'user',content:textOnlyInput}],timeoutMs:provider.timeoutMs,
+              maxTokens:fastPhone?700:1400,cooldowns:branch1FallbackProviderCooldowns
+            });
+            console.info('[BRANCH1 FALLBACK] independent provider succeeded after Gemini failure',{
+              provider:provider.name,model:provider.model,status:primaryStatus,useWebSearch,fastPhone,chars:answer.length
+            });
+            return {response:{text:()=>answer}};
+          } catch (providerError) {
+            console.warn('[BRANCH1 FALLBACK] independent provider failed; trying next provider',{
+              provider:provider.name,status:geminiErrorStatus(providerError),coolingDown:!!providerError?.coolingDown,
+              errorCategory:providerError?.coolingDown?'cooldown':'provider_error',useWebSearch,fastPhone
+            });
+          }
         }
       }
     }

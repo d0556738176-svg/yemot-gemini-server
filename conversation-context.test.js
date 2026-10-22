@@ -27,16 +27,15 @@ test('does not attach an unrelated new question to an old lookup', () => {
 });
 
 
-test('ordinary new turn still receives durable caller memory', () => {
-  const persisted = 'תור 1 — מתקשר: אני מעדיף תשובות קצרות\nתשובה: בסדר';
-  const text = selectRelevantHistoryForTurn('תן לי רעיון חדש', persisted, []);
-  assert.match(text, /אני מעדיף תשובות קצרות/);
+test('ordinary new topic does not receive stale prior-call transcript', () => {
+  const persisted = 'תור 1 — מתקשר: מה המחיר של מוצר א\nתשובה: מאה שקלים';
+  assert.equal(selectRelevantHistoryForTurn('תן לי רעיון חדש', persisted, []), '');
 });
 
-test('durable memory and current-call turns are both retained for follow-up', () => {
+test('follow-up inside the live call prefers current-call context over older transcript', () => {
   const persisted = 'תור 1 — מתקשר: דיברנו על פרויקט אלפא\nתשובה: נכון';
   const current = [{ user: 'עכשיו תבדוק את התקציב', assistant: 'בסדר' }];
   const text = selectRelevantHistoryForTurn('תמשיך', persisted, current);
-  assert.match(text, /פרויקט אלפא/);
+  assert.doesNotMatch(text, /פרויקט אלפא/);
   assert.match(text, /התקציב/);
 });
