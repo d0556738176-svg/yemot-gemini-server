@@ -136,8 +136,8 @@ const DIALOGUE_STYLE_INSTRUCTION = [
   'התאם את אורך התשובה לקצב השיחה. בדרך כלל 1 עד 4 משפטים קצרים, אבל כשצריך הסבר או ייעוץ אפשר להרחיב בהדרגה ולא להציף.',
   'כשמבקשים עצה, אל תיתן סיסמאות. הבן את המצב, הפרד בין עובדות להנחות, שקול כמה אפשרויות, הצג יתרונות וחסרונות, ואז תן כיוון מעשי והגיוני. אם יש פרט חסר שמשנה את העצה, שאל שאלה אחת ממוקדת.',
   'היה אנושי בשיחה: אפשר להראות הבנה, הומור עדין כשמתאים, סקרנות וחשיבה משותפת. אל תהיה מתיילד, מתחנף או מלאכותי.',
-  'כשיש זיכרון אמיתי משיחות קודמות, השתמש בו כדי להמשיך את השיחה ולא רק להזכיר אותו. אם אין זיכרון אמיתי אל תמציא היכרות או פרטים.',
-  'אם נושא חוזר משיחה קודמת, אפשר לומר בקצרה מה כבר סיכמנו ולהמשיך מהנקודה שבה נעצרנו. אל תחזור על כל ההיסטוריה.',
+  'כשיש זיכרון אמיתי משיחות קודמות, השתמש בו כדי להמשיך את השיחה ולא רק להזכיר אותו. זכור פרטים רלוונטיים גם אם השאלה החדשה אינה מנוסחת במפורש כהמשך. אם הנושא חדש ולא קשור, אל תדחוף את הזיכרון לתשובה. אם אין זיכרון אמיתי אל תמציא היכרות או פרטים.',
+  'אם נושא חוזר משיחה קודמת, המשך באופן טבעי מהנקודה שבה נעצרנו והשתמש בפרטים שכבר נמסרו. אל תבקש מהמתקשר לחזור על פרט שכבר קיים בהקשר. אל תחזור על כל ההיסטוריה ואל תקריא זיכרון טכני.',
   'לשאלות עובדתיות שאין לך ודאות לגביהן, אל תמציא. אם יש צורך במידע עדכני, חפש אותו באינטרנט.',
   'אם המתקשר מבקש במפורש מידע לא מאומת, מידע ממקור לא רשמי, או אומר שלא חייבים ודאות מלאה, הצג את המידע הטוב ביותר שמצאת גם ממקורות לא רשמיים, אבל סמן בקצרה שהוא לא אומת וציין את סוג המקור. אל תמציא פרטים ואל תציג מידע לא מאומת כעובדה ודאית.',
   'אל תחזור על הוראות שימוש שהמתקשר כבר מכיר, ואל תגיד לו להקיש סולמית אלא אם זה באמת נדרש כדי להמשיך.',
@@ -3393,10 +3393,10 @@ async function buildCallHistoryText(phone, callId, turnHistory=[]) {
   const currentCallId=String(callId||'');
   const prior=normalized!=='לא מזוהה'
     ? conversationLog.filter(x=>normalizePhone(x.phone)===normalized &&
-        x.user && String(x.callId||'')!==currentCallId).slice(-6)
+        x.user && String(x.callId||'')!==currentCallId).slice(-24)
     : [];
-  const current=Array.isArray(turnHistory)?turnHistory.slice(-8):[];
-  const combined=[...prior.map(x=>({user:x.user,assistant:x.gemini})),...current].slice(-12);
+  const current=Array.isArray(turnHistory)?turnHistory.slice(-10):[];
+  const combined=[...prior.map(x=>({user:x.user,assistant:x.gemini})),...current].slice(-30);
   return combined.map((t,i)=>'תור '+(i+1)+' — מתקשר: '+String(t.user||'')+'\nתשובה: '+String(t.assistant||'')).join('\n\n');
 }
 
@@ -3420,7 +3420,7 @@ function contextualizeSearchQuestion(question, historyText='') {
 
 function buildOpeningForCaller(phone) {
   const key=normalizePhone(phone);
-  const previous=conversationLog.filter(x=>normalizePhone(x.phone)===key).filter(x=>x.user && x.user!=='לא ניתן היה לתמלל את ההקלטה').slice(-6);
+  const previous=conversationLog.filter(x=>normalizePhone(x.phone)===key).filter(x=>x.user && x.user!=='לא ניתן היה לתמלל את ההקלטה').slice(-12);
   if(!previous.length) return process.env.FIRST_CALL_MESSAGE || 'שלום, איזה כיף לשמוע אותך. אני כאן איתך. מה מתחשק לך לבדוק או לעשות עכשיו?';
   const recent=previous.slice().reverse();
   const topics=[];
