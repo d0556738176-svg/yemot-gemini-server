@@ -488,6 +488,14 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
         }
       }
     }
+    // Hard deadline for ordinary phone turns: after primary Gemini and the
+    // independent low-latency providers fail, do not stack slower fallbacks.
+    if (fastPhone && !useWebSearch && textOnlyInput && independentFallbackStatus) {
+      console.warn('[BRANCH1 FALLBACK] hard phone deadline reached after fast providers; skipping slow fallback chain', {
+        status: primaryStatus, useWebSearch, fastPhone
+      });
+      throw primaryError;
+    }
     if (textOnlyInput && String(process.env.OPENAI_API_KEY || '').trim()) {
       if (Date.now() < openAIBillingCooldownUntil) {
         console.warn('[BRANCH1 FALLBACK] skipping OpenAI during known billing cooldown', {
