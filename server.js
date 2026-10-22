@@ -113,7 +113,7 @@ const DIRECT_WEB_QUERY_TIMEOUT_MS = Number(process.env.DIRECT_WEB_QUERY_TIMEOUT_
 // Deepgram is the primary Hebrew phone ASR. Keep its timeout separate from Gemini so
 // a slow Deepgram request does not inherit Gemini's tighter phone-answer timeout.
 // 18s is only a safety ceiling; successful requests should return much sooner.
-const PHONE_DEEPGRAM_TIMEOUT_MS = Number(process.env.PHONE_DEEPGRAM_TIMEOUT_MS || 18000);
+const PHONE_DEEPGRAM_TIMEOUT_MS = Number(process.env.PHONE_DEEPGRAM_TIMEOUT_MS || 6500);
 const MEDIA_MAX_IMAGE_BYTES = Number(process.env.MEDIA_MAX_IMAGE_BYTES || 12000000);
 const MEDIA_MAX_VIDEO_BYTES = Number(process.env.MEDIA_MAX_VIDEO_BYTES || 95000000);
 const MEDIA_ANALYSIS_TIMEOUT_MS = Number(process.env.MEDIA_ANALYSIS_TIMEOUT_MS || 45000);
@@ -3521,16 +3521,21 @@ async function callHandler(call) {
     const active=activeCalls.get(activeKey);
     if(active) active.status='הקלטה התקבלה — מעבד';
 
+    const turnStartedAt=Date.now();
     let audioBuffer;
     try {
-      const response=await withTimeout(yemotApi.download_file('ivr2:'+recordPath), REQUEST_TIMEOUT_MS, 'yemotApi.download_file');
+      // A phone recording is tiny; do not let a stalled Yemot file download hold
+      // the caller for the generic 30-second network budget.
+      const recordingDownloadTimeoutMs=Math.min(REQUEST_TIMEOUT_MS,
+        Math.max(2500,Number(process.env.BRANCH1_RECORDING_DOWNLOAD_TIMEOUT_MS || 6000)));
+      const response=await withTimeout(yemotApi.download_file('ivr2:'+recordPath), recordingDownloadTimeoutMs, 'yemotApi.download_file');
       audioBuffer=response.data;
     } catch(e) {
       logDetailedError('recording download',e);
       continue;
     }
     const audioBase64=Buffer.isBuffer(audioBuffer)?audioBuffer.toString('base64'):Buffer.from(audioBuffer).toString('base64');
-    console.info('[CALL_FLOW] recording_downloaded', { callId: activeKey, bytes: audioBuffer?.length || 0 });
+    console.info('[CALL_FLOW] recording_downloaded', { callId: activeKey, bytes: audioBuffer?.length || 0, elapsedMs:Date.now()-turnStartedAt });
 
     const historyText=await buildCallHistoryText(callerPhone,callId,turnHistory);
     // Visual routing may use only the immediately preceding turn in this call.
@@ -3544,7 +3549,7 @@ async function callHandler(call) {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
       userTranscript=await transcribePhoneAudio(audioBuffer);
-      console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length});
+      console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length,elapsedMs:Date.now()-turnStartedAt});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
       originalSpokenTranscript=userTranscript;
       const pendingLookup=resolvePendingLookupQuestion(userTranscript,turnHistory, q =>
@@ -3738,7 +3743,7 @@ async function callHandler(call) {
       console.warn('[CALL_FLOW] long_answer_trimmed',{callId:activeKey,chars:replyText.length,max:LONG_ANSWER_MAX_CHARS});
       replyText=replyText.slice(0,LONG_ANSWER_MAX_CHARS).replace(/\\s+\\S*$/,'').trim()+'.';
     }
-    console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length });
+    console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length, elapsedMs:Date.now()-turnStartedAt });
     const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
       phone:normalizePhone(callerPhone),callId:String(callId||''),user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript) || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText};
     conversationLog.push(entry);
@@ -3757,7 +3762,7 @@ async function callHandler(call) {
       turnHistory.push({user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript),assistant:replyText});
       if(turnHistory.length>8) turnHistory.shift();
     }
-    console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length });
+    console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length, elapsedMs:Date.now()-turnStartedAt });
     // Do NOT call id_list_message here. It normally exits the action unless it is
     // queued with prependToNextAction. Instead, put the answer directly into the
     // next read: Yemot will play the answer and immediately collect the next turn.
