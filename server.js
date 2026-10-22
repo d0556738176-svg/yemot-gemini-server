@@ -388,8 +388,8 @@ console.info('[BRANCH1 FALLBACK] independent provider configuration', {
 });
 // Branch 1 should stop repeatedly calling a provider after quota/overload failures.
 // This is deliberately isolated from the primary/backup call handlers for other branches.
-const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:90000, transientMs:25000});
-const branch1BackupCooldowns = createCooldownRegistry({quotaMs:90000, transientMs:25000});
+const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:180000, transientMs:45000});
+const branch1BackupCooldowns = createCooldownRegistry({quotaMs:180000, transientMs:45000});
 
 async function generateBranch1WithFallback(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null) {
   let primaryError;
@@ -400,7 +400,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
   } else {
     try {
       const branch1PhoneBudget = fastPhone
-        ? Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS || 5200)
+        ? Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS || 3200)
         : null;
       const primaryResult=await generateWithRetry(contents, useWebSearch, fastPhone, timeoutOverrideMs, branch1PhoneBudget);
       branch1PrimaryCooldown.clear('primary');
