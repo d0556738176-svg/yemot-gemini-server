@@ -6,6 +6,7 @@ import { tavily } from '@tavily/core';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { selectedResultIndex, isMoreResultsRequest, isFreshYouTubeSearch } from './youtube-selection.js';
+import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
@@ -3805,8 +3806,15 @@ async function youtubeCallHandler(call) {
 
   async function playSelected(call, video) {
     console.info('[YouTube IVR] direct playback requested', { videoId: video.videoId });
+    let alternate=null;
+    try {
+      alternate=await resolvePublisherAudio(video);
+      if(alternate) console.info('[YouTube IVR] publisher audio fallback matched',{videoId:video.videoId,source:alternate.source,score:alternate.score});
+    } catch(e) {
+      console.warn('[YouTube IVR] publisher audio fallback unavailable',{videoId:video.videoId,status:geminiErrorStatus(e)});
+    }
     const playback=await withTimeout(
-      downloadAuthorizedAudioToYemot(video.videoId),
+      downloadAuthorizedAudioToYemot(video.videoId,{fallbackUrl:alternate?.url||null}),
       Number(process.env.YOUTUBE_AUTHORIZED_PLAYBACK_TIMEOUT_MS || 90000),
       'authorized YouTube playback preparation'
     );
