@@ -33,7 +33,8 @@ export function selectRelevantHistoryForTurn(question, persistedHistoryText = ''
     // are only meaningful against the immediately preceding turn. Never bind them
     // to an older persisted call when the current call has no prior turn.
     const transformationWithoutCurrent = !currentText &&
-      /(?:^|\s)(?:תן לי|תביא לי|תציג|תמנה|מנה|סכם|תסכם|תקצר|בקצרה|בכמה מילים|נקודות|יתרונות|חסרונות|דוגמאות|דוגמה|הראשון|השני|השלישי|האחרון|עיקרי|עיקריים|מרכזי|מרכזיים)(?:\s|$)/i.test(q);
+      /(?:^|\s)(?:תן לי|תביא לי|תציג|תמנה|מנה|סכם|תסכם|תקצר|בקצרה|בכמה מילים|נקודות|יתרונות|חסרונות|דוגמאות|דוגמה|עיקרי|עיקריים|מרכזי|מרכזיים)(?:\s|$)/i.test(q) &&
+      !/(?:תמשיך|המשך|תרחיב|תפרט|תסביר יותר|הפרט הראשון|הדבר הראשון|מה שאמרת|מה אמרת קודם|תמשיך מאיפה|מאיפה שעצרת)/i.test(q);
     if (transformationWithoutCurrent) return '';
     if (currentText) return currentText;
     return persisted;
