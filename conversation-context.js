@@ -15,12 +15,14 @@ export function selectRelevantHistoryForTurn(question, persistedHistoryText = ''
   ).join('\n\n');
   const persisted = String(persistedHistoryText || '').trim();
 
-  // Always make durable caller memory available. For an explicit follow-up the
-  // current call comes first; for a new topic the model still receives the
-  // persisted memory but is instructed by the system prompt not to force it
-  // into unrelated answers.
-  if (explicitFollowUp || shortReferential) return [currentText, persisted].filter(Boolean).join('\n\n');
-  return [persisted, currentText].filter(Boolean).join('\n\n');
+  // Keep durable memory available for genuine follow-ups, but do not inject
+  // unrelated old calls into every new question. Within a live call, the
+  // immediately relevant turns take precedence over persisted history.
+  if (explicitFollowUp || shortReferential) {
+    if (currentText) return currentText;
+    return persisted;
+  }
+  return '';
 }
 
 
