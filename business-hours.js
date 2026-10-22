@@ -121,9 +121,14 @@ export function buildBusinessHoursFallback({ question = '', business = 'הסני
   });
   const official = matching.find(result => officialSuperPharm(result) && extractHoursEvidence(result));
   if (official) {
+    // Keep the complete official snippet for grouped weekday/weekend schedules.
+    // extractHoursEvidence() intentionally returns one range, which is useful for
+    // a simple answer but loses Friday/Saturday ranges and previously caused
+    // "not verified" replies even when the official page contained every day.
+    const officialText = normalize([official.title, official.snippet].filter(Boolean).join(' | '));
     const hours = extractHoursEvidence(official);
     const branch = normalize(official.title || business);
-    const perDay = formatHoursByDay(hours, q);
+    const perDay = formatHoursByDay(officialText, q);
     return 'מצאתי באתר הרשמי של סופר-פארם את פרטי הסניף ' + branch + '. ' +
       (perDay ? 'שעות הפתיחה לפי ימות השבוע: ' + perDay + '. ' : 'שעות שמופיעות בתוצאת המקור: ' + hours + '. ') +
       'כדאי לוודא מול עמוד הסניף אם מדובר ביום חג או בשעות חריגות.';
