@@ -3,7 +3,7 @@ import { rankWebsitePages } from './website-relevance.js';
 const DEFAULT_TIMEOUT_MS = 6500;
 const DEFAULT_MAX_BYTES = 1_500_000;
 
-function isPublicHttpUrl(value) {
+export function isPublicHttpUrl(value) {
   try {
     const url = new URL(String(value || ''));
     if (!['http:', 'https:'].includes(url.protocol)) return false;
@@ -58,7 +58,7 @@ function extractInternalLinks(html, baseUrl, origin) {
     try {
       const url = new URL(href, baseUrl);
       url.hash = '';
-      if (!isPublicHttpUrl(url.href) || url.origin !== origin) continue;
+      if (!isPublicHttpUrl(url.href) || (origin && url.origin !== origin)) continue;
       if (/\.(?:pdf|jpg|jpeg|png|gif|webp|svg|zip|mp4|mp3|docx?|xlsx?|pptx?)(?:$|\?)/i.test(url.pathname)) continue;
       if (seen.has(url.href)) continue;
       seen.add(url.href);
@@ -108,6 +108,21 @@ async function fetchHtml(url, { timeoutMs, maxBytes }) {
     reader.releaseLock();
   }
   return { html: Buffer.concat(chunks, size).toString('utf8'), finalUrl: response.url || url };
+}
+
+// Single-page entry point for low-latency branch 1 reads. It returns real links
+// and never recursively crawls before the first spoken response.
+export async function readSinglePublicWebsitePage({url, timeoutMs=3000, maxBytes=DEFAULT_MAX_BYTES}={}) {
+  if (!isPublicHttpUrl(url)) return null;
+  const {html,finalUrl}=await fetchHtml(url,{timeoutMs,maxBytes});
+  const original=new URL(url), final=new URL(finalUrl);
+  if (original.hostname.replace(/^www\./,'')!==final.hostname.replace(/^www\./,'')) throw new Error('Unexpected website redirect');
+  const main=html.match(/<main\b[^>]*>([\s\S]*?)<\/main\s*>/i);
+  const article=original.pathname==='/' ? null : html.match(/<article\b[^>]*>([\s\S]*?)<\/article\s*>/i);
+  const body=html.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i);
+  const content=stripTags(main?.[1] || article?.[1] || body?.[1] || html).slice(0,60000);
+  if(content.length<80 || /^(?:just a moment|access denied|checking your browser)/i.test(content)) return null;
+  return {url:finalUrl,title:extractTitle(html),content,links:extractInternalLinks(html,finalUrl,final.origin),sourceLinks:extractInternalLinks(html,finalUrl,null)};
 }
 
 /**
@@ -169,3 +184,4 @@ export async function readPublicWebsitePages({
   }
   return rankWebsitePages(question, pages, rootUrl).slice(0, maxPages);
 }
+

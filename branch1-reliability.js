@@ -1,3 +1,4 @@
+import { findBranch1Events } from './branch1-events.js';
 import { extractExplicitLocation } from './business-location.js';
 import { buildLocalBusinessQueries, filterLocalBusinessResults } from './local-business-search.js';
 
@@ -33,6 +34,16 @@ export function resolveBranch1Question(text, history = []) {
       extractExplicitLocation(q).city && q.length < 60 && !/(הופעה|אירוע|שעות|טלפון)/u.test(q)) {
     q = (last.resolvedQuestion || last.user) + ' ' + q;
   }
+  const lastQuestion=last?.resolvedQuestion || last?.user || '';
+  const dateOnly=/^(?:כן[, ]*)?(?:להיום|היום|מחר|למחר|הערב|השבוע|בסוף השבוע|סוף השבוע|\d{1,2}[./]\d{1,2}(?:[./]20\d{2})?)[?.! ]*$/u.test(q);
+  if(dateOnly && isBranch1EventRequest(lastQuestion)) {
+    q=lastQuestion.replace(/(?:להיום|היום|מחר|למחר|הערב|השבוע|בסוף השבוע|סוף השבוע)/gu,'').trim()+' '+q;
+  }
+  const namedLocation=extractExplicitLocation(q);
+  if(namedLocation.city && namedLocation.area && !/(חנות|חנויות|עסקים|מכולת|מסעדה|אירוע|מופע|הופעה|טלפון|שעות)/u.test(q) &&
+      /(חנות|חנויות|עסקים|מכולת|מסעדה)/u.test(lastQuestion)) {
+    q=lastQuestion.replace(/(?:ב)?(?:רמות דוד|קריית גת|קרית גת)/gu,'').trim()+' '+q;
+  }
   if (isCorrection(q)) {
     const previous = [...history].reverse().find(t => t.user && !isCorrection(t.user));
     // A correction naming a fresh location/category must be processed as spoken.
@@ -49,7 +60,15 @@ export function isBranch1LocalRequest(q) {
   return /(חנות|חנויות|חניות|עסקים|מכולת|סופרמרקט|מסעדות|מסעדה)/u.test(q) && !!extractExplicitLocation(q).area;
 }
 
+export function branch1FollowUpHistory(q, history=[]) {
+  if(!history.length)return '';
+  const contextual=/^(?:כן[, ]*)?(?:היום|מחר|הערב|השבוע|תמשיך|המשך|עוד|תסביר|תרחיב|תפרט|מה הכוונה|למה|איך זה|איפה זה|מתי זה|מה השעות|ומה|כמה זה|הראשון|השני|השלישי|זה|אותו|אותה)(?:\s|[?!.,]|$)/u.test(q) || isCorrection(q);
+  if(!contextual)return '';
+  return history.slice(-4).map((t,i)=>'תור '+(i+1)+' — מתקשר: '+(t.resolvedQuestion||t.user)+'\nתשובה: '+t.assistant).join('\n\n');
+}
+
 export function isBranch1EventRequest(q) {
+  if (/(שעות\s+(?:ה)?פעילות|שעות\s+פתיחה|מתי\s+(?:פתוח|נסגר)|טלפון|שירות לקוחות)/u.test(q)) return false;
   return /(פעילות|פעילויות|הופעה|הופעות|אירוע|אירועים|תרבותי|תרבותית|מופע|מופעים)/u.test(q) &&
     !/(מה זה|מהי|מהו|הסבר|הגדר)/u.test(q);
 }
@@ -104,46 +123,12 @@ export async function answerBranch1Local(q, search) {
   });
   const unique = [...new Map(exact.map(r => [r.url, r])).values()].slice(0, 3);
   if (!unique.length) return 'לא הצלחתי לאמת כרגע שמות וכתובות של חנויות בתוך ' + loc.area + ' ב' + loc.city + '. לא מצאתי רשומת עסק שמתאימה למיקום שביקשת.';
-  return 'ברשומות שמצאתי עבור ' + loc.area + ' ב' + loc.city + ': ' +
+  const wantsOpen=/(פתוח|פתוחה|פתוחים|פתוחות).{0,10}(עכשיו|היום)/u.test(q);
+  return (wantsOpen?'לא אומת איזו חנות פתוחה עכשיו. ברשומות שמצאתי עבור ':'ברשומות שמצאתי עבור ') + loc.area + ' ב' + loc.city + ': ' +
     unique.map(r => String(r.title) + '. ' + String(r.snippet || '').slice(0, 240)).join('. ') +
     '. אלה רשומות ברשת; פעילות החנויות ושעות הפתיחה לא אומתו.';
 }
 
-export async function answerBranch1Events(q, search) {
-  const city = extractExplicitLocation(q).city;
-  if (!city) return 'באיזו עיר ובאיזה יום לחפש הופעה או פעילות תרבות?';
-  // Do not assume a date for an open-ended request, or read an old event snippet.
-  if (!/(היום|מחר|הערב|השבוע|סוף השבוע|\d{1,2}[./]\d{1,2})/u.test(q)) {
-    return 'לחפש לך הופעה או פעילות תרבות ב' + city + ' להיום, למחר או להמשך השבוע?';
-  }
-  const now = new Date();
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now).map(p => [p.type,p.value]));
-  const today = parts.year + '-' + parts.month + '-' + parts.day;
-  const dayMs = 86400000;
-  const start = Date.parse(today + 'T00:00:00Z') + (/מחר/u.test(q) ? dayMs : 0);
-  const end = start + (/השבוע/u.test(q) ? 7 : 1) * dayMs;
-  const responses = await Promise.allSettled([
-    q + ' ' + today + ' לוח אירועים רשמי תאריך שעה מקום',
-    city + ' מופעים לוח אירועים ' + parts.month + ' ' + parts.year
-  ].map(query => search(query, {timeoutMs:2200})));
-  const results = responses.flatMap(r => r.status === 'fulfilled' ? r.value : []);
-  const dated = results.filter(r => {
-    const text = [r.title, r.snippet].join(' ');
-    if (!text.includes(city) || !/(מופע|הופעה|קונצרט|הצגה|אירוע)/u.test(text)) return false;
-    // A publication timestamp by itself is insufficient event evidence.
-    if (/(פורסם|עודכן|תאריך פרסום)/u.test(text) && !/(מועד האירוע|תאריך האירוע|יתקיים|תתקיים)/u.test(text)) return false;
-    const dates = [...text.matchAll(/(?:\b(20\d{2})-(\d{2})-(\d{2})\b|\b(\d{1,2})[./](\d{1,2})[./](20\d{2})\b)/gu)];
-    return dates.some(m => {
-      const year=m[1] || m[6], month=m[2] || m[5], day=m[3] || m[4];
-      const stamp=Date.UTC(Number(year), Number(month)-1, Number(day));
-      const d=new Date(stamp);
-      return d.getUTCMonth()===Number(month)-1 && d.getUTCDate()===Number(day) && stamp>=start && stamp<end;
-    });
-  });
-  const unique = [...new Map(dated.map(r => [r.url,r])).values()].slice(0,3);
-  if (!unique.length) return 'לא הצלחתי לאמת הופעה או פעילות תרבות ב' + city + ' לתאריך שביקשת. לא אציג פרסום ישן כאירוע עדכני.';
-  return 'בלוחות שמצאתי מופיעים הפרסומים הבאים עם תאריך בטווח שביקשת: ' + unique.map(r => {
-    let host=''; try {host=new URL(r.url).hostname;} catch {}
-    return r.title + '. ' + String(r.snippet || '').slice(0,350) + (host ? '. מקור ' + host : '');
-  }).join('. ') + '. יש לאמת מול המארגן שהאירוע מתקיים ושנותרו מקומות.';
+export async function answerBranch1Events(q, search, options={}) {
+  return findBranch1Events(q,search,options);
 }
