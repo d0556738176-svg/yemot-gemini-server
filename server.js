@@ -1,3 +1,4 @@
+import { isBranch1WebsiteRequest, answerBranch1Website } from './branch1-websites.js';
 import express from 'express';
 import crypto from 'node:crypto';
 import { YemotRouter, ExitError } from 'yemot-router2';
@@ -20,7 +21,7 @@ import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visu
 import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion } from './conversation-context.js';
 import { buildPharmacySearchQueries, buildPharmacySearchAnswer } from './pharmacy-search.js';
 
-import { filterBranch1Results, createBranch1Search, resolveBranch1Question, isCorrection, isBranch1LocalRequest, isBranch1EventRequest, answerBranch1Local, answerBranch1Events, branch1SpeechItems } from './branch1-reliability.js';
+import { branch1FollowUpHistory, filterBranch1Results, createBranch1Search, resolveBranch1Question, isCorrection, isBranch1LocalRequest, isBranch1EventRequest, answerBranch1Local, answerBranch1Events, branch1SpeechItems } from './branch1-reliability.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -3387,6 +3388,16 @@ async function answerBranch1Web(question, historyText='', turnContext=null) {
   });
 }
 
+async function extractBranch1Page(url, timeoutMs=2500) {
+  const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
+  const data=await withTimeout(client.extract([url],{extractDepth:'basic',timeout:Math.ceil(timeoutMs/1000)}),timeoutMs,'branch1 page extraction');
+  const item=(data.results||[]).find(x=>{
+    try { return new URL(x.url).hostname.replace(/^www\./,'')===new URL(url).hostname.replace(/^www\./,''); }catch{return false;}
+  });
+  const content=String(item?.rawContent||item?.raw_content||item?.content||'').trim();
+  return content.length>=80?{url:item.url||url,title:item.title||'',content,links:[]}:null;
+}
+
 const branch1Search=createBranch1Search(searchWebDirect);
 
 async function callHandler(call) {
@@ -3511,13 +3522,15 @@ async function callHandler(call) {
       userTranscript=resolveBranch1Question(userTranscript,turnHistory);
       relevantHistoryText=isCorrection(originalSpokenTranscript)
         ? selectRelevantHistoryForTurn('מה שאמרת קודם',historyText,turnHistory)
-        : selectRelevantHistoryForTurn(originalSpokenTranscript,historyText,turnHistory);
+        : (branch1FollowUpHistory(originalSpokenTranscript,turnHistory) || selectRelevantHistoryForTurn(originalSpokenTranscript,historyText,turnHistory));
       // Avoid spending a Gemini generation call on requests that are already
       // handled by deterministic/direct data paths below. This reduces quota use,
       // improves phone latency, and leaves more capacity for real conversation/advice.
-      const branch1Local=isBranch1LocalRequest(userTranscript);
-      const branch1Events=isBranch1EventRequest(userTranscript);
-      const directDataRequest = branch1Local || branch1Events ||
+      const branch1Website=isBranch1WebsiteRequest(userTranscript,turnContext);
+      const branch1Local=!branch1Website && isBranch1LocalRequest(userTranscript);
+      const branch1Events=!branch1Website && isBranch1EventRequest(userTranscript);
+      turnContext.lastRoute=branch1Website?'website':branch1Local?'local':branch1Events?'events':'other';
+      const directDataRequest = branch1Website || branch1Local || branch1Events ||
         isMultimodalAnalysisRequest(userTranscript).any ||
         isVisualContinuationRequest(userTranscript,visualHistoryText) ||
         !!answerIsraelTimeQuestion(userTranscript) ||
@@ -3561,8 +3574,12 @@ async function callHandler(call) {
       const deterministicDailyDateAnswer=answerDailyDateQuestion(userTranscript);
       if(deterministicDailyDateAnswer) replyText=deterministicDailyDateAnswer;
       const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
-      if(branch1Local) replyText=await answerBranch1Local(userTranscript,branch1Search);
-      else if(branch1Events) replyText=await answerBranch1Events(userTranscript,branch1Search);
+      if(branch1Website) {
+        console.info('[BRANCH1 WEBSITE] direct reading route selected',{callId:activeKey});
+        replyText=await answerBranch1Website(userTranscript,turnContext,{search:branch1Search,extract:extractBranch1Page});
+      }
+      else if(branch1Local) replyText=await answerBranch1Local(userTranscript,branch1Search);
+      else if(branch1Events) replyText=await answerBranch1Events(userTranscript,branch1Search,{extract:extractBranch1Page});
       else if(deterministicDailyDateAnswer) replyText=deterministicDailyDateAnswer;
       else if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
       else if(isWeatherQuestion(userTranscript)) {
@@ -3668,7 +3685,7 @@ async function callHandler(call) {
         !isVisualContinuationRequest(userTranscript,visualHistoryText) &&
         !isWebsiteCapabilityQuestion(userTranscript) && !isWebsiteNavigationRequest(userTranscript) &&
         !isGenericWebsiteRequest(userTranscript) && !extractExplicitHttpUrl(userTranscript) &&
-        !isBranch1LocalRequest(userTranscript) && !isBranch1EventRequest(userTranscript) &&
+        !isBranch1WebsiteRequest(userTranscript,turnContext) && !isBranch1LocalRequest(userTranscript) && !isBranch1EventRequest(userTranscript) &&
         !isPhoneNumberRequest(userTranscript) && !isPharmacySearchRequest(userTranscript) &&
         !isBusinessHoursRequest(userTranscript);
       if(eligibleForQuickWebFallback) {
@@ -4390,6 +4407,10 @@ const port=process.env.PORT||3000;
 app.listen(port,async()=>{
   console.log('server running on port '+port);
   await loadConversationLog();
+  console.info('[BRANCH1 MEMORY] configuration', {persistentStoreConfigured:SUPABASE_ENABLED,openingEnabled:process.env.ENABLE_AI_OPENING!=='false',loadedEntries:conversationLog.length});
+  if(process.env.BRANCH1_VERIFY_PUBLIC_SOURCES==='true') {
+    void import('./branch1-source-check.js').then(module=>module.verifyBranch1PublicSources({search:branch1Search,extract:extractBranch1Page})).catch(error=>logDetailedError('Branch1 source check',error));
+  }
   try { await configureYemotStructure(); }
   catch (e) { logDetailedError('Yemot automatic setup', e); }
 });

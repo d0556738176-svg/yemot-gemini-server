@@ -44,14 +44,14 @@ test('relevant local listing is returned without any generation call', async () 
 
 test('culture request asks a date; dated request rejects an old publication', async () => {
   assert.match(await answerBranch1Events('איזה פעילות יש בבית שמש הופעה משהו תרבותי',()=>{throw Error('no date');}),/להיום, למחר/);
-  assert.match(await answerBranch1Events('הופעה היום בבית שמש',async()=>[{title:'הופעה בבית שמש',snippet:'פורסם 25.10.2020',url:'https://example.org/old'}]),/לא הצלחתי לאמת/);
+  assert.match(await answerBranch1Events('הופעה היום בבית שמש',async()=>[{title:'הופעה בבית שמש',snippet:'פורסם 25.10.2020',url:'https://example.org/old'}],{read:async()=>({url:'https://example.org/old',title:'בית שמש',content:'פורסם 25.10.2020 הופעה בבית שמש בשעה 20:00'})}),/לא מצאתי/);
 });
 
 test('current event listing retains source and availability qualification',async()=>{
   const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  const answer=await answerBranch1Events('הופעה היום בבית שמש',async()=>[{title:'מופע לדוגמה בבית שמש',snippet:'תאריך האירוע '+date+' שעה 20:00 היכל התרבות',url:'https://example.org/event'}]);
+  const answer=await answerBranch1Events('הופעה היום בבית שמש',async()=>[],{read:async()=>({url:'https://example.org/event',title:'בית שמש',content:'מופע לדוגמה בבית שמש '+date+' 20:00 היכל התרבות'})});
   assert.match(answer,/מופע לדוגמה/);
-  assert.match(answer,/לאמת מול המארגן/);
+  assert.match(answer,/לבדוק מול המארגן/);
 });
 
 test('speech chunks preserve complete long answer and strip protocol controls',()=>{
@@ -82,7 +82,7 @@ test('actual branch1 handler survives model timeout and reaches quick fallback w
     REQUEST_TIMEOUT_MS:30000,withTimeout:async p=>p,yemotApi:{download_file:async()=>({data:Buffer.from('audio')})},
     buildCallHistoryText:async()=>'',transcribePhoneAudio:async()=> 'מה היתרונות של אנרגיה סולרית',
     resolvePendingLookupQuestion:()=>'',resolveBranch1Question,isCorrection,selectRelevantHistoryForTurn:()=>'',
-    isBranch1LocalRequest:()=>false,isBranch1EventRequest:()=>false,
+    branch1FollowUpHistory:()=>'',isBranch1WebsiteRequest:()=>false,isBranch1LocalRequest:()=>false,isBranch1EventRequest:()=>false,
     isMultimodalAnalysisRequest:()=>({any:false}),isVisualContinuationRequest:()=>false,
     answerIsraelTimeQuestion:()=>'',answerDailyDateQuestion:()=>'',EXCLUSIVE_INSTRUCTION:'',LONG_ANSWER_MAX_CHARS:12000,
     generateBranch1WithFallback:async()=>{throw Object.assign(Error('timeout'),{status:408});},
