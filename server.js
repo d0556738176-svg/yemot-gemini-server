@@ -3785,13 +3785,19 @@ async function callHandler(call) {
  * Uses the same raw-recording -> Gemini transcription convention as the main robot.
  */
 async function youtubeCallHandler(call) {
-  // Branch 2 stays isolated from the main AI conversation. A clear spoken
-  // selection is final: prepare and play it immediately, without a second
-  // yes/no recording round-trip.
+  // Branch 2 stays isolated from the main AI conversation.
+  // A result selection is remembered and playback starts only after a clear
+  // spoken confirmation ("כן"). A rejection keeps the current results alive.
   let currentQuery='';
   let results=[];
   let resultOffset=0;
   let nextPrompt=null;
+  let pendingVideo=null;
+
+  const normalizeConfirm=(text)=>String(text||'').normalize('NFKC').toLowerCase()
+    .replace(/[.,!?;:״"'׳]/g,' ').replace(/\s+/g,' ').trim();
+  const isYesConfirm=(text)=>/^(?:כן|כן כן|כן בבקשה|כן תשמיע|כן תפעיל|כן אני רוצה|בטח|בוודאי|אכן)(?:\s|$)/u.test(normalizeConfirm(text));
+  const isNoConfirm=(text)=>/^(?:לא|לא תודה|לא רוצה|לא זה|אחר|אחרת)(?:\s|$)/u.test(normalizeConfirm(text));
 
   function formatResultsPage() {
     const page=results.slice(resultOffset,resultOffset+5);
@@ -3801,7 +3807,7 @@ async function youtubeCallHandler(call) {
       return 'תוצאה מספר '+n+': '+sanitizeForYemot(v.title)+'. הערוץ: '+sanitizeForYemot(v.channelTitle)+'.';
     });
     resultOffset += page.length;
-    return 'מצאתי כמה תוצאות. '+lines.join(' ')+' אמור את מספר התוצאה או את השם שלה, ואשמיע אותה מיד. אפשר גם לומר עוד לתוצאות נוספות.';
+    return 'מצאתי כמה תוצאות. '+lines.join(' ')+' אמור את מספר התוצאה או את השם שלה. אחרי הבחירה אבקש ממך אישור לפני ההשמעה. אפשר גם לומר עוד לתוצאות נוספות.';
   }
 
   async function playSelected(call, video) {
@@ -3828,9 +3834,11 @@ async function youtubeCallHandler(call) {
 
   try {
     while(true) {
-      const basePrompt=!results.length
-        ? 'אמור מה תרצה לחפש ביוטיוב. אפשר לומר נושא, אדם, ערוץ או שם סרטון. ולסיום ההקלטה הקש סולמית'
-        : 'אמור את מספר התוצאה או את השם שלה ואשמיע אותה מיד. אפשר גם לומר עוד או חיפוש חדש. ולסיום ההקלטה הקש סולמית';
+      const basePrompt=pendingVideo
+        ? 'בחרת את '+sanitizeForYemot(pendingVideo.title)+'. האם להשמיע את הסרטון הזה? אמור כן או לא.'
+        : (!results.length
+          ? 'אמור מה תרצה לחפש ביוטיוב. אפשר לומר נושא, אדם, ערוץ או שם סרטון. ולסיום ההקלטה הקש סולמית'
+          : 'אמור את מספר התוצאה או את השם שלה. אפשר גם לומר עוד או חיפוש חדש. ולסיום ההקלטה הקש סולמית');
       const prompt=nextPrompt||basePrompt;
       nextPrompt=null;
 
@@ -3854,6 +3862,27 @@ async function youtubeCallHandler(call) {
         continue;
       }
 
+      if(pendingVideo) {
+        if(isYesConfirm(transcript)) {
+          const selectedVideo=pendingVideo;
+          pendingVideo=null;
+          try {
+            return await playSelected(call,selectedVideo);
+          } catch(playbackError) {
+            logDetailedError('YouTube authorized playback',playbackError);
+            nextPrompt='לא הצלחתי להשמיע את התוצאה הזאת כרגע. התוצאות נשארו זמינות. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
+            continue;
+          }
+        }
+        if(isNoConfirm(transcript)) {
+          pendingVideo=null;
+          nextPrompt='בסדר. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
+          continue;
+        }
+        nextPrompt='לא הבנתי את האישור. אם זה הסרטון שבחרת אמור כן. אם לא, אמור לא.';
+        continue;
+      }
+
       if(isMoreResultsRequest(transcript)&&results.length) {
         nextPrompt=resultOffset>=results.length
           ? 'אין עוד תוצאות שכבר נטענו. אמור חיפוש חדש.'
@@ -3863,16 +3892,9 @@ async function youtubeCallHandler(call) {
 
       const selectedIndex=selectedResultIndex(transcript,results);
       if(selectedIndex>=0) {
-        const selectedVideo=results[selectedIndex];
-        try {
-          return await playSelected(call,selectedVideo);
-        } catch(playbackError) {
-          logDetailedError('YouTube authorized playback',playbackError);
-          // Keep the existing result list alive so the caller can choose another
-          // result without repeating the original search.
-          nextPrompt='לתוצאה הזאת אין כרגע מקור שמע זמין להשמעה במערכת. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
-          continue;
-        }
+        pendingVideo=results[selectedIndex];
+        nextPrompt='בחרת את '+sanitizeForYemot(pendingVideo.title)+'. האם להשמיע את הסרטון הזה? אמור כן או לא.';
+        continue;
       }
 
       if(isFreshYouTubeSearch(transcript)||!results.length) {
