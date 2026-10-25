@@ -48,6 +48,19 @@ function extractReadableText(html) {
   return stripTags(body).slice(0, 60000);
 }
 
+function extractMainContainer(html) {
+  // Many public homepages use a content div instead of <main>. Match its full
+  // balanced container rather than reading the navigation or only one article.
+  const start=String(html).match(/<(div|section)\b[^>]*(?:\bid\s*=\s*["'](?:content|main-content|maincontent|page-content)["']|\brole\s*=\s*["']main["'])[^>]*>/i);
+  if(!start)return null;
+  const begin=start.index+start[0].length;
+  const tags=new RegExp('<\\/?'+start[1]+'\\b[^>]*>','gi');
+  tags.lastIndex=begin;
+  let depth=1,tag;
+  while((tag=tags.exec(html))){depth+=/^<\//.test(tag[0])?-1:1;if(depth===0)return html.slice(begin,tag.index);}
+  return null;
+}
+
 function extractInternalLinks(html, baseUrl, origin) {
   const links = [];
   const seen = new Set();
@@ -120,9 +133,10 @@ export async function readSinglePublicWebsitePage({url, timeoutMs=3000, maxBytes
   const main=html.match(/<main\b[^>]*>([\s\S]*?)<\/main\s*>/i);
   const article=original.pathname==='/' ? null : html.match(/<article\b[^>]*>([\s\S]*?)<\/article\s*>/i);
   const body=html.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i);
-  const content=stripTags(main?.[1] || article?.[1] || body?.[1] || html).slice(0,60000);
+  const selected=main?.[1] || article?.[1] || extractMainContainer(html) || body?.[1] || html;
+  const content=stripTags(selected).slice(0,60000);
   if(content.length<80 || /^(?:just a moment|access denied|checking your browser)/i.test(content)) return null;
-  return {url:finalUrl,title:extractTitle(html),content,links:extractInternalLinks(html,finalUrl,final.origin),sourceLinks:extractInternalLinks(html,finalUrl,null)};
+  return {url:finalUrl,title:extractTitle(html),content,links:extractInternalLinks(selected,finalUrl,final.origin),sourceLinks:extractInternalLinks(html,finalUrl,null)};
 }
 
 /**

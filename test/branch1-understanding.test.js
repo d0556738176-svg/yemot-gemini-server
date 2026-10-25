@@ -117,7 +117,9 @@ test('actual phone handler reads website, continues, switches topic and routes h
   const source=readFileSync(new URL('../server.js',import.meta.url),'utf8');
   const handler=source.slice(source.indexOf('async function callHandler(call)'),source.indexOf('\n\n/**\n * Isolated YouTube'));
   const inputs=['פתח אתר הידברות וקרא מה שכתוב','תמשיך','אירועים היום בבית שמש','מה שעות הפעילות של חנות בקרית גת',
-    'איזה אירוע תרבות יש בבת שמש?','מחר','ומה יש היום?','אם ישאל לאיזה יום, ענה רק מחר ומה יש היום?'];
+    'איזה אירוע תרבות יש בבת שמש?','מחר','ומה יש היום?','אם ישאל לאיזה יום, ענה רק מחר ומה יש היום?',
+    'תפתח לי את אתר התאבות ותקרא לי את הדפים הראשונים','את הדף שנפתח לך, שפתחת',
+    'לא, ביקשתי שתפתח את אתר הידברות ותקרא את מה שכתוב שם על ההתחלה','ותקרא את מה שכתוב שם על ההתחלה','תמשיך'];
   let transcriptIndex=0,reads=0,websiteReads=0,eventCalls=0,hoursCalls=0;
   const context={console:{info(){},warn(){},error(){}},Buffer,Date,Intl,process:{env:{ENABLE_AI_OPENING:'false'}},
     getCallerNumber:()=> 'anonymous',activeCalls:new Map(),conversationLog:[],branch1SpeechItems,
@@ -140,11 +142,12 @@ test('actual phone handler reads website, continues, switches topic and routes h
   vm.createContext(context);vm.runInContext(handler+'\nglobalThis.handler=callHandler;',context);
   await context.handler({read:async items=>{reads++;if(reads>inputs.length)throw Error('hangup');return '/audio.wav';}});
   assert.equal(websiteReads,1);assert.equal(eventCalls,5);assert.equal(hoursCalls,1);
-  assert.equal(context.conversationLog.length,8);assert.match(context.conversationLog[0].gemini,/טקסט מקורי/);assert.match(context.conversationLog[1].gemini,/המשך/);
+  assert.equal(context.conversationLog.length,13);assert.match(context.conversationLog[0].gemini,/טקסט מקורי/);assert.match(context.conversationLog[1].gemini,/המשך/);
   assert.match(context.conversationLog[2].gemini,/מופע לדוגמה/);assert.match(context.conversationLog[3].gemini,/לוח שעות מאומת/);
   assert.match(context.conversationLog[4].gemini,/להיום, למחר/);
   assert.match(context.conversationLog[5].gemini,/מופע מחר/);
   assert.match(context.conversationLog[6].gemini,/מופע לדוגמה/);
   assert.match(context.conversationLog[7].gemini,/מופע לדוגמה/);
+  for(const row of context.conversationLog.slice(8))assert.match(row.gemini,/טקסט מקורי/);
   assert.equal(isBranch1WebsiteRequest('תמשיך',{lastRoute:'events',currentWebsitePages:[{content:'old'}]}),false);
 });
