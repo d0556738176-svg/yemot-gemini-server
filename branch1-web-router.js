@@ -1,4 +1,4 @@
-function shouldForceWebSearch(transcript) {
+export function shouldForceWebSearch(transcript) {
   const t = String(transcript || '').toLowerCase().replace(/\s+/g,' ').trim();
   // Route factual requests whose answer is likely external, local or time-sensitive
   // to retrieval even when STT omits explicit words such as "search the internet".
