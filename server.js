@@ -20,6 +20,8 @@ import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visu
 import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion } from './conversation-context.js';
 import { buildPharmacySearchQueries, buildPharmacySearchAnswer } from './pharmacy-search.js';
 
+import { filterBranch1Results, createBranch1Search, resolveBranch1Question, isCorrection, isBranch1LocalRequest, isBranch1EventRequest, answerBranch1Local, answerBranch1Events, branch1SpeechItems } from './branch1-reliability.js';
+
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -2722,6 +2724,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     if(seen.has(key)) return false;
     seen.add(key); return true;
   }).slice(0,12);
+  if(options.branch1Strict) unique.splice(0,unique.length,...filterBranch1Results(question,unique));
   if(!unique.length && queries.length>firstPass.length) {
     // If the primary search fails, race the remaining focused queries and take
     // the first non-empty response instead of waiting for every provider.
@@ -2870,6 +2873,11 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
         });
       }
     }
+  }
+
+  if(options.branch1Strict) {
+    unique.splice(0,unique.length,...filterBranch1Results(question,unique));
+    if(!unique.length) throw Object.assign(new Error('No relevant branch1 search evidence'),{status:422});
   }
 
   // Venue-event results are highly date-sensitive. If the retrieved pages do not
@@ -3372,6 +3380,15 @@ function buildOpeningForCaller(phone) {
   opening+=' נמשיך משם.';
   return opening.trim();
 }
+async function answerBranch1Web(question, historyText='', turnContext=null) {
+  const contextual=contextualizeSearchQuestion(question,historyText);
+  return answerWithDirectWebFallback(contextual,historyText,turnContext,{
+    skipSynthesis:false,branch1Strict:true,timeoutMs:2200
+  });
+}
+
+const branch1Search=createBranch1Search(searchWebDirect);
+
 async function callHandler(call) {
   const callerPhone = getCallerNumber(call);
   const callId = call?.callId || call?.values?.ApiCallId || '';
@@ -3402,7 +3419,7 @@ async function callHandler(call) {
     firstTurn=false;
     let recordPath;
     try {
-      recordPath=await call.read([{type:'text',data:prompt}],'record',
+      recordPath=await call.read(branch1SpeechItems(prompt),'record',
         {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
     } catch(readError) {
       // A caller hang-up is not a TTS failure. Do not issue a second Yemot
@@ -3472,6 +3489,7 @@ async function callHandler(call) {
     let replyText='';
     let userTranscript='';
     let originalSpokenTranscript='';
+    let relevantHistoryText='';
     try {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
@@ -3490,11 +3508,16 @@ async function callHandler(call) {
           isLocalBusinessDiscoveryRequest(pendingLookup,extractExplicitLocation(pendingLookup))?'local-business':'web-search'});
         userTranscript=pendingLookup;
       }
-      const relevantHistoryText=selectRelevantHistoryForTurn(userTranscript,historyText,turnHistory);
+      userTranscript=resolveBranch1Question(userTranscript,turnHistory);
+      relevantHistoryText=isCorrection(originalSpokenTranscript)
+        ? selectRelevantHistoryForTurn('מה שאמרת קודם',historyText,turnHistory)
+        : selectRelevantHistoryForTurn(originalSpokenTranscript,historyText,turnHistory);
       // Avoid spending a Gemini generation call on requests that are already
       // handled by deterministic/direct data paths below. This reduces quota use,
       // improves phone latency, and leaves more capacity for real conversation/advice.
-      const directDataRequest =
+      const branch1Local=isBranch1LocalRequest(userTranscript);
+      const branch1Events=isBranch1EventRequest(userTranscript);
+      const directDataRequest = branch1Local || branch1Events ||
         isMultimodalAnalysisRequest(userTranscript).any ||
         isVisualContinuationRequest(userTranscript,visualHistoryText) ||
         !!answerIsraelTimeQuestion(userTranscript) ||
@@ -3511,17 +3534,17 @@ async function callHandler(call) {
 
       if(!directDataRequest) {
         const longAnswer=isLongAnswerRequest(userTranscript);
-        const answerPrompt=EXCLUSIVE_INSTRUCTION+'\\n\\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\\n\\nהקשר קודם של השיחה, לפי הסדר:\\n'+(relevantHistoryText || 'אין עדיין הקשר קודם.')+'\\n\\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\\n'+userTranscript+'\\n\\n'+(longAnswer
+        const answerPrompt=EXCLUSIVE_INSTRUCTION+'\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\n\nהקשר קודם של השיחה, לפי הסדר:\n'+(relevantHistoryText || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\n'+userTranscript+'\n\n'+(longAnswer
           ? 'זו בקשה לתשובה ארוכה ומפורטת. אל תקצר ל-1 עד 4 משפטים. בנה תשובה רציפה ומסודרת, בדרך כלל 8 עד 20 פסקאות או משפטים קצרים לפי הצורך, עד כ-'+LONG_ANSWER_MAX_CHARS+' תווים. שמור על רצף טבעי להקראה בטלפון, בלי כותרות טכניות ובלי לחזור על עצמך. '
           : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. ')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
         const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
         let parsedTurn=null;
-        try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\\{[\\s\\S]*\\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
+        try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\{[\s\S]*\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
         if(parsedTurn && typeof parsedTurn.answer==='string') {
           replyText=parsedTurn.answer.trim();
         } else {
           const cleaned=String(firstPass||'').trim();
-          const answerMatch=cleaned.match(/"answer"\\s*:\\s*"([\\s\\S]*?)"\\s*(?:,|})/i);
+          const answerMatch=cleaned.match(/"answer"\s*:\s*"([\s\S]*?)"\s*(?:,|})/i);
           if(answerMatch && answerMatch[1]) replyText=answerMatch[1].replace(/\\\\n/g,' ').replace(/\\\\\"/g,'"').trim();
           else if(cleaned && cleaned.length<700) replyText=cleaned;
           else replyText='לא הצלחתי להבין את השאלה בבירור. נא לחזור עליה בבקשה';
@@ -3530,7 +3553,7 @@ async function callHandler(call) {
       } else {
         console.info('[CALL_FLOW] direct_data_path_skip_initial_gemini', { callId: activeKey });
       }
-      if (userTranscript && feedbackPending && /^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר|לא|לא עזר|לא ממש|לא כל כך)\\s*$/i.test(userTranscript)) {
+      if (userTranscript && feedbackPending && /^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר|לא|לא עזר|לא ממש|לא כל כך)\s*$/i.test(userTranscript)) {
         if (/^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר)/i.test(userTranscript)) replyText='מצוין. שמח שעזרתי לך. מה עוד תרצה שאעשה עבורך?';
         else replyText='בסדר. מה לא היה ברור או מה חסר לך? אמור לי ואנסה לעזור בצורה אחרת.';
         feedbackPending=false;
@@ -3538,23 +3561,25 @@ async function callHandler(call) {
       const deterministicDailyDateAnswer=answerDailyDateQuestion(userTranscript);
       if(deterministicDailyDateAnswer) replyText=deterministicDailyDateAnswer;
       const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
-      if(deterministicDailyDateAnswer) replyText=deterministicDailyDateAnswer;
+      if(branch1Local) replyText=await answerBranch1Local(userTranscript,branch1Search);
+      else if(branch1Events) replyText=await answerBranch1Events(userTranscript,branch1Search);
+      else if(deterministicDailyDateAnswer) replyText=deterministicDailyDateAnswer;
       else if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
       else if(isWeatherQuestion(userTranscript)) {
         try { replyText=await answerWeatherDirect(userTranscript); }
-        catch(e) { replyText=await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext); }
+        catch(e) { replyText=await answerBranch1Web(userTranscript, relevantHistoryText, turnContext); }
       }
       else if(isNewsQuestion(userTranscript)) {
         try { replyText=await answerNewsDirect(userTranscript, relevantHistoryText); }
-        catch(e) { replyText=await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext); }
+        catch(e) { replyText=await answerBranch1Web(userTranscript, relevantHistoryText, turnContext); }
       }
       else if(isTransitRequest(userTranscript)) {
         try {
           const transitAnswer=await answerTransitDirect(userTranscript);
-          replyText=transitAnswer || await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext);
+          replyText=transitAnswer || await answerBranch1Web(userTranscript, relevantHistoryText, turnContext);
         } catch(e) {
           console.warn('[TRANSIT] direct route unavailable; falling back to live web search',{status:geminiErrorStatus(e)});
-          replyText=await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext);
+          replyText=await answerBranch1Web(userTranscript, relevantHistoryText, turnContext);
         }
       }
       else if(isMultimodalAnalysisRequest(userTranscript).any || isVisualContinuationRequest(userTranscript,visualHistoryText)) {
@@ -3586,7 +3611,7 @@ async function callHandler(call) {
       else if(isWebsiteCapabilityQuestion(userTranscript) || isWebsiteNavigationRequest(userTranscript) || isGenericWebsiteRequest(userTranscript) || extractExplicitHttpUrl(userTranscript)) {
         // Website requests must use the real retrieval/extraction path, not the generic no-tools answer.
         try {
-          replyText=await answerWithWebSearch(userTranscript,relevantHistoryText,turnContext);
+          replyText=await answerBranch1Web(userTranscript,relevantHistoryText,turnContext);
         } catch(e) {
           console.warn('[WEBSITE_REQUEST] direct website retrieval failed',{status:geminiErrorStatus(e)});
           replyText='לא הצלחתי לפתוח ולקרוא את האתר כרגע. אפשר לנסות שוב עם שם האתר או כתובת מדויקת.';
@@ -3596,7 +3621,7 @@ async function callHandler(call) {
         try {
           replyText=await answerBusinessHoursDirect(userTranscript);
         } catch(e) {
-          replyText=await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext);
+          replyText=await answerBranch1Web(userTranscript, relevantHistoryText, turnContext);
         }
       }
       else if(isLocalBusinessDiscoveryRequest(userTranscript,extractExplicitLocation(userTranscript))) {
@@ -3615,7 +3640,7 @@ async function callHandler(call) {
             // can consume the remaining quota and make the phone call fail twice.
             replyText='לא הצלחתי כרגע לקבל תוצאות מיוטיוב. נא לנסות שוב בעוד כמה רגעים.';
           } else {
-            replyText=await answerWithWebSearch(userTranscript, relevantHistoryText, turnContext);
+            replyText=await answerBranch1Web(userTranscript, relevantHistoryText, turnContext);
           }
         } catch(searchError) {
           const fallback=knownContactFallback(userTranscript, relevantHistoryText);
@@ -3643,12 +3668,13 @@ async function callHandler(call) {
         !isVisualContinuationRequest(userTranscript,visualHistoryText) &&
         !isWebsiteCapabilityQuestion(userTranscript) && !isWebsiteNavigationRequest(userTranscript) &&
         !isGenericWebsiteRequest(userTranscript) && !extractExplicitHttpUrl(userTranscript) &&
+        !isBranch1LocalRequest(userTranscript) && !isBranch1EventRequest(userTranscript) &&
         !isPhoneNumberRequest(userTranscript) && !isPharmacySearchRequest(userTranscript) &&
         !isBusinessHoursRequest(userTranscript);
       if(eligibleForQuickWebFallback) {
         try {
           const directFallback=await answerWithDirectWebFallback(userTranscript,relevantHistoryText,turnContext,{
-            skipSynthesis:true,
+            skipSynthesis:true,branch1Strict:true,
             timeoutMs:deepSearchFallback?4200:1800
           });
           if(directFallback && String(directFallback).trim()) {
@@ -3668,7 +3694,7 @@ async function callHandler(call) {
     replyText=sanitizeForYemot(replyText)||'מצטער לא הצלחתי לנסח תשובה נסה שוב';
     if(replyText.length>LONG_ANSWER_MAX_CHARS) {
       console.warn('[CALL_FLOW] long_answer_trimmed',{callId:activeKey,chars:replyText.length,max:LONG_ANSWER_MAX_CHARS});
-      replyText=replyText.slice(0,LONG_ANSWER_MAX_CHARS).replace(/\\s+\\S*$/,'').trim()+'.';
+      replyText=replyText.slice(0,LONG_ANSWER_MAX_CHARS).replace(/\s+\S*$/,'').trim()+'.';
     }
     console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length, elapsedMs:Date.now()-turnStartedAt });
     const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
@@ -3686,7 +3712,7 @@ async function callHandler(call) {
         callId:activeKey,status:geminiErrorStatus(err),message:String(err?.message||err).slice(0,180)
       }));
     if(userTranscript) {
-      turnHistory.push({user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript),assistant:replyText});
+      turnHistory.push({user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript),assistant:replyText,resolvedQuestion:userTranscript});
       if(turnHistory.length>8) turnHistory.shift();
     }
     console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length, elapsedMs:Date.now()-turnStartedAt });
@@ -4289,6 +4315,10 @@ app.get('/api/youtube/search', rateLimit(20, 60 * 1000, 'youtube'), requireDashb
 app.get('/',(req,res)=>res.type('html').send('<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>AI Phone Line</title></head><body><h1>AI Phone Line Dashboard</h1><p>המערכת מחוברת וממתינה לשיחות</p></body></html>'));
 
 async function configureYemotStructure() {
+  if (process.env.YEMOT_AUTO_CONFIGURE === 'false' || /staging/i.test(process.env.RENDER_SERVICE_NAME || '')) {
+    console.info('[Yemot automatic setup] disabled for isolated service');
+    return;
+  }
   const apiUser=(process.env.YEMOT_API_USERNAME||'').trim();
   const apiPassword=(process.env.YEMOT_API_PASSWORD||'').trim();
   if(!apiUser || !apiPassword) {
