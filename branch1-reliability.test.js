@@ -82,7 +82,7 @@ test('actual branch1 handler survives model timeout and reaches quick fallback w
     REQUEST_TIMEOUT_MS:30000,withTimeout:async p=>p,yemotApi:{download_file:async()=>({data:Buffer.from('audio')})},
     buildCallHistoryText:async()=>'',transcribePhoneAudio:async()=> 'מה היתרונות של אנרגיה סולרית',
     resolvePendingLookupQuestion:()=>'',resolveBranch1Question,isCorrection,selectRelevantHistoryForTurn:()=>'',
-    branch1FollowUpHistory:()=>'',isBranch1WebsiteRequest:()=>false,isBranch1LocalRequest:()=>false,isBranch1EventRequest:()=>false,
+    branch1Clarification:()=>'',branch1FollowUpHistory:()=>'',isBranch1WebsiteRequest:()=>false,isBranch1LocalRequest:()=>false,isBranch1EventRequest:()=>false,
     isMultimodalAnalysisRequest:()=>({any:false}),isVisualContinuationRequest:()=>false,
     answerIsraelTimeQuestion:()=>'',answerDailyDateQuestion:()=>'',EXCLUSIVE_INSTRUCTION:'',LONG_ANSWER_MAX_CHARS:12000,
     generateBranch1WithFallback:async()=>{throw Object.assign(Error('timeout'),{status:408});},

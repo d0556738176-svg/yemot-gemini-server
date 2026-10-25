@@ -21,7 +21,7 @@ import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visu
 import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion } from './conversation-context.js';
 import { buildPharmacySearchQueries, buildPharmacySearchAnswer } from './pharmacy-search.js';
 
-import { branch1FollowUpHistory, filterBranch1Results, createBranch1Search, resolveBranch1Question, isCorrection, isBranch1LocalRequest, isBranch1EventRequest, answerBranch1Local, answerBranch1Events, branch1SpeechItems } from './branch1-reliability.js';
+import { branch1Clarification, branch1FollowUpHistory, filterBranch1Results, createBranch1Search, resolveBranch1Question, isCorrection, isBranch1LocalRequest, isBranch1EventRequest, answerBranch1Local, answerBranch1Events, branch1SpeechItems } from './branch1-reliability.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -3526,11 +3526,12 @@ async function callHandler(call) {
       // Avoid spending a Gemini generation call on requests that are already
       // handled by deterministic/direct data paths below. This reduces quota use,
       // improves phone latency, and leaves more capacity for real conversation/advice.
-      const branch1Website=isBranch1WebsiteRequest(userTranscript,turnContext);
+      const clarification=branch1Clarification(userTranscript);
+      const branch1Website=!clarification && isBranch1WebsiteRequest(userTranscript,turnContext);
       const branch1Local=!branch1Website && isBranch1LocalRequest(userTranscript);
       const branch1Events=!branch1Website && isBranch1EventRequest(userTranscript);
       turnContext.lastRoute=branch1Website?'website':branch1Local?'local':branch1Events?'events':'other';
-      const directDataRequest = branch1Website || branch1Local || branch1Events ||
+      const directDataRequest = !!clarification || branch1Website || branch1Local || branch1Events ||
         isMultimodalAnalysisRequest(userTranscript).any ||
         isVisualContinuationRequest(userTranscript,visualHistoryText) ||
         !!answerIsraelTimeQuestion(userTranscript) ||
@@ -3574,7 +3575,8 @@ async function callHandler(call) {
       const deterministicDailyDateAnswer=answerDailyDateQuestion(userTranscript);
       if(deterministicDailyDateAnswer) replyText=deterministicDailyDateAnswer;
       const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
-      if(branch1Website) {
+      if(clarification) replyText=clarification;
+      else if(branch1Website) {
         console.info('[BRANCH1 WEBSITE] direct reading route selected',{callId:activeKey});
         replyText=await answerBranch1Website(userTranscript,turnContext,{search:branch1Search,extract:extractBranch1Page});
       }

@@ -6,7 +6,7 @@ import {answerBranch1Website, requestedSiteName, isBranch1WebsiteRequest} from '
 import {readSinglePublicWebsitePage} from '../website-reader.js';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
-import {isCorrection,isBranch1LocalRequest,branch1SpeechItems} from '../branch1-reliability.js';
+import {branch1Clarification,isCorrection,isBranch1LocalRequest,branch1SpeechItems} from '../branch1-reliability.js';
 
 const now=new Date('2026-10-25T17:00:00Z');
 const link=(text,url='https://calendar.example/event')=>({content:text,url});
@@ -24,8 +24,24 @@ test('today and tomorrow remain attached to the immediately preceding culture qu
   const history=[{user:'איזה הופעה יש בבית שמש',assistant:'להיום או למחר?'}];
   assert.match(resolveBranch1Question('היום',history),/הופעה.*בית שמש.*היום/);
   assert.match(resolveBranch1Question('מחר',history),/הופעה.*בית שמש.*מחר/);
+  assert.match(resolveBranch1Question('ומה יש היום?',history),/הופעה.*בית שמש.*היום/);
+  assert.match(resolveBranch1Question('מה יש היום?',history),/הופעה.*בית שמש.*היום/);
+  assert.match(resolveBranch1Question('אם ישאל לאיזה יום, ענה רק מחר ומה יש היום?',history),/הופעה.*בית שמש.*היום/);
+  assert.doesNotMatch(resolveBranch1Question('אם ישאל לאיזה יום, ענה רק מחר ומה יש היום?',history),/אם ישאל|מחר/);
   assert.equal(resolveBranch1Question('מה מזג האוויר בחיפה',history),'מה מזג האוויר בחיפה');
   assert.match(branch1FollowUpHistory('תסביר לי',[{user:'שאלה',assistant:'תשובה'}]),/שאלה.*\nתשובה: תשובה/);
+});
+
+test('normalizes the caller city transcription without changing other city names',()=>{
+  assert.equal(resolveBranch1Question('איזה אירוע תרבות יש בבת שמש?'),'איזה אירוע תרבות יש בבית שמש?');
+  assert.equal(resolveBranch1Question('איזה אירוע יש בבת ים?'),'איזה אירוע יש בבת ים?');
+});
+
+test('unanchored date questions and spoken instructions ask for context instead of searching raw text',()=>{
+  assert.match(branch1Clarification('ומה יש היום?'),/איזה נושא ובאיזו עיר/);
+  assert.match(branch1Clarification('אם ישאל לאיזה יום, ענה רק מחר ומה יש היום?'),/לאיזה נושא/);
+  assert.equal(branch1Clarification('אירועי תרבות בבית שמש היום'),'');
+  assert.equal(eventDateRange('אירועים מחר ומה יש היום בבית שמש',now).start,eventDateRange('היום',now).start);
 });
 test('location correction preserves shop intent without adding another city',()=>{
   const q=resolveBranch1Question('קריית גת בשכונה שנקראת רמות דוד',[{user:'איזה חנות יש ברמות דוד בתוך קריאת'}]);
@@ -100,14 +116,15 @@ test('real reader extracts full homepage and link labels instead of first articl
 test('actual phone handler reads website, continues, switches topic and routes hours without a model call',async()=>{
   const source=readFileSync(new URL('../server.js',import.meta.url),'utf8');
   const handler=source.slice(source.indexOf('async function callHandler(call)'),source.indexOf('\n\n/**\n * Isolated YouTube'));
-  const inputs=['פתח אתר הידברות וקרא מה שכתוב','תמשיך','אירועים היום בבית שמש','מה שעות הפעילות של חנות בקרית גת'];
+  const inputs=['פתח אתר הידברות וקרא מה שכתוב','תמשיך','אירועים היום בבית שמש','מה שעות הפעילות של חנות בקרית גת',
+    'איזה אירוע תרבות יש בבת שמש?','מחר','ומה יש היום?','אם ישאל לאיזה יום, ענה רק מחר ומה יש היום?'];
   let transcriptIndex=0,reads=0,websiteReads=0,eventCalls=0,hoursCalls=0;
   const context={console:{info(){},warn(){},error(){}},Buffer,Date,Intl,process:{env:{ENABLE_AI_OPENING:'false'}},
     getCallerNumber:()=> 'anonymous',activeCalls:new Map(),conversationLog:[],branch1SpeechItems,
     isCallerHangupError:e=>e.message==='hangup',geminiErrorStatus:e=>e.status||0,
     REQUEST_TIMEOUT_MS:30000,withTimeout:async p=>p,yemotApi:{download_file:async()=>({data:Buffer.from('audio')})},
     buildCallHistoryText:async()=>'',transcribePhoneAudio:async()=>inputs[transcriptIndex++],
-    resolvePendingLookupQuestion:()=>'',resolveBranch1Question,isCorrection,selectRelevantHistoryForTurn:()=>'',branch1FollowUpHistory,
+    resolvePendingLookupQuestion:()=>'',resolveBranch1Question,isCorrection,branch1Clarification,selectRelevantHistoryForTurn:()=>'',branch1FollowUpHistory,
     isBranch1WebsiteRequest,isBranch1LocalRequest,isBranch1EventRequest,
     branch1Search:async()=>[],extractBranch1Page:async()=>null,
     answerBranch1Website:(q,state)=>answerBranch1Website(q,state,{search:async()=>[],read:async({url})=>{websiteReads++;return {url,title:'הידברות',content:'טקסט מקורי '.repeat(250),links:[]};}}),
@@ -122,8 +139,12 @@ test('actual phone handler reads website, continues, switches topic and routes h
   context.shouldForceWebSearch=q=>q.includes('שעות');context.isBusinessHoursRequest=q=>q.includes('שעות');context.extractExplicitHttpUrl=()=>'';
   vm.createContext(context);vm.runInContext(handler+'\nglobalThis.handler=callHandler;',context);
   await context.handler({read:async items=>{reads++;if(reads>inputs.length)throw Error('hangup');return '/audio.wav';}});
-  assert.equal(websiteReads,1);assert.equal(eventCalls,1);assert.equal(hoursCalls,1);
-  assert.equal(context.conversationLog.length,4);assert.match(context.conversationLog[0].gemini,/טקסט מקורי/);assert.match(context.conversationLog[1].gemini,/המשך/);
+  assert.equal(websiteReads,1);assert.equal(eventCalls,5);assert.equal(hoursCalls,1);
+  assert.equal(context.conversationLog.length,8);assert.match(context.conversationLog[0].gemini,/טקסט מקורי/);assert.match(context.conversationLog[1].gemini,/המשך/);
   assert.match(context.conversationLog[2].gemini,/מופע לדוגמה/);assert.match(context.conversationLog[3].gemini,/לוח שעות מאומת/);
+  assert.match(context.conversationLog[4].gemini,/להיום, למחר/);
+  assert.match(context.conversationLog[5].gemini,/מופע מחר/);
+  assert.match(context.conversationLog[6].gemini,/מופע לדוגמה/);
+  assert.match(context.conversationLog[7].gemini,/מופע לדוגמה/);
   assert.equal(isBranch1WebsiteRequest('תמשיך',{lastRoute:'events',currentWebsitePages:[{content:'old'}]}),false);
 });
