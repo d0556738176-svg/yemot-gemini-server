@@ -9,11 +9,13 @@ export function eventDateRange(question, now=new Date()) {
   const p=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusalem',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now).map(x=>[x.type,x.value]));
   const today=Date.UTC(+p.year,+p.month-1,+p.day), day=86400000;
   let start=today, end=today+day;
+  const temporal=[...String(question).matchAll(/מחרתיים|בסוף השבוע|סוף השבוע|למחר|להיום|היום|מחר|הערב|השבוע/gu)].at(-1)?.[0]||'';
   const explicit=String(question).match(/(?:(20\d{2})-(\d{2})-(\d{2})|(\d{1,2})[./](\d{1,2})(?:[./](20\d{2}))?)/u);
   if(explicit){start=Date.UTC(+(explicit[1]||explicit[6]||p.year),+(explicit[2]||explicit[5])-1,+(explicit[3]||explicit[4]));end=start+day;}
-  else if(/מחר/u.test(question)){start+=day;end=start+day;}
-  else if(/סוף\s*השבוע/u.test(question)){const weekday=new Date(today).getUTCDay();start+=((5-weekday+7)%7)*day;end=start+2*day;}
-  else if(/השבוע/u.test(question))end=start+7*day;
+  else if(temporal==='מחרתיים'){start+=2*day;end=start+day;}
+  else if(/מחר/u.test(temporal)){start+=day;end=start+day;}
+  else if(/סוף\s*השבוע/u.test(temporal)){const weekday=new Date(today).getUTCDay();start+=((5-weekday+7)%7)*day;end=start+2*day;}
+  else if(temporal==='השבוע')end=start+7*day;
   return {start,end,today:new Date(today).toISOString().slice(0,10),now};
 }
 

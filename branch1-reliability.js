@@ -22,7 +22,8 @@ export function createBranch1Search(search, {ttlMs=30000, now=Date.now}={}) {
 }
 
 export function resolveBranch1Question(text, history = []) {
-  let q = String(text || '').trim();
+  let q = String(text || '').trim()
+    .replace(/(^|[\s,])([בלמ]?)(?:בת|ביית|ביט)\s+שמש(?=$|[\s,.?!])/gu,'$1$2בית שמש');
   // Only repair known locality transcription in an explicit neighborhood context.
   // A truncated city is ambiguous: ask rather than silently choose a city.
   if (/רמות\s+דוד/u.test(q)) {
@@ -36,8 +37,14 @@ export function resolveBranch1Question(text, history = []) {
   }
   const lastQuestion=last?.resolvedQuestion || last?.user || '';
   const dateOnly=/^(?:כן[, ]*)?(?:להיום|היום|מחר|למחר|הערב|השבוע|בסוף השבוע|סוף השבוע|\d{1,2}[./]\d{1,2}(?:[./]20\d{2})?)[?.! ]*$/u.test(q);
-  if(dateOnly && isBranch1EventRequest(lastQuestion)) {
-    q=lastQuestion.replace(/(?:להיום|היום|מחר|למחר|הערב|השבוע|בסוף השבוע|סוף השבוע)/gu,'').trim()+' '+q;
+  const dateQuestion=/^(?:אז[, ]*)?(?:ו?מה\s+(?:יש|קורה|לגבי)|ו?מה\s+עם|ואילו אירועים|ואיזה אירועים).{0,20}(?:היום|מחר|הערב|השבוע|סוף השבוע)[?.! ]*$/u.test(q);
+  const spokenInstructions=q.length<160 && /אם\s+(?:י?שאל|תשאל)|(?:ענה|אענה|אני)\s+רק/u.test(q);
+  // A caller may combine a short date reply and a new date question in one
+  // recording. The final requested date wins; never search the instruction text.
+  const temporal=[...q.matchAll(/מחרתיים|בסוף השבוע|סוף השבוע|למחר|להיום|היום|מחר|הערב|השבוע/gu)].at(-1)?.[0];
+  if((dateOnly||dateQuestion||spokenInstructions) && isBranch1EventRequest(lastQuestion) && !extractExplicitLocation(q).city) {
+    const cleanTopic=lastQuestion.replace(/(?:מחרתיים|בסוף השבוע|סוף השבוע|למחר|להיום|היום|מחר|הערב|השבוע)/gu,'').trim();
+    if(temporal)q=cleanTopic+' '+temporal;
   }
   const namedLocation=extractExplicitLocation(q);
   if(namedLocation.city && namedLocation.area && !/(חנות|חנויות|עסקים|מכולת|מסעדה|אירוע|מופע|הופעה|טלפון|שעות)/u.test(q) &&
@@ -62,9 +69,16 @@ export function isBranch1LocalRequest(q) {
 
 export function branch1FollowUpHistory(q, history=[]) {
   if(!history.length)return '';
-  const contextual=/^(?:כן[, ]*)?(?:היום|מחר|הערב|השבוע|תמשיך|המשך|עוד|תסביר|תרחיב|תפרט|מה הכוונה|למה|איך זה|איפה זה|מתי זה|מה השעות|ומה|כמה זה|הראשון|השני|השלישי|זה|אותו|אותה)(?:\s|[?!.,]|$)/u.test(q) || isCorrection(q);
+  const contextual=/^(?:כן[, ]*)?(?:היום|מחר|הערב|השבוע|תמשיך|המשך|עוד|תסביר|תרחיב|תפרט|מה הכוונה|למה|איך זה|איפה זה|מתי זה|מה השעות|מה יש|מה קורה|ומה|כמה זה|הראשון|השני|השלישי|זה|אותו|אותה)(?:\s|[?!.,]|$)/u.test(q) || isCorrection(q);
   if(!contextual)return '';
   return history.slice(-4).map((t,i)=>'תור '+(i+1)+' — מתקשר: '+(t.resolvedQuestion||t.user)+'\nתשובה: '+t.assistant).join('\n\n');
+}
+
+export function branch1Clarification(q) {
+  if(extractExplicitLocation(q).city||isBranch1EventRequest(q))return '';
+  if(/^(?:ו?מה\s+(?:יש|קורה)|ו?מה\s+עם)\s+(?:היום|מחר|הערב|השבוע)[?.! ]*$/u.test(q))return 'על איזה נושא ובאיזו עיר לחפש לך מידע להיום או למחר?';
+  if(q.length<160&&/אם\s+(?:י?שאל|תשאל).{0,35}יום/u.test(q))return 'לאיזה נושא ולאיזה יום התכוונת? אפשר לומר את הבקשה עצמה, ואחפש אותה.';
+  return '';
 }
 
 export function isBranch1EventRequest(q) {
