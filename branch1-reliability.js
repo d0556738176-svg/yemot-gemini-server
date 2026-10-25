@@ -55,7 +55,8 @@ export function resolveBranch1Question(text, history = []) {
     const previous = [...history].reverse().find(t => t.user && !isCorrection(t.user));
     // A correction naming a fresh location/category must be processed as spoken.
     const named = extractExplicitLocation(q);
-    if (!named.city && !named.area && !/(?:התכוונתי|אלא|ביקשתי)\s+.{3,}/u.test(q) && previous) {
+    const explicitWebsite=/https?:\/\/|(?:האתר|אתר)\s+(?!(?:הזה|זה|שפתחת|שנפתח)(?:\s|$))\S+/u.test(q);
+    if (!named.city && !named.area && !explicitWebsite && !/(?:התכוונתי|אלא|ביקשתי)\s+.{3,}/u.test(q) && previous) {
       q = previous.resolvedQuestion || previous.user;
     }
   }
@@ -70,7 +71,8 @@ export function isBranch1LocalRequest(q) {
 export function branch1FollowUpHistory(q, history=[]) {
   if(!history.length)return '';
   const contextual=/^(?:כן[, ]*)?(?:היום|מחר|הערב|השבוע|תמשיך|המשך|עוד|תסביר|תרחיב|תפרט|מה הכוונה|למה|איך זה|איפה זה|מתי זה|מה השעות|מה יש|מה קורה|ומה|כמה זה|הראשון|השני|השלישי|זה|אותו|אותה)(?:\s|[?!.,]|$)/u.test(q) || isCorrection(q);
-  if(!contextual)return '';
+  const details=/(?:מאיזה מקור|מה המקור|פרטים על (?:האירוע|החנות|הדבר|הפרט) הראשון|הדף שפתחת)/u.test(q);
+  if(!contextual&&!details)return '';
   return history.slice(-4).map((t,i)=>'תור '+(i+1)+' — מתקשר: '+(t.resolvedQuestion||t.user)+'\nתשובה: '+t.assistant).join('\n\n');
 }
 
