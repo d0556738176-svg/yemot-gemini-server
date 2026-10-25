@@ -2129,7 +2129,7 @@ function isLongAnswerRequest(text) {
   return /(תשובה ארוכה|תשובה מפורטת|בהרחבה|בפירוט|תפרט|פרט|ספר לי סיפור|סיפור ארוך|כמה דקות|מספר דקות|מאמר|סקירה מקיפה|היסטוריה של|הסיפור המלא|תן את כל הפרטים|כל הפרטים|לעומק)/i.test(q) || q.length>320;
 }
 
-function shouldForceWebSearch(transcript) {
+export function shouldForceWebSearch(transcript) {
   const t = String(transcript || '').toLowerCase().replace(/\s+/g,' ').trim();
   // Route factual requests whose answer is likely external, local or time-sensitive
   // to retrieval even when STT omits explicit words such as "search the internet".
