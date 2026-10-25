@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldForceWebSearch } from '../server.js';
+import { shouldForceWebSearch } from '../branch1-web-router.js';
 
 test('routes external factual business questions to live web retrieval', () => {
   assert.equal(shouldForceWebSearch('מה שעות הפתיחה של סופר פארם בקניון עזריאלי תל אביב לכל יום בשבוע'), true);
