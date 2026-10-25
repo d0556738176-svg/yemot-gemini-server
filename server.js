@@ -2131,6 +2131,14 @@ function isLongAnswerRequest(text) {
 
 function shouldForceWebSearch(transcript) {
   const t = String(transcript || '').toLowerCase().replace(/\s+/g,' ').trim();
+  // Route factual requests whose answer is likely external, local or time-sensitive
+  // to retrieval even when STT omits explicit words such as "search the internet".
+  // This prevents ordinary Gemini from being the single point of failure for facts
+  // that should have been looked up.
+  const externalFactIntent =
+    /(?:מה|מי|איפה|היכן|מתי|כמה|איזה|אילו|תן|תגיד|אפשר).{0,70}(?:שעות|טלפון|מספר|כתובת|סניף|סניפים|חנות|חנויות|עסק|עסקים|מחיר|עלות|מלאי|זמין|שירותים|אירוע|אירועים|הופעה|מופע|תחבורה|אוטובוס|רכבת|אתר|דף|עמוד|קישור)/i.test(t) ||
+    /(?:של|ב|בקניון|ברחוב|בשכונת|במרכז|בסניף).{0,80}(?:סופר.?פארם|בנק|בית מרקחת|קופת חולים|דואר|חנות|עסק|קניון|מסעדה|חברה|ארגון)/i.test(t);
+  if (externalFactIntent) return true;
   // Explicit search language always means live web search, even when the topic
   // is something the server did not anticipate in a hard-coded category list.
   if (/(חפש|תחפש|תמצא|תאתר|בדוק|תבדוק|תברר|בירור|חיפוש|חפש לי|תבדוק לי|תמצא לי|באינטרנט|בגוגל|ברשת|באתר|באתרים|מה כתוב באתר|מה כתבו על|מצא לי מידע|תן לי מידע עדכני|תדפדף|דפדף|תפתח.{0,20}את האתר|פתח.{0,20}את האתר|תיכנס לאתר|תכנס לאתר|תעבור לעמוד|עמוד הבא|דף הבא|תקרא את האתר|קרא את האתר|באתר הזה|בעמוד הזה|מה כתוב בעמוד)/i.test(t)) return true;
@@ -3383,8 +3391,14 @@ function buildOpeningForCaller(phone) {
 }
 async function answerBranch1Web(question, historyText='', turnContext=null) {
   const contextual=contextualizeSearchQuestion(question,historyText);
+  const deep=isDeepWebSearchRequest(contextual);
+  // Retrieval is the answer path, not merely a prelude to another model call.
+  // Normal phone lookups return source-grounded evidence immediately; explicit
+  // deep research gets a slightly larger retrieval budget and more sources.
   return answerWithDirectWebFallback(contextual,historyText,turnContext,{
-    skipSynthesis:false,branch1Strict:true,timeoutMs:2200
+    skipSynthesis:true,
+    branch1Strict:true,
+    timeoutMs:deep?4200:2400
   });
 }
 
@@ -3531,6 +3545,13 @@ async function callHandler(call) {
       const branch1Local=!branch1Website && isBranch1LocalRequest(userTranscript);
       const branch1Events=!branch1Website && isBranch1EventRequest(userTranscript);
       turnContext.lastRoute=branch1Website?'website':branch1Local?'local':branch1Events?'events':'other';
+      const forcedWebSearch=shouldForceWebSearch(userTranscript);
+      console.info('[BRANCH1_ROUTER]',{
+        callId:activeKey,
+        route:branch1Website?'website':branch1Local?'local':branch1Events?'events':forcedWebSearch?'web':'conversation',
+        forcedWebSearch,
+        transcriptChars:userTranscript.length
+      });
       const directDataRequest = !!clarification || branch1Website || branch1Local || branch1Events ||
         isMultimodalAnalysisRequest(userTranscript).any ||
         isVisualContinuationRequest(userTranscript,visualHistoryText) ||
@@ -3542,7 +3563,7 @@ async function callHandler(call) {
         isWebsiteNavigationRequest(userTranscript) ||
         isGenericWebsiteRequest(userTranscript) ||
         !!extractExplicitHttpUrl(userTranscript) ||
-        shouldForceWebSearch(userTranscript) ||
+        forcedWebSearch ||
         /(חפש|תחפש|תמצא|חיפוש|באינטרנט|בגוגל|מה קורה עכשיו|מידע עדכני)/i.test(userTranscript) ||
         /(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript);
 
