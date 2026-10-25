@@ -2,7 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
-import {resolveBranch1Question, isCorrection, branch1SpeechItems, answerBranch1Local, answerBranch1Events, createBranch1Search} from './branch1-reliability.js';
+import {resolveBranch1Question, isCorrection, branch1SpeechItems, answerBranch1Local, answerBranch1Events, createBranch1Search, filterBranch1Results, isBranch1LocalRequest} from './branch1-reliability.js';
+
+test('branch1 generic web results require the requested city and topic',()=>{
+  const input=[{title:'חנויות ירושלים',snippet:'חנויות בקניון רמות'}, {title:'חדשות קרית גת',snippet:'חדשות ספורט'}, {title:'חנויות קרית גת',snippet:'כתובת עסק'}];
+  assert.equal(filterBranch1Results('חנויות קריית גת',input).length,1);
+  assert.equal(isBranch1LocalRequest('מה שעות חנות ברמות דוד בקרית גת'),false);
+});
 
 test('correction reruns the resolved user question, not the irrelevant answer', () => {
   assert.equal(isCorrection('לא הבנת מה שאמרתי'),true);

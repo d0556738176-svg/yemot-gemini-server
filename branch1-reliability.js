@@ -45,6 +45,7 @@ export function resolveBranch1Question(text, history = []) {
 }
 
 export function isBranch1LocalRequest(q) {
+  if (/(שעות|מתי פתוח|מתי נסגר|טלפון|מוקד)/u.test(q)) return false;
   return /(חנות|חנויות|חניות|עסקים|מכולת|סופרמרקט|מסעדות|מסעדה)/u.test(q) && !!extractExplicitLocation(q).area;
 }
 
