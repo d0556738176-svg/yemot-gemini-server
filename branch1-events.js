@@ -90,6 +90,7 @@ export async function findBranch1Events(q,search,{read=readSinglePublicWebsitePa
   const selected=events.slice(0,5);
   return 'בלוחות האירועים של '+city+' מופיעים: '+selected.map(e=>{
     const ended=e.date===range.today&&e.time<clock;
-    return e.name+', בתאריך '+e.date+', בשעה '+e.time+(e.venue?', ב'+e.venue:'')+(ended?'. שעת ההתחלה כבר עברה':'');
+    const spokenDate=new Intl.DateTimeFormat('he-IL',{timeZone:'UTC',day:'numeric',month:'long',year:'numeric'}).format(new Date(e.date+'T12:00:00Z'));
+    return e.name+', בתאריך '+spokenDate+', בשעה '+e.time+(e.venue?', ב'+e.venue:'')+(ended?'. שעת ההתחלה כבר עברה':'');
   }).join('. ')+'. המקור: '+[...new Set(selected.map(e=>new URL(e.sourceUrl).hostname))].join(', ')+'. יש לבדוק מול המארגן אם האירוע מתקיים ואם נותרו מקומות.';
 }

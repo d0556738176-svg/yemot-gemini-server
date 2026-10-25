@@ -46,6 +46,7 @@ test('answers events from actual official source pages without synthesis or snip
   let reads=0;
   const answer=await findBranch1Events('מה האירועים שיש היום בבית שמש',()=>{throw Error('must read official calendars');},{now,read:async()=>{reads++;return municipal;}});
   assert.match(answer,/מופע לדוגמה/);assert.match(answer,/17:30/);assert.match(answer,/שעת ההתחלה כבר עברה/);
+  assert.match(answer,/25 באוקטובר 2026/);assert.doesNotMatch(answer,/2026-10-25/);
   assert.match(answer,/פעילות לדוגמה/);assert.doesNotMatch(answer,/מופע מחר/);assert.equal(reads,2);
 });
 test('official source failure invokes extraction; network failure does not claim no events',async()=>{
