@@ -20,6 +20,7 @@ import { callCompatibleChatCompletion } from './provider-fallback.js';
 import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visual-intent.js';
 import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion } from './conversation-context.js';
 import { buildPharmacySearchQueries, buildPharmacySearchAnswer } from './pharmacy-search.js';
+import { shouldForceWebSearch } from './branch1-web-router.js';
 
 import { branch1Clarification, branch1FollowUpHistory, filterBranch1Results, createBranch1Search, resolveBranch1Question, isCorrection, isBranch1LocalRequest, isBranch1EventRequest, answerBranch1Local, answerBranch1Events, branch1SpeechItems } from './branch1-reliability.js';
 
@@ -2129,13 +2130,6 @@ function isLongAnswerRequest(text) {
   return /(תשובה ארוכה|תשובה מפורטת|בהרחבה|בפירוט|תפרט|פרט|ספר לי סיפור|סיפור ארוך|כמה דקות|מספר דקות|מאמר|סקירה מקיפה|היסטוריה של|הסיפור המלא|תן את כל הפרטים|כל הפרטים|לעומק)/i.test(q) || q.length>320;
 }
 
-function shouldForceWebSearch(transcript) {
-  const t = String(transcript || '').toLowerCase().replace(/\s+/g,' ').trim();
-  // Explicit search language always means live web search, even when the topic
-  // is something the server did not anticipate in a hard-coded category list.
-  if (/(חפש|תחפש|תמצא|תאתר|בדוק|תבדוק|תברר|בירור|חיפוש|חפש לי|תבדוק לי|תמצא לי|באינטרנט|בגוגל|ברשת|באתר|באתרים|מה כתוב באתר|מה כתבו על|מצא לי מידע|תן לי מידע עדכני|תדפדף|דפדף|תפתח.{0,20}את האתר|פתח.{0,20}את האתר|תיכנס לאתר|תכנס לאתר|תעבור לעמוד|עמוד הבא|דף הבא|תקרא את האתר|קרא את האתר|באתר הזה|בעמוד הזה|מה כתוב בעמוד)/i.test(t)) return true;
-  return /(חדשות|מבזק|אקטואלי|היום|עכשיו|כרגע|השידור החי|שידור חי|מתי מתחיל|מתי מתחילה|מתי מתחילים|על מה דיברו|מה דיברו|מה אמרו|מה היה בתוכנית|לוח שידורים|תוכנית היום|מספר טלפון|טלפון|כתובת|שעות פתיחה|שעות פעילות|פתוח עכשיו|סגור היום|מתי נסגר|מתי סוגר|מתי פתוח|יצירת קשר|איך יוצרים קשר|אתר רשמי|רשתות חברתיות|רשת חברתית|אינסטגרם|פייסבוק|טיקטוק|טוויטר|עדכון אחרון|מה חדש|הופעה|הופעות|מופע|מופעים|אירוע|אירועים|כרטיסים|רכישת כרטיסים|לקנות כרטיסים|איפה קונים|מחיר כרטיס|מכירת כרטיסים|בית מרקחת|בתי מרקחת|חנות|חנויות|עסק|עסקים|סניף|סניפים|כתובת של|מייל של|דוא.?ל|אימייל|קישור|האתר של|מידע מהאתר|חפש באתר|תחפש באתר|המונדיאל|גביע העולם|מי ניצח|מי זכה|תוצאה|משחק|אליפות העולם|אוטובוס|אוטובוסים|תחנת אוטובוס|תחבורה ציבורית|קו אוטובוס|קווי אוטובוס|רכבת|תחנת רכבת|מסלול נסיעה|איך מגיעים|איך להגיע|הגעה ל|טיול|טיולים|מסלול טיול|אירוע היום|אירועים היום|פעילות היום|פעילויות היום|פעילות קהילתית|פעילויות קהילתיות|מה יש היום|מה יש בסוף השבוע|מה יש בעיר|חניות|חניונים|חניון|חניה|איפה יש|איפה נמצא|איפה נמצאת|איפה אפשר לקנות|מי מוכר|כמה עולה|מה המחיר|מחיר עדכני|זמין במלאי|זמינות במלאי|תפריט|תפריטים|מלאי בחנות|שירותים באזור|עסקים באזור|חנויות באזור)/i.test(t);
-}
 
 function parseJinaSearchResults(body){
   const source=String(body||'').trim();
@@ -3383,8 +3377,14 @@ function buildOpeningForCaller(phone) {
 }
 async function answerBranch1Web(question, historyText='', turnContext=null) {
   const contextual=contextualizeSearchQuestion(question,historyText);
+  const deep=isDeepWebSearchRequest(contextual);
+  // Retrieval is the answer path, not merely a prelude to another model call.
+  // Normal phone lookups return source-grounded evidence immediately; explicit
+  // deep research gets a slightly larger retrieval budget and more sources.
   return answerWithDirectWebFallback(contextual,historyText,turnContext,{
-    skipSynthesis:false,branch1Strict:true,timeoutMs:2200
+    skipSynthesis:true,
+    branch1Strict:true,
+    timeoutMs:deep?4200:2400
   });
 }
 
@@ -3531,6 +3531,13 @@ async function callHandler(call) {
       const branch1Local=!branch1Website && isBranch1LocalRequest(userTranscript);
       const branch1Events=!branch1Website && isBranch1EventRequest(userTranscript);
       turnContext.lastRoute=branch1Website?'website':branch1Local?'local':branch1Events?'events':'other';
+      const forcedWebSearch=shouldForceWebSearch(userTranscript);
+      console.info('[BRANCH1_ROUTER]',{
+        callId:activeKey,
+        route:branch1Website?'website':branch1Local?'local':branch1Events?'events':forcedWebSearch?'web':'conversation',
+        forcedWebSearch,
+        transcriptChars:userTranscript.length
+      });
       const directDataRequest = !!clarification || branch1Website || branch1Local || branch1Events ||
         isMultimodalAnalysisRequest(userTranscript).any ||
         isVisualContinuationRequest(userTranscript,visualHistoryText) ||
@@ -3542,7 +3549,7 @@ async function callHandler(call) {
         isWebsiteNavigationRequest(userTranscript) ||
         isGenericWebsiteRequest(userTranscript) ||
         !!extractExplicitHttpUrl(userTranscript) ||
-        shouldForceWebSearch(userTranscript) ||
+        forcedWebSearch ||
         /(חפש|תחפש|תמצא|חיפוש|באינטרנט|בגוגל|מה קורה עכשיו|מידע עדכני)/i.test(userTranscript) ||
         /(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript);
 
