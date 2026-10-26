@@ -6,6 +6,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { tavily } from '@tavily/core';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
+import { selectedResultIndex, isMoreResultsRequest, isFreshYouTubeSearch } from './youtube-selection.js';
+import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
@@ -3762,52 +3764,19 @@ async function callHandler(call) {
  * Uses the same raw-recording -> Gemini transcription convention as the main robot.
  */
 async function youtubeCallHandler(call) {
-  // Conversational YouTube discovery only. We keep search/selection separate from
-  // playback so the phone flow never waits on an unsupported media extraction job.
+  // Branch 2 stays isolated from the main AI conversation.
+  // A result selection is remembered and playback starts only after a clear
+  // spoken confirmation ("כן"). A rejection keeps the current results alive.
   let currentQuery='';
   let results=[];
   let resultOffset=0;
-  let selectedVideo=null;
   let nextPrompt=null;
+  let pendingVideo=null;
 
-  const numberWords = {
-    'אחד':1,'אחת':1,'ראשון':1,'ראשונה':1,'הראשון':1,'הראשונה':1,
-    'שתיים':2,'שניים':2,'שתי':2,'שני':2,'שניה':2,'שנייה':2,'השני':2,'השניה':2,'השנייה':2,
-    'שלוש':3,'שלושה':3,'שלישי':3,'שלישית':3,'השלישי':3,'השלישית':3,
-    'ארבע':4,'ארבעה':4,'רביעי':4,'רביעית':4,'הרביעי':4,'הרביעית':4,
-    'חמש':5,'חמישה':5,'חמישי':5,'חמישית':5,'החמישי':5,'החמישית':5,
-    'שש':6,'שישה':6,'שישי':6,'שישית':6,'השישי':6,'השישית':6,
-    'שבע':7,'שבעה':7,'שביעי':7,'שביעית':7,'השביעי':7,'השביעית':7,
-    'שמונה':8,'שמיני':8,'שמינית':8,'השמיני':8,'השמינית':8,
-    'תשע':9,'תשעה':9,'תשיעי':9,'תשיעית':9,'התשיעי':9,'התשיעית':9,
-    'עשר':10,'עשרה':10,'עשירי':10,'עשירית':10,'העשירי':10,'העשירית':10
-  };
-
-  function spokenNumber(text) {
-    const t=String(text||'').trim().toLowerCase().replace(/[.,!?;:]+/g,' ');
-    const digit=t.match(/\b(\d{1,2})\b/);
-    if(digit) return Number(digit[1]);
-    for(const [word,n] of Object.entries(numberWords)) {
-      if(new RegExp('(^|\\s)'+word+'($|\\s)','i').test(t)) return n;
-    }
-    return null;
-  }
-
-  function isMoreRequest(text) {
-    return /(עוד|תוצאות נוספות|עוד תוצאות|הבא|הבאה|דף הבא|תראה עוד|תביא עוד)/i.test(String(text||''));
-  }
-
-  function isNewSearch(text) {
-    return /(חפש|תחפש|תמצא|תאתר|חיפוש|נושא חדש|חיפוש חדש|משהו אחר)/i.test(String(text||''));
-  }
-
-  function isYes(text) {
-    return /^(כן|כן בהחלט|בוודאי|בטח|אני רוצה|רוצה|כן אני רוצה|תשמיע|להשמיע|כן תשמיע)\\s*$/i.test(String(text||'').trim());
-  }
-
-  function isNo(text) {
-    return /^(לא|לא תודה|לא רוצה|סיימתי|זה מספיק|תודה)\\s*$/i.test(String(text||'').trim());
-  }
+  const normalizeConfirm=(text)=>String(text||'').normalize('NFKC').toLowerCase()
+    .replace(/[.,!?;:״"'׳]/g,' ').replace(/\s+/g,' ').trim();
+  const isYesConfirm=(text)=>/^(?:כן|כן כן|כן בבקשה|כן תשמיע|כן תפעיל|כן אני רוצה|בטח|בוודאי|אכן)(?:\s|$)/u.test(normalizeConfirm(text));
+  const isNoConfirm=(text)=>/^(?:לא|לא תודה|לא רוצה|לא זה|אחר|אחרת)(?:\s|$)/u.test(normalizeConfirm(text));
 
   function formatResultsPage() {
     const page=results.slice(resultOffset,resultOffset+5);
@@ -3817,25 +3786,100 @@ async function youtubeCallHandler(call) {
       return 'תוצאה מספר '+n+': '+sanitizeForYemot(v.title)+'. הערוץ: '+sanitizeForYemot(v.channelTitle)+'.';
     });
     resultOffset += page.length;
-    return 'מצאתי כמה תוצאות. '+lines.join(' ')+' אמור את מספר התוצאה שאתה רוצה, או אמור עוד לעוד תוצאות.';
+    return 'מצאתי כמה תוצאות. '+lines.join(' ')+' אמור את מספר התוצאה או את השם שלה. אחרי הבחירה אבקש ממך אישור לפני ההשמעה. אפשר גם לומר עוד לתוצאות נוספות.';
+  }
+
+  async function playSelected(call, video) {
+    console.info('[YouTube IVR] direct playback requested', { videoId: video.videoId });
+
+    // Preferred path: the isolated Audio Worker supplied for branch 2.
+    // The worker owns media acquisition, FFmpeg conversion, Yemot upload,
+    // post-upload verification and cache. If it is not configured or is
+    // temporarily unavailable, keep the existing authorized-source path as
+    // a fallback so the IVR itself does not go down.
+    const workerBase=String(process.env.YOUTUBE_AUDIO_WORKER_URL||'').trim().replace(/\/$/,'');
+    const workerSecret=String(process.env.YOUTUBE_AUDIO_WORKER_SECRET||'').trim();
+    if(workerBase && workerSecret) {
+      try {
+        const workerResponse=await withTimeout(
+          fetch(workerBase+'/prepare-audio',{
+            method:'POST',
+            headers:{
+              'content-type':'application/json',
+              'authorization':'Bearer '+workerSecret
+            },
+            body:JSON.stringify({
+              videoId:video.videoId,
+              title:video.title||'',
+              requestId:crypto.randomUUID()
+            })
+          }),
+          Number(process.env.YOUTUBE_AUDIO_WORKER_TIMEOUT_MS||120000),
+          'YouTube audio worker'
+        );
+        const workerBody=await workerResponse.json().catch(()=>null);
+        if(workerResponse.ok && workerBody?.status==='ready' && Array.isArray(workerBody.playbackPaths) && workerBody.playbackPaths.length) {
+          console.info('[YouTube IVR] audio worker ready',{
+            videoId:video.videoId,
+            chunks:workerBody.playbackPaths.length,
+            cached:Boolean(workerBody.cached)
+          });
+          return call.id_list_message([
+            {type:'text',data:'משמיע עכשיו את '+sanitizeForYemot(video.title)+'.'},
+            ...workerBody.playbackPaths.map(file=>({type:'file',data:String(file)}))
+          ],{removeInvalidChars:true});
+        }
+        console.warn('[YouTube IVR] audio worker unavailable; using existing fallback',{
+          videoId:video.videoId,
+          httpStatus:workerResponse.status,
+          status:workerBody?.status||'invalid_response',
+          reason:workerBody?.reason||''
+        });
+      } catch(workerError) {
+        console.warn('[YouTube IVR] audio worker request failed; using existing fallback',{
+          videoId:video.videoId,
+          status:geminiErrorStatus(workerError)
+        });
+      }
+    }
+
+
+    let alternate=null;
+    try {
+      alternate=await resolvePublisherAudio(video);
+      if(alternate) console.info('[YouTube IVR] publisher audio fallback matched',{videoId:video.videoId,source:alternate.source,score:alternate.score});
+    } catch(e) {
+      console.warn('[YouTube IVR] publisher audio fallback unavailable',{videoId:video.videoId,status:geminiErrorStatus(e)});
+    }
+    const playback=await withTimeout(
+      downloadAuthorizedAudioToYemot(video.videoId,{fallbackUrl:alternate?.url||null}),
+      Number(process.env.YOUTUBE_AUTHORIZED_PLAYBACK_TIMEOUT_MS || 90000),
+      'authorized YouTube playback preparation'
+    );
+    if(!playback?.playbackPaths?.length) throw new Error('No playback files generated');
+    console.info('[YouTube IVR] direct playback ready',{videoId:video.videoId,chunks:playback.chunkCount});
+    return call.id_list_message([
+      {type:'text',data:'משמיע עכשיו את '+sanitizeForYemot(video.title)+'.'},
+      ...playback.playbackPaths.map(file=>({type:'file',data:file}))
+    ],{removeInvalidChars:true});
   }
 
   try {
     while(true) {
-      const basePrompt = selectedVideo
-        ? 'האם אתה רוצה לשמוע את הסרטון הזה? אמור כן או לא. ולסיום ההקלטה הקש סולמית'
+      const basePrompt=pendingVideo
+        ? 'בחרת את '+sanitizeForYemot(pendingVideo.title)+'. האם להשמיע את הסרטון הזה? אמור כן או לא.'
         : (!results.length
-          ? 'ברוכים הבאים לחיפוש ביוטיוב. אמור כל מה שאתה מחפש: נושא, אדם, ערוץ, שם סרטון, הסרטון הכי חדש, סרטונים בנושא מסוים או כל ניסוח אחר. אפשר גם לבקש עוד תוצאות. ולסיום ההקלטה הקש סולמית'
-          : 'אמור את מספר התוצאה הרצויה, או אמור עוד כדי לקבל תוצאות נוספות, או חיפוש חדש כדי להתחיל חיפוש אחר. ולסיום ההקלטה הקש סולמית');
-
-      const prompt=nextPrompt || basePrompt;
+          ? 'אמור מה תרצה לחפש ביוטיוב. אפשר לומר נושא, אדם, ערוץ או שם סרטון. ולסיום ההקלטה הקש סולמית'
+          : 'אמור את מספר התוצאה או את השם שלה. אפשר גם לומר עוד או חיפוש חדש. ולסיום ההקלטה הקש סולמית');
+      const prompt=nextPrompt||basePrompt;
       nextPrompt=null;
+
       const recordPath=await call.read(
         [{type:'text',data:sanitizeForYemot(prompt)}],
         'record',
         {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000}
       );
-      if(!recordPath || recordPath==='None')
+      if(!recordPath||recordPath==='None')
         return call.id_list_message([{type:'text',data:'לא נקלטה בקשה. להתראות'}]);
 
       const audioResponse=await withTimeout(
@@ -3845,118 +3889,70 @@ async function youtubeCallHandler(call) {
       );
       const transcript=await transcribePhoneAudio(audioResponse.data);
       console.info('[YouTube IVR] transcript',{chars:transcript.length,transcript});
-      if(!transcript)
-        return call.id_list_message([{type:'text',data:'לא הצלחתי להבין את הבקשה. נא לנסות שוב'}]);
+      if(!transcript) {
+        nextPrompt='לא הצלחתי להבין. אמור שוב את הבקשה או את מספר התוצאה.';
+        continue;
+      }
 
-      if(selectedVideo) {
-        if(isYes(transcript)) {
-          // Only play an exact, independently authorized audio source that was
-          // explicitly mapped to this selected video ID. No YouTube extraction
-          // or hidden stream discovery is performed.
+      if(pendingVideo) {
+        if(isYesConfirm(transcript)) {
+          const selectedVideo=pendingVideo;
+          pendingVideo=null;
           try {
-            console.info('[YouTube IVR] playback requested', { videoId: selectedVideo.videoId });
-            const playback = await withTimeout(
-              downloadAuthorizedAudioToYemot(selectedVideo.videoId),
-              Number(process.env.YOUTUBE_AUTHORIZED_PLAYBACK_TIMEOUT_MS || 90000),
-              'authorized YouTube playback preparation'
-            );
-            if (!playback?.playbackPaths?.length) throw new Error('No playback files generated');
-
-            console.info('[YouTube IVR] authorized playback ready', {
-              videoId: selectedVideo.videoId,
-              chunks: playback.chunkCount
-            });
-
-            const messages = [
-              { type: 'text', data: 'מתחיל להשמיע את הסרטון המאושר.' },
-              ...playback.playbackPaths.map(file => ({ type: 'file', data: file }))
-            ];
-
-            selectedVideo = null;
-            // Yemot-router2 supports file messages directly. This makes the
-            // phone call play the uploaded WAV chunks instead of waiting for
-            // another HTTP request or trying to stream a remote YouTube URL.
-            console.info('[YouTube IVR] playback response ready', { videoId: selectedVideo?.videoId || null, files: playback.playbackPaths.length });
-            return call.id_list_message(messages, { removeInvalidChars: true });
-          } catch (playbackError) {
-            logDetailedError('YouTube authorized playback', playbackError);
-            selectedVideo=null;
-            nextPrompt='אין מקור שמע מורשה זמין לסרטון הזה. אפשר לבחור סרטון אחר. ולסיום ההקלטה הקש סולמית';
+            return await playSelected(call,selectedVideo);
+          } catch(playbackError) {
+            logDetailedError('YouTube authorized playback',playbackError);
+            nextPrompt='לא הצלחתי להשמיע את התוצאה הזאת כרגע. התוצאות נשארו זמינות. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
             continue;
           }
         }
-
-        if(isNo(transcript) || isNewSearch(transcript)) {
-          selectedVideo=null;
-          results=[];
-          resultOffset=0;
-          currentQuery='';
-          nextPrompt='בסדר. אמור עכשיו מה תרצה לחפש ביוטיוב. ולסיום ההקלטה הקש סולמית';
+        if(isNoConfirm(transcript)) {
+          pendingVideo=null;
+          nextPrompt='בסדר. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
           continue;
         }
-        nextPrompt='לא הבנתי אם אתה רוצה לשמוע את הסרטון. אמור כן או לא. ולסיום ההקלטה הקש סולמית';
+        nextPrompt='לא הבנתי את האישור. אם זה הסרטון שבחרת אמור כן. אם לא, אמור לא.';
         continue;
       }
 
-      if(isMoreRequest(transcript) && results.length) {
-        if(resultOffset>=results.length) {
-          nextPrompt='אין עוד תוצאות שכבר נטענו. אמור חיפוש חדש כדי לבצע חיפוש נוסף. ולסיום ההקלטה הקש סולמית';
-        } else {
-          nextPrompt=formatResultsPage();
-        }
+      if(isMoreResultsRequest(transcript)&&results.length) {
+        nextPrompt=resultOffset>=results.length
+          ? 'אין עוד תוצאות שכבר נטענו. אמור חיפוש חדש.'
+          : formatResultsPage();
         continue;
       }
 
-      const selectedNumber=spokenNumber(transcript);
-      if(results.length && selectedNumber!==null) {
-        const idx=selectedNumber-1;
-        if(idx>=0 && idx<results.length) {
-          selectedVideo=results[idx];
-          nextPrompt='בחרת את '+sanitizeForYemot(selectedVideo.title)+'. הערוץ הוא '+sanitizeForYemot(selectedVideo.channelTitle)+'. האם אתה רוצה לשמוע את הסרטון הזה? אמור כן או לא. ולסיום ההקלטה הקש סולמית';
-          continue;
-        }
-        nextPrompt='המספר הזה לא נמצא ברשימה. אמור מספר מתוך התוצאות או אמור עוד. ולסיום ההקלטה הקש סולמית';
+      const selectedIndex=selectedResultIndex(transcript,results);
+      if(selectedIndex>=0) {
+        pendingVideo=results[selectedIndex];
+        nextPrompt='בחרת את '+sanitizeForYemot(pendingVideo.title)+'. האם להשמיע את הסרטון הזה? אמור כן או לא.';
         continue;
       }
 
-      if(isNewSearch(transcript) || !results.length) {
+      if(isFreshYouTubeSearch(transcript)||!results.length) {
         currentQuery=transcript;
-        results=await searchYouTubeVideos(currentQuery,{
-          apiKey:process.env.YOUTUBE_API_KEY,
-          regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
-          timeoutMs:REQUEST_TIMEOUT_MS
-        });
-        resultOffset=0;
-        selectedVideo=null;
-
-        if(!results.length) {
-          nextPrompt='לא מצאתי תוצאות מתאימות ביוטיוב. נסה נושא, אדם, ערוץ או שם סרטון אחר. ולסיום ההקלטה הקש סולמית';
-          continue;
-        }
-
-        nextPrompt=formatResultsPage();
-        continue;
+      } else {
+        // Natural language that does not identify an existing result is treated
+        // as a refined search. This keeps the IVR conversational.
+        currentQuery=transcript;
       }
 
-      // If the caller gives a natural-language request while results are shown,
-      // treat it as a fresh YouTube search rather than forcing keypad interaction.
-      currentQuery=transcript;
       results=await searchYouTubeVideos(currentQuery,{
         apiKey:process.env.YOUTUBE_API_KEY,
         regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
         timeoutMs:REQUEST_TIMEOUT_MS
       });
       resultOffset=0;
-      selectedVideo=null;
       nextPrompt=results.length
         ? formatResultsPage()
-        : 'לא מצאתי תוצאות מתאימות. אמור חיפוש חדש. ולסיום ההקלטה הקש סולמית';
+        : 'לא מצאתי תוצאות מתאימות ביוטיוב. נסה שם, נושא או ערוץ אחר.';
     }
   } catch(error) {
+    if(error instanceof ExitError) throw error;
     logDetailedError('YouTube IVR',error);
     const status=geminiErrorStatus(error);
     const message=status===429?'החיפוש עמוס כרגע. נא לנסות שוב':status===503?'שירות יוטיוב אינו זמין כרגע':'אירעה תקלה זמנית בחיפוש ביוטיוב. נא לנסות שוב';
-    return call.id_list_message([{type:'text',data:message}]);
+    return call.id_list_message([{type:'text',data:sanitizeForYemot(message)}]);
   }
 }
 
@@ -4383,8 +4379,16 @@ async function configureYemotStructure() {
   catch { throw new Error('PUBLIC_BASE_URL is invalid'); }
   if(parsedBase.protocol !== 'https:') throw new Error('PUBLIC_BASE_URL must use HTTPS');
 
-  // This release is intentionally scoped to branch 1. Do not rewrite branch 2,
-  // branch 3, or their voice menu on a branch-1 deployment: another workstream owns them.
+  // Staging-safe branch scoping. A branch-2 deployment must never rewrite
+  // extension 1 or 3 just to connect the YouTube IVR.
+  const configureBranch2Only = process.env.YEMOT_AUTO_CONFIGURE_BRANCH2_ONLY === 'true';
+  if (configureBranch2Only) {
+    await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
+    console.log('[Yemot automatic setup] branch-2-only mode; extensions 1 and 3 were left untouched');
+    return;
+  }
+
+  // Default behavior remains branch 1 only.
   await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
   if (process.env.YEMOT_AUTO_CONFIGURE_ALL_EXTENSIONS === 'true') {
     await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
