@@ -4325,8 +4325,16 @@ async function configureYemotStructure() {
   catch { throw new Error('PUBLIC_BASE_URL is invalid'); }
   if(parsedBase.protocol !== 'https:') throw new Error('PUBLIC_BASE_URL must use HTTPS');
 
-  // This release is intentionally scoped to branch 1. Do not rewrite branch 2,
-  // branch 3, or their voice menu on a branch-1 deployment: another workstream owns them.
+  // Staging-safe branch scoping. A branch-2 deployment must never rewrite
+  // extension 1 or 3 just to connect the YouTube IVR.
+  const configureBranch2Only = process.env.YEMOT_AUTO_CONFIGURE_BRANCH2_ONLY === 'true';
+  if (configureBranch2Only) {
+    await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
+    console.log('[Yemot automatic setup] branch-2-only mode; extensions 1 and 3 were left untouched');
+    return;
+  }
+
+  // Default behavior remains branch 1 only.
   await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
   if (process.env.YEMOT_AUTO_CONFIGURE_ALL_EXTENSIONS === 'true') {
     await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
