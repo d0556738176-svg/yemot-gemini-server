@@ -15,8 +15,16 @@ const activeJobs = new Map();
 
 function yemotApiKey() {
   const key = String(process.env.YEMOT_API_KEY || '').trim();
-  if (!key) throw new Error('YEMOT_API_KEY is missing');
-  return key;
+  if (key) return key;
+
+  // Yemot accepts username:password as the token value. Reuse the same
+  // credentials as the automatic IVR configuration so branch 2 does not
+  // require a duplicate secret.
+  const username = String(process.env.YEMOT_API_USERNAME || '').trim();
+  const password = String(process.env.YEMOT_API_PASSWORD || '').trim();
+  if (username && password) return username + ':' + password;
+
+  throw new Error('Yemot credentials are missing');
 }
 
 async function authorizedSourceFromSupabase(videoId) {
@@ -65,14 +73,19 @@ function validateSourceUrl(value, dynamicAllowedHost='') {
 async function fetchAuthorizedSource(videoId, output, fallbackUrl=null) {
   const id = String(videoId || '').trim();
   console.info('[YouTube IVR] playback step 1: looking up authorized source', { videoId: id });
-  const mapped = await authorizedSourceFromSupabase(id) || authorizedSourceFromEnv(id) || fallbackUrl;
+  const registrySource = await authorizedSourceFromSupabase(id) || authorizedSourceFromEnv(id);
+  const mapped = registrySource || fallbackUrl;
   if (!mapped) {
     console.warn('[YouTube IVR] playback stopped: no authorized source mapping', { videoId: id });
     throw new Error('No authorized audio source mapped to this video');
   }
   console.info('[YouTube IVR] playback step 2: authorized source found', { videoId: id, host: new URL(mapped).hostname });
 
-  const sourceUrl = validateSourceUrl(mapped);
+  // Configured registry sources stay restricted to AUTHORIZED_AUDIO_HOSTS.
+  // A publisher RSS fallback was already discovered from that publisher's
+  // public feed; allow only the exact host of that one resolved enclosure.
+  const dynamicAllowedHost = !registrySource && fallbackUrl ? new URL(fallbackUrl).hostname : '';
+  const sourceUrl = validateSourceUrl(mapped, dynamicAllowedHost);
   const response = await fetch(sourceUrl, {
     headers: { accept: 'audio/*,application/octet-stream;q=0.9,*/*;q=0.1' },
     signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS)
