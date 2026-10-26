@@ -3812,6 +3812,59 @@ async function youtubeCallHandler(call) {
 
   async function playSelected(call, video) {
     console.info('[YouTube IVR] direct playback requested', { videoId: video.videoId });
+
+    // Preferred path: the isolated Audio Worker supplied for branch 2.
+    // The worker owns media acquisition, FFmpeg conversion, Yemot upload,
+    // post-upload verification and cache. If it is not configured or is
+    // temporarily unavailable, keep the existing authorized-source path as
+    // a fallback so the IVR itself does not go down.
+    const workerBase=String(process.env.YOUTUBE_AUDIO_WORKER_URL||'').trim().replace(/\/$/,'');
+    const workerSecret=String(process.env.YOUTUBE_AUDIO_WORKER_SECRET||'').trim();
+    if(workerBase && workerSecret) {
+      try {
+        const workerResponse=await withTimeout(
+          fetch(workerBase+'/prepare-audio',{
+            method:'POST',
+            headers:{
+              'content-type':'application/json',
+              'authorization':'Bearer '+workerSecret
+            },
+            body:JSON.stringify({
+              videoId:video.videoId,
+              title:video.title||'',
+              requestId:crypto.randomUUID()
+            })
+          }),
+          Number(process.env.YOUTUBE_AUDIO_WORKER_TIMEOUT_MS||120000),
+          'YouTube audio worker'
+        );
+        const workerBody=await workerResponse.json().catch(()=>null);
+        if(workerResponse.ok && workerBody?.status==='ready' && Array.isArray(workerBody.playbackPaths) && workerBody.playbackPaths.length) {
+          console.info('[YouTube IVR] audio worker ready',{
+            videoId:video.videoId,
+            chunks:workerBody.playbackPaths.length,
+            cached:Boolean(workerBody.cached)
+          });
+          return call.id_list_message([
+            {type:'text',data:'משמיע עכשיו את '+sanitizeForYemot(video.title)+'.'},
+            ...workerBody.playbackPaths.map(file=>({type:'file',data:String(file)}))
+          ],{removeInvalidChars:true});
+        }
+        console.warn('[YouTube IVR] audio worker unavailable; using existing fallback',{
+          videoId:video.videoId,
+          httpStatus:workerResponse.status,
+          status:workerBody?.status||'invalid_response',
+          reason:workerBody?.reason||''
+        });
+      } catch(workerError) {
+        console.warn('[YouTube IVR] audio worker request failed; using existing fallback',{
+          videoId:video.videoId,
+          status:geminiErrorStatus(workerError)
+        });
+      }
+    }
+
+
     let alternate=null;
     try {
       alternate=await resolvePublisherAudio(video);
