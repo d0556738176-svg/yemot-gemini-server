@@ -3973,7 +3973,7 @@ async function youtubeCallHandler(call) {
     logDetailedError('YouTube IVR',error);
     const status=geminiErrorStatus(error);
     const message=status===429?'החיפוש עמוס כרגע. נא לנסות שוב':status===503?'שירות יוטיוב אינו זמין כרגע':'אירעה תקלה זמנית בחיפוש ביוטיוב. נא לנסות שוב';
-    return call.id_list_message([{type:'text',data:message}]);
+    return call.id_list_message([{type:'text',data:sanitizeForYemot(message)}]);
   }
 }
 
