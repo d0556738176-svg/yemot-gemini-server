@@ -37,3 +37,19 @@ test('second-opinion transcript wins only when it contains a known name Deepgram
   assert.equal(ctx2.choose('מה המספר של ביטוח לאומי','',vocab),'מה המספר של ביטוח לאומי');
   assert.equal(ctx2.choose('מה המספר של בעל פגי','מה המספר של בעל פגי',vocab),'מה המספר של בנק פאגי');
 });
+
+test('garbled Super-Pharm and Discount are corrected',()=>{
+  assert.equal(context.fix('מה המספר של סוף אפרים ברעננה'),'מה המספר של סופר פארם ברעננה');
+  assert.equal(context.fix('מה המספר של בנקי דישקונט'),'מה המספר של בנק דיסקונט');
+  assert.equal(context.fix('סופר פארם'),'סופר פארם');
+});
+
+test('official-site phone fallback uses only the official domain',()=>{
+  const c={console,URL};vm.createContext(c);
+  const a=source.indexOf('function officialDomainsForQuestion'),b=source.indexOf('function normalizePhoneCandidate');
+  vm.runInContext(source.slice(a,b)+'\nglobalThis.p=officialPhoneAnswerFromSources;',c);
+  const out=c.p('מה המספר של בנק דיסקונט',[{url:'https://www.discountbank.co.il/x',snippet:'ראשי *6111 נוסף 03-9439111'},{url:'https://spam.example',snippet:'*9999 050-1234567'}]);
+  assert.match(out,/\*6111/);assert.match(out,/03-9439111/);
+  assert.doesNotMatch(out,/9999|1234567/);
+  assert.equal(c.p('מה המספר של בנק דיסקונט',[{url:'https://spam.example',snippet:'*9999'}]),'');
+});
