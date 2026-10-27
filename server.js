@@ -419,6 +419,21 @@ const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:180000, transient
 const branch1BackupCooldowns = createCooldownRegistry({quotaMs:180000, transientMs:45000});
 
 async function generateBranch1WithFallback(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null) {
+  // Gemini is the least available provider: for plain-text prompts the independent fast
+  // providers answer first, and Gemini is only used when they all fail.
+  if(process.env.BRANCH1_GEMINI_LAST!=='off' && !useWebSearch && Array.isArray(contents) && contents.length &&
+     contents.every(item=>Array.isArray(item?.parts)&&item.parts.length&&item.parts.every(part=>typeof part?.text==='string'))) {
+    const flat=contents.map(item=>(item.role==='model'?'Assistant: ':'User: ')+item.parts.map(part=>part.text).join('\n')).join('\n\n');
+    try {
+      const answer=await raceSynthesis(flat,fastPhone?3200:7000,{gemini:false,maxTokens:fastPhone?700:1400});
+      if(String(answer||'').trim()) {
+        console.info('[BRANCH1 FALLBACK] independent provider answered before Gemini',{fastPhone,chars:String(answer).length});
+        return {response:{text:()=>String(answer).trim()}};
+      }
+    } catch(e) {
+      console.warn('[BRANCH1 FALLBACK] independent providers failed; trying Gemini last',{status:geminiErrorStatus(e),fastPhone});
+    }
+  }
   let primaryError;
   if (branch1PrimaryCooldown.isCoolingDown('primary')) {
     const remainingMs=branch1PrimaryCooldown.remainingMs('primary');
@@ -2139,7 +2154,15 @@ async function readBestPages(question,results,budgetMs=2000){
 async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate=null}={}){
   // Gemini-only racer (not generateBranch1WithFallback, which would call Groq/OpenRouter a
   // second time) and it honors the shared circuit breaker so a stalled Gemini costs nothing.
+  // Gemini is the last resort: it only starts after a short hedge delay, and never if an
+  // independent provider already produced an answer.
+  let raceDone=false;
+  const othersConfigured=Boolean((process.env.GROQ_API_KEY||'').trim()||(process.env.OPENROUTER_API_KEY||'').trim()||extraFastProviders(true).length);
   const racers=gemini?[(async()=>{
+    if(othersConfigured) {
+      await new Promise(r=>setTimeout(r,Number(process.env.BRANCH1_GEMINI_HEDGE_MS||1800)));
+      if(raceDone) throw Object.assign(new Error('Gemini not needed'),{status:499});
+    }
     if(branch1PrimaryCooldown.isCoolingDown('primary')) throw Object.assign(new Error('Gemini cooling down'),{status:503});
     try {
       const r=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,true,null,Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS||2200));
@@ -2169,7 +2192,8 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     if(!validate(text)) { console.warn('[BRANCH1_WEB_SYNTH] ungrounded answer rejected'); throw Object.assign(new Error('ungrounded answer'),{status:422}); }
     return text;
   })):racers;
-  return withTimeout(Promise.any(checked),budgetMs,'branch1 web synthesis');
+  try { return await withTimeout(Promise.any(checked),budgetMs,'branch1 web synthesis'); }
+  finally { raceDone=true; }
 }
 // Follow-up resolution: a short question that leans on the previous turn ("is it open now?",
 // "and what is its number?") is rewritten into a self-contained question by a fast model,
