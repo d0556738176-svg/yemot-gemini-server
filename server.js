@@ -3487,6 +3487,8 @@ async function callHandler(call) {
       audioBuffer=response.data;
     } catch(e) {
       logDetailedError('recording download',e);
+      // Tell the caller what happened instead of silently re-prompting.
+      nextPrompt='לא הצלחתי לקלוט את ההקלטה. אמור שוב בבקשה';
       continue;
     }
     const audioBase64=Buffer.isBuffer(audioBuffer)?audioBuffer.toString('base64'):Buffer.from(audioBuffer).toString('base64');
