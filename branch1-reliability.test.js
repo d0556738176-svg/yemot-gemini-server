@@ -87,7 +87,7 @@ test('actual branch1 handler survives model timeout and reaches quick fallback w
     answerIsraelTimeQuestion:()=>'',answerDailyDateQuestion:()=>'',EXCLUSIVE_INSTRUCTION:'',LONG_ANSWER_MAX_CHARS:12000,
     generateBranch1WithFallback:async()=>{throw Object.assign(Error('timeout'),{status:408});},
     logDetailedError(){},answerWithDirectWebFallback:async(q,h)=>{assert.equal(h,'');fallbacks++;return 'תשובה מהמקורות';},
-    sanitizeForYemot:x=>x,normalizePhone:x=>x,persistConversationEntry:async()=>{},MAX_CONVERSATION_LOG:1000};
+    sanitizeForYemot:x=>x,correctKnownSpeechNames:x=>x,normalizePhone:x=>x,persistConversationEntry:async()=>{},MAX_CONVERSATION_LOG:1000};
   for(const key of ['isWeatherQuestion','isNewsQuestion','isWebsiteCapabilityQuestion','isWebsiteNavigationRequest','isGenericWebsiteRequest','shouldForceWebSearch','isLongAnswerRequest','isDeepWebSearchRequest','isTransitRequest','isPhoneNumberRequest','isPharmacySearchRequest','isBusinessHoursRequest']) context[key]=()=>false;
   context.extractExplicitHttpUrl=()=>'';
   vm.createContext(context);vm.runInContext(handler+'\nglobalThis.handler=callHandler;',context);
