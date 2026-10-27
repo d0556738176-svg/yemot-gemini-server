@@ -391,6 +391,18 @@ const branch1BackupWebModels = branch1BackupGeminiClient
 let openAIBillingCooldownUntil = 0;
 const branch1FallbackProviderCooldowns = new Map();
 const branch1SynthCooldowns = new Map();
+// Extra free OpenAI-compatible providers: each activates only when its key env var exists.
+function extraFastProviders(fastPhone=true){
+  const defs=[
+    ['Mistral','https://api.mistral.ai/v1','MISTRAL_API_KEY','MISTRAL_MODEL','mistral-small-latest'],
+    ['Cerebras','https://api.cerebras.ai/v1','CEREBRAS_API_KEY','CEREBRAS_MODEL','gpt-oss-120b'],
+    ['SambaNova','https://api.sambanova.ai/v1','SAMBANOVA_API_KEY','SAMBANOVA_MODEL','gpt-oss-120b']
+  ];
+  return defs.map(([name,baseUrl,keyEnv,modelEnv,defModel])=>({
+    name,baseUrl,apiKey:(process.env[keyEnv]||'').trim(),model:(process.env[modelEnv]||defModel).trim(),
+    timeoutMs:Number(process.env[name.toUpperCase()+'_TIMEOUT_MS']||(fastPhone?1800:6500))
+  })).filter(x=>x.apiKey);
+}
  // Log configuration presence only; never print or partially reveal API keys.
 console.info('[BRANCH1 FALLBACK] independent provider configuration', {
   groqConfigured: Boolean((process.env.GROQ_API_KEY || '').trim()),
@@ -398,6 +410,7 @@ console.info('[BRANCH1 FALLBACK] independent provider configuration', {
   openRouterConfigured: Boolean((process.env.OPENROUTER_API_KEY || '').trim()),
   openRouterModel: (process.env.OPENROUTER_MODEL || 'openrouter/free').trim()
 });
+console.info('[BRANCH1 FALLBACK] extra providers configured',{names:extraFastProviders().map(x=>x.name)});
 // Branch 1 should stop repeatedly calling a provider after quota/overload failures.
 // This is deliberately isolated from the primary/backup call handlers for other branches.
 const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:180000, transientMs:45000});
@@ -458,7 +471,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
           timeoutMs: Number(process.env.OPENROUTER_TIMEOUT_MS || (fastPhone ? 1400 : 5500))
         }
       ];
-      const configuredIndependentProviders=independentProviders.filter(provider=>provider.apiKey);
+      const configuredIndependentProviders=[...independentProviders.filter(provider=>provider.apiKey),...extraFastProviders(fastPhone)];
       if (fastPhone && configuredIndependentProviders.length > 1) {
         // Phone latency matters more than preserving provider order after Gemini has
         // already failed. Race independent providers and use the first healthy answer;
@@ -3090,6 +3103,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
         for(const provider of [
           {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim()},
           {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim()}
+          ,...extraFastProviders(true)
         ]) {
           if(!provider.apiKey) continue;
           racers.push(callCompatibleChatCompletion({
