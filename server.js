@@ -392,6 +392,7 @@ const branch1BackupWebModels = branch1BackupGeminiClient
 let openAIBillingCooldownUntil = 0;
 const branch1FallbackProviderCooldowns = new Map();
 const branch1SynthCooldowns = new Map();
+const branch1SynthCooldownsBig = new Map();
 // Extra free OpenAI-compatible providers: each activates only when its key env var exists.
 function extraFastProviders(fastPhone=true){
   const defs=[
@@ -2095,7 +2096,47 @@ function extractRequestedBusinessName(question) {
 
 // Shared fast answer synthesis: races Gemini and every configured independent provider
 // and returns the first healthy answer inside the time budget (or throws).
-async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700}={}){
+// Grounding check: phone-like numbers and clock times in a model answer must literally appear
+// in the evidence it was given. An ungrounded answer is rejected so another racer can win.
+function groundedValidator(evidenceText){
+  const evidence=String(evidenceText||'');
+  const evDigits=evidence.replace(/[\s\-‑–־.]/g,'');
+  const evTimes=new Set([...evidence.matchAll(/(\d{1,2})[:.](\d{2})/g)].map(m=>Number(m[1])+':'+m[2]));
+  return answer=>{
+    const text=String(answer||'');
+    for(const m of text.matchAll(/\*\d{3,4}|(?<![\d])0\d{1,2}[\s\-‑–]?\d{3}[\s\-‑–]?\d{4}(?!\d)|(?<![\d])1[\s\-‑–]?[27]00[\s\-‑–]?\d{3}[\s\-‑–]?\d{3}(?!\d)/g)) {
+      const digits=m[0].replace(/[\s\-‑–]/g,'');
+      if(!evDigits.includes(digits)) return false;
+    }
+    for(const m of text.matchAll(/(?<!\d)(\d{1,2})[:.](\d{2})(?!\d)/g)) {
+      if(!evTimes.has(Number(m[1])+':'+m[2])) return false;
+    }
+    return true;
+  };
+}
+const PHONE_IN_TEXT=/\*\d{3,4}|(?<![\d])0\d{1,2}[\s\-‑–]?\d{3}[\s\-‑–]?\d{4}(?!\d)|(?<![\d])1[\s\-‑–]?[27]00[\s\-‑–]?\d{3}[\s\-‑–]?\d{3}(?!\d)/;
+
+// When search snippets lack the requested detail, read the real page text of the best
+// candidates (official domain first) within a short budget.
+async function readBestPages(question,results,budgetMs=2000){
+  try {
+    const domains=officialDomainsForQuestion(question);
+    const ranked=[...(results||[]).filter(r=>domains.length&&isOfficialSearchUrl(r.url,domains)),...(results||[])];
+    const urls=[...new Set(ranked.map(r=>r.url).filter(Boolean))].slice(0,2);
+    if(!urls.length) return [];
+    const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
+    const extracted=await withTimeout(client.extract(urls,{extractDepth:'basic',timeout:Math.ceil(budgetMs/1000)}),budgetMs,'evidence page extraction');
+    return (Array.isArray(extracted.results)?extracted.results:[]).map(page=>({
+      title:String(page.title||''),url:String(page.url||''),
+      snippet:String(page.rawContent||page.content||'').trim().slice(0,3000)
+    })).filter(x=>x.snippet.length>80);
+  } catch(e) {
+    console.warn('[EVIDENCE] page read unavailable',{status:geminiErrorStatus(e)});
+    return [];
+  }
+}
+
+async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate=null}={}){
   // Gemini-only racer (not generateBranch1WithFallback, which would call Groq/OpenRouter a
   // second time) and it honors the shared circuit breaker so a stalled Gemini costs nothing.
   const racers=gemini?[(async()=>{
@@ -2112,6 +2153,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700}={}){
   })()]:[];
   for(const provider of [
     {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim()},
+    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim(),big:true},
     {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim()},
     ...extraFastProviders(true)
   ]) {
@@ -2119,11 +2161,15 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700}={}){
     racers.push(callCompatibleChatCompletion({
       provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
       messages:[{role:'user',content:prompt}],timeoutMs:Math.max(1200,budgetMs-300),
-      maxTokens,cooldowns:branch1SynthCooldowns,cooldownMs:15000
+      maxTokens,cooldowns:provider.big?branch1SynthCooldownsBig:branch1SynthCooldowns,cooldownMs:15000
     }).then(text=>{ if(!String(text||'').trim()) throw new Error('empty'); return String(text).trim(); })
       .catch(err=>{ console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
   }
-  return withTimeout(Promise.any(racers),budgetMs,'branch1 web synthesis');
+  const checked=validate?racers.map(r=>r.then(text=>{
+    if(!validate(text)) { console.warn('[BRANCH1_WEB_SYNTH] ungrounded answer rejected'); throw Object.assign(new Error('ungrounded answer'),{status:422}); }
+    return text;
+  })):racers;
+  return withTimeout(Promise.any(checked),budgetMs,'branch1 web synthesis');
 }
 // Follow-up resolution: a short question that leans on the previous turn ("is it open now?",
 // "and what is its number?") is rewritten into a self-contained question by a fast model,
@@ -2275,7 +2321,7 @@ async function answerBusinessHoursDirect(transcript) {
         'כעת בישראל: '+israelNowText()+'. ענה בדיוק על מה שנשאל: אם שאל אם פתוח עכשיו, אמור כן או לא לפי השעה כעת ולפי שעות הפתיחה במקורות; אם שאל על שעות, מסור את השעות לפי ימים כפי שמופיעות. '+
         'אם המקורות כוללים שעות רק לחלק מהימים, מסור מה שיש וציין מה חסר. אם המקור מתייחס לסניף אחר או לעיר אחרת, אל תשתמש בו. אם אין במקורות שעות בכלל, אמור זאת בקצרה ואל תנחש. אל תמציא.\n\n'+
         'השאלה: '+question+'\n\nמקורות:\n'+evidence;
-      const raced=sanitizeForYemot(await raceSynthesis(prompt,3600));
+      const raced=sanitizeForYemot(await raceSynthesis(prompt,3600,{validate:groundedValidator(evidence+' '+israelNowText())}));
       if(raced.length>8) {
         console.info('[BUSINESS_HOURS] synthesized hours answer',{chars:raced.length,pages:pages.length});
         return raced;
@@ -3203,14 +3249,20 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     try {
       const synthBudgetMs=Number(process.env.BRANCH1_WEB_SYNTH_BUDGET_MS || 3200);
       if(synthBudgetMs>0) {
-        const synthEvidence=unique.slice(0,deepSearch?6:4).map((x,i)=>
-          'מקור '+(i+1)+' ('+String(x.url||'').slice(0,100)+'): '+String(x.title||'').slice(0,120)+'\n'+String(x.snippet||'').slice(0,deepSearch?900:600)).join('\n\n');
+        let evidenceItems=unique.slice(0,deepSearch?6:4);
+        // Phone request but no number in any snippet: read the best pages instead of guessing.
+        if(isPhoneNumberRequest(question) && !evidenceItems.some(x=>PHONE_IN_TEXT.test(String(x.title||'')+' '+String(x.snippet||'')))) {
+          const pages=await readBestPages(question,unique,1900);
+          if(pages.length) evidenceItems=[...pages,...evidenceItems];
+        }
+        const synthEvidence=evidenceItems.map((x,i)=>
+          'מקור '+(i+1)+' ('+String(x.url||'').slice(0,100)+'): '+String(x.title||'').slice(0,120)+'\n'+String(x.snippet||'').slice(0,deepSearch?900:(i<2&&String(x.snippet||'').length>1200?1400:600))).join('\n\n');
         const synthPrompt=EXCLUSIVE_INSTRUCTION+'\n\nענה לשאלת המתקשר בעברית טבעית וקצרה (עד 4 משפטים, ואם התבקשו כמה פריטים או סניפים פרט אותם) להקראה בטלפון, על בסיס המקורות בלבד. '+
           'כעת בישראל: '+israelNowText()+'. ענה בדיוק על מה שנשאל ולא על נושא סמוך. אם המקורות חלקיים, מסור את מה שנתמך בהם והבהר בקצרה מה חסר, ואל תסרב כשיש מידע רלוונטי. '+
           'התחל ישר בתשובה. אם המקורות לא עוסקים בנושא השאלה או שהשאלה נראית כתמלול משובש, אמור שלא הצלחת למצוא ובקש מהמתקשר לחזור על שם הגוף או הנושא. '+
           'מספר טלפון: מסור רק אם הוא מופיע במקור שמתאים לגוף שנשאל עליו, וללא שינוי בספרות או בכוכבית. אל תמציא פרטים שלא במקורות.\n\n'+
           'השאלה: '+question+'\n\nמקורות:\n'+synthEvidence;
-        const raced=await raceSynthesis(synthPrompt,synthBudgetMs);
+        const raced=await raceSynthesis(synthPrompt,synthBudgetMs,{validate:groundedValidator(synthEvidence+' '+israelNowText())});
         const synthAnswer=sanitizeForYemot(String(raced||'').trim());
         if(synthAnswer.length>8) {
           console.info('[BRANCH1_WEB_SYNTH] synthesized phone answer',{chars:synthAnswer.length,sources:Math.min(unique.length,deepSearch?6:4)});
