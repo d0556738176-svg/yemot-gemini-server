@@ -31,3 +31,17 @@ test('vision client to Yemot path with simulated services',{skip: !ffmpegPath ||
   assert.equal(result.chunkCount,1);assert.equal(uploaded,1);
  } finally {globalThis.fetch=savedFetch;process.env=previous;await rm(dir,{recursive:true,force:true});}
 });
+test('player denial stops without uploading to Yemot',async()=>{
+ const savedFetch=globalThis.fetch, previous={...process.env}; let yemotCalls=0;
+ try {
+  process.env.YOUTUBE_VISIONOS_EXPERIMENT='true';process.env.YEMOT_API_KEY='fake-token';
+  globalThis.fetch=async input=>{
+   const u=new URL(input);
+   if(u.hostname==='www.youtube.com') return Response.json({playabilityStatus:{status:'LOGIN_REQUIRED'}});
+   if(u.hostname==='www.call2all.co.il') yemotCalls++;
+   throw new Error('Unexpected external request');
+  };
+  await assert.rejects(downloadAuthorizedAudioToYemot('testvideo01'),/Video unavailable/);
+  assert.equal(yemotCalls,0);
+ } finally {globalThis.fetch=savedFetch;process.env=previous;}
+});
