@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
+import { downloadVerified } from './experiments/verified-audio/verified-download.mjs';
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const YEMOT_UPLOAD_URL = YEMOT_API_BASE + '/UploadFile';
@@ -72,6 +73,11 @@ async function fetchAuthorizedSource(videoId, output) {
   console.info('[YouTube IVR] playback step 2: authorized source found', { videoId: id, host: new URL(mapped).hostname });
 
   const sourceUrl = validateSourceUrl(mapped);
+  if (process.env.YOUTUBE_VERIFIED_RANGES === 'true') {
+    const result = await downloadVerified(sourceUrl, output, {maxBytes: MAX_SOURCE_BYTES});
+    console.info('[YouTube IVR] verified range download complete', {videoId: id, bytes: result.bytes});
+    return result.bytes;
+  }
   const response = await fetch(sourceUrl, {
     headers: { accept: 'audio/*,application/octet-stream;q=0.9,*/*;q=0.1' },
     signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS)
@@ -222,3 +228,4 @@ export async function downloadAuthorizedAudioToYemot(videoId) {
   activeJobs.set(id,job);
   return job;
 }
+
