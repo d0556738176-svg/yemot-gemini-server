@@ -5,12 +5,13 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {downloadAuthorizedAudioToYemot} from '../../../youtube-authorized-playback.js';
+import ffmpegPath from 'ffmpeg-static';
 
 test('actual branch 2 playback pipeline with simulated source and Yemot API',async()=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'ivr-int-'));
  try {
   const audio=path.join(dir,'tone.m4a');
-  execFileSync('ffmpeg',['-v','error','-f','lavfi','-i','sine=frequency=440:duration=2','-c:a','aac','-y',audio]);
+  execFileSync(ffmpegPath,['-v','error','-f','lavfi','-i','sine=frequency=440:duration=2','-c:a','aac','-y',audio]);
   const bytes=await readFile(audio);
   const oldFetch=globalThis.fetch;
   const saved={...process.env};
