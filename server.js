@@ -2426,7 +2426,17 @@ function officialDomainsForQuestion(question){
     [/סופר.?פארם|סופר.?אפרים|סופר.?אפרם|סופר.?פרם|super.?pharm/,['super-pharm.co.il']],
     [/בנק הפועלים|הפועלים|poalim/,['bankhapoalim.co.il']],
     [/לאומי|בנק לאומי|leumi/,['leumi.co.il']],
-    [/מזרחי|מזרחי טפחות|mizrahi/,['mizrahitefahot.co.il']]
+    [/מזרחי|מזרחי טפחות|mizrahi/,['mizrahitefahot.co.il']],
+    [/פאגי|pagi/,['pagi.co.il']],
+    [/איגוד|union bank/,['unionbank.co.il']],
+    [/בנק יהב|yahav/,['bank-yahav.co.il']],
+    [/בנק הדואר|postbank/,['postbank.co.il']],
+    [/הבינלאומי|fibi/,['fibi.co.il']],
+    [/ביטוח לאומי/,['btl.gov.il']],
+    [/בזק|bezeq/,['bezeq.co.il']],
+    [/פרטנר|partner/,['partner.co.il']],
+    [/סלקום|cellcom/,['cellcom.co.il']],
+    [/פלאפון|pelephone/,['pelephone.co.il']]
   ];
   for(const [pattern,domains] of map) if(pattern.test(q)) return domains;
   return [];
@@ -3435,16 +3445,22 @@ function buildOpeningForCaller(phone) {
 // before it reaches search. Any failure or timeout returns the original text unchanged.
 async function understandPhoneQuestion(question, historyText='') {
   const original=String(question||'').trim();
-  if(!original || original.length>240 || process.env.BRANCH1_QUERY_REPAIR==='off') return original;
+  const groqKey=(process.env.GROQ_API_KEY||'').trim();
+  if(!original || original.length>240 || process.env.BRANCH1_QUERY_REPAIR==='off' || !groqKey) return original;
   try {
     const prompt='התמלול הבא הגיע מזיהוי דיבור בטלפון ועלול להכיל מילים שגויות, בעיקר שמות של בנקים, חברות, מקומות ואנשים בישראל. '+
       'תקן רק מילים שנשמעות כשגיאת תמלול ברורה (למשל "בת פגי" -> "בנק פאגי") בהתחשב בהקשר השיחה. '+
       'אל תשנה את כוונת השאלה, אל תוסיף מידע ואל תענה עליה. אם הכול נראה תקין, החזר את הטקסט כפי שהוא. החזר רק את השאלה המתוקנת בשורה אחת, בלי הסברים.\n'+
       (historyText?'הקשר שיחה קודם: '+String(historyText).slice(-500)+'\n':'')+'התמלול: '+original;
-    const result=await withTimeout(
-      generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true,null),
-      Number(process.env.BRANCH1_QUERY_REPAIR_BUDGET_MS || 1800),'branch1 query understanding');
-    let fixed=String(result?.response?.text?.()||'').trim().split('\n')[0].replace(/^["'“”]+|["'“”]+$/g,'').trim();
+    // Groq only (never Gemini): keeps this step off the Gemini circuit breaker and
+    // fast; it simply returns the original text when Groq is slow or unavailable.
+    const timeoutMs=Number(process.env.BRANCH1_QUERY_REPAIR_BUDGET_MS || 1500);
+    const answer=await callCompatibleChatCompletion({
+      provider:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:groqKey,
+      model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),
+      messages:[{role:'user',content:prompt}],timeoutMs,maxTokens:120,cooldowns:branch1FallbackProviderCooldowns
+    });
+    let fixed=String(answer||'').trim().split('\n')[0].replace(/^["'“”]+|["'“”]+$/g,'').trim();
     if(!fixed || fixed.length<2 || fixed.length>original.length*2+40) return original;
     if(fixed!==original) console.info('[BRANCH1_QUERY_REPAIR] question repaired',{from:original.slice(0,120),to:fixed.slice(0,120)});
     return fixed;
