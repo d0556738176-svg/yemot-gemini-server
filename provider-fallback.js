@@ -67,6 +67,9 @@ export async function callCompatibleChatCompletion({
           model,
           messages,
           max_tokens: Math.max(128, Number(maxTokens) || 900),
+          // gpt-oss models are reasoning models: low effort keeps answers fast and
+          // stops hidden reasoning from consuming the whole token budget (empty reply).
+          ...(provider === 'Groq' && /gpt-oss/i.test(String(model)) ? { reasoning_effort: 'low' } : {}),
           stream: false
         }),
         signal: controller.signal
