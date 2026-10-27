@@ -3699,7 +3699,7 @@ async function callHandler(call) {
         status:geminiErrorStatus(readError),
         message:String(readError?.message||readError).slice(0,240)
       });
-      const retryPrompt='יש תקלה זמנית בהקראה. אפשר להמשיך. אמור בבקשה את השאלה שלך ולסיום הקש סולמית.';
+      const retryPrompt='יש תקלה זמנית בהקראה. אפשר להמשיך. אמור בבקשה את השאלה שלך.';
       try {
         recordPath=await call.read([{type:'text',data:retryPrompt}],'record',
           {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
@@ -4646,6 +4646,19 @@ async function configureYemotStructure() {
   // This release is intentionally scoped to branch 1. Do not rewrite branch 2,
   // branch 3, or their voice menu on a branch-1 deployment: another workstream owns them.
   await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
+  // Hands-free conversation: end each recording after a few seconds of silence, as if
+  // the caller pressed #. Set in a separate, non-fatal call so an unsupported setting can
+  // never break the main API link. Format: silenceSeconds-minSeconds-maxSeconds.
+  if (process.env.YEMOT_RECORD_SILENCE_SECONDS !== 'off') {
+    const silence=Math.max(1,Math.min(10,Number(process.env.YEMOT_RECORD_SILENCE_SECONDS||3)||3));
+    try {
+      await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot',option_record:silence+'-1-60'});
+      console.log('[Yemot automatic setup] hands-free recording (end on '+silence+'s silence) requested for ivr2:/1');
+    } catch(e) {
+      console.warn('[Yemot automatic setup] hands-free recording setting rejected; continuing with # key',String(e?.message||e).slice(0,200));
+      try { await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'}); } catch {}
+    }
+  }
   if (process.env.YEMOT_AUTO_CONFIGURE_ALL_EXTENSIONS === 'true') {
     await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
     if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
