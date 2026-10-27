@@ -756,15 +756,26 @@ async function transcribePhoneAudio(audioBuffer, options={}) {
   if((process.env.DEEPGRAM_API_KEY||'').trim()) {
     try {
       const dgMeta={};
+      // Start the Gemini second opinion at the same time as Deepgram so a low-confidence
+      // result adds (almost) no waiting; its outcome is simply ignored when Deepgram is sure.
+      const secondOpinionEnabled=!!options.secondOpinion && process.env.BRANCH1_ASR_SECOND_OPINION!=='off';
+      const secondVocab=secondOpinionEnabled
+        ? (process.env.DEEPGRAM_KEYTERMS||'').split(',').map(x=>x.trim()).filter(Boolean).concat(KNOWN_NAME_HINTS)
+        : [];
+      const secondOpinionPromise=secondOpinionEnabled
+        ? transcribeWithGeminiInline(audioBuffer,secondVocab).catch(e=>{
+            console.warn('[ASR_SECOND_OPINION] unavailable; keeping Deepgram',{status:geminiErrorStatus(e)});
+            return '';
+          })
+        : null;
       const deepgramText=await transcribeWithDeepgram(audioBuffer,'',dgMeta);
       if(deepgramText) {
         const lowConfidence=(dgMeta.confidence!==null && dgMeta.confidence!==undefined && dgMeta.confidence<Number(process.env.BRANCH1_ASR_LOW_CONFIDENCE||0.9)) ||
           (dgMeta.weakWords||[]).length>0;
-        if(lowConfidence && options.secondOpinion && process.env.BRANCH1_ASR_SECOND_OPINION!=='off') {
+        if(lowConfidence && secondOpinionPromise) {
           try {
-            const vocab=(process.env.DEEPGRAM_KEYTERMS||'').split(',').map(x=>x.trim()).filter(Boolean)
-              .concat(KNOWN_NAME_HINTS);
-            const geminiText=await transcribeWithGeminiInline(audioBuffer,vocab);
+            const vocab=secondVocab;
+            const geminiText=await secondOpinionPromise;
             const chosen=chooseBetterTranscript(deepgramText,geminiText,vocab);
             console.info('[ASR_SECOND_OPINION]',{
               confidence:dgMeta.confidence,weakWords:dgMeta.weakWords,
