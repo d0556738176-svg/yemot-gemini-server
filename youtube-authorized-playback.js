@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
+import { downloadVisionAudio } from './vision-audio.mjs';
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const YEMOT_UPLOAD_URL = YEMOT_API_BASE + '/UploadFile';
@@ -215,7 +216,17 @@ async function build(videoId, fallbackUrl=null) {
   const chunksDir=path.join(temp,'chunks');
   const paths=[];
   try {
-    await fetchAuthorizedSource(id,source,fallbackUrl);
+    if (process.env.YOUTUBE_VISIONOS_EXPERIMENT !== 'false') {
+      try {
+        await downloadVisionAudio(id, source);
+        console.info('[YouTube IVR] vision audio downloaded', {videoId: id});
+      } catch (error) {
+        console.warn('[YouTube IVR] vision audio unavailable; trying existing source', {videoId: id, error: String(error?.message || '').slice(0,150)});
+        await fetchAuthorizedSource(id,source,fallbackUrl);
+      }
+    } else {
+      await fetchAuthorizedSource(id,source,fallbackUrl);
+    }
     const chunks=await makeChunks(source,chunksDir);
     console.info('[YouTube IVR] playback step 9: uploading chunks', { videoId: id, chunks: chunks.length });
     for(let i=0;i<chunks.length;i++) {
