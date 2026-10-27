@@ -2284,8 +2284,14 @@ async function searchWebDirect(query, options={}) {
     const tavilyClient=process.env.TAVILY_API_KEY
       ? tavily({apiKey:process.env.TAVILY_API_KEY})
       : tavily();
-    const tavilyResponse=await withTimeout(tavilyClient.search(q.slice(0,400),{
-      searchDepth:deepSearch?'advanced':'fast',
+    // Tavily ignores the Google-style `site:` operator. Turn it into a real domain
+    // restriction so official-site lookups (e.g. a bank's contact page) return that site's passages.
+    const siteMatch=q.match(/\bsite:([a-z0-9.-]+\.[a-z]{2,})/i);
+    const siteDomain=siteMatch?siteMatch[1].toLowerCase():'';
+    const searchText=siteDomain?q.replace(siteMatch[0],' ').replace(/\s+/g,' ').trim():q;
+    const tavilyResponse=await withTimeout(tavilyClient.search(searchText.slice(0,400),{
+      ...(siteDomain?{includeDomains:[siteDomain]}:{}),
+      searchDepth:deepSearch?'advanced':(siteDomain?'basic':'fast'),
       topic:'general',
       maxResults:deepSearch?7:5,
       includeAnswer:false,
