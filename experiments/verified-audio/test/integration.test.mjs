@@ -6,8 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import {downloadAuthorizedAudioToYemot} from '../../../youtube-authorized-playback.js';
 import ffmpegPath from 'ffmpeg-static';
+import { existsSync } from 'node:fs';
 
-test('actual branch 2 playback pipeline with simulated source and Yemot API',async()=>{
+test('actual branch 2 playback pipeline with simulated source and Yemot API',{skip: !ffmpegPath || !existsSync(ffmpegPath) ? 'ffmpeg binary is not installed' : false},async()=>{
  const dir=await mkdtemp(path.join(os.tmpdir(),'ivr-int-'));
  try {
   const audio=path.join(dir,'tone.m4a');
