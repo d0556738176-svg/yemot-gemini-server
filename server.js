@@ -697,8 +697,14 @@ async function transcribeWithDeepgram(audioBuffer, overrideKey='') {
 
   const cleaned=sanitizeForYemot(transcript);
   if(cleaned) {
+    const dgAlt=data?.results?.channels?.[0]?.alternatives?.[0];
+    const dgWords=Array.isArray(dgAlt?.words)?dgAlt.words:[];
+    const weakWords=dgWords.filter(w=>Number(w?.confidence)<0.7).map(w=>String(w.word||'').slice(0,20)).slice(0,6);
     console.info('[TRANSCRIBE] deepgram_nova3_he_ok',{
-      mimeType,chars:cleaned.length
+      mimeType,chars:cleaned.length,
+      audioBytes:bytes.length,
+      confidence:Number.isFinite(Number(dgAlt?.confidence))?Number(Number(dgAlt.confidence).toFixed(3)):null,
+      weakWords
     });
     return cleaned;
   }
