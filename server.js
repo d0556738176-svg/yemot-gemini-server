@@ -8,7 +8,7 @@ import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
-import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
+import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion, parseWeeklyHours, buildOpenNowAnswer } from './business-hours.js';
 import { extractExplicitLocation, extractLocalArea, extractSearchCity } from './business-location.js';
 import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, filterNearbyLocalBusinessResults, buildNoVerifiedLocalResultsAnswer, buildLocalBusinessResultsAnswer } from './local-business-search.js';
 import { rankWebsitePages } from './website-relevance.js';
@@ -2096,10 +2096,20 @@ function extractRequestedBusinessName(question) {
 // Shared fast answer synthesis: races Gemini and every configured independent provider
 // and returns the first healthy answer inside the time budget (or throws).
 async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700}={}){
-  const racers=gemini?[
-    generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true,null)
-      .then(r=>String(r?.response?.text?.()||'').trim())
-  ]:[];
+  // Gemini-only racer (not generateBranch1WithFallback, which would call Groq/OpenRouter a
+  // second time) and it honors the shared circuit breaker so a stalled Gemini costs nothing.
+  const racers=gemini?[(async()=>{
+    if(branch1PrimaryCooldown.isCoolingDown('primary')) throw Object.assign(new Error('Gemini cooling down'),{status:503});
+    try {
+      const r=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,true,null,Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS||2200));
+      branch1PrimaryCooldown.clear('primary');
+      return String(r?.response?.text?.()||'').trim();
+    } catch(err) {
+      const st=geminiErrorStatus(err);
+      if([429,408,500,502,503,504].includes(st)) branch1PrimaryCooldown.cool('primary',st);
+      throw err;
+    }
+  })()]:[];
   for(const provider of [
     {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim()},
     {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim()},
@@ -2246,6 +2256,18 @@ async function answerBusinessHoursDirect(transcript) {
             if(content.length>80) pages.push({title:String(page.title||''),url:String(page.url||''),snippet:content.slice(0,3500)});
           }
         } catch(e) { console.warn('[BUSINESS_HOURS] page extraction for synthesis unavailable',{status:geminiErrorStatus(e)}); }
+      }
+      if(/(?:פתוח|פתוחה|פתוחים|סגור|סגורה|סגורים)/.test(question)) {
+        // Wrong "open now" answers are worse than none: compute it from the parsed weekly schedule.
+        const scheduleSources=[...pages,...evidenceResults.filter(x=>resultLooksRelevantForHours(x,business||generic,city))];
+        for(const src of scheduleSources) {
+          const weekly=parseWeeklyHours(String(src.title||'')+' '+String(src.snippet||''));
+          if(weekly) {
+            const label=(business||generic||'העסק');
+            const answer=buildOpenNowAnswer(weekly,/^ה/.test(label)?label:'ה'+label);
+            if(answer) { console.info('[BUSINESS_HOURS] deterministic open-now answer',{url:String(src.url||'').slice(0,100)}); return sanitizeForYemot(answer); }
+          }
+        }
       }
       const evidence=[...pages,...evidenceResults].slice(0,5).map((x,i)=>
         'מקור '+(i+1)+' ('+String(x.url||'').slice(0,100)+'): '+String(x.title||'').slice(0,120)+'\n'+String(x.snippet||'').slice(0,1200)).join('\n\n');
