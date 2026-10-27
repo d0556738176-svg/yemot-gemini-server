@@ -2093,6 +2093,41 @@ function extractRequestedBusinessName(question) {
   return known.find(([,re])=>re.test(t))?.[0] || '';
 }
 
+// Shared fast answer synthesis: races Gemini and every configured independent provider
+// and returns the first healthy answer inside the time budget (or throws).
+async function raceSynthesis(prompt,budgetMs){
+  const racers=[
+    generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true,null)
+      .then(r=>String(r?.response?.text?.()||'').trim())
+  ];
+  for(const provider of [
+    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim()},
+    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim()},
+    ...extraFastProviders(true)
+  ]) {
+    if(!provider.apiKey) continue;
+    racers.push(callCompatibleChatCompletion({
+      provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
+      messages:[{role:'user',content:prompt}],timeoutMs:Math.max(1200,budgetMs-300),
+      maxTokens:700,cooldowns:branch1SynthCooldowns,cooldownMs:15000
+    }).then(text=>{ if(!String(text||'').trim()) throw new Error('empty'); return String(text).trim(); })
+      .catch(err=>{ console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
+  }
+  return withTimeout(Promise.any(racers),budgetMs,'branch1 web synthesis');
+}
+function israelNowText(){
+  const now=new Date();
+  return new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);
+}
+
+function resultLooksRelevantForHours(result,business,city){
+  const hay=String([result?.title,result?.snippet,result?.url].join(' ')).toLowerCase();
+  const biz=String(business||'').toLowerCase();
+  const bizOk=!biz||biz.split(/\s+/).filter(w=>w.length>2).some(w=>hay.includes(w.replace(/^[הלב]/,'')));
+  const cityOk=!city||hay.includes(String(city).toLowerCase());
+  return bizOk&&cityOk;
+}
+
 async function answerBusinessHoursDirect(transcript) {
   const question=String(transcript||'').trim();
   const loc=extractExplicitLocation(question);
@@ -2171,6 +2206,38 @@ async function answerBusinessHoursDirect(transcript) {
   console.info('[BUSINESS_HOURS] deterministic source-grounded answer ready',{
     business:business||generic,city,area,sources:evidenceResults.length,chars:directHoursAnswer.length
   });
+  // The template only speaks hours it can parse from an official snippet. When it could
+  // not, let a fast, time-boxed model read the real page text and answer the actual
+  // question (e.g. "is it open now?"), instead of replying "maybe this matches".
+  if(!/^מצאתי באתר הרשמי/.test(directHoursAnswer) && evidenceResults.length) {
+    try {
+      const pages=[];
+      const relevant=evidenceResults.filter(x=>resultLooksRelevantForHours(x,business||generic,city)).slice(0,2);
+      if(relevant.length) {
+        try {
+          const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
+          const extracted=await withTimeout(client.extract(relevant.map(x=>x.url),{extractDepth:'basic',timeout:3}),2200,'Hours page extraction');
+          for(const page of (Array.isArray(extracted.results)?extracted.results:[])) {
+            const content=String(page.rawContent||page.content||'').trim();
+            if(content.length>80) pages.push({title:String(page.title||''),url:String(page.url||''),snippet:content.slice(0,3500)});
+          }
+        } catch(e) { console.warn('[BUSINESS_HOURS] page extraction for synthesis unavailable',{status:geminiErrorStatus(e)}); }
+      }
+      const evidence=[...pages,...evidenceResults].slice(0,5).map((x,i)=>
+        'מקור '+(i+1)+' ('+String(x.url||'').slice(0,100)+'): '+String(x.title||'').slice(0,120)+'\n'+String(x.snippet||'').slice(0,1200)).join('\n\n');
+      const prompt=EXCLUSIVE_INSTRUCTION+'\n\nענה לשאלת המתקשר בעברית טבעית וקצרה להקראה בטלפון (עד 4 משפטים), על בסיס המקורות בלבד. '+
+        'כעת בישראל: '+israelNowText()+'. ענה בדיוק על מה שנשאל: אם שאל אם פתוח עכשיו, אמור כן או לא לפי השעה כעת ולפי שעות הפתיחה במקורות; אם שאל על שעות, מסור את השעות לפי ימים כפי שמופיעות. '+
+        'אם המקורות כוללים שעות רק לחלק מהימים, מסור מה שיש וציין מה חסר. אם המקור מתייחס לסניף אחר או לעיר אחרת, אל תשתמש בו. אם אין במקורות שעות בכלל, אמור זאת בקצרה ואל תנחש. אל תמציא.\n\n'+
+        'השאלה: '+question+'\n\nמקורות:\n'+evidence;
+      const raced=sanitizeForYemot(await raceSynthesis(prompt,3600));
+      if(raced.length>8) {
+        console.info('[BUSINESS_HOURS] synthesized hours answer',{chars:raced.length,pages:pages.length});
+        return raced;
+      }
+    } catch(e) {
+      console.warn('[BUSINESS_HOURS] synthesis unavailable; using deterministic answer',{status:geminiErrorStatus(e)});
+    }
+  }
   return directHoursAnswer;
 
 }
@@ -3093,29 +3160,11 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
         const synthEvidence=unique.slice(0,deepSearch?6:4).map((x,i)=>
           'מקור '+(i+1)+' ('+String(x.url||'').slice(0,100)+'): '+String(x.title||'').slice(0,120)+'\n'+String(x.snippet||'').slice(0,deepSearch?900:600)).join('\n\n');
         const synthPrompt=EXCLUSIVE_INSTRUCTION+'\n\nענה לשאלת המתקשר בעברית טבעית וקצרה (עד 4 משפטים, ואם התבקשו כמה פריטים או סניפים פרט אותם) להקראה בטלפון, על בסיס המקורות בלבד. '+
+          'כעת בישראל: '+israelNowText()+'. ענה בדיוק על מה שנשאל ולא על נושא סמוך. אם המקורות חלקיים, מסור את מה שנתמך בהם והבהר בקצרה מה חסר, ואל תסרב כשיש מידע רלוונטי. '+
           'התחל ישר בתשובה. אם המקורות לא עוסקים בנושא השאלה או שהשאלה נראית כתמלול משובש, אמור שלא הצלחת למצוא ובקש מהמתקשר לחזור על שם הגוף או הנושא. '+
           'מספר טלפון: מסור רק אם הוא מופיע במקור שמתאים לגוף שנשאל עליו, וללא שינוי בספרות או בכוכבית. אל תמציא פרטים שלא במקורות.\n\n'+
           'השאלה: '+question+'\n\nמקורות:\n'+synthEvidence;
-        // Race Gemini against the independent fast providers: whoever answers first wins,
-        // so a slow or failing Gemini can no longer burn the whole time budget.
-        const racers=[
-          generateBranch1WithFallback([{role:'user',parts:[{text:synthPrompt}]}],false,true,null)
-            .then(r=>String(r?.response?.text?.()||'').trim())
-        ];
-        for(const provider of [
-          {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim()},
-          {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim()}
-          ,...extraFastProviders(true)
-        ]) {
-          if(!provider.apiKey) continue;
-          racers.push(callCompatibleChatCompletion({
-            provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
-            messages:[{role:'user',content:synthPrompt}],timeoutMs:Math.max(1200,synthBudgetMs-300),
-            maxTokens:700,cooldowns:branch1SynthCooldowns,cooldownMs:15000
-          }).then(text=>{ if(!String(text||'').trim()) throw new Error('empty'); return String(text).trim(); })
-            .catch(err=>{ console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
-        }
-        const raced=await withTimeout(Promise.any(racers),synthBudgetMs,'branch1 web synthesis');
+        const raced=await raceSynthesis(synthPrompt,synthBudgetMs);
         const synthAnswer=sanitizeForYemot(String(raced||'').trim());
         if(synthAnswer.length>8) {
           console.info('[BRANCH1_WEB_SYNTH] synthesized phone answer',{chars:synthAnswer.length,sources:Math.min(unique.length,deepSearch?6:4)});
