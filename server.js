@@ -122,6 +122,13 @@ const MEDIA_MAX_IMAGE_BYTES = Number(process.env.MEDIA_MAX_IMAGE_BYTES || 120000
 const MEDIA_MAX_VIDEO_BYTES = Number(process.env.MEDIA_MAX_VIDEO_BYTES || 95000000);
 const MEDIA_ANALYSIS_TIMEOUT_MS = Number(process.env.MEDIA_ANALYSIS_TIMEOUT_MS || 45000);
 const MEDIA_SEARCH_TIMEOUT_MS = Number(process.env.MEDIA_SEARCH_TIMEOUT_MS || 18000);
+// Phone callers hang up long before 3 keys x 5 models x 45s could finish, so media
+// analysis gets a per-attempt cap and an overall deadline; on expiry the existing
+// fallbacks (Google Vision for images, friendly error for video) take over.
+const MEDIA_IMAGE_ATTEMPT_TIMEOUT_MS = Number(process.env.MEDIA_IMAGE_ATTEMPT_TIMEOUT_MS || 14000);
+const MEDIA_IMAGE_TOTAL_BUDGET_MS = Number(process.env.MEDIA_IMAGE_TOTAL_BUDGET_MS || 28000);
+const MEDIA_VIDEO_ATTEMPT_TIMEOUT_MS = Number(process.env.MEDIA_VIDEO_ATTEMPT_TIMEOUT_MS || 32000);
+const MEDIA_VIDEO_TOTAL_BUDGET_MS = Number(process.env.MEDIA_VIDEO_TOTAL_BUDGET_MS || 50000);
 const MEDIA_MAX_CANDIDATES = Number(process.env.MEDIA_MAX_CANDIDATES || 6);
 
 // Avoid repeatedly hammering Gemini after the API has explicitly reported quota exhaustion.
@@ -1259,9 +1266,15 @@ async function analyzePublicImageUrl(imageUrl, question) {
   const prompt='נתח את התמונה עצמה, לא רק את כתובת המקור. השאלה של המתקשר: '+String(question||'תאר את התמונה בפירוט')+
     '\nתן תיאור מפורט, מדויק וטבעי בעברית: מה נראה, אנשים או בעלי חיים אם יש, חפצים, סביבה, טקסט קריא, צבעים, מיקום יחסי, פעולות ואירועים שניתן להסיק בביטחון. הפרד בין מה שנראה בבירור לבין מה שאינו ודאי. אם יש טקסט בתמונה, קרא אותו רק אם הוא קריא. התשובה מיועדת להקראה בטלפון.';
   let lastError=null;
+  const imageDeadline=Date.now()+MEDIA_IMAGE_TOTAL_BUDGET_MS;
 
   for(let ki=0;ki<candidateKeys.length;ki++){
     for(const model of mediaModels){
+      const remainingMs=imageDeadline-Date.now();
+      if(remainingMs<2500){
+        lastError=lastError||Object.assign(new Error('Image analysis time budget exhausted'),{status:408});
+        break;
+      }
       try{
         const r=await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{
           method:'POST',
@@ -1270,7 +1283,7 @@ async function analyzePublicImageUrl(imageUrl, question) {
             {type:'text',text:prompt},
             {type:'image',data:bytes.toString('base64'),mime_type:mime}
           ]})
-        }),MEDIA_ANALYSIS_TIMEOUT_MS,'Gemini image analysis');
+        }),Math.min(MEDIA_IMAGE_ATTEMPT_TIMEOUT_MS,remainingMs),'Gemini image analysis');
         const data=await r.json().catch(()=>({}));
         if(!r.ok){
           const e=Object.assign(new Error(data?.error?.message||('Gemini image analysis HTTP '+r.status)),{status:r.status});
@@ -1363,9 +1376,15 @@ async function analyzePublicVideoUrl(videoUrl, question) {
   const prompt='נתח את הסרטון עצמו, לא רק את הכותרת, התיאור או המטא-דאטה, כולל המידע החזותי והשמע. השאלה של המתקשר: '+String(question||'תמחיש את הסרטון בפירוט')+
     '\nתן המחשה קולית מפורטת ומעמיקה בעברית: איך הסרטון נראה מתחילתו, מי או מה מופיע, לבוש ומראה כללי שניתן לראות, המקום והסביבה, מה כל אדם או אובייקט עושה, רצף האירועים והשינויים בין הסצנות, טקסטים שמופיעים על המסך, ומה נאמר או נשמע כאשר ניתן לקבוע זאת. אם יש תנועה מהירה או רגע חשוב, נסה לאתר אותו ולציין זמן רלוונטי. הפרד בבירור בין מה שנצפה לבין השערה, ואל תמציא פרטים. התשובה מיועדת להקראה בטלפון ולכן היא צריכה ממש לעזור למאזין לדמיין את הסרטון.';
   let lastError=null;
+  const videoDeadline=Date.now()+MEDIA_VIDEO_TOTAL_BUDGET_MS;
 
   for(let ki=0;ki<candidateKeys.length;ki++){
     for(const model of mediaModels){
+      const remainingMs=videoDeadline-Date.now();
+      if(remainingMs<4000){
+        lastError=lastError||Object.assign(new Error('Video analysis time budget exhausted'),{status:408});
+        break;
+      }
       try{
         const agentic=/^gemini-3\.(8|7|6)-flash$|^gemini-3\.5-flash-lite$/i.test(model);
         const input=isYouTube
@@ -1375,7 +1394,7 @@ async function analyzePublicVideoUrl(videoUrl, question) {
           method:'POST',
           headers:{'x-goog-api-key':candidateKeys[ki],'Content-Type':'application/json'},
           body:JSON.stringify({model,store:false,input:[input,{type:'text',text:prompt}]})
-        }),MEDIA_ANALYSIS_TIMEOUT_MS,'Gemini video analysis');
+        }),Math.min(MEDIA_VIDEO_ATTEMPT_TIMEOUT_MS,remainingMs),'Gemini video analysis');
         const data=await r.json().catch(()=>({}));
         if(!r.ok){
           lastError=Object.assign(new Error(data?.error?.message||('Gemini video analysis HTTP '+r.status)),{status:r.status});
