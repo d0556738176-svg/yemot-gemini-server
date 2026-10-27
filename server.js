@@ -3440,6 +3440,22 @@ function buildOpeningForCaller(phone) {
   opening+=' נמשיך משם.';
   return opening.trim();
 }
+// Deterministic fixes for names that speech-to-text repeatedly mishears on the phone
+// (seen live: "בעל פגי" / "בת פגי" for "בנק פאגי"). Instant and independent of any model.
+const KNOWN_SPEECH_NAME_FIXES=[
+  [/(?<![\u0590-\u05FF])(?:בנק|בת|בעל|בן|בנך|בית|בנג|בנקה)?\s*(?:פאגי|פגי|פאג'י|פגיי|פאגיי|פאגי'|פאחי)(?![\u0590-\u05FF])/g,'בנק פאגי'],
+  [/(?<![\u0590-\u05FF])(?:בנק|בת|בעל|בן)\s*(?:איגוד|אגוד|יגוד)(?![\u0590-\u05FF])/g,'בנק איגוד'],
+  [/(?<![\u0590-\u05FF])(?:בנק|בת|בעל|בן)\s*(?:יהב|יאהב)(?![\u0590-\u05FF])/g,'בנק יהב']
+];
+function correctKnownSpeechNames(text) {
+  let out=String(text||'');
+  const before=out;
+  for(const [pattern,replacement] of KNOWN_SPEECH_NAME_FIXES) out=out.replace(pattern,replacement);
+  out=out.replace(/(בנק פאגי)(\s+בנק פאגי)+/g,'$1').replace(/\s{2,}/g,' ').trim();
+  if(out!==before) console.info('[SPEECH_NAME_FIX] corrected known name',{from:before.slice(0,120),to:out.slice(0,120)});
+  return out;
+}
+
 // Query-understanding step for phone searches: speech-to-text often garbles Israeli
 // names ("בת פגי" for "בנק פאגי"). A fast, time-boxed model pass repairs the question
 // before it reaches search. Any failure or timeout returns the original text unchanged.
@@ -3602,7 +3618,7 @@ async function callHandler(call) {
     try {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
-      userTranscript=await transcribePhoneAudio(audioBuffer,{failFastOnNoSpeech:true});
+      userTranscript=correctKnownSpeechNames(await transcribePhoneAudio(audioBuffer,{failFastOnNoSpeech:true}));
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length,elapsedMs:Date.now()-turnStartedAt});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
       originalSpokenTranscript=userTranscript;
