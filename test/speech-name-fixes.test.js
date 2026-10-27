@@ -42,6 +42,8 @@ test('garbled Super-Pharm and Discount are corrected',()=>{
   assert.equal(context.fix('מה המספר של סוף אפרים ברעננה'),'מה המספר של סופר פארם ברעננה');
   assert.equal(context.fix('מה המספר של בנקי דישקונט'),'מה המספר של בנק דיסקונט');
   assert.equal(context.fix('סופר פארם'),'סופר פארם');
+  assert.equal(context.fix('מה המספר של סוף אברהם ברעננה'),'מה המספר של סופר פארם ברעננה');
+  assert.equal(context.fix('מה המספר של יוסף אברהם ברעננה'),'מה המספר של סופר פארם ברעננה');
 });
 
 test('official-site phone fallback uses only the official domain',()=>{
