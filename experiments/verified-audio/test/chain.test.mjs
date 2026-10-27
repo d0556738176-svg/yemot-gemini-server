@@ -7,8 +7,9 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {downloadVerified} from '../verified-download.mjs';
 import ffmpegPath from 'ffmpeg-static';
+import { existsSync } from 'node:fs';
 
-test('generated sound: download, convert and simulated upload', async()=>{
+test('generated sound: download, convert and simulated upload', {skip: !ffmpegPath || !existsSync(ffmpegPath) ? 'ffmpeg binary is not installed' : false}, async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'audio-chain-'));
   const source=path.join(dir,'source.m4a'), copied=path.join(dir,'copy.m4a'), wave=path.join(dir,'audio.wav');
   let uploaded=null;
