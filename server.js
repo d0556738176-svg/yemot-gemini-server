@@ -3951,6 +3951,10 @@ async function callHandler(call) {
       replyText=replyText.slice(0,LONG_ANSWER_MAX_CHARS).replace(/\s+\S*$/,'').trim()+'.';
     }
     console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length, elapsedMs:Date.now()-turnStartedAt });
+    // Short preview of phone-number answers so their accuracy can be audited from the logs.
+    if(typeof isPhoneNumberRequest==='function' && isPhoneNumberRequest(userTranscript)) {
+      console.info('[REPLY_PREVIEW]',{callId:activeKey,question:String(userTranscript).slice(0,100),reply:String(replyText).slice(0,300)});
+    }
     const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
       phone:normalizePhone(callerPhone),callId:String(callId||''),user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript) || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText};
     conversationLog.push(entry);
