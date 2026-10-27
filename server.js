@@ -770,6 +770,7 @@ async function transcribePhoneAudio(audioBuffer, options={}) {
         : null;
       const deepgramText=await transcribeWithDeepgram(audioBuffer,'',dgMeta);
       if(deepgramText) {
+        if(options.meta) { options.meta.confidence=dgMeta.confidence; options.meta.weakWords=dgMeta.weakWords||[]; }
         const lowConfidence=(dgMeta.confidence!==null && dgMeta.confidence!==undefined && dgMeta.confidence<Number(process.env.BRANCH1_ASR_LOW_CONFIDENCE||0.9)) ||
           (dgMeta.weakWords||[]).length>0;
         if(lowConfidence && secondOpinionPromise) {
@@ -3037,7 +3038,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     // retrieved evidence so the caller hears an answer, not raw excerpts. Any
     // failure or timeout falls through to the excerpts below.
     try {
-      const synthBudgetMs=Number(process.env.BRANCH1_WEB_SYNTH_BUDGET_MS || 4500);
+      const synthBudgetMs=Number(process.env.BRANCH1_WEB_SYNTH_BUDGET_MS || 3200);
       if(synthBudgetMs>0) {
         const synthEvidence=unique.slice(0,deepSearch?6:4).map((x,i)=>
           'מקור '+(i+1)+' ('+String(x.url||'').slice(0,100)+'): '+String(x.title||'').slice(0,120)+'\n'+String(x.snippet||'').slice(0,deepSearch?900:600)).join('\n\n');
@@ -3536,8 +3537,10 @@ function correctKnownSpeechNames(text) {
 // Query-understanding step for phone searches: speech-to-text often garbles Israeli
 // names ("בת פגי" for "בנק פאגי"). A fast, time-boxed model pass repairs the question
 // before it reaches search. Any failure or timeout returns the original text unchanged.
-async function understandPhoneQuestion(question, historyText='') {
+async function understandPhoneQuestion(question, historyText='', turnContext=null) {
   const original=String(question||'').trim();
+  // Deepgram is very sure (and no weak words): repairing would only add latency.
+  if(Number(turnContext?.asrConfidence)>=Number(process.env.BRANCH1_QUERY_REPAIR_SKIP_CONFIDENCE||0.95)) return original;
   const groqKey=(process.env.GROQ_API_KEY||'').trim();
   if(!original || original.length>240 || process.env.BRANCH1_QUERY_REPAIR==='off' || !groqKey) return original;
   try {
@@ -3564,7 +3567,7 @@ async function understandPhoneQuestion(question, historyText='') {
 }
 
 async function answerBranch1Web(question, historyText='', turnContext=null) {
-  const repaired=await understandPhoneQuestion(question,historyText);
+  const repaired=await understandPhoneQuestion(question,historyText,turnContext);
   const contextual=contextualizeSearchQuestion(repaired,historyText);
   const deep=isDeepWebSearchRequest(contextual);
   // Retrieval is the answer path, not merely a prelude to another model call.
@@ -3695,7 +3698,9 @@ async function callHandler(call) {
     try {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
-      userTranscript=correctKnownSpeechNames(await transcribePhoneAudio(audioBuffer,{failFastOnNoSpeech:true,secondOpinion:true}));
+      const asrMeta={};
+      userTranscript=correctKnownSpeechNames(await transcribePhoneAudio(audioBuffer,{failFastOnNoSpeech:true,secondOpinion:true,meta:asrMeta}));
+      turnContext.asrConfidence=(asrMeta.confidence===undefined||asrMeta.confidence===null||(asrMeta.weakWords||[]).length)?null:asrMeta.confidence;
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length,elapsedMs:Date.now()-turnStartedAt});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
       originalSpokenTranscript=userTranscript;
