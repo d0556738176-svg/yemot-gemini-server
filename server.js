@@ -390,6 +390,7 @@ const branch1BackupWebModels = branch1BackupGeminiClient
 
 let openAIBillingCooldownUntil = 0;
 const branch1FallbackProviderCooldowns = new Map();
+const branch1SynthCooldowns = new Map();
  // Log configuration presence only; never print or partially reveal API keys.
 console.info('[BRANCH1 FALLBACK] independent provider configuration', {
   groqConfigured: Boolean((process.env.GROQ_API_KEY || '').trim()),
@@ -2501,12 +2502,12 @@ function mapsIsraelUrl(title,address){
 function officialDomainsForQuestion(question){
   const q=String(question||'').toLowerCase();
   const map=[
-    [/דיסקונט|discount/,['discountbank.co.il']],
+    [/דיסקונט|דישקונט|דסקונט|discount/,['discountbank.co.il']],
     [/כללית|clalit/,['clalit.co.il']],
     [/מכבי|maccabi/,['maccabi4u.co.il']],
     [/מאוחדת|meuhedet/,['meuhedet.co.il']],
     [/לאומית|leumit/,['leumit.co.il']],
-    [/סופר.?פארם|סופר.?אפרים|סופר.?אפרם|סופר.?פרם|super.?pharm/,['super-pharm.co.il']],
+    [/סופר.?פארם|סופר.?אפרים|סוף.?אפרים|סופר.?אפרם|סופר.?פרם|super.?pharm/,['super-pharm.co.il']],
     [/בנק הפועלים|הפועלים|poalim/,['bankhapoalim.co.il']],
     [/לאומי|בנק לאומי|leumi/,['leumi.co.il']],
     [/מזרחי|מזרחי טפחות|mizrahi/,['mizrahitefahot.co.il']],
@@ -2524,6 +2525,26 @@ function officialDomainsForQuestion(question){
   for(const [pattern,domains] of map) if(pattern.test(q)) return domains;
   return [];
 }
+// Last-resort phone answer when no model answered: only numbers that literally appear
+// in a result from the entity's own official domain. Never uses third-party pages.
+function officialPhoneAnswerFromSources(question,results){
+  const domains=officialDomainsForQuestion(question);
+  if(!domains.length) return '';
+  const official=(results||[]).filter(r=>isOfficialSearchUrl(r.url,domains));
+  const numberRe=/\*\d{3,4}|(?<![\d-])1[-\s]?[27]00[-\s]?\d{3}[-\s]?\d{3}(?!\d)|(?<![\d-])0(?:[23489]|5\d|7\d)[-\s]?\d{3}[-\s]?\d{4}(?!\d)/g;
+  const found=[];
+  for(const r of official){
+    const text=String(r.title||'')+' '+String(r.snippet||'');
+    for(const m of text.matchAll(numberRe)){
+      const n=m[0].replace(/\s+/g,'');
+      if(!found.includes(n)) found.push(n);
+    }
+  }
+  if(!found.length) return '';
+  const name=String(question||'').replace(/^.*?(?:מספר(?: הטלפון)?(?: של)?|טלפון(?: של)?)\s*/,'').replace(/[?.!]+$/,'').trim().slice(0,40);
+  return 'לפי האתר הרשמי'+(name?' של '+name:'')+', המספרים הם: '+found.slice(0,3).join(', ')+'.';
+}
+
 function isOfficialSearchUrl(url,domains){
   try{
     const host=new URL(String(url||'')).hostname.toLowerCase().replace(/^www\./,'');
@@ -3074,8 +3095,9 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
           racers.push(callCompatibleChatCompletion({
             provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
             messages:[{role:'user',content:synthPrompt}],timeoutMs:Math.max(1200,synthBudgetMs-300),
-            maxTokens:700,cooldowns:branch1FallbackProviderCooldowns
-          }).then(text=>{ if(!String(text||'').trim()) throw new Error('empty'); return String(text).trim(); }));
+            maxTokens:700,cooldowns:branch1SynthCooldowns,cooldownMs:15000
+          }).then(text=>{ if(!String(text||'').trim()) throw new Error('empty'); return String(text).trim(); })
+            .catch(err=>{ console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
         }
         const raced=await withTimeout(Promise.any(racers),synthBudgetMs,'branch1 web synthesis');
         const synthAnswer=sanitizeForYemot(String(raced||'').trim());
@@ -3086,6 +3108,10 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
       }
     } catch(synthError) {
       console.warn('[BRANCH1_WEB_SYNTH] unavailable; using source excerpts',{status:geminiErrorStatus(synthError),message:String(synthError?.message||synthError).slice(0,160)});
+      if(isPhoneNumberRequest(question)) {
+        const official=officialPhoneAnswerFromSources(question,unique);
+        if(official) { console.info('[BRANCH1_WEB_SYNTH] official-site phone extraction',{chars:official.length}); return official; }
+      }
     }
     console.warn('[BRANCH1 FALLBACK] returning source-grounded excerpts after answer-model outage',{results:Math.min(snippetLimit,usable.length),deepSearch});
     return (deepSearch?'בחיפוש המעמיק מצאתי את המידע הבא. ':'לפי המידע שמצאתי ברשת, ')+snippets+'.';
@@ -3552,7 +3578,9 @@ const KNOWN_NAME_HINTS=['בנק פאגי','בנק איגוד','בנק יהב','�
 const KNOWN_SPEECH_NAME_FIXES=[
   [/(?<![\u0590-\u05FF])(?:בנק|בת|בעל|בן|בנך|בית|בנג|בנקה)?\s*(?:פאגי|פגי|פאג'י|פגיי|פאגיי|פאגי'|פאחי)(?![\u0590-\u05FF])/g,'בנק פאגי'],
   [/(?<![\u0590-\u05FF])(?:בנק|בת|בעל|בן)\s*(?:איגוד|אגוד|יגוד)(?![\u0590-\u05FF])/g,'בנק איגוד'],
-  [/(?<![\u0590-\u05FF])(?:בנק|בת|בעל|בן)\s*(?:יהב|יאהב)(?![\u0590-\u05FF])/g,'בנק יהב']
+  [/(?<![\u0590-\u05FF])(?:בנק|בת|בעל|בן)\s*(?:יהב|יאהב)(?![\u0590-\u05FF])/g,'בנק יהב'],
+  [/(?<![֐-׿])(?:סוף|סופה|סופא|סופר)\s*(?:אפרים|אפרם|פרם|פארם|פארן)(?![֐-׿])/g,'סופר פארם'],
+  [/(?<![֐-׿])(?:בנקי|בנק)\s*(?:דישקונט|דסקונט|דיסקאונט|דיסקונת|דיסקונד)(?![֐-׿])/g,'בנק דיסקונט']
 ];
 function correctKnownSpeechNames(text) {
   let out=String(text||'');
