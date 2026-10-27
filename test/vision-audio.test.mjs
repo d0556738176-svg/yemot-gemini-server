@@ -28,3 +28,7 @@ for(const mode of ['blocked','host','oversize','short']) test('rejects '+mode,as
  await assert.rejects(stat(output),{code:'ENOENT'});
 }));
 test('rejects malformed video ID before network',async()=>assert.rejects(downloadVisionAudio('no','/unused',{fetchImpl:()=>{throw new Error('unexpected');}}),/Invalid video ID/));
+
+test('reports player denial status without logging raw payload',async()=>check('blocked',async(output,fetchImpl)=>{
+ await assert.rejects(downloadVisionAudio('testvideo01',output,{fetchImpl}),/Video unavailable: LOGIN_REQUIRED/);
+}));
