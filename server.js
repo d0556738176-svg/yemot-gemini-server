@@ -4094,11 +4094,11 @@ async function youtubeCallHandler(call) {
   }
 
   function isYes(text) {
-    return /^(כן|כן בהחלט|בוודאי|בטח|אני רוצה|רוצה|כן אני רוצה|תשמיע|להשמיע|כן תשמיע)\\s*$/i.test(String(text||'').trim());
+    return /^(כן|כן בהחלט|בוודאי|בטח|אני רוצה|רוצה|כן אני רוצה|תשמיע|להשמיע|כן תשמיע)\s*$/i.test(String(text||'').trim());
   }
 
   function isNo(text) {
-    return /^(לא|לא תודה|לא רוצה|סיימתי|זה מספיק|תודה)\\s*$/i.test(String(text||'').trim());
+    return /^(לא|לא תודה|לא רוצה|סיימתי|זה מספיק|תודה)\s*$/i.test(String(text||'').trim());
   }
 
   function formatResultsPage() {
