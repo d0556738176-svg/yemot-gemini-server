@@ -3430,8 +3430,33 @@ function buildOpeningForCaller(phone) {
   opening+=' נמשיך משם.';
   return opening.trim();
 }
+// Query-understanding step for phone searches: speech-to-text often garbles Israeli
+// names ("בת פגי" for "בנק פאגי"). A fast, time-boxed model pass repairs the question
+// before it reaches search. Any failure or timeout returns the original text unchanged.
+async function understandPhoneQuestion(question, historyText='') {
+  const original=String(question||'').trim();
+  if(!original || original.length>240 || process.env.BRANCH1_QUERY_REPAIR==='off') return original;
+  try {
+    const prompt='התמלול הבא הגיע מזיהוי דיבור בטלפון ועלול להכיל מילים שגויות, בעיקר שמות של בנקים, חברות, מקומות ואנשים בישראל. '+
+      'תקן רק מילים שנשמעות כשגיאת תמלול ברורה (למשל "בת פגי" -> "בנק פאגי") בהתחשב בהקשר השיחה. '+
+      'אל תשנה את כוונת השאלה, אל תוסיף מידע ואל תענה עליה. אם הכול נראה תקין, החזר את הטקסט כפי שהוא. החזר רק את השאלה המתוקנת בשורה אחת, בלי הסברים.\n'+
+      (historyText?'הקשר שיחה קודם: '+String(historyText).slice(-500)+'\n':'')+'התמלול: '+original;
+    const result=await withTimeout(
+      generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true,null),
+      Number(process.env.BRANCH1_QUERY_REPAIR_BUDGET_MS || 1800),'branch1 query understanding');
+    let fixed=String(result?.response?.text?.()||'').trim().split('\n')[0].replace(/^["'“”]+|["'“”]+$/g,'').trim();
+    if(!fixed || fixed.length<2 || fixed.length>original.length*2+40) return original;
+    if(fixed!==original) console.info('[BRANCH1_QUERY_REPAIR] question repaired',{from:original.slice(0,120),to:fixed.slice(0,120)});
+    return fixed;
+  } catch(e) {
+    console.warn('[BRANCH1_QUERY_REPAIR] unavailable; using original',{status:geminiErrorStatus(e)});
+    return original;
+  }
+}
+
 async function answerBranch1Web(question, historyText='', turnContext=null) {
-  const contextual=contextualizeSearchQuestion(question,historyText);
+  const repaired=await understandPhoneQuestion(question,historyText);
+  const contextual=contextualizeSearchQuestion(repaired,historyText);
   const deep=isDeepWebSearchRequest(contextual);
   // Retrieval is the answer path, not merely a prelude to another model call.
   // Normal phone lookups return source-grounded evidence immediately; explicit
