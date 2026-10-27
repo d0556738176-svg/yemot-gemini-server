@@ -135,7 +135,7 @@ test('actual phone handler reads website, continues, switches topic and routes h
     isMultimodalAnalysisRequest:()=>({any:false}),isVisualContinuationRequest:()=>false,
     answerIsraelTimeQuestion:()=>'',answerDailyDateQuestion:()=>'',EXCLUSIVE_INSTRUCTION:'',LONG_ANSWER_MAX_CHARS:12000,
     generateBranch1WithFallback:async()=>{throw Error('Unexpected model call');},
-    logDetailedError(context,error){throw error;},sanitizeForYemot:x=>x,correctKnownSpeechNames:x=>x,normalizePhone:x=>x,persistConversationEntry:async()=>{},MAX_CONVERSATION_LOG:1000,
+    logDetailedError(context,error){throw error;},sanitizeForYemot:x=>x,correctKnownSpeechNames:x=>x,rewriteFollowUp:async q=>q,normalizePhone:x=>x,persistConversationEntry:async()=>{},MAX_CONVERSATION_LOG:1000,
     knownPrimaryPhoneAnswer:()=>''};
   for(const key of ['isWeatherQuestion','isNewsQuestion','isWebsiteCapabilityQuestion','isWebsiteNavigationRequest','isGenericWebsiteRequest','isLongAnswerRequest','isDeepWebSearchRequest','isTransitRequest','isPhoneNumberRequest','isPharmacySearchRequest'])context[key]=()=>false;
   context.shouldForceWebSearch=q=>q.includes('שעות');context.isBusinessHoursRequest=q=>q.includes('שעות');context.extractExplicitHttpUrl=()=>'';
