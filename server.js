@@ -2778,9 +2778,16 @@ function extractDirectSearchQueries(question){
   }
   queries.push(base);
   if(isPhoneNumberRequest(cleaned)){
-    queries.push(base+' מספר טלפון מוקד שירות לקוחות');
-    queries.push(base+' אתר רשמי טלפון');
-    for(const d of officialDomainsForQuestion(cleaned)) queries.push(base+' site:'+d+' טלפון');
+    // The bank is officially written פאג"י (Poalei Agudat Israel); the plain spoken form
+    // "בנק פאגי" otherwise returns Bank Hapoalim pages. Official-site query goes first
+    // because only the first queries run on the fast phone path.
+    const aliasBase=base.replace(/בנק\s*פאגי|פאגי/g,'בנק פאג"י פועלי אגודת ישראל');
+    const officialDomains=officialDomainsForQuestion(cleaned);
+    queries.length=0;
+    for(const d of officialDomains) queries.push(aliasBase+' site:'+d+' צור קשר טלפון מוקד');
+    queries.push(aliasBase+' מספר טלפון מוקד שירות לקוחות');
+    queries.push(aliasBase+' אתר רשמי טלפון');
+    queries.push(base);
   } else if(isBusinessLocalRequest(cleaned)){
     queries.push(base+' כתובת מדויקת שעות פתיחה טלפון');
     queries.push(base+' אתר רשמי סניפים');
@@ -2810,7 +2817,8 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
   const fastVoiceSearch=!deepSearch && !eventVenueLookup && !openSiteRequest;
   // Run multiple focused searches in parallel for specific factual lookups, not just
   // the first generic query. This improves official-source coverage without serial waits.
-  const firstPass=(deepSearch||eventVenueLookup)?queries.slice(0,3):openSiteRequest?queries.slice(0,3):specificLookup?queries.slice(0,2):queries.slice(0,2);
+  const phoneWithOfficialSite=isPhoneNumberRequest(question) && officialDomainsForQuestion(question).length>0;
+  const firstPass=(deepSearch||eventVenueLookup)?queries.slice(0,3):openSiteRequest?queries.slice(0,3):phoneWithOfficialSite?queries.slice(0,3):specificLookup?queries.slice(0,2):queries.slice(0,2);
   const communitySearch=deepSearch || /(פורום|פורומים|קהילות|דיונים|רשתות חברתיות|רשת חברתית|פייסבוק|אינסטגרם|טיקטוק|טוויטר|reddit|facebook|instagram|tiktok|twitter|x\.com|threads)/i.test(question);
   if(communitySearch) {
     const topic=String(question||'').slice(0,180);
