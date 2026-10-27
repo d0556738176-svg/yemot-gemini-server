@@ -656,7 +656,13 @@ async function transcribeWithDeepgram(audioBuffer, overrideKey='') {
   const mimeType=(process.env.YEMOT_AUDIO_MIME_TYPE||detectAudioMime(bytes)||'audio/wav').trim();
   const vocabulary=(process.env.DEEPGRAM_KEYTERMS ||
     'יוטיוב,YouTube,גוגל,Google,ChatGPT,GPT,Gemini,גמיני,ג׳מיני,ימות,ימות המשיח,רנולד,רנולד שוורצנגר,Deepgram,Render,Supabase,API,אילן גוזל,רעננה,סופר פארם,בנק הפועלים,בנק דיסקונט,בנק לאומי,בנק מזרחי טפחות,מכבי,כללית,מאוחדת,לאומית')
-    .split(',').map(x=>x.trim()).filter(Boolean).slice(0,100);
+    .split(',').map(x=>x.trim()).filter(Boolean);
+  // Always-on Israeli service names that phone callers ask about (kept even when
+  // DEEPGRAM_KEYTERMS is overridden in the environment). Misheard names such as
+  // "בת פגי" for "בנק פאגי" led to unrelated search results.
+  for(const term of ['בנק פאגי','פאגי','בנק איגוד','בנק יהב','בנק הדואר','בנק מסד','הבנק הבינלאומי','בנק אוצר החייל','בנק ירושלים','ביטוח לאומי','בזק','פרטנר','סלקום','פלאפון','הוט','יס','מגן דוד אדום','משטרה'])
+    if(!vocabulary.includes(term)) vocabulary.push(term);
+  vocabulary.splice(100);
 
   const url=new URL('https://api.deepgram.com/v1/listen');
   url.searchParams.set('model','nova-3');
@@ -2941,6 +2947,30 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
       return excerpt+(host ? '. מקור: '+sanitizeForYemot(host) : '');
     }).filter(Boolean).join('. מקור נוסף: ');
     if(!snippets) throw Object.assign(new Error('Emergency direct fallback has no readable snippets'),{status:503});
+    // Phone-friendly synthesis: one short, tightly time-boxed model pass over the
+    // retrieved evidence so the caller hears an answer, not raw excerpts. Any
+    // failure or timeout falls through to the excerpts below.
+    try {
+      const synthBudgetMs=Number(process.env.BRANCH1_WEB_SYNTH_BUDGET_MS || 4500);
+      if(synthBudgetMs>0) {
+        const synthEvidence=unique.slice(0,deepSearch?6:4).map((x,i)=>
+          'מקור '+(i+1)+' ('+String(x.url||'').slice(0,100)+'): '+String(x.title||'').slice(0,120)+'\n'+String(x.snippet||'').slice(0,deepSearch?900:600)).join('\n\n');
+        const synthPrompt=EXCLUSIVE_INSTRUCTION+'\n\nענה לשאלת המתקשר בעברית טבעית וקצרה (עד 4 משפטים, ואם התבקשו כמה פריטים או סניפים פרט אותם) להקראה בטלפון, על בסיס המקורות בלבד. '+
+          'התחל ישר בתשובה. אם המקורות לא עוסקים בנושא השאלה או שהשאלה נראית כתמלול משובש, אמור שלא הצלחת למצוא ובקש מהמתקשר לחזור על שם הגוף או הנושא. '+
+          'מספר טלפון: מסור רק אם הוא מופיע במקור שמתאים לגוף שנשאל עליו, וללא שינוי בספרות או בכוכבית. אל תמציא פרטים שלא במקורות.\n\n'+
+          'השאלה: '+question+'\n\nמקורות:\n'+synthEvidence;
+        const synthResult=await withTimeout(
+          generateBranch1WithFallback([{role:'user',parts:[{text:synthPrompt}]}],false,true,null),
+          synthBudgetMs,'branch1 web synthesis');
+        const synthAnswer=sanitizeForYemot(String(synthResult?.response?.text?.()||'').trim());
+        if(synthAnswer.length>8) {
+          console.info('[BRANCH1_WEB_SYNTH] synthesized phone answer',{chars:synthAnswer.length,sources:Math.min(unique.length,deepSearch?6:4)});
+          return synthAnswer;
+        }
+      }
+    } catch(synthError) {
+      console.warn('[BRANCH1_WEB_SYNTH] unavailable; using source excerpts',{status:geminiErrorStatus(synthError),message:String(synthError?.message||synthError).slice(0,160)});
+    }
     console.warn('[BRANCH1 FALLBACK] returning source-grounded excerpts after answer-model outage',{results:Math.min(snippetLimit,usable.length),deepSearch});
     return (deepSearch?'בחיפוש המעמיק מצאתי את המידע הבא. ':'לפי המידע שמצאתי ברשת, ')+snippets+'.';
   }
