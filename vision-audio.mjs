@@ -13,7 +13,11 @@ export async function downloadVisionAudio(id, destination, {fetchImpl=fetch, max
     body:JSON.stringify({context:{client:CLIENT},videoId:id,contentCheckOk:true,racyCheckOk:true})});
   if (!player.ok) throw new Error('Player request failed: HTTP '+player.status);
   const body=await player.json();
-  if(body.playabilityStatus?.status!=='OK') throw new Error('Video unavailable');
+  if(body.playabilityStatus?.status!=='OK') {
+    const code = String(body.playabilityStatus?.status || 'UNKNOWN');
+    const safeCode = /^[A-Z_]{1,40}$/.test(code) ? code : 'UNKNOWN';
+    throw new Error('Video unavailable: ' + safeCode);
+  }
   const formats=(body.streamingData?.adaptiveFormats||[]).filter(f=>typeof f.url==='string' && /^audio\/mp4(?:;|$)/i.test(f.mimeType||'') && !f.isDrc && !/[?&]xtags=[^&]*drc/.test(f.url))
     .sort((a,b)=>(Number(b.bitrate)||0)-(Number(a.bitrate)||0));
   if(!formats.length) throw new Error('No direct audio available');
