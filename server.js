@@ -648,7 +648,7 @@ function answerDailyDateQuestion(transcript) {
   return 'היום בישראל '+gregorian+', והתאריך העברי הוא '+hebrew+'.';
 }
 
-async function transcribeWithDeepgram(audioBuffer, overrideKey='') {
+async function transcribeWithDeepgram(audioBuffer, overrideKey='', meta={}) {
   const key=(overrideKey || process.env.DEEPGRAM_API_KEY || '').trim();
   if(!key) return null;
 
@@ -700,15 +700,53 @@ async function transcribeWithDeepgram(audioBuffer, overrideKey='') {
     const dgAlt=data?.results?.channels?.[0]?.alternatives?.[0];
     const dgWords=Array.isArray(dgAlt?.words)?dgAlt.words:[];
     const weakWords=dgWords.filter(w=>Number(w?.confidence)<0.7).map(w=>String(w.word||'').slice(0,20)).slice(0,6);
+    meta.confidence=Number.isFinite(Number(dgAlt?.confidence))?Number(dgAlt.confidence):null;
+    meta.weakWords=weakWords;
     console.info('[TRANSCRIBE] deepgram_nova3_he_ok',{
       mimeType,chars:cleaned.length,
       audioBytes:bytes.length,
-      confidence:Number.isFinite(Number(dgAlt?.confidence))?Number(Number(dgAlt.confidence).toFixed(3)):null,
+      confidence:meta.confidence===null?null:Number(meta.confidence.toFixed(3)),
       weakWords
     });
     return cleaned;
   }
   throw Object.assign(new Error('Deepgram transcription became empty after cleanup'),{status:503});
+}
+
+// Second ASR opinion: a fast inline Gemini transcription (no file upload round trips),
+// used only when Deepgram is unsure. Returns '' on any failure or timeout.
+async function transcribeWithGeminiInline(audioBuffer, vocabulary=[]) {
+  const key=(apiKeys&&apiKeys[0])||'';
+  if(!key) return '';
+  const bytes=Buffer.isBuffer(audioBuffer)?audioBuffer:Buffer.from(audioBuffer);
+  const mimeType=(process.env.YEMOT_AUDIO_MIME_TYPE||detectAudioMime(bytes)||'audio/wav').trim();
+  const res=await withTimeout(fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:generateContent',{
+    method:'POST',
+    headers:{'x-goog-api-key':key,'Content-Type':'application/json'},
+    body:JSON.stringify({contents:[{role:'user',parts:[
+      {inlineData:{mimeType,data:bytes.toString('base64')}},
+      {text:['תמלל בדיוק את דברי המתקשר בעברית, שיחת טלפון קצרה.',
+        'שמות של בנקים, חברות, מקומות ואנשים בישראל כתוב נכון.',
+        'אל תשלים מילים שלא נשמעו, אל תענה לשאלה, והחזר רק את התמלול.',
+        'שמות שעשויים להופיע: '+vocabulary.slice(0,60).join(', ')+'.'].join(' ')}
+    ]}]})
+  }),Number(process.env.BRANCH1_ASR_SECOND_OPINION_TIMEOUT_MS||3000),'Gemini inline second-opinion transcription');
+  if(!res.ok) return '';
+  const data=await res.json().catch(()=>({}));
+  return sanitizeForYemot(String(data.candidates?.[0]?.content?.parts?.map(p=>p?.text||'').join(' ')||'').trim());
+}
+
+// Pick between Deepgram and the Gemini second opinion without another model call:
+// prefer the text that contains a known name; otherwise trust Deepgram.
+function chooseBetterTranscript(deepgramText, geminiText, vocabulary=[]) {
+  const dg=correctKnownSpeechNames(deepgramText);
+  const gm=correctKnownSpeechNames(geminiText);
+  if(!gm || dg===gm) return dg;
+  const names=vocabulary.filter(t=>t.length>=4);
+  const hits=text=>names.filter(n=>text.includes(n)).length;
+  const dgHits=hits(dg), gmHits=hits(gm);
+  if(gmHits>dgHits) return gm;
+  return dg;
 }
 
 async function transcribePhoneAudio(audioBuffer, options={}) {
@@ -717,8 +755,29 @@ async function transcribePhoneAudio(audioBuffer, options={}) {
   // supports keyterm prompting for names and YouTube/channel terminology.
   if((process.env.DEEPGRAM_API_KEY||'').trim()) {
     try {
-      const deepgramText=await transcribeWithDeepgram(audioBuffer);
-      if(deepgramText) return deepgramText;
+      const dgMeta={};
+      const deepgramText=await transcribeWithDeepgram(audioBuffer,'',dgMeta);
+      if(deepgramText) {
+        const lowConfidence=(dgMeta.confidence!==null && dgMeta.confidence!==undefined && dgMeta.confidence<Number(process.env.BRANCH1_ASR_LOW_CONFIDENCE||0.9)) ||
+          (dgMeta.weakWords||[]).length>0;
+        if(lowConfidence && options.secondOpinion && process.env.BRANCH1_ASR_SECOND_OPINION!=='off') {
+          try {
+            const vocab=(process.env.DEEPGRAM_KEYTERMS||'').split(',').map(x=>x.trim()).filter(Boolean)
+              .concat(KNOWN_NAME_HINTS);
+            const geminiText=await transcribeWithGeminiInline(audioBuffer,vocab);
+            const chosen=chooseBetterTranscript(deepgramText,geminiText,vocab);
+            console.info('[ASR_SECOND_OPINION]',{
+              confidence:dgMeta.confidence,weakWords:dgMeta.weakWords,
+              same:geminiText===deepgramText,picked:chosen===correctKnownSpeechNames(deepgramText)?'deepgram':'gemini',
+              deepgram:deepgramText.slice(0,100),gemini:String(geminiText||'').slice(0,100)
+            });
+            return chosen;
+          } catch(secondError) {
+            console.warn('[ASR_SECOND_OPINION] unavailable; keeping Deepgram',{status:geminiErrorStatus(secondError)});
+          }
+        }
+        return deepgramText;
+      }
     } catch(err) {
       console.warn('[TRANSCRIBE] Deepgram primary failed',{
         status:geminiErrorStatus(err),
@@ -3448,6 +3507,7 @@ function buildOpeningForCaller(phone) {
 }
 // Deterministic fixes for names that speech-to-text repeatedly mishears on the phone
 // (seen live: "בעל פגי" / "בת פגי" for "בנק פאגי"). Instant and independent of any model.
+const KNOWN_NAME_HINTS=['בנק פאגי','בנק איגוד','בנק יהב','בנק הדואר','בנק הפועלים','בנק לאומי','בנק דיסקונט','בנק מזרחי טפחות','הבנק הבינלאומי','ביטוח לאומי','סופר פארם','בזק','פרטנר','סלקום','פלאפון','מכבי','כללית','מאוחדת','לאומית'];
 const KNOWN_SPEECH_NAME_FIXES=[
   [/(?<![\u0590-\u05FF])(?:בנק|בת|בעל|בן|בנך|בית|בנג|בנקה)?\s*(?:פאגי|פגי|פאג'י|פגיי|פאגיי|פאגי'|פאחי)(?![\u0590-\u05FF])/g,'בנק פאגי'],
   [/(?<![\u0590-\u05FF])(?:בנק|בת|בעל|בן)\s*(?:איגוד|אגוד|יגוד)(?![\u0590-\u05FF])/g,'בנק איגוד'],
@@ -3624,7 +3684,7 @@ async function callHandler(call) {
     try {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
-      userTranscript=correctKnownSpeechNames(await transcribePhoneAudio(audioBuffer,{failFastOnNoSpeech:true}));
+      userTranscript=correctKnownSpeechNames(await transcribePhoneAudio(audioBuffer,{failFastOnNoSpeech:true,secondOpinion:true}));
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length,elapsedMs:Date.now()-turnStartedAt});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
       originalSpokenTranscript=userTranscript;

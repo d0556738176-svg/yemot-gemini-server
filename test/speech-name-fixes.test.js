@@ -22,3 +22,18 @@ test('correct names and unrelated words are left alone',()=>{
   assert.equal(context.fix('בנק הפועלים'),'בנק הפועלים');
   assert.equal(context.fix('הגיע פגיעה'),'הגיע פגיעה');
 });
+
+const ctx2={console:{info(){}}};
+vm.createContext(ctx2);
+const s2=source.indexOf('const KNOWN_NAME_HINTS');
+const e2=source.indexOf('// Query-understanding step');
+const pick=source.slice(source.indexOf('// Pick between Deepgram'),source.indexOf('async function transcribePhoneAudio'));
+vm.runInContext(source.slice(s2,e2)+'\n'+pick+'\nglobalThis.choose=chooseBetterTranscript;',ctx2);
+
+test('second-opinion transcript wins only when it contains a known name Deepgram missed',()=>{
+  const vocab=['בנק פאגי','ביטוח לאומי'];
+  assert.equal(ctx2.choose('מה המספר הבא','מה המספר של בנק פאגי',vocab),'מה המספר של בנק פאגי');
+  assert.equal(ctx2.choose('מה מזג האוויר','מה מזג האויר',vocab),'מה מזג האוויר');
+  assert.equal(ctx2.choose('מה המספר של ביטוח לאומי','',vocab),'מה המספר של ביטוח לאומי');
+  assert.equal(ctx2.choose('מה המספר של בעל פגי','מה המספר של בעל פגי',vocab),'מה המספר של בנק פאגי');
+});
