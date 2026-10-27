@@ -21,6 +21,7 @@ import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visu
 import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion } from './conversation-context.js';
 import { buildPharmacySearchQueries, buildPharmacySearchAnswer } from './pharmacy-search.js';
 import { shouldForceWebSearch } from './branch1-web-router.js';
+import { fuzzyCorrectEntities, lexiconKeyterms, ENTITY_LEXICON } from './speech-lexicon.js';
 
 import { branch1Clarification, branch1FollowUpHistory, filterBranch1Results, createBranch1Search, resolveBranch1Question, isCorrection, isBranch1LocalRequest, isBranch1EventRequest, answerBranch1Local, answerBranch1Events, branch1SpeechItems } from './branch1-reliability.js';
 
@@ -676,6 +677,7 @@ async function transcribeWithDeepgram(audioBuffer, overrideKey='', meta={}) {
   // "בת פגי" for "בנק פאגי" led to unrelated search results.
   for(const term of ['בנק פאגי','פאגי','בנק איגוד','בנק יהב','בנק הדואר','בנק מסד','הבנק הבינלאומי','בנק אוצר החייל','בנק ירושלים','ביטוח לאומי','בזק','פרטנר','סלקום','פלאפון','הוט','יס','מגן דוד אדום','משטרה'])
     if(!vocabulary.includes(term)) vocabulary.push(term);
+  for(const term of lexiconKeyterms(60)) if(!vocabulary.includes(term)) vocabulary.push(term);
   vocabulary.splice(100);
 
   const url=new URL('https://api.deepgram.com/v1/listen');
@@ -3601,6 +3603,7 @@ function correctKnownSpeechNames(text) {
   const before=out;
   for(const [pattern,replacement] of KNOWN_SPEECH_NAME_FIXES) out=out.replace(pattern,replacement);
   out=out.replace(/(בנק פאגי)(\s+בנק פאגי)+/g,'$1').replace(/\s{2,}/g,' ').trim();
+  if(typeof fuzzyCorrectEntities==='function') out=fuzzyCorrectEntities(out);
   if(out!==before) console.info('[SPEECH_NAME_FIX] corrected known name',{from:before.slice(0,120),to:out.slice(0,120)});
   return out;
 }
@@ -3610,16 +3613,17 @@ function correctKnownSpeechNames(text) {
 // before it reaches search. Any failure or timeout returns the original text unchanged.
 // Separate cooldown map: a failed repair attempt must never disable Groq for answer synthesis.
 const branch1QueryRepairCooldowns=new Map();
-async function understandPhoneQuestion(question, historyText='', turnContext=null) {
+async function understandPhoneQuestion(question, historyText='', turnContext=null, force=false) {
   const original=String(question||'').trim();
   // Deepgram is very sure (and no weak words): repairing would only add latency.
-  if(Number(turnContext?.asrConfidence)>=Number(process.env.BRANCH1_QUERY_REPAIR_SKIP_CONFIDENCE||0.95)) return original;
+  if(!force && Number(turnContext?.asrConfidence)>=Number(process.env.BRANCH1_QUERY_REPAIR_SKIP_CONFIDENCE||0.95)) return original;
   const groqKey=(process.env.GROQ_API_KEY||'').trim();
   if(!original || original.length>240 || process.env.BRANCH1_QUERY_REPAIR==='off' || !groqKey) return original;
   try {
     const prompt='התמלול הבא הגיע מזיהוי דיבור בטלפון ועלול להכיל מילים שגויות, בעיקר שמות של בנקים, חברות, מקומות ואנשים בישראל. '+
       'תקן רק מילים שנשמעות כשגיאת תמלול ברורה (למשל "בת פגי" -> "בנק פאגי") בהתחשב בהקשר השיחה. '+
       'אל תשנה את כוונת השאלה, אל תוסיף מידע ואל תענה עליה. אם הכול נראה תקין, החזר את הטקסט כפי שהוא. החזר רק את השאלה המתוקנת בשורה אחת, בלי הסברים.\n'+
+      'שמות מוכרים שייתכן שהכוונה אליהם: '+ENTITY_LEXICON.slice(0,70).join(', ')+'. אם מילה בתמלול נשמעת כמו אחד מהם, השתמש בשם המדויק.\n'+
       (historyText?'הקשר שיחה קודם: '+String(historyText).slice(-500)+'\n':'')+'התמלול: '+original;
     // Groq only (never Gemini): keeps this step off the Gemini circuit breaker and
     // fast; it simply returns the original text when Groq is slow or unavailable.
@@ -3640,17 +3644,30 @@ async function understandPhoneQuestion(question, historyText='', turnContext=nul
 }
 
 async function answerBranch1Web(question, historyText='', turnContext=null) {
+  const run=async q=>{
+    const contextual=contextualizeSearchQuestion(q,historyText);
+    const deep=isDeepWebSearchRequest(contextual);
+    // Retrieval is the answer path, not merely a prelude to another model call.
+    // Normal phone lookups return source-grounded evidence immediately; explicit
+    // deep research gets a slightly larger retrieval budget and more sources.
+    return answerWithDirectWebFallback(contextual,historyText,turnContext,{
+      skipSynthesis:true,
+      branch1Strict:true,
+      timeoutMs:deep?4200:2400
+    });
+  };
   const repaired=await understandPhoneQuestion(question,historyText,turnContext);
-  const contextual=contextualizeSearchQuestion(repaired,historyText);
-  const deep=isDeepWebSearchRequest(contextual);
-  // Retrieval is the answer path, not merely a prelude to another model call.
-  // Normal phone lookups return source-grounded evidence immediately; explicit
-  // deep research gets a slightly larger retrieval budget and more sources.
-  return answerWithDirectWebFallback(contextual,historyText,turnContext,{
-    skipSynthesis:true,
-    branch1Strict:true,
-    timeoutMs:deep?4200:2400
-  });
+  try {
+    return await run(repaired);
+  } catch(firstError) {
+    // Nothing relevant was found: the name was probably mis-heard. Retry once with a forced
+    // model repair against the known-names lexicon instead of telling the caller "not found".
+    if(geminiErrorStatus(firstError)!==422) throw firstError;
+    const second=await understandPhoneQuestion(question,historyText,turnContext,true);
+    if(!second || second===repaired) throw firstError;
+    console.info('[BRANCH1_RETRY] no evidence; retrying with repaired question',{from:repaired.slice(0,100),to:second.slice(0,100)});
+    return run(second);
+  }
 }
 
 async function extractBranch1Page(url, timeoutMs=2500) {
