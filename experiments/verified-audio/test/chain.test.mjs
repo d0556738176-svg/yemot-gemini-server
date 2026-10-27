@@ -6,12 +6,13 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {downloadVerified} from '../verified-download.mjs';
+import ffmpegPath from 'ffmpeg-static';
 
 test('generated sound: download, convert and simulated upload', async()=>{
   const dir=await mkdtemp(path.join(os.tmpdir(),'audio-chain-'));
   const source=path.join(dir,'source.m4a'), copied=path.join(dir,'copy.m4a'), wave=path.join(dir,'audio.wav');
   let uploaded=null;
-  execFileSync('ffmpeg',['-v','error','-f','lavfi','-i','sine=frequency=440:duration=2','-c:a','aac','-y',source]);
+  execFileSync(ffmpegPath,['-v','error','-f','lavfi','-i','sine=frequency=440:duration=2','-c:a','aac','-y',source]);
   const original=await readFile(source);
   const server=http.createServer((req,res)=>{
     if(req.method==='POST' && req.url==='/upload') {
@@ -27,10 +28,13 @@ test('generated sound: download, convert and simulated upload', async()=>{
     const base=`http://127.0.0.1:${server.address().port}`;
     await downloadVerified(base+'/source',copied,{chunkBytes:4096});
     assert.deepEqual(await readFile(copied),original);
-    execFileSync('ffmpeg',['-v','error','-xerror','-i',copied,'-ar','8000','-ac','1','-c:a','pcm_s16le','-y',wave]);
-    const probe=JSON.parse(execFileSync('ffprobe',['-v','error','-show_entries','stream=codec_name,sample_rate,channels','-of','json',wave],{encoding:'utf8'}));
-    assert.deepEqual(probe.streams[0],{codec_name:'pcm_s16le',sample_rate:'8000',channels:1});
+    execFileSync(ffmpegPath,['-v','error','-xerror','-i',copied,'-ar','8000','-ac','1','-c:a','pcm_s16le','-y',wave]);
     const wav=await readFile(wave);
+    assert.equal(wav.subarray(0,4).toString(),'RIFF');
+    assert.equal(wav.readUInt16LE(20),1);
+    assert.equal(wav.readUInt16LE(22),1);
+    assert.equal(wav.readUInt32LE(24),8000);
+    assert.equal(wav.readUInt16LE(34),16);
     const res=await fetch(base+'/upload',{method:'POST',body:wav});
     assert.equal((await res.json()).responseStatus,'OK');
     assert.deepEqual(uploaded,wav);
