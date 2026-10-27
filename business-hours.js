@@ -193,3 +193,63 @@ export function buildBusinessHoursFallback({ question = '', business = 'הסני
   }
   return 'חיפשתי את ' + business + (location ? ' באזור ' + location : '') + ', אבל המקורות שהתקבלו לא הציגו שעות פתיחה ברורות ומאומתות. אפשר לומר את שם העיר או הכתובת המדויקת כדי שאבדוק את הסניף הנכון.';
 }
+
+const WEEK_DAYS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+
+// Reads a weekly schedule such as "ראשון: 08:00 18:00 שני: 08:00 15:00 ... שישי: סגור".
+// Returns {dayIndex(0=Sunday): [[startMin,endMin],...]} or null unless at least four days parse.
+export function parseWeeklyHours(text) {
+  const source = String(text || '').replace(/\s+/g, ' ');
+  const found = [...source.matchAll(/(?:יום\s*)?(ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת)(?:\s*[:\-–]|\s+(?=\d|סגור))/g)];
+  const map = {};
+  for (let i = 0; i < found.length; i++) {
+    const day = WEEK_DAYS.indexOf(found[i][1]);
+    if (day < 0 || map[day]) continue;
+    const from = found[i].index + found[i][0].length;
+    const to = Math.min(found[i + 1]?.index ?? source.length, from + 45);
+    const segment = source.slice(from, to);
+    const ranges = [...segment.matchAll(/(\d{1,2})[:.](\d{2})\s*(?:[-–—]|עד)?\s*(\d{1,2})[:.](\d{2})/g)]
+      .map(m => [Number(m[1]) * 60 + Number(m[2]), Number(m[3]) * 60 + Number(m[4])])
+      .filter(([a, b]) => a < b && b <= 24 * 60);
+    if (ranges.length) map[day] = ranges;
+    else if (/^\s*סגור/.test(segment)) map[day] = [];
+  }
+  return Object.keys(map).length >= 4 ? map : null;
+}
+
+function clock(min) {
+  return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');
+}
+
+export function israelWeekdayAndMinutes(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
+  const get = type => parts.find(p => p.type === type)?.value || '';
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(get('weekday'));
+  return { day, minutes: Number(get('hour')) * 60 + Number(get('minute')) };
+}
+
+// Deterministic "is it open now?" so the answer never depends on a model's arithmetic.
+export function buildOpenNowAnswer(weekly, label = 'הסניף', now = new Date()) {
+  if (!weekly) return '';
+  const { day, minutes } = israelWeekdayAndMinutes(now);
+  if (day < 0) return '';
+  const today = weekly[day] || [];
+  const current = today.find(([a, b]) => minutes >= a && minutes < b);
+  const todayName = WEEK_DAYS[day];
+  if (current) {
+    return label + ' פתוח כרגע, ונסגר היום בשעה ' + clock(current[1]) + '.';
+  }
+  const laterToday = today.find(([a]) => a > minutes);
+  if (laterToday) {
+    return label + ' סגור כרגע. היום, יום ' + todayName + ', הוא ייפתח בשעה ' + clock(laterToday[0]) + ' ויהיה פתוח עד ' + clock(laterToday[1]) + '.';
+  }
+  for (let step = 1; step <= 7; step++) {
+    const d = (day + step) % 7;
+    const ranges = weekly[d];
+    if (ranges && ranges.length) {
+      const when = step === 1 ? 'מחר' : 'ביום ' + WEEK_DAYS[d];
+      return label + ' סגור כרגע. הפתיחה הבאה ' + when + ' בשעה ' + clock(ranges[0][0]) + ', ועד ' + clock(ranges[0][1]) + '.';
+    }
+  }
+  return label + ' סגור כרגע.';
+}
