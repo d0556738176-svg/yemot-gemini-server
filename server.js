@@ -2095,11 +2095,11 @@ function extractRequestedBusinessName(question) {
 
 // Shared fast answer synthesis: races Gemini and every configured independent provider
 // and returns the first healthy answer inside the time budget (or throws).
-async function raceSynthesis(prompt,budgetMs){
-  const racers=[
+async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700}={}){
+  const racers=gemini?[
     generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true,null)
       .then(r=>String(r?.response?.text?.()||'').trim())
-  ];
+  ]:[];
   for(const provider of [
     {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim()},
     {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim()},
@@ -2109,12 +2109,36 @@ async function raceSynthesis(prompt,budgetMs){
     racers.push(callCompatibleChatCompletion({
       provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
       messages:[{role:'user',content:prompt}],timeoutMs:Math.max(1200,budgetMs-300),
-      maxTokens:700,cooldowns:branch1SynthCooldowns,cooldownMs:15000
+      maxTokens,cooldowns:branch1SynthCooldowns,cooldownMs:15000
     }).then(text=>{ if(!String(text||'').trim()) throw new Error('empty'); return String(text).trim(); })
       .catch(err=>{ console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
   }
   return withTimeout(Promise.any(racers),budgetMs,'branch1 web synthesis');
 }
+// Follow-up resolution: a short question that leans on the previous turn ("is it open now?",
+// "and what is its number?") is rewritten into a self-contained question by a fast model,
+// so routing and search work on the real subject instead of a dangling pronoun.
+async function rewriteFollowUp(question,turns){
+  const q=String(question||'').trim();
+  if(process.env.BRANCH1_FOLLOWUP_REWRITE==='off' || !q || q.length>90 || !Array.isArray(turns) || !turns.length) return q;
+  const dangling=/(?:^|\s)(?:הוא|היא|הם|הן|שם|שלו|שלה|שלהם|שלהן|זה|זאת|אותו|אותה|אותם|גם שם|ומה עם|ומה לגבי|ואיפה|וכמה|ומתי)(?=\s|$|\?)/.test(q) || q.split(/\s+/).length<=2;
+  if(!dangling) return q;
+  const recent=turns.slice(-3).map(t=>'מתקשר: '+String(t.user||'').slice(0,160)+'\nמערכת: '+String(t.assistant||'').slice(0,200)).join('\n');
+  if(!recent.trim()) return q;
+  const prompt='שכתב את השאלה האחרונה של המתקשר לשאלה עצמאית ומלאה, בהתבסס על השיחה הקודמת, כך שיהיה ברור על מה ועל איזה גוף או מקום שואלים (שם העסק והעיר אם הוזכרו). '+
+    'אל תענה עליה ואל תוסיף מידע שלא נאמר. אם השאלה כבר עצמאית וברורה, החזר אותה בדיוק כפי שהיא. החזר שורה אחת בלבד, בלי הסברים.\n\nשיחה קודמת:\n'+recent+'\n\nהשאלה האחרונה: '+q;
+  try {
+    const out=await raceSynthesis(prompt,Number(process.env.BRANCH1_FOLLOWUP_BUDGET_MS||1500),{gemini:false,maxTokens:300});
+    const fixed=String(out||'').trim().split('\n')[0].replace(/^["'“”]+|["'“”]+$/g,'').trim();
+    if(!fixed || fixed.length<3 || fixed.length>q.length*3+60 || fixed===q) return q;
+    console.info('[FOLLOWUP_REWRITE] question made self-contained',{from:q.slice(0,100),to:fixed.slice(0,140)});
+    return fixed;
+  } catch(e) {
+    console.warn('[FOLLOWUP_REWRITE] unavailable; using original',{status:geminiErrorStatus(e)});
+    return q;
+  }
+}
+
 function israelNowText(){
   const now=new Date();
   return new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);
@@ -3855,6 +3879,7 @@ async function callHandler(call) {
         userTranscript=pendingLookup;
       }
       userTranscript=resolveBranch1Question(userTranscript,turnHistory);
+      userTranscript=await rewriteFollowUp(userTranscript,turnHistory);
       relevantHistoryText=isCorrection(originalSpokenTranscript)
         ? selectRelevantHistoryForTurn('מה שאמרת קודם',historyText,turnHistory)
         : (branch1FollowUpHistory(originalSpokenTranscript,turnHistory) || selectRelevantHistoryForTurn(originalSpokenTranscript,historyText,turnHistory));
@@ -4061,7 +4086,7 @@ async function callHandler(call) {
     }
     console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length, elapsedMs:Date.now()-turnStartedAt });
     // Short preview of phone-number answers so their accuracy can be audited from the logs.
-    if(typeof isPhoneNumberRequest==='function' && isPhoneNumberRequest(userTranscript)) {
+    {
       console.info('[REPLY_PREVIEW]',{callId:activeKey,question:String(userTranscript).slice(0,100),reply:String(replyText).slice(0,300)});
     }
     const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
