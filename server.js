@@ -6,6 +6,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { tavily } from '@tavily/core';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
+import { isYouTubeConfirmationYes, isYouTubeConfirmationNo } from './youtube-confirmation.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
@@ -3801,13 +3802,6 @@ async function youtubeCallHandler(call) {
     return /(חפש|תחפש|תמצא|תאתר|חיפוש|נושא חדש|חיפוש חדש|משהו אחר)/i.test(String(text||''));
   }
 
-  function isYes(text) {
-    return /^(כן|כן בהחלט|בוודאי|בטח|אני רוצה|רוצה|כן אני רוצה|תשמיע|להשמיע|כן תשמיע)\\s*$/i.test(String(text||'').trim());
-  }
-
-  function isNo(text) {
-    return /^(לא|לא תודה|לא רוצה|סיימתי|זה מספיק|תודה)\\s*$/i.test(String(text||'').trim());
-  }
 
   function formatResultsPage() {
     const page=results.slice(resultOffset,resultOffset+5);
@@ -3849,7 +3843,14 @@ async function youtubeCallHandler(call) {
         return call.id_list_message([{type:'text',data:'לא הצלחתי להבין את הבקשה. נא לנסות שוב'}]);
 
       if(selectedVideo) {
-        if(isYes(transcript)) {
+        const confirmationYes = isYouTubeConfirmationYes(transcript);
+        const confirmationNo = isYouTubeConfirmationNo(transcript);
+        console.info('[YouTube IVR] confirmation classified', {
+          videoId: selectedVideo.videoId,
+          yes: confirmationYes,
+          no: confirmationNo
+        });
+        if(confirmationYes) {
           // Only play an exact, independently authorized audio source that was
           // explicitly mapped to this selected video ID. No YouTube extraction
           // or hidden stream discovery is performed.
@@ -3867,6 +3868,7 @@ async function youtubeCallHandler(call) {
               chunks: playback.chunkCount
             });
 
+            const playedVideoId = selectedVideo.videoId;
             const messages = [
               { type: 'text', data: 'מתחיל להשמיע את הסרטון המאושר.' },
               ...playback.playbackPaths.map(file => ({ type: 'file', data: file }))
@@ -3876,7 +3878,7 @@ async function youtubeCallHandler(call) {
             // Yemot-router2 supports file messages directly. This makes the
             // phone call play the uploaded WAV chunks instead of waiting for
             // another HTTP request or trying to stream a remote YouTube URL.
-            console.info('[YouTube IVR] playback response ready', { videoId: selectedVideo?.videoId || null, files: playback.playbackPaths.length });
+            console.info('[YouTube IVR] playback response ready', { videoId: playedVideoId, files: playback.playbackPaths.length });
             return call.id_list_message(messages, { removeInvalidChars: true });
           } catch (playbackError) {
             logDetailedError('YouTube authorized playback', playbackError);
@@ -3886,7 +3888,7 @@ async function youtubeCallHandler(call) {
           }
         }
 
-        if(isNo(transcript) || isNewSearch(transcript)) {
+        if(confirmationNo || isNewSearch(transcript)) {
           selectedVideo=null;
           results=[];
           resultOffset=0;
@@ -3953,6 +3955,18 @@ async function youtubeCallHandler(call) {
         : 'לא מצאתי תוצאות מתאימות. אמור חיפוש חדש. ולסיום ההקלטה הקש סולמית';
     }
   } catch(error) {
+    // Do not try to speak a second response after the caller has disconnected
+    // or YemotRouter has already ended the action; that can trigger an uncaught
+    // "invalid characters/headers already sent" failure.
+    // ExitError is YemotRouter's normal control-flow signal after id_list_message.
+    // Re-throw it so the router can complete its cleanup; swallowing it here would
+    // leave the call lifecycle in the wrong state.
+    if(error instanceof ExitError) throw error;
+    // A disconnected caller cannot receive another response.
+    if(isCallerHangupError(error)) {
+      console.info('[YouTube IVR] caller disconnected before another response could be sent');
+      return;
+    }
     logDetailedError('YouTube IVR',error);
     const status=geminiErrorStatus(error);
     const message=status===429?'החיפוש עמוס כרגע. נא לנסות שוב':status===503?'שירות יוטיוב אינו זמין כרגע':'אירעה תקלה זמנית בחיפוש ביוטיוב. נא לנסות שוב';
