@@ -6,6 +6,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { tavily } from '@tavily/core';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
+import { isYouTubeConfirmationYes, isYouTubeConfirmationNo } from './youtube-confirmation.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
@@ -3801,13 +3802,7 @@ async function youtubeCallHandler(call) {
     return /(חפש|תחפש|תמצא|תאתר|חיפוש|נושא חדש|חיפוש חדש|משהו אחר)/i.test(String(text||''));
   }
 
-  function isYes(text) {
-    return /^(כן|כן בהחלט|בוודאי|בטח|אני רוצה|רוצה|כן אני רוצה|תשמיע|להשמיע|כן תשמיע)\\s*$/i.test(String(text||'').trim());
-  }
 
-  function isNo(text) {
-    return /^(לא|לא תודה|לא רוצה|סיימתי|זה מספיק|תודה)\\s*$/i.test(String(text||'').trim());
-  }
 
   function formatResultsPage() {
     const page=results.slice(resultOffset,resultOffset+5);
@@ -3849,7 +3844,7 @@ async function youtubeCallHandler(call) {
         return call.id_list_message([{type:'text',data:'לא הצלחתי להבין את הבקשה. נא לנסות שוב'}]);
 
       if(selectedVideo) {
-        if(isYes(transcript)) {
+        if(isYouTubeConfirmationYes(transcript)) {
           // Only play an exact, independently authorized audio source that was
           // explicitly mapped to this selected video ID. No YouTube extraction
           // or hidden stream discovery is performed.
@@ -3886,7 +3881,7 @@ async function youtubeCallHandler(call) {
           }
         }
 
-        if(isNo(transcript) || isNewSearch(transcript)) {
+        if(isYouTubeConfirmationNo(transcript) || isNewSearch(transcript)) {
           selectedVideo=null;
           results=[];
           resultOffset=0;
