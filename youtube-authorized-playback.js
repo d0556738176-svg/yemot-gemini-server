@@ -71,14 +71,14 @@ function validateSourceUrl(value, dynamicAllowedHost='') {
   return url;
 }
 
-async function fetchAuthorizedSource(videoId, output, fallbackUrl=null) {
+async function fetchAuthorizedSource(videoId, output, fallbackUrl=null, signal=undefined) {
   const id = String(videoId || '').trim();
   console.info('[YouTube IVR] playback step 1: looking up authorized source', { videoId: id });
   const registrySource = await authorizedSourceFromSupabase(id) || authorizedSourceFromEnv(id);
   const mapped = registrySource || fallbackUrl;
   if (!mapped) {
     console.warn('[YouTube IVR] playback stopped: no authorized source mapping', { videoId: id });
-    throw new Error('No authorized audio source mapped to this video');
+    throw Object.assign(new Error('No authorized audio source mapped to this video'), {code: 'no_alternate_source'});
   }
   console.info('[YouTube IVR] playback step 2: authorized source found', { videoId: id, host: new URL(mapped).hostname });
 
@@ -89,7 +89,7 @@ async function fetchAuthorizedSource(videoId, output, fallbackUrl=null) {
   const sourceUrl = validateSourceUrl(mapped, dynamicAllowedHost);
   const response = await fetch(sourceUrl, {
     headers: { accept: 'audio/*,application/octet-stream;q=0.9,*/*;q=0.1' },
-    signal: AbortSignal.timeout(SOURCE_TIMEOUT_MS)
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(SOURCE_TIMEOUT_MS)]) : AbortSignal.timeout(SOURCE_TIMEOUT_MS)
   });
   if (!response.ok || !response.body) {
     throw new Error('Authorized audio source HTTP ' + response.status);
@@ -117,11 +117,16 @@ async function fetchAuthorizedSource(videoId, output, fallbackUrl=null) {
   return total;
 }
 
-function runFfmpeg(args) {
+function runFfmpeg(args, signal=undefined) {
   return new Promise((resolve, reject) => {
     if (!ffmpegPath) return reject(new Error('ffmpeg-static is unavailable'));
     const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('ffmpeg timed out')); }, FFMPEG_TIMEOUT_MS);
+    // Stop the child process when the caller's budget is gone so no orphan
+    // conversion keeps eating CPU on the free instance.
+    const onAbort = () => { child.kill('SIGKILL'); clearTimeout(timer); reject(Object.assign(new Error('ffmpeg aborted'), {code: 'aborted'})); };
+    if (signal?.aborted) return onAbort();
+    signal?.addEventListener('abort', onAbort, { once: true });
     let stderr = '';
     child.stderr.on('data', chunk => {
       stderr += chunk.toString();
@@ -134,20 +139,25 @@ function runFfmpeg(args) {
   });
 }
 
-async function makeChunks(source, dir) {
+async function makeChunks(source, dir, signal=undefined) {
   await fs.mkdir(dir, { recursive: true });
   const pattern = path.join(dir, 'chunk-%03d.wav');
+  console.info('[YouTube IVR] playback step 4: starting ffmpeg');
   await runFfmpeg([
     '-hide_banner','-loglevel','error','-y',
     '-i',source,
     '-vn','-ar','8000','-ac','1','-c:a','pcm_s16le',
     '-f','segment','-segment_time','120','-reset_timestamps','1',pattern
-  ]);
-  console.info('[YouTube IVR] playback step 4: starting ffmpeg', { source });
+  ], signal);
   const names=(await fs.readdir(dir))
     .filter(n => /^chunk-\d{3}\.wav$/.test(n))
     .sort();
   if(!names.length) throw new Error('ffmpeg produced no audio chunks');
+  // A WAV header alone is 44 bytes; refuse to call an empty conversion "ready".
+  for (const n of names) {
+    const {size} = await fs.stat(path.join(dir, n));
+    if (size <= 44) throw Object.assign(new Error('ffmpeg produced an empty audio chunk'), {code: 'empty_audio'});
+  }
   console.info('[YouTube IVR] playback step 5: ffmpeg finished', { chunks: names.length });
   return names.map(n=>path.join(dir,n));
 }
@@ -208,7 +218,7 @@ async function ensureUploadedAndVerified(filePath, remotePath) {
   });
 }
 
-async function build(videoId, fallbackUrl=null) {
+async function build(videoId, fallbackUrl=null, signal=undefined) {
   const id=String(videoId||'').trim();
   if(!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'authorized-audio-'));
@@ -218,18 +228,29 @@ async function build(videoId, fallbackUrl=null) {
   try {
     if (process.env.YOUTUBE_VISIONOS_EXPERIMENT !== 'false') {
       try {
-        await downloadVisionAudio(id, source);
-        console.info('[YouTube IVR] vision audio downloaded', {videoId: id});
+        const {bytes} = await downloadVisionAudio(id, source, {signal});
+        console.info('[YouTube IVR] vision audio downloaded', {videoId: id, bytes});
       } catch (error) {
-        console.warn('[YouTube IVR] vision audio unavailable; trying existing source', {videoId: id, error: String(error?.message || '').slice(0,150)});
-        await fetchAuthorizedSource(id,source,fallbackUrl);
+        console.warn('[YouTube IVR] vision audio unavailable; trying existing source', {videoId: id, code: error?.code || 'unknown', error: String(error?.message || '').slice(0,150)});
+        try {
+          await fetchAuthorizedSource(id,source,fallbackUrl,signal);
+        } catch (fallbackError) {
+          // Report the original YouTube refusal when no other source exists;
+          // "no mapping" alone would hide the real reason from the caller and logs.
+          if (fallbackError?.code === 'no_alternate_source') {
+            throw Object.assign(new Error('YouTube audio unavailable: ' + (error?.code || 'unknown')), {code: error?.code || 'youtube_unavailable', cause: error});
+          }
+          throw fallbackError;
+        }
       }
     } else {
-      await fetchAuthorizedSource(id,source,fallbackUrl);
+      await fetchAuthorizedSource(id,source,fallbackUrl,signal);
     }
-    const chunks=await makeChunks(source,chunksDir);
+    signal?.throwIfAborted();
+    const chunks=await makeChunks(source,chunksDir,signal);
     console.info('[YouTube IVR] playback step 9: uploading chunks', { videoId: id, chunks: chunks.length });
     for(let i=0;i<chunks.length;i++) {
+      signal?.throwIfAborted();
       const remote='ivr2:/2/youtube-authorized/'+id+'-'+String(i+1).padStart(3,'0')+'.wav';
       await ensureUploadedAndVerified(chunks[i],remote);
       paths.push('/2/youtube-authorized/'+id+'-'+String(i+1).padStart(3,'0'));
@@ -245,7 +266,9 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
   const fallbackUrl=String(options?.fallbackUrl||'').trim()||null;
   const jobKey=id+(fallbackUrl?'|alternate':'');
   if(activeJobs.has(jobKey)) return activeJobs.get(jobKey);
-  const job=build(id,fallbackUrl).finally(()=>activeJobs.delete(jobKey));
+  // The first caller's deadline signal cancels download/ffmpeg/upload so no
+  // orphan work keeps running on the free instance after the call gave up.
+  const job=build(id,fallbackUrl,options?.signal).finally(()=>activeJobs.delete(jobKey));
   activeJobs.set(jobKey,job);
   return job;
 }

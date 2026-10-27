@@ -9,6 +9,7 @@ import { selectedResultIndex, isMoreResultsRequest, isFreshYouTubeSearch } from 
 import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
+import { prepareYouTubePlayback, playbackFailureMessage } from './youtube-playback-prepare.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
 import { extractExplicitLocation, extractLocalArea, extractSearchCity } from './business-location.js';
 import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, filterNearbyLocalBusinessResults, buildNoVerifiedLocalResultsAnswer, buildLocalBusinessResultsAnswer } from './local-business-search.js';
@@ -3812,76 +3813,15 @@ async function youtubeCallHandler(call) {
 
   async function playSelected(call, video) {
     console.info('[YouTube IVR] direct playback requested', { videoId: video.videoId });
-
-    // Preferred path: the isolated Audio Worker supplied for branch 2.
-    // The worker owns media acquisition, FFmpeg conversion, Yemot upload,
-    // post-upload verification and cache. If it is not configured or is
-    // temporarily unavailable, keep the existing authorized-source path as
-    // a fallback so the IVR itself does not go down.
-    const workerBase=String(process.env.YOUTUBE_AUDIO_WORKER_URL||'').trim().replace(/\/$/,'');
-    const workerSecret=String(process.env.YOUTUBE_AUDIO_WORKER_SECRET||'').trim();
-    if(workerBase && workerSecret) {
-      try {
-        const workerResponse=await withTimeout(
-          fetch(workerBase+'/prepare-audio',{
-            method:'POST',
-            headers:{
-              'content-type':'application/json',
-              'authorization':'Bearer '+workerSecret
-            },
-            body:JSON.stringify({
-              videoId:video.videoId,
-              title:video.title||'',
-              requestId:crypto.randomUUID()
-            })
-          }),
-          Number(process.env.YOUTUBE_AUDIO_WORKER_TIMEOUT_MS||120000),
-          'YouTube audio worker'
-        );
-        const workerBody=await workerResponse.json().catch(()=>null);
-        if(workerResponse.ok && workerBody?.status==='ready' && Array.isArray(workerBody.playbackPaths) && workerBody.playbackPaths.length) {
-          console.info('[YouTube IVR] audio worker ready',{
-            videoId:video.videoId,
-            chunks:workerBody.playbackPaths.length,
-            cached:Boolean(workerBody.cached)
-          });
-          return call.id_list_message([
-            {type:'text',data:'משמיע עכשיו את '+sanitizeForYemot(video.title)+'.'},
-            ...workerBody.playbackPaths.map(file=>({type:'file',data:String(file)}))
-          ],{removeInvalidChars:true});
-        }
-        console.warn('[YouTube IVR] audio worker unavailable; using existing fallback',{
-          videoId:video.videoId,
-          httpStatus:workerResponse.status,
-          status:workerBody?.status||'invalid_response',
-          reason:workerBody?.reason||''
-        });
-      } catch(workerError) {
-        console.warn('[YouTube IVR] audio worker request failed; using existing fallback',{
-          videoId:video.videoId,
-          status:geminiErrorStatus(workerError)
-        });
-      }
-    }
-
-
-    let alternate=null;
-    try {
-      alternate=await resolvePublisherAudio(video);
-      if(alternate) console.info('[YouTube IVR] publisher audio fallback matched',{videoId:video.videoId,source:alternate.source,score:alternate.score});
-    } catch(e) {
-      console.warn('[YouTube IVR] publisher audio fallback unavailable',{videoId:video.videoId,status:geminiErrorStatus(e)});
-    }
-    const playback=await withTimeout(
-      downloadAuthorizedAudioToYemot(video.videoId,{fallbackUrl:alternate?.url||null}),
-      Number(process.env.YOUTUBE_AUTHORIZED_PLAYBACK_TIMEOUT_MS || 90000),
-      'authorized YouTube playback preparation'
-    );
-    if(!playback?.playbackPaths?.length) throw new Error('No playback files generated');
-    console.info('[YouTube IVR] direct playback ready',{videoId:video.videoId,chunks:playback.chunkCount});
+    // Worker first, then the in-process download, under one shared time
+    // budget with real cancellation (see youtube-playback-prepare.js).
+    const prepared=await prepareYouTubePlayback(video,{
+      resolveAlternate:resolvePublisherAudio,
+      downloadToYemot:downloadAuthorizedAudioToYemot
+    });
     return call.id_list_message([
       {type:'text',data:'משמיע עכשיו את '+sanitizeForYemot(video.title)+'.'},
-      ...playback.playbackPaths.map(file=>({type:'file',data:file}))
+      ...prepared.playbackPaths.map(file=>({type:'file',data:String(file)}))
     ],{removeInvalidChars:true});
   }
 
@@ -3922,8 +3862,13 @@ async function youtubeCallHandler(call) {
           try {
             return await playSelected(call,selectedVideo);
           } catch(playbackError) {
-            logDetailedError('YouTube authorized playback',playbackError);
-            nextPrompt='לא הצלחתי להשמיע את התוצאה הזאת כרגע. התוצאות נשארו זמינות. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
+            if(playbackError instanceof ExitError||isCallerHangupError(playbackError)) throw playbackError;
+            console.warn('[YouTube IVR] playback failed',{
+              videoId:selectedVideo.videoId,
+              code:playbackError?.code||'unknown',
+              attempts:(playbackError?.attempts||[]).map(a=>a.path+':'+a.code).join(',')
+            });
+            nextPrompt=playbackFailureMessage(playbackError?.code);
             continue;
           }
         }
@@ -3970,6 +3915,13 @@ async function youtubeCallHandler(call) {
     }
   } catch(error) {
     if(error instanceof ExitError) throw error;
+    // After a hang-up Yemot's request is already answered; sending
+    // id_list_message here is what produced "Cannot send id_list_message
+    // after sending response" in the logs.
+    if(isCallerHangupError(error)) {
+      console.info('[YouTube IVR] caller hung up');
+      return;
+    }
     logDetailedError('YouTube IVR',error);
     const status=geminiErrorStatus(error);
     const message=status===429?'החיפוש עמוס כרגע. נא לנסות שוב':status===503?'שירות יוטיוב אינו זמין כרגע':'אירעה תקלה זמנית בחיפוש ביוטיוב. נא לנסות שוב';

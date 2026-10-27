@@ -33,6 +33,39 @@ test('vision failure reaches existing fallback without uploading',async()=>{
  try {
   delete process.env.YOUTUBE_VISIONOS_EXPERIMENT;delete process.env.SUPABASE_URL;delete process.env.SUPABASE_KEY;delete process.env.AUTHORIZED_AUDIO_SOURCES_JSON;
   globalThis.fetch=async input=>{let u=new URL(input);if(u.hostname==='www.youtube.com')return Response.json({playabilityStatus:{status:'LOGIN_REQUIRED'}});if(u.hostname==='www.call2all.co.il')uploads++;throw new Error('unexpected request');};
-  await assert.rejects(downloadAuthorizedAudioToYemot('testvideo02'),/No authorized audio source/);assert.equal(uploads,0);
+  await assert.rejects(downloadAuthorizedAudioToYemot('testvideo02'),e=>e.code==='youtube_login_required'&&/LOGIN_REQUIRED/.test(e.cause?.message||''));assert.equal(uploads,0);
+ } finally {globalThis.fetch=saved;process.env=env;}
+});
+
+test('multi-chunk audio uploads every chunk in order and verifies each', {skip:!ffmpegPath||!existsSync(ffmpegPath)}, async()=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'stage-long-'));const saved=globalThis.fetch;const env={...process.env};const uploaded=new Map();
+ try {
+  const name=path.join(dir,'long.m4a');execFileSync(ffmpegPath,['-v','error','-f','lavfi','-i','sine=frequency=440:duration=250','-c:a','aac','-y',name]);
+  const audio=await readFile(name);process.env.YEMOT_API_KEY='fake-key';delete process.env.YOUTUBE_VISIONOS_EXPERIMENT;
+  globalThis.fetch=async(input,options={})=>{
+   const url=new URL(input);
+   if(url.hostname==='www.youtube.com') return Response.json({playabilityStatus:{status:'OK'},streamingData:{adaptiveFormats:[{mimeType:'audio/mp4',url:'https://mock.googlevideo.com/a',contentLength:String(audio.length),bitrate:128000}]}});
+   if(url.hostname==='mock.googlevideo.com')return new Response(audio);
+   if(url.pathname.endsWith('/GetFile'))return Response.json({responseStatus:uploaded.has(url.searchParams.get('what'))?'OK':'ERROR'});
+   if(url.pathname.endsWith('/UploadFile')){const wav=Buffer.from(await options.body.get('file').arrayBuffer());uploaded.set(url.searchParams.get('path'),(wav.length-44)/16000);return Response.json({responseStatus:'OK'});}
+   throw new Error('Unexpected request');
+  };
+  const result=await downloadAuthorizedAudioToYemot('testvideo03');
+  assert.deepEqual(result.playbackPaths,['/2/youtube-authorized/testvideo03-001','/2/youtube-authorized/testvideo03-002','/2/youtube-authorized/testvideo03-003']);
+  const secs=[...uploaded.values()];const total=secs.reduce((a,b)=>a+b,0);
+  assert.ok(Math.abs(total-250)<1.5,'total duration preserved: '+total);
+  assert.ok(Math.abs(secs[0]-120)<1 && Math.abs(secs[1]-120)<1,'first chunks are 120s');
+ } finally {globalThis.fetch=saved;process.env=env;await rm(dir,{recursive:true,force:true});}
+});
+
+test('HTML returned instead of audio is rejected before any upload', {skip:!ffmpegPath||!existsSync(ffmpegPath)}, async()=>{
+ const saved=globalThis.fetch;const env={...process.env};let uploads=0;const html=Buffer.from('<html>blocked</html>');
+ try {
+  process.env.YEMOT_API_KEY='fake-key';delete process.env.YOUTUBE_VISIONOS_EXPERIMENT;
+  globalThis.fetch=async input=>{const u=new URL(input);
+   if(u.hostname==='www.youtube.com')return Response.json({playabilityStatus:{status:'OK'},streamingData:{adaptiveFormats:[{mimeType:'audio/mp4',url:'https://mock.googlevideo.com/h',contentLength:String(html.length),bitrate:1}]}});
+   if(u.hostname==='mock.googlevideo.com')return new Response(html);
+   uploads++;return Response.json({responseStatus:'OK'});};
+  await assert.rejects(downloadAuthorizedAudioToYemot('testvideo04'),/ffmpeg failed/);assert.equal(uploads,0);
  } finally {globalThis.fetch=saved;process.env=env;}
 });
