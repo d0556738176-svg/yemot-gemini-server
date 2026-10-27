@@ -680,7 +680,7 @@ async function transcribeWithDeepgram(audioBuffer, overrideKey='') {
     data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || ''
   ).trim();
 
-  if(!transcript) throw Object.assign(new Error('Deepgram returned empty transcription'),{status:503});
+  if(!transcript) throw Object.assign(new Error('Deepgram returned empty transcription'),{status:503,noSpeech:true});
 
   const cleaned=sanitizeForYemot(transcript);
   if(cleaned) {
@@ -692,7 +692,7 @@ async function transcribeWithDeepgram(audioBuffer, overrideKey='') {
   throw Object.assign(new Error('Deepgram transcription became empty after cleanup'),{status:503});
 }
 
-async function transcribePhoneAudio(audioBuffer) {
+async function transcribePhoneAudio(audioBuffer, options={}) {
   // Primary path for Israeli Hebrew phone speech: Deepgram Nova-3 when configured.
   // It is purpose-built for speech-to-text, supports Hebrew in production, and
   // supports keyterm prompting for names and YouTube/channel terminology.
@@ -705,6 +705,12 @@ async function transcribePhoneAudio(audioBuffer) {
         status:geminiErrorStatus(err),
         message:String(err?.message||err).slice(0,500)
       });
+      // Deepgram answered normally but heard no speech (silence/noise). The slower
+      // Gemini fallbacks return empty text for the same audio and add ~20s of dead
+      // air, so branch 1 fails fast and asks the caller to repeat instead.
+      if(err?.noSpeech && options.failFastOnNoSpeech) {
+        throw Object.assign(new Error('Empty phone transcription'),{status:400,noSpeech:true});
+      }
     }
   }
 
@@ -3506,7 +3512,7 @@ async function callHandler(call) {
     try {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
-      userTranscript=await transcribePhoneAudio(audioBuffer);
+      userTranscript=await transcribePhoneAudio(audioBuffer,{failFastOnNoSpeech:true});
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length,elapsedMs:Date.now()-turnStartedAt});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
       originalSpokenTranscript=userTranscript;
@@ -3713,6 +3719,7 @@ async function callHandler(call) {
           console.warn('[CALL_FLOW] quick web fallback unavailable',{callId:activeKey,status:geminiErrorStatus(fallbackError)});
         }
       }
+      if(!replyText && e.noSpeech) replyText='לא שמעתי אותך בבירור. אמור שוב בבקשה';
       if(!replyText) replyText=e.status===429?'מצטערים מנוע התשובות הגיע כרגע למגבלת השימוש נסה שוב בעוד כמה רגעים':
         e.status===503?'מצטערים מנוע התשובות אינו זמין כרגע נסה שוב בעוד רגע':
         e.status===408?'מצטערים לקח יותר מדי זמן לענות נסה שוב':
