@@ -3803,7 +3803,7 @@ function startYouTubePlaybackJob(video) {
   // No caller AbortSignal: the job must survive across the short hold requests.
   // A larger budget than the old inline path lets long shiurim finish.
   prepareYouTubePlayback(video, {
-    env: { ...process.env, YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS: String(process.env.YOUTUBE_PLAYBACK_JOB_BUDGET_MS || 1800000) },
+    env: { ...process.env, YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS: String(process.env.YOUTUBE_PLAYBACK_JOB_BUDGET_MS || 2700000) },
     resolveAlternate: resolvePublisherAudio,
     downloadToYemot: downloadAuthorizedAudioToYemot,
     lookupCached: lookupCachedYouTubeAudio,
@@ -3862,9 +3862,12 @@ async function youtubeCallHandler(call) {
     // instead of holding one HTTP request open for the whole ~60s (which drops
     // the call). When ready, every chunk plays in ONE id_list_message => gapless.
     const state=startYouTubePlaybackJob(video);
+    // A short grace period avoids a full spoken hold cycle on fast cached hits.
+    const fastUntil=Date.now()+1500;
+    while(state.status==='running'&&Date.now()<fastUntil) await new Promise(resolve=>setTimeout(resolve,100));
     const holdStartedAt=Date.now();
-    const maxHoldMs=Number(process.env.YOUTUBE_HOLD_MAX_MS||240000);
-    const holdSec=Number(process.env.YOUTUBE_HOLD_SEC||8);
+    const maxHoldMs=Number(process.env.YOUTUBE_HOLD_MAX_MS||900000);
+    const holdSec=Number(process.env.YOUTUBE_HOLD_SEC||3);
     let holdCycles=0;
     let lastAnnouncement={};
     while(true) {

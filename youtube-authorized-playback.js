@@ -10,9 +10,9 @@ import { createAudioCache, audioCachePaths, verifiedAudioFile } from './youtube-
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const YEMOT_UPLOAD_URL = YEMOT_API_BASE + '/UploadFile';
-const MAX_SOURCE_BYTES = 120 * 1024 * 1024;
+const MAX_SOURCE_BYTES = 256 * 1024 * 1024;
 const SOURCE_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_SOURCE_TIMEOUT_MS || 12000);
-const FFMPEG_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_FFMPEG_TIMEOUT_MS || 120000);
+const FFMPEG_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_FFMPEG_TIMEOUT_MS || 900000);
 const UPLOAD_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_UPLOAD_TIMEOUT_MS || 20000);
 const VERIFY_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_VERIFY_TIMEOUT_MS || 8000);
 const activeJobs = new Map();
@@ -142,27 +142,54 @@ function runFfmpeg(args, signal=undefined) {
   });
 }
 
-async function makeChunks(source, dir, signal=undefined) {
-  await fs.mkdir(dir, { recursive: true });
-  const pattern = path.join(dir, 'chunk-%03d.wav');
+async function makeChunks(source, dir, signal=undefined, onChunk=undefined) {
+  await fs.mkdir(dir,{recursive:true});
+  const pattern=path.join(dir,'chunk-%03d.wav');
+  const stop=new AbortController();
+  const combined=signal?AbortSignal.any([signal,stop.signal]):stop.signal;
+  let done=false,failure;
+  const produced=new Set();
+  const files=[];
+  const list=async()=>(await fs.readdir(dir)).filter(n=>/^chunk-\d{3,}\.wav$/.test(n))
+    .sort((a,b)=>Number(a.match(/\d+/)[0])-Number(b.match(/\d+/)[0]));
   console.info('[YouTube IVR] playback step 4: starting ffmpeg');
-  await runFfmpeg([
-    '-hide_banner','-loglevel','error','-y',
-    '-i',source,
+  const conversion=runFfmpeg([
+    '-hide_banner','-loglevel','error','-y','-i',source,
     '-vn','-ar','8000','-ac','1','-c:a','pcm_s16le',
     '-f','segment','-segment_time','120','-reset_timestamps','1',pattern
-  ], signal);
-  const names=(await fs.readdir(dir))
-    .filter(n => /^chunk-\d{3}\.wav$/.test(n))
-    .sort();
-  if(!names.length) throw new Error('ffmpeg produced no audio chunks');
-  // A WAV header alone is 44 bytes; refuse to call an empty conversion "ready".
-  for (const n of names) {
-    const {size} = await fs.stat(path.join(dir, n));
-    if (size <= 44) throw Object.assign(new Error('ffmpeg produced an empty audio chunk'), {code: 'empty_audio'});
+  ],combined).then(()=>{done=true;},e=>{failure=e;done=true;});
+  try {
+    for(;;){
+      combined.throwIfAborted();
+      if(failure)throw failure;
+      const names=await list();
+      // FFmpeg finalizes the WAV header before opening the NEXT segment.
+      // Never read/upload the active final file until conversion exits cleanly.
+      const eligible=done?names:names.slice(0,-1);
+      for(const name of eligible){
+        if(produced.has(name))continue;
+        const index=Number(name.match(/\d+/)[0]);
+        if(index!==files.length)throw new Error('Non-contiguous audio segment sequence');
+        const file=path.join(dir,name);
+        if((await fs.stat(file)).size<=44)throw Object.assign(new Error('Empty audio chunk'),{code:'empty_audio'});
+        if(onChunk)await onChunk(file,index,{converting:!done,total:done?names.length:null});
+        produced.add(name);files.push(file);
+      }
+      if(done){
+        if(failure)throw failure;
+        // A new segment may have appeared between the listing and process exit.
+        if((await list()).length===files.length)break;
+        continue;
+      }
+      await new Promise(resolve=>setTimeout(resolve,250));
+    }
+    if(!files.length)throw new Error('ffmpeg produced no audio chunks');
+    console.info('[YouTube IVR] playback step 5: ffmpeg finished',{chunks:files.length,overlappedUpload:Boolean(onChunk)});
+    return files;
+  } finally {
+    if(!done)stop.abort();
+    await conversion;
   }
-  console.info('[YouTube IVR] playback step 5: ffmpeg finished', { chunks: names.length });
-  return names.map(n=>path.join(dir,n));
 }
 
 async function uploadToYemot(filePath, remotePath) {
@@ -324,11 +351,15 @@ export function lookupCachedYouTubeAudio(videoId) {
 async function downloadApifySource(id, output, signal, onProgress=()=>{}) {
   onProgress({stage:'provider'});
   const resolved = await resolveApifyAudio(id, process.env, {store:{read:readCacheJson,write:writeCacheJson}});
-  const r = await fetch(resolved.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(300000)]) : AbortSignal.timeout(300000) });
+  const r = await fetch(resolved.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(600000)]) : AbortSignal.timeout(600000) });
   if (!r.ok || !r.body) throw Object.assign(new Error('Apify file download HTTP ' + r.status), { code: 'apify_download_http' });
   const encoding=r.headers.get('content-encoding');
   const declared=encoding&&encoding!=='identity'?NaN:Number(r.headers.get('content-length'));
   const totalBytes=Number.isFinite(declared)&&declared>0?declared:null;
+  if(totalBytes>MAX_SOURCE_BYTES) {
+    await r.body.cancel().catch(()=>{});
+    throw Object.assign(new Error('Source exceeds supported audio size'),{code:'too_large'});
+  }
   onProgress({stage:'transferring',bytes:0,totalBytes});
   const file = await fs.open(output, 'w');
   let total = 0;
@@ -392,19 +423,13 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     }
     signal?.throwIfAborted();
     onProgress({stage:'converting'});
-    const chunks=await makeChunks(source,chunksDir,signal);
-    onProgress({stage:'uploading',completed:0,total:chunks.length});
-    console.info('[YouTube IVR] playback step 9: uploading chunks', { videoId: id, chunks: chunks.length });
-    for(let i=0;i<chunks.length;i++) {
+    await makeChunks(source,chunksDir,signal,async(file,index,info)=>{
       signal?.throwIfAborted();
-      // Yemot message delimiters forbid hyphens, even inside file paths.
-      // Hex preserves distinct video IDs without forbidden characters.
-      const playbackPath='/2/youtubeaudio/'+Buffer.from(id,'utf8').toString('hex')+'/'+String(i+1).padStart(3,'0');
-      const remote='ivr2:'+playbackPath+'.wav';
-      await ensureUploadedAndVerified(chunks[i],remote);
+      const playbackPath='/2/youtubeaudio/'+Buffer.from(id,'utf8').toString('hex')+'/'+String(index+1).padStart(3,'0');
+      await ensureUploadedAndVerified(file,'ivr2:'+playbackPath+'.wav');
       paths.push(playbackPath);
-      onProgress({stage:'uploading',completed:i+1,total:chunks.length});
-    }
+      onProgress({stage:info.converting?'preparing':'uploading',completed:paths.length,total:info.total});
+    });
     onProgress({stage:'verifying',completed:paths.length,total:paths.length});
     await audioCache.save(id,paths);
     return {playbackPaths:paths,chunkCount:paths.length};
