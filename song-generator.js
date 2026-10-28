@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import ffmpegPath from 'ffmpeg-static';
 import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
+import { generateWithFalAceStep, isFalConfigured } from './song-engine-fal.js';
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const MAX_AUDIO_BYTES = 35 * 1024 * 1024;
@@ -353,6 +354,25 @@ async function generateWithBackup(spec) {
 }
 
 async function generateAudio(spec) {
+  // Preferred provider: fal.ai ACE-Step (pay-per-use, no Space to wake,
+  // no ZeroGPU token). Used whenever FAL_KEY is configured.
+  const falState = statusOf('fal-ace-step');
+  let falError = null;
+  if (isFalConfigured() && falState.status !== 'disabled' && falState.cooldownUntil <= Date.now()) {
+    try {
+      log('MUSIC_PROVIDER_SELECTED', { provider: 'fal-ace-step' });
+      const result = await generateWithFalAceStep(spec);
+      markProvider('fal-ace-step', 'available');
+      return result;
+    } catch (error) {
+      falError = error;
+      const status = httpStatus(error);
+      const failure = classifyProviderFailure(status, error?.message);
+      markProvider('fal-ace-step', failure.status, failure.cooldownMs);
+      log('MUSIC_PROVIDER_FAILED', { provider: 'fal-ace-step', status: status || 'unknown' });
+      if (!shouldFallbackToBackup(status)) throw error;
+    }
+  }
   const aceState = statusOf('ace-step');
   const aceConfigured = !!String(process.env.ACESTEP_API_URL || '').trim() && !!String(process.env.ACESTEP_API_KEY || '').trim();
   let aceError = null;
@@ -404,6 +424,7 @@ async function generateAudio(spec) {
       throw error;
     }
   }
+  if (falError) throw falError;
   if (aceError) throw aceError;
   if (hfError) throw hfError;
   throw Object.assign(new Error(

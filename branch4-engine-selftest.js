@@ -83,9 +83,32 @@ export async function runBranch4EngineSelfTest(env = process.env) {
     await ffmpegToYemotWav(src, wav);
     const facts = await wavDurationSec(wav);
     console.info(TAG, 'converted to Yemot wav', { convertMs: Date.now() - c0, ...facts });
+
+    // Optional: prove the full chain by uploading the generated song to Yemot
+    // and verifying it, exactly as the live extension-4 path would.
+    let uploaded = null;
+    if (String(env.BRANCH4_SELFTEST_UPLOAD || '').trim() === '1') {
+      try {
+        const { _pipeline } = await import('./youtube-authorized-playback.js');
+        const remote = 'ivr2:/4/selftest/' + runId + '-001.wav';
+        const u0 = Date.now();
+        await _pipeline.uploadToYemot(wav, remote);
+        const verifyUrl = new URL(_pipeline.YEMOT_API_BASE + '/GetFile');
+        verifyUrl.searchParams.set('token', _pipeline.yemotApiKey());
+        verifyUrl.searchParams.set('what', remote);
+        const vr = await fetch(verifyUrl, { signal: AbortSignal.timeout(8000) });
+        const vb = await vr.json().catch(() => null);
+        uploaded = { remote, uploadMs: Date.now() - u0, verified: vb?.responseStatus === 'OK' && vb?.file?.exists !== false, size: vb?.file?.size ?? null };
+        console.info(TAG, 'uploaded to Yemot', uploaded);
+      } catch (e) {
+        uploaded = { error: String(e?.message || e).slice(0, 160) };
+        console.warn(TAG, 'Yemot upload failed', uploaded);
+      }
+    }
     console.info(TAG, 'summary', JSON.stringify({
       reachable: true, generated: true, audioBytes, genMs,
-      wavSeconds: facts.durationSec, wavRate: facts.rate, wavChannels: facts.channels, runId
+      wavSeconds: facts.durationSec, wavRate: facts.rate, wavChannels: facts.channels,
+      yemotVerified: uploaded?.verified ?? 'skipped', runId
     }));
   } catch (e) {
     console.warn(TAG, 'conversion failed', { message: String(e?.message || e).slice(0, 200) });
