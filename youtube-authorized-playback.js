@@ -6,6 +6,8 @@ import ffmpegPath from 'ffmpeg-static';
 import { downloadVisionAudio } from './vision-audio.mjs';
 import { resolveApifyAudio, isApifyConfigured } from './youtube-apify-source.js';
 
+import { createAudioCache, audioCachePaths, verifiedAudioFile } from './youtube-audio-cache.js';
+
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const YEMOT_UPLOAD_URL = YEMOT_API_BASE + '/UploadFile';
 const MAX_SOURCE_BYTES = 120 * 1024 * 1024;
@@ -202,7 +204,7 @@ async function getYemotFile(remotePath) {
 // responseStatus 'OK' with file.exists=true and its size; a missing file
 // returns responseStatus 'ERROR'. Require all three, not the status alone.
 function yemotFileReady(data) {
-  return data?.responseStatus === 'OK' && data?.file?.exists !== false && !(Number(data?.file?.size) <= 44);
+  return verifiedAudioFile(data);
 }
 
 async function ensureUploadedAndVerified(filePath, remotePath) {
@@ -224,6 +226,96 @@ async function ensureUploadedAndVerified(filePath, remotePath) {
     size: verified.file?.size ?? null,
     duration: verified.file?.duration ?? null
   });
+}
+
+
+async function readCacheJson(remotePath) {
+  const meta=await getYemotFile(remotePath);
+  if (meta?.file?.exists===false || meta?.responseStatus==='ERROR' && /not.?found|not.?exist|doesn.t exist|לא קיים|אינו קיים|לא נמצא|לא נמצאה/i.test(String(meta.message||''))) return null;
+  // Never spend a download credit when cache storage is temporarily unavailable.
+  if (meta?.responseStatus!=='OK' || meta?.file?.exists!==true)
+    throw Object.assign(new Error('Cannot verify audio cache storage'),{code:'cache_unavailable'});
+  const url=new URL(YEMOT_API_BASE+'/DownloadFile');
+  url.searchParams.set('token',yemotApiKey());
+  url.searchParams.set('path',remotePath);
+  const r=await fetch(url,{signal:AbortSignal.timeout(VERIFY_TIMEOUT_MS)});
+  if (!r.ok) throw Object.assign(new Error('Cannot read audio cache receipt'),{code:'cache_unavailable'});
+  const text=await r.text();
+  if(text.length>1024*1024) throw Object.assign(new Error('Audio cache receipt too large'),{code:'cache_invalid'});
+  try {return JSON.parse(text);} catch {throw Object.assign(new Error('Audio cache receipt is not JSON'),{code:'cache_invalid'});}
+}
+async function writeCacheJson(remotePath,data) {
+  const url=new URL(YEMOT_UPLOAD_URL);
+  url.searchParams.set('token',yemotApiKey());
+  url.searchParams.set('path',remotePath);
+  url.searchParams.set('convertAudio','0');
+  url.searchParams.set('autoNumbering','false');
+  const text=JSON.stringify(data);
+  const form=new FormData();
+  form.append('file',new Blob([text],{type:'application/json'}),'complete.json');
+  const r=await fetch(url,{method:'POST',body:form,signal:AbortSignal.timeout(UPLOAD_TIMEOUT_MS)});
+  const result=await r.json().catch(()=>null);
+  if(!r.ok||result?.responseStatus!=='OK')
+    throw Object.assign(new Error('Cannot persist audio completion receipt'),{code:'cache_write_failed'});
+  const saved=await readCacheJson(remotePath);
+  if(JSON.stringify(saved)!==text) throw Object.assign(new Error('Audio receipt readback mismatch'),{code:'cache_write_failed'});
+}
+const audioCache=createAudioCache({getFile:getYemotFile,readJson:readCacheJson,writeJson:writeCacheJson});
+
+// One legacy full download is established by the actual 2026-10-28 15:27 UTC
+// completion logs: four verified WAVs, sizes below. No general inference of
+// completeness from a partial folder listing. Copy only these verified files.
+const legacyCompleteDownloads={
+  '0D2MvNWOVk0':[1920446,1920078,1920078,1256780]
+};
+export const saveCachedYouTubeAudio=(id,paths)=>audioCache.save(id,paths);
+const cacheLookups=new Map();
+export function lookupCachedYouTubeAudio(videoId) {
+  const id=String(videoId||'').trim();
+  if(cacheLookups.has(id)) return cacheLookups.get(id);
+  const job=(async()=>{
+    const existing=await audioCache.lookup(id);
+    if(existing) return existing;
+    const sizes=legacyCompleteDownloads[id];
+    if(!sizes) return null;
+    const paths=audioCachePaths(id,sizes.length);
+    // First see if a previous call already uploaded the new safe file names.
+    let safeComplete=true;
+    for(let i=0;i<paths.length;i++){
+      const meta=await getYemotFile('ivr2:'+paths[i]+'.wav');
+      if(!verifiedAudioFile(meta)||Number(meta.file.size)!==sizes[i]){safeComplete=false;break;}
+    }
+    if(!safeComplete) {
+      // Verify ALL old chunks before copying anything.
+      for(let i=0;i<sizes.length;i++){
+        const old='ivr2:/2/youtube-authorized/'+id+'-'+String(i+1).padStart(3,'0')+'.wav';
+        const meta=await getYemotFile(old);
+        if(!verifiedAudioFile(meta)||Number(meta.file.size)!==sizes[i])
+          throw Object.assign(new Error('Legacy saved audio cannot be verified; download not attempted'),{code:'cache_incomplete'});
+      }
+      const temp=await fs.mkdtemp(path.join(os.tmpdir(),'audio-cache-copy-'));
+      try {
+        for(let i=0;i<sizes.length;i++){
+          const old='ivr2:/2/youtube-authorized/'+id+'-'+String(i+1).padStart(3,'0')+'.wav';
+          const url=new URL(YEMOT_API_BASE+'/DownloadFile');
+          url.searchParams.set('token',yemotApiKey());url.searchParams.set('path',old);
+          const r=await fetch(url,{signal:AbortSignal.timeout(UPLOAD_TIMEOUT_MS)});
+          if(!r.ok) throw Object.assign(new Error('Saved audio copy failed'),{code:'cache_unavailable'});
+          const b=Buffer.from(await r.arrayBuffer());
+          if(b.length!==sizes[i]||b.subarray(0,4).toString()!=='RIFF')
+            throw Object.assign(new Error('Saved WAV copy is invalid'),{code:'cache_invalid'});
+          const local=path.join(temp,String(i)+'.wav');
+          await fs.writeFile(local,b);
+          await ensureUploadedAndVerified(local,'ivr2:'+paths[i]+'.wav');
+        }
+      } finally {await fs.rm(temp,{recursive:true,force:true}).catch(()=>{});}
+    }
+    await audioCache.save(id,paths);
+    console.info('[YouTube IVR] legacy saved audio recovered',{videoId:id,chunks:paths.length,downloadSkipped:true});
+    return audioCache.lookup(id);
+  })().finally(()=>cacheLookups.delete(id));
+  cacheLookups.set(id,job);
+  return job;
 }
 
 // Apify is the primary source when configured: the actor downloads the full
@@ -301,6 +393,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined) {
       await ensureUploadedAndVerified(chunks[i],remote);
       paths.push(playbackPath);
     }
+    await audioCache.save(id,paths);
     return {playbackPaths:paths,chunkCount:paths.length};
   } finally {
     await fs.rm(temp,{recursive:true,force:true}).catch(()=>{});
