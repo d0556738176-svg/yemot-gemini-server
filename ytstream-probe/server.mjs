@@ -75,7 +75,8 @@ async function convert(input, output) {
 export async function probe() {
   if (!process.env.RAPIDAPI_KEY) return { stage: 'configuration', error: 'MISSING_RAPIDAPI_KEY' };
   const api = new URL('https://ytstream-download-youtube-videos.p.rapidapi.com/dl');
-  api.searchParams.set('id', 'UxxajLWwzqY'); api.searchParams.set('cgeo', 'DE');
+  api.searchParams.set('id', 'UxxajLWwzqY');
+  if (process.env.PROBE_GEO) api.searchParams.set('cgeo', process.env.PROBE_GEO);
   const res = await fetch(api, { headers: { 'X-RapidAPI-Key': process.env.RAPIDAPI_KEY,
     'X-RapidAPI-Host': api.hostname }, signal: AbortSignal.timeout(30000) });
   if (!res.ok) { await res.body?.cancel(); return { stage: 'api', http: res.status }; }
@@ -83,11 +84,15 @@ export async function probe() {
   if (j.status !== 'OK') return { stage: 'api', http: res.status, error: 'PROVIDER_STATUS_NOT_OK' };
   const formats = (j.adaptiveFormats || []).filter(x => /^audio\//.test(x.mimeType || '') && x.url)
     .sort((a,b) => (a.itag===140 ? -1 : b.itag===140 ? 1 : 0));
+  const provider = { isProxied: j.isProxied, geoMode: process.env.PROBE_GEO || 'provider_auto',
+    mediaHosts: [...new Set(formats.map(x => new URL(x.url).hostname))] };
   const attempts = [];
   const dir = await mkdtemp(join(tmpdir(), 'ytstream-probe-'));
   try {
     for (const format of formats.slice(0,2)) {
-      const media = await fetchMedia(format.url);
+      let media;
+      try { media = await fetchMedia(format.url); }
+      catch (e) { attempts.push({ itag: format.itag, error: e.message === 'UNAPPROVED_MEDIA_HOST' ? e.message : 'MEDIA_NETWORK_ERROR' }); continue; }
       const report = { itag: format.itag, trace: media.trace, bytes: media.bytes, error: media.error };
       attempts.push(report);
       if (!media.data) continue;
@@ -95,10 +100,10 @@ export async function probe() {
       await writeFile(input, media.data);
       try {
         const wav = await convert(input, output);
-        return { stage: 'converted', api: 'OK', attempts, wav, yemot: 'NOT_TESTED' };
+        return { stage: 'converted', api: 'OK', provider, attempts, wav, yemot: 'NOT_TESTED' };
       } catch { report.error = 'AUDIO_DECODE_FAILED'; }
     }
-    return { stage: 'download_failed', api: 'OK', attempts, yemot: 'NOT_TESTED' };
+    return { stage: 'download_failed', api: 'OK', provider, attempts, yemot: 'NOT_TESTED' };
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
 
