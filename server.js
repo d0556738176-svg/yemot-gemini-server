@@ -3894,11 +3894,21 @@ async function youtubeCallHandler(call) {
       // Play the hold message and wait briefly. Any key pressed is ignored; an
       // empty return simply means "poll the job again". This keeps each HTTP
       // request short so Yemot never times the call out mid-preparation.
-      await call.read(
-        holdMessages,
-        'tap',
-        {max_digits:1,min_digits:0,sec_wait:holdSec,allow_empty:true,empty_val:'',typing_playback_mode:'No'}
-      );
+      try {
+        await call.read(
+          holdMessages,
+          'tap',
+          {max_digits:1,min_digits:1,sec_wait:holdSec,allow_empty:true,empty_val:'None',typing_playback_mode:'No'}
+        );
+        console.info('[YouTube IVR] spoken hold returned',{videoId:video.videoId,holdCycles,stage:state.progress?.stage||'checking'});
+      } catch(error) {
+        console.warn('[YouTube IVR] spoken hold interrupted',{
+          videoId:video.videoId,holdCycles,stage:state.progress?.stage||'checking',
+          messageType:'text',hangupReportedByYemot:isCallerHangupError(error),
+          code:error?.code||error?.name||'unknown'
+        });
+        throw error;
+      }
     }
   }
 
