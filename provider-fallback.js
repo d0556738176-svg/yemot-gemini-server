@@ -32,7 +32,8 @@ export async function callCompatibleChatCompletion({
   fetchImpl = globalThis.fetch,
   cooldowns = new Map(),
   now = Date.now,
-  cooldownMs = DEFAULT_COOLDOWN_MS
+  cooldownMs = DEFAULT_COOLDOWN_MS,
+  signal
 }) {
   if (!apiKey || !model || !baseUrl || !Array.isArray(messages) || !messages.length) {
     throw makeProviderError(provider + ' fallback is not configured', 400, provider);
@@ -47,6 +48,9 @@ export async function callCompatibleChatCompletion({
   }
 
   const controller = new AbortController();
+  const abortFromParent = () => controller.abort();
+  if(signal?.aborted) throw makeProviderError(provider + ' request cancelled',499,provider);
+  signal?.addEventListener('abort',abortFromParent,{once:true});
   const timer = setTimeout(() => controller.abort(), Math.max(250, Number(timeoutMs) || 4500));
   const endpoint = String(baseUrl).replace(/\/+$/, '') + '/chat/completions';
 
@@ -75,6 +79,7 @@ export async function callCompatibleChatCompletion({
         signal: controller.signal
       });
     } catch (error) {
+      if(signal?.aborted) throw makeProviderError(provider + ' request cancelled',499,provider);
       if (controller.signal.aborted || error?.name === 'AbortError') {
         cooldowns.set(provider, now() + cooldownMs);
         throw makeProviderError(provider + ' request timed out', 408, provider, { cause: error });
@@ -106,6 +111,7 @@ export async function callCompatibleChatCompletion({
     try {
       data = await response.json();
     } catch (error) {
+      if(signal?.aborted) throw makeProviderError(provider + ' request cancelled',499,provider);
       cooldowns.set(provider, now() + cooldownMs);
       throw makeProviderError(provider + ' returned invalid JSON', 502, provider, { cause: error });
     }
@@ -119,5 +125,7 @@ export async function callCompatibleChatCompletion({
     return answer.trim();
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort',abortFromParent);
   }
 }
+
