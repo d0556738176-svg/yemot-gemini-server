@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
-import { channel12, createOnDemand, validateSource } from './on-demand.mjs';
+import { channel12, createOnDemand, createExtensionGate, validateSource } from './on-demand.mjs';
 const source = channel12.candidate;
 
 test('nothing starts before a valid call; missing source fails closed', () => {
@@ -45,4 +45,41 @@ test('untrusted or credential-bearing source URLs are rejected', () => {
   for (const u of ['http://localhost/x', 'https://evil.example/x', 'https://user:pw@mako-streaming.akamaized.net/x']) {
     assert.throws(() => validateSource(u), /SOURCE_NOT_ALLOWED/);
   }
+});
+
+test('old cancelled work cannot stop a new session with the same call id', async () => {
+  let started;
+  const ready = new Promise(r => { started = r; });
+  const e = createOnDemand({ source, capture: async ({ signal }) => {
+    started(); await delay(20); signal.throwIfAborted();
+  }, publish: async () => 'ok' });
+  e.enter('call'); const old = e.next('call', 0); await ready;
+  e.stop('call'); e.enter('call');
+  await assert.rejects(old); assert.equal(e.activeSessions, 1);
+  assert.equal(await e.next('call', 0), 'ok'); e.close();
+});
+
+test('only exact /5/1 starts work; parent menu never starts capture', async () => {
+  let captures = 0;
+  const e = createOnDemand({ source, capture: async () => { captures++; }, publish: async () => 'ok' });
+  const gate = createExtensionGate(e);
+  for (const folder of ['/5', '/1', '/5/10', '/5/2']) {
+    assert.deepEqual(await gate({ callId: 'call', folder }), { stopped: true });
+  }
+  assert.equal(captures, 0);
+  assert.equal(await gate({ callId: 'call', folder: '/5/1' }), 'ok');
+  assert.equal(captures, 1);
+  await gate({ callId: 'call', folder: '/5', event: 'exit' });
+  assert.equal(e.activeSessions, 0); e.close();
+});
+
+test('hangup and exit are processed before sequence or capture', async () => {
+  const e = createOnDemand({ source, publish() { assert.fail(); } });
+  const gate = createExtensionGate(e);
+  e.enter('call');
+  await gate({ callId: 'call', folder: '/5/1', event: 'hangup', sequence: 999 });
+  assert.equal(e.activeSessions, 0);
+  await assert.rejects(gate({ callId: '', folder: '/5/1' }), /CALL_ID_REQUIRED/);
+  await assert.rejects(gate({ callId: 'call', folder: '/5/1', sequence: 5 }), /BAD_SEQUENCE/);
+  assert.equal(e.activeSessions, 0); e.close();
 });
