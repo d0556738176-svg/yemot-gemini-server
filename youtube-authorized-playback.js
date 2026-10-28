@@ -294,9 +294,12 @@ async function build(videoId, fallbackUrl=null, signal=undefined) {
     console.info('[YouTube IVR] playback step 9: uploading chunks', { videoId: id, chunks: chunks.length });
     for(let i=0;i<chunks.length;i++) {
       signal?.throwIfAborted();
-      const remote='ivr2:/2/youtube-authorized/'+id+'-'+String(i+1).padStart(3,'0')+'.wav';
+      // Yemot message delimiters forbid hyphens, even inside file paths.
+      // Hex preserves distinct video IDs without forbidden characters.
+      const playbackPath='/2/youtubeaudio/'+Buffer.from(id,'utf8').toString('hex')+'/'+String(i+1).padStart(3,'0');
+      const remote='ivr2:'+playbackPath+'.wav';
       await ensureUploadedAndVerified(chunks[i],remote);
-      paths.push('/2/youtube-authorized/'+id+'-'+String(i+1).padStart(3,'0'));
+      paths.push(playbackPath);
     }
     return {playbackPaths:paths,chunkCount:paths.length};
   } finally {
