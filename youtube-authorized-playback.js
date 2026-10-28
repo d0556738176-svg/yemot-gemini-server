@@ -197,9 +197,16 @@ async function getYemotFile(remotePath) {
   return data;
 }
 
+// Measured on the real account (self-test 28.10): an existing file returns
+// responseStatus 'OK' with file.exists=true and its size; a missing file
+// returns responseStatus 'ERROR'. Require all three, not the status alone.
+function yemotFileReady(data) {
+  return data?.responseStatus === 'OK' && data?.file?.exists !== false && !(Number(data?.file?.size) <= 44);
+}
+
 async function ensureUploadedAndVerified(filePath, remotePath) {
   const existing = await getYemotFile(remotePath).catch(() => null);
-  if (existing?.responseStatus === 'OK') {
+  if (yemotFileReady(existing)) {
     console.info('[YouTube IVR] cached Yemot audio verified', { remotePath });
     return;
   }
@@ -208,13 +215,13 @@ async function ensureUploadedAndVerified(filePath, remotePath) {
 
   console.info('[YouTube IVR] playback step 8: verifying Yemot file', { remotePath });
   const verified = await getYemotFile(remotePath);
-  if (verified?.responseStatus !== 'OK') {
+  if (!yemotFileReady(verified)) {
     throw new Error('Yemot file upload was not verified: ' + (verified?.message || 'file missing after upload'));
   }
   console.info('[YouTube IVR] Yemot audio verified', {
     remotePath,
-    size: verified.size || null,
-    fileType: verified.fileType || null
+    size: verified.file?.size ?? null,
+    duration: verified.file?.duration ?? null
   });
 }
 

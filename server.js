@@ -3856,6 +3856,20 @@ async function youtubeCallHandler(call) {
         continue;
       }
 
+      // Owner's playback test: plays a file the self-test uploaded, through
+      // the same id_list_message path real playback uses. Active only while
+      // BRANCH2_SELFTEST_PLAY_PATH is set; never reached by normal callers.
+      const selftestPlayPath=String(process.env.BRANCH2_SELFTEST_PLAY_PATH||'').trim();
+      if(selftestPlayPath && /^\/2\/selftest\/[A-Za-z0-9_-]+$/.test(selftestPlayPath) &&
+         /^בדיק[הת]\s+(?:מערכת|השמעה)/u.test(normalizeConfirm(transcript))) {
+        console.info('[YouTube IVR] owner playback test',{path:selftestPlayPath});
+        return call.id_list_message([
+          {type:'text',data:'בדיקת השמעה מתחילה.'},
+          {type:'file',data:selftestPlayPath},
+          {type:'text',data:'בדיקת ההשמעה הסתיימה.'}
+        ],{removeInvalidChars:true});
+      }
+
       if(pendingVideo) {
         if(isYesConfirm(transcript)) {
           const selectedVideo=pendingVideo;

@@ -72,6 +72,7 @@ test('worker failure classification', () => {
   assert.equal(classifyWorkerFailure(502, null), 'worker_unreachable');
   assert.equal(classifyWorkerFailure(504, { status: 'error', reason: 'timeout' }), 'worker_timeout');
   assert.equal(classifyWorkerFailure(422, { status: 'unavailable' }), 'youtube_unavailable');
+  assert.equal(classifyWorkerFailure(422, { status: 'unavailable', reason: 'audio_source_unavailable' }), 'youtube_source_refused');
   assert.equal(classifyWorkerFailure(401, { status: 'error', reason: 'unauthorized' }), 'worker_unauthorized');
 });
 
