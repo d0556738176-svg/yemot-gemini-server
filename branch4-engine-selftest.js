@@ -14,6 +14,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
 import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
+import { generateWithFalAceStep, isFalConfigured } from './song-engine-fal.js';
 
 const TAG = '[BRANCH4_ENGINE_SELFTEST]';
 // Short, clearly original Hebrew test lyrics — enough to hear vocals.
@@ -43,10 +44,9 @@ async function wavDurationSec(file) {
 export async function runBranch4EngineSelfTest(env = process.env) {
   const runId = String(env.BRANCH4_ENGINE_SELFTEST_ID || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24);
   if (!runId) return;
-  const engine = String(env.HF_MUSIC_SPACE_URL || 'default ace-step space');
-  const anonymous = String(env.HF_ANONYMOUS_TEST || '').toLowerCase() === 'true';
-  const hasToken = !!String(env.HF_TOKEN || '').trim();
-  console.info(TAG, 'start', { runId, engine, anonymous, hasToken, durationSec: Number(env.BRANCH4_SELFTEST_DURATION || 40) });
+  const useFal = isFalConfigured(env);
+  const engine = useFal ? 'fal.ai ace-step' : String(env.HF_MUSIC_SPACE_URL || 'default ace-step space');
+  console.info(TAG, 'start', { runId, engine, useFal, durationSec: Number(env.BRANCH4_SELFTEST_DURATION || 40) });
 
   const spec = {
     lyrics: TEST_LYRICS,
@@ -58,7 +58,7 @@ export async function runBranch4EngineSelfTest(env = process.env) {
   const started = Date.now();
   let result;
   try {
-    result = await generateWithHuggingFaceSpace(spec);
+    result = useFal ? await generateWithFalAceStep(spec, env) : await generateWithHuggingFaceSpace(spec);
   } catch (error) {
     console.warn(TAG, 'generation failed', {
       ms: Date.now() - started,
