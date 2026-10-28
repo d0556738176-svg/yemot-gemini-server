@@ -3784,6 +3784,43 @@ async function callHandler(call) {
 }
 
 
+// Branch 2 runs the full download -> convert -> upload in the BACKGROUND, not
+// inside the caller's HTTP request. Holding one request open for the whole
+// ~60s preparation left the phone line silent and the call was dropped before
+// a single chunk played (observed live 28.10). Keyed by videoId: the hold loop
+// in playSelected polls this state until the job is ready, then plays every
+// chunk in one id_list_message (gapless). The job outlives each short hold
+// request, so preparation is never restarted or wasted.
+const youtubePlaybackJobs = new Map();
+
+function startYouTubePlaybackJob(video) {
+  const key = String(video?.videoId || '').trim();
+  const existing = youtubePlaybackJobs.get(key);
+  if (existing && (existing.status === 'running' || existing.status === 'ready')) return existing;
+  const state = { status: 'running', paths: null, error: null, via: null, startedAt: Date.now() };
+  youtubePlaybackJobs.set(key, state);
+  // No caller AbortSignal: the job must survive across the short hold requests.
+  // A larger budget than the old inline path lets long shiurim finish.
+  prepareYouTubePlayback(video, {
+    env: { ...process.env, YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS: String(process.env.YOUTUBE_PLAYBACK_JOB_BUDGET_MS || 220000) },
+    resolveAlternate: resolvePublisherAudio,
+    downloadToYemot: downloadAuthorizedAudioToYemot
+  }).then(result => {
+    state.status = 'ready';
+    state.paths = result.playbackPaths;
+    state.via = result.via || null;
+    console.info('[YouTube IVR] background job ready', { videoId: key, chunks: result.playbackPaths?.length || 0, via: result.via || null, prepMs: Date.now() - state.startedAt });
+  }).catch(error => {
+    state.status = 'failed';
+    state.error = error;
+    console.warn('[YouTube IVR] background job failed', { videoId: key, code: error?.code || 'unknown', prepMs: Date.now() - state.startedAt });
+    // Let a later retry of the same video start fresh rather than replay a failure.
+    const timer = setTimeout(() => { if (youtubePlaybackJobs.get(key) === state) youtubePlaybackJobs.delete(key); }, 2000);
+    timer.unref?.();
+  });
+  return state;
+}
+
 /**
  * Isolated YouTube IVR flow. Results live only in this call's async context.
  * Uses the same raw-recording -> Gemini transcription convention as the main robot.
@@ -3816,16 +3853,42 @@ async function youtubeCallHandler(call) {
 
   async function playSelected(call, video) {
     console.info('[YouTube IVR] direct playback requested', { videoId: video.videoId });
-    // Worker first, then the in-process download, under one shared time
-    // budget with real cancellation (see youtube-playback-prepare.js).
-    const prepared=await prepareYouTubePlayback(video,{
-      resolveAlternate:resolvePublisherAudio,
-      downloadToYemot:downloadAuthorizedAudioToYemot
-    });
-    return call.id_list_message([
-      {type:'text',data:'משמיע עכשיו את '+sanitizeForYemot(video.title)+'.'},
-      ...prepared.playbackPaths.map(file=>({type:'file',data:String(file)}))
-    ],{removeInvalidChars:true});
+    // Preparation runs in the background (download -> convert -> upload). We keep
+    // the caller on the line with short "please hold" prompts and poll the job,
+    // instead of holding one HTTP request open for the whole ~60s (which drops
+    // the call). When ready, every chunk plays in ONE id_list_message => gapless.
+    const state=startYouTubePlaybackJob(video);
+    const holdStartedAt=Date.now();
+    const maxHoldMs=Number(process.env.YOUTUBE_HOLD_MAX_MS||240000);
+    const holdSec=Number(process.env.YOUTUBE_HOLD_SEC||8);
+    let holdCycles=0;
+    while(true) {
+      if(state.status==='ready'&&state.paths?.length) {
+        console.info('[YouTube IVR] playback starting',{videoId:video.videoId,chunks:state.paths.length,heldMs:Date.now()-holdStartedAt,holdCycles});
+        return call.id_list_message([
+          {type:'text',data:'משמיע עכשיו את '+sanitizeForYemot(video.title)+'.'},
+          ...state.paths.map(file=>({type:'file',data:String(file)}))
+        ],{removeInvalidChars:true});
+      }
+      if(state.status==='failed') {
+        throw Object.assign(new Error('playback preparation failed'),{code:state.error?.code||'direct_failed',attempts:state.error?.attempts||[],cause:state.error});
+      }
+      if(Date.now()-holdStartedAt>maxHoldMs) {
+        throw Object.assign(new Error('playback preparation timed out on hold'),{code:'timeout'});
+      }
+      const holdMsg=holdCycles===0
+        ? 'מתחיל להכין את הסרטון להשמעה. ההכנה עשויה לקחת כדקה, לפי אורך הסרטון. נא להמתין על הקו ולא לנתק.'
+        : 'עדיין מכין את הסרטון, נא להמתין על הקו.';
+      holdCycles++;
+      // Play the hold message and wait briefly. Any key pressed is ignored; an
+      // empty return simply means "poll the job again". This keeps each HTTP
+      // request short so Yemot never times the call out mid-preparation.
+      await call.read(
+        [{type:'text',data:holdMsg}],
+        'tap',
+        {max_digits:1,min_digits:0,sec_wait:holdSec,allow_empty:true,empty_val:'',typing_playback_mode:'No'}
+      );
+    }
   }
 
   try {
