@@ -21,6 +21,8 @@ export function progressAnnouncement(progress={},last={},now=Date.now()){
       text='הורדת קובץ השמע הושלמה במאה אחוז. כעת מכין אותו להשמעה בטלפון.';break;
     case 'converting':
       text='הורדת קובץ השמע הושלמה במאה אחוז. כעת ממיר אותו לפורמט המתאים להשמעה בטלפון. נא להמתין.';break;
+    case 'preparing':
+      text='כעת ממיר ומעלה את השמע במקביל. הושלמו ואומתו '+done+' חלקים. ההכנה נמשכת.';break;
     case 'uploading':
       text='כעת מעלה את חלקי השמע לימות.'+(count?' הושלמו ואומתו '+done+' מתוך '+count+' חלקים.':'')+' נא להמתין.';break;
     case 'verifying':
