@@ -23,6 +23,15 @@ function resultFromItem(item,videoId,actorId,runId,token){
   return {url:url.toString(),item,actorId,runId,title:item.title||null,
     durationSeconds:item.durationSeconds||item.durationSec||item.duration_seconds||item.duration||null};
 }
+
+export function redactProviderDiagnostic(value,token=''){
+  let text=String(value||'');
+  if(token)text=text.split(token).join('[redacted]');
+  return text.replace(/https?:\/\/\S+/g,'[url]')
+    .replace(/(?:Bearer|token|password|cookie|authorization)\s*[:= ]+\S+/gi,'[credential]')
+    .replace(/[A-Za-z0-9_-]{24,}/g,'[redacted]').slice(0,320);
+}
+
 export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>setTimeout(r,ms)),now=Date.now,log=console}={}){
   const active=new Map();
   return function resolve(videoId,env=process.env,options={}){
@@ -95,7 +104,26 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
           log.info('[YouTube IVR] provider run completed',{videoId:id,runId:receipt.runId,reusedRun:true});
           return result;
         }
-        if(terminal.has(run.status))throw err('apify_run_failed','Saved provider run ended '+run.status+'; automatic paid retry blocked');
+        if(terminal.has(run.status)){
+          let lines=[];
+          try{
+            const response=await fetchImpl(API_BASE+'/actor-runs/'+receipt.runId+'/log',{
+              headers:{authorization:'Bearer '+token},signal:AbortSignal.timeout(15000)});
+            if(response.ok){
+              const text=await response.text();
+              lines=text.slice(-100000).split('\n')
+                .filter(line=>/error|failed|timeout|timed.out|exceed|limit|killed|oom|memory|no video|no audio|unable|forbidden|403|429/i.test(line))
+                .slice(-8).map(line=>redactProviderDiagnostic(line,token));
+            }
+          }catch{ /* diagnostics must not change billing/retry behavior */ }
+          log.warn?.('[YouTube IVR] provider terminal diagnosis',{
+            videoId:id,runId:receipt.runId,status:run.status,exitCode:run.exitCode??null,
+            statusMessage:redactProviderDiagnostic(run.statusMessage,token),
+            usageTotalUsd:run.usageTotalUsd??null,maxTotalChargeUsd:run.options?.maxTotalChargeUsd??null,
+            errorLines:lines,newRunStarted:false
+          });
+          throw err('apify_run_failed','Saved provider run ended '+run.status+'; automatic paid retry blocked');
+        }
         if(now()>=until)throw err('apify_pending','Provider still working; saved run will be resumed');
         await sleep(5000);
       }
