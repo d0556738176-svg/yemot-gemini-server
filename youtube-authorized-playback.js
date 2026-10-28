@@ -272,3 +272,8 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
   activeJobs.set(jobKey,job);
   return job;
 }
+
+// Narrow exports for the branch 2 self-test (branch2-selftest.js). They use
+// the same conversion and upload code as real playback, so a passing
+// self-test proves the production path, not a copy of it.
+export const _pipeline = { makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE };

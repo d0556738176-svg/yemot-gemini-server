@@ -10,6 +10,7 @@ import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { prepareYouTubePlayback, playbackFailureMessage } from './youtube-playback-prepare.js';
+import { runBranch2SelfTest } from './branch2-selftest.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
 import { extractExplicitLocation, extractLocalArea, extractSearchCity } from './business-location.js';
 import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, filterNearbyLocalBusinessResults, buildNoVerifiedLocalResultsAnswer, buildLocalBusinessResultsAnswer } from './local-business-search.js';
@@ -4373,4 +4374,6 @@ app.listen(port,async()=>{
   await loadConversationLog();
   try { await configureYemotStructure(); }
   catch (e) { logDetailedError('Yemot automatic setup', e); }
+  // Isolated branch 2 self-test; a no-op unless BRANCH2_SELFTEST_ID is set.
+  void runBranch2SelfTest().catch(e=>logDetailedError('Branch 2 self-test',e));
 });
