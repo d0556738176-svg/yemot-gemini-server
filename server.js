@@ -4416,10 +4416,12 @@ async function runSegmentSelfTest() {
   } catch(e){ console.warn('[SEGMENT_SELFTEST] router inspection failed',String(e?.message||e).slice(0,120)); }
   // During a deploy the previous instance may still answer the public URL
   // (without this route); wait, bounded, until the source answers 206.
+  // Generate the source locally first so the first public request is fast.
+  await (await import('./segmented-player.js')).ensureTestSource();
   let sourceReady=false;
   for(let i=0;i<18&&!sourceReady;i++){
     try{const r=await fetch(testSourceUrl(),{headers:{range:'bytes=0-0'},signal:AbortSignal.timeout(10000)});sourceReady=r.status===206;await r.body?.cancel().catch(()=>{});}catch{}
-    if(!sourceReady) await new Promise(r=>setTimeout(r,10000));
+    if(!sourceReady){ console.info('[SEGMENT_SELFTEST] waiting for test source',{attempt:i+1}); await new Promise(r=>setTimeout(r,10000)); }
   }
   console.info('[SEGMENT_SELFTEST] test source reachable',{sourceReady,url:testSourceUrl()});
   if(!sourceReady) return;

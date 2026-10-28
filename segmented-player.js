@@ -100,19 +100,31 @@ export async function playSegmented(call, { sourceKey, resolveSourceUrl, log = c
 // 7.5 minutes, pitch steps every 10 s and a short gap every second, so a
 // listener can hear continuity; fragmented MP4/AAC like YouTube's audio.
 export const TEST_SOURCE_VERSION = 'tone450fragv1';
-let testSourcePath = null;
-export async function ensureTestSource() {
-  if (testSourcePath && fsSync.existsSync(testSourcePath)) return testSourcePath;
+// Generated once per process; concurrent requests share the same promise and
+// the file appears only after FFmpeg finished (temp file + rename).
+let testSourcePromise = null;
+export function ensureTestSource() {
+  if (!testSourcePromise) {
+    testSourcePromise = generateTestSource().catch(e => { testSourcePromise = null; throw e; });
+  }
+  return testSourcePromise;
+}
+async function generateTestSource() {
   const out = path.join(os.tmpdir(), 'branch2-' + TEST_SOURCE_VERSION + '.m4a');
+  if (fsSync.existsSync(out)) return out;
+  const tmp = out + '.' + process.pid + '.part.m4a';
+  const started = Date.now();
   await new Promise((resolve, reject) => {
     const c = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
       "aevalsrc='0.4*sin(2*PI*(300+40*mod(floor(t/10),12))*t)*lt(mod(t,1),0.85)':s=44100:d=450",
       '-c:a', 'aac', '-b:a', '64k', '-movflags', '+frag_keyframe+empty_moov+default_base_moof+global_sidx',
-      '-frag_duration', '5000000', out], { stdio: ['ignore', 'ignore', 'pipe'] });
+      '-frag_duration', '5000000', '-f', 'mp4', tmp], { stdio: ['ignore', 'ignore', 'pipe'] });
     let err = ''; c.stderr.on('data', d => { err += d; });
+    c.on('error', reject);
     c.on('close', code => code === 0 ? resolve() : reject(new Error('test source ffmpeg ' + code + ': ' + err.slice(-200))));
   });
-  testSourcePath = out;
+  await fs.rename(tmp, out);
+  console.info('[SEGMENT] test source generated', { bytes: (await fs.stat(out)).size, ms: Date.now() - started });
   return out;
 }
 
