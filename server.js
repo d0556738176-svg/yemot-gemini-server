@@ -1,3 +1,4 @@
+import { progressAnnouncement } from './youtube-playback-progress.js';
 import express from 'express';
 import crypto from 'node:crypto';
 import { YemotRouter, ExitError } from 'yemot-router2';
@@ -3797,7 +3798,7 @@ function startYouTubePlaybackJob(video) {
   const key = String(video?.videoId || '').trim();
   const existing = youtubePlaybackJobs.get(key);
   if (existing && (existing.status === 'running')) return existing;
-  const state = { status: 'running', paths: null, error: null, via: null, startedAt: Date.now() };
+  const state = { status: 'running', paths: null, error: null, via: null, progress: {stage:'checking'}, startedAt: Date.now() };
   youtubePlaybackJobs.set(key, state);
   // No caller AbortSignal: the job must survive across the short hold requests.
   // A larger budget than the old inline path lets long shiurim finish.
@@ -3806,7 +3807,8 @@ function startYouTubePlaybackJob(video) {
     resolveAlternate: resolvePublisherAudio,
     downloadToYemot: downloadAuthorizedAudioToYemot,
     lookupCached: lookupCachedYouTubeAudio,
-    saveCached: saveCachedYouTubeAudio
+    saveCached: saveCachedYouTubeAudio,
+    onProgress: progress => { state.progress=progress; }
   }).then(result => {
     state.status = 'ready';
     state.paths = result.playbackPaths;
@@ -3864,6 +3866,7 @@ async function youtubeCallHandler(call) {
     const maxHoldMs=Number(process.env.YOUTUBE_HOLD_MAX_MS||240000);
     const holdSec=Number(process.env.YOUTUBE_HOLD_SEC||8);
     let holdCycles=0;
+    let lastAnnouncement={};
     while(true) {
       if(state.status==='ready'&&state.paths?.length) {
         console.info('[YouTube IVR] playback starting',{videoId:video.videoId,chunks:state.paths.length,heldMs:Date.now()-holdStartedAt,holdCycles});
@@ -3878,15 +3881,18 @@ async function youtubeCallHandler(call) {
       if(Date.now()-holdStartedAt>maxHoldMs) {
         throw Object.assign(new Error('playback preparation timed out on hold'),{code:'apify_pending'});
       }
-      const holdMsg=holdCycles===0
-        ? 'מתחיל להכין את הסרטון להשמעה. ההכנה עשויה לקחת מספר דקות, לפי אורך הסרטון. נא להמתין על הקו ולא לנתק.'
-        : 'עדיין מכין את הסרטון, נא להמתין על הקו.';
+      const announcement=progressAnnouncement(state.progress,lastAnnouncement,Date.now());
+      if(announcement) lastAnnouncement=announcement.state;
+      // Poll quietly between meaningful stage changes and periodic reminders.
+      const holdMessages=announcement
+        ? [{type:'text',data:announcement.text}]
+        : [{type:'music_on_hold',data:{musicName:'ztomao',maxSec:3}}];
       holdCycles++;
       // Play the hold message and wait briefly. Any key pressed is ignored; an
       // empty return simply means "poll the job again". This keeps each HTTP
       // request short so Yemot never times the call out mid-preparation.
       await call.read(
-        [{type:'text',data:holdMsg}],
+        holdMessages,
         'tap',
         {max_digits:1,min_digits:0,sec_wait:holdSec,allow_empty:true,empty_val:'',typing_playback_mode:'No'}
       );

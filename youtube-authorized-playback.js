@@ -321,10 +321,15 @@ export function lookupCachedYouTubeAudio(videoId) {
 // Apify is the primary source when configured: the actor downloads the full
 // audio on Apify's residential-proxy infrastructure and stores the file, which
 // we then fetch here. This is what bypasses YouTube's datacenter-IP block.
-async function downloadApifySource(id, output, signal) {
+async function downloadApifySource(id, output, signal, onProgress=()=>{}) {
+  onProgress({stage:'provider'});
   const resolved = await resolveApifyAudio(id, process.env, {store:{read:readCacheJson,write:writeCacheJson}});
   const r = await fetch(resolved.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(300000)]) : AbortSignal.timeout(300000) });
   if (!r.ok || !r.body) throw Object.assign(new Error('Apify file download HTTP ' + r.status), { code: 'apify_download_http' });
+  const encoding=r.headers.get('content-encoding');
+  const declared=encoding&&encoding!=='identity'?NaN:Number(r.headers.get('content-length'));
+  const totalBytes=Number.isFinite(declared)&&declared>0?declared:null;
+  onProgress({stage:'transferring',bytes:0,totalBytes});
   const file = await fs.open(output, 'w');
   let total = 0;
   try {
@@ -334,15 +339,18 @@ async function downloadApifySource(id, output, signal) {
       if (done) break;
       total += value.byteLength;
       if (total > MAX_SOURCE_BYTES) throw Object.assign(new Error('Apify source too large'), { code: 'too_large' });
+      onProgress({stage:'transferring',bytes:total,totalBytes});
       await file.write(Buffer.from(value));
     }
   } finally { await file.close(); }
   if (!total) throw Object.assign(new Error('Apify source empty'), { code: 'empty' });
+  if(totalBytes&&total!==totalBytes)throw Object.assign(new Error('Incomplete provider audio transfer'),{code:'apify_pending'});
+  onProgress({stage:'downloaded',bytes:total,totalBytes:total});
   console.info('[YouTube IVR] apify source downloaded', { videoId: id, bytes: total, title: String(resolved.title || '').slice(0, 60) });
   return total;
 }
 
-async function build(videoId, fallbackUrl=null, signal=undefined) {
+async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=>{}) {
   const id=String(videoId||'').trim();
   if(!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'authorized-audio-'));
@@ -355,7 +363,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined) {
     let apifyOk = false;
     if (isApifyConfigured(process.env)) {
       try {
-        await downloadApifySource(id, source, signal);
+        await downloadApifySource(id, source, signal, onProgress);
         apifyOk = true;
       } catch (apifyError) {
         console.warn('[YouTube IVR] provider preparation stopped; no second download attempted', { videoId: id, code: apifyError?.code || 'apify_pending' });
@@ -383,7 +391,9 @@ async function build(videoId, fallbackUrl=null, signal=undefined) {
       await fetchAuthorizedSource(id,source,fallbackUrl,signal);
     }
     signal?.throwIfAborted();
+    onProgress({stage:'converting'});
     const chunks=await makeChunks(source,chunksDir,signal);
+    onProgress({stage:'uploading',completed:0,total:chunks.length});
     console.info('[YouTube IVR] playback step 9: uploading chunks', { videoId: id, chunks: chunks.length });
     for(let i=0;i<chunks.length;i++) {
       signal?.throwIfAborted();
@@ -393,7 +403,9 @@ async function build(videoId, fallbackUrl=null, signal=undefined) {
       const remote='ivr2:'+playbackPath+'.wav';
       await ensureUploadedAndVerified(chunks[i],remote);
       paths.push(playbackPath);
+      onProgress({stage:'uploading',completed:i+1,total:chunks.length});
     }
+    onProgress({stage:'verifying',completed:paths.length,total:paths.length});
     await audioCache.save(id,paths);
     return {playbackPaths:paths,chunkCount:paths.length};
   } finally {
@@ -408,7 +420,8 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
   if(activeJobs.has(jobKey)) return activeJobs.get(jobKey);
   // The first caller's deadline signal cancels download/ffmpeg/upload so no
   // orphan work keeps running on the free instance after the call gave up.
-  const job=build(id,fallbackUrl,options?.signal).finally(()=>activeJobs.delete(jobKey));
+  const report=event=>{try{options?.onProgress?.(event);}catch{ /* Progress must never interrupt audio preparation. */ }};
+  const job=build(id,fallbackUrl,options?.signal,report).finally(()=>activeJobs.delete(jobKey));
   activeJobs.set(jobKey,job);
   return job;
 }
