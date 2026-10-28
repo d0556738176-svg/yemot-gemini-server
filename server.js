@@ -9,7 +9,7 @@ import { searchYouTubeVideos } from './youtube-ivr.js';
 import { selectedResultIndex, isMoreResultsRequest, isFreshYouTubeSearch } from './youtube-selection.js';
 import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
-import { downloadAuthorizedAudioToYemot, lookupCachedYouTubeAudio, saveCachedYouTubeAudio } from './youtube-authorized-playback.js';
+import { downloadAuthorizedAudioToYemot, lookupCachedYouTubeAudio, saveCachedYouTubeAudio, addPendingPlaybackJob, removePendingPlaybackJob, listPendingPlaybackJobs } from './youtube-authorized-playback.js';
 import { prepareYouTubePlayback, playbackFailureMessage } from './youtube-playback-prepare.js';
 import { runBranch2SelfTest } from './branch2-selftest.js';
 import { playSegmented, serveTestSource, testSourceUrl, TEST_SOURCE_VERSION } from './segmented-player.js';
@@ -3828,6 +3828,8 @@ function startYouTubePlaybackJob(video) {
   const state = { status: 'running', paths: null, error: null, via: null, progress: {stage:'checking'}, startedAt: Date.now() };
   youtubePlaybackJobs.set(key, state);
   ensurePlaybackKeepAlive();
+  // Record this download as in-flight so a restart can resume it on its own.
+  void addPendingPlaybackJob(key);
   // No caller AbortSignal: the job must survive across the short hold requests.
   // A larger budget than the old inline path lets long shiurim finish.
   prepareYouTubePlayback(video, {
@@ -3841,10 +3843,12 @@ function startYouTubePlaybackJob(video) {
     state.status = 'ready';
     state.paths = result.playbackPaths;
     state.via = result.via || null;
+    void removePendingPlaybackJob(key);
     console.info('[YouTube IVR] background job ready', { videoId: key, chunks: result.playbackPaths?.length || 0, via: result.via || null, prepMs: Date.now() - state.startedAt });
   }).catch(error => {
     state.status = 'failed';
     state.error = error;
+    void removePendingPlaybackJob(key);
     console.warn('[YouTube IVR] background job failed', { videoId: key, code: error?.code || 'unknown', prepMs: Date.now() - state.startedAt });
     // Let a later retry of the same video start fresh rather than replay a failure.
     const timer = setTimeout(() => { if (youtubePlaybackJobs.get(key) === state) youtubePlaybackJobs.delete(key); }, 2000);
@@ -4563,6 +4567,17 @@ app.listen(port,async()=>{
   // Recover the known timed-out synchronous run with GETs only. The resolver
   // explicitly forbids a new paid run for this ID if no history can be found.
   if(process.env.APIFY_TOKEN) for(const videoId of ['Nb9xE8J6pgA','EZeWxl7N2DI']) startYouTubePlaybackJob({videoId,title:'הורדה קודמת'});
+  // Resume any download that was in-flight when the instance last stopped, so a
+  // long download finishes and is saved on its own with no second phone call.
+  // The durable run receipt makes each resume reuse the same paid run; a video
+  // already cached just verifies and clears itself from the index.
+  if(process.env.APIFY_TOKEN) void (async()=>{
+    try{
+      const pending=await listPendingPlaybackJobs();
+      if(pending.length) console.info('[YouTube IVR] resuming interrupted downloads on boot',{count:pending.length});
+      for(const videoId of pending) startYouTubePlaybackJob({videoId,title:'המשך הורדה'});
+    }catch(e){ console.warn('[YouTube IVR] could not list pending downloads',{message:String(e?.message||e).slice(0,120)}); }
+  })();
   // Recover the already verified legacy download using Yemot storage only.
   // This path never calls a download provider, even if recovery fails.
   void (async()=>{

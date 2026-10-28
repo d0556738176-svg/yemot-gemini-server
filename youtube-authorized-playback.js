@@ -297,6 +297,43 @@ const legacyCompleteDownloads={
   '0D2MvNWOVk0':[1920446,1920078,1920078,1256780]
 };
 export const saveCachedYouTubeAudio=(id,paths)=>audioCache.save(id,paths);
+
+// Pending-jobs index in Yemot: the set of videoIds whose download has started
+// but not yet completed. It lets the server resume interrupted downloads on
+// boot (after a restart/deploy/crash) with no second phone call, so a long
+// download finishes and is saved on its own. Read-modify-writes are serialized.
+const PENDING_INDEX_PATH='ivr2:/2/youtubejobs/pending.json';
+let pendingIndexChain=Promise.resolve();
+function mutatePendingIndex(apply){
+  pendingIndexChain=pendingIndexChain.then(async()=>{
+    let idx=null;
+    try{ idx=await readCacheJson(PENDING_INDEX_PATH); }catch{ idx=null; }
+    const ids=Array.isArray(idx?.videoIds)?idx.videoIds.filter(x=>/^[A-Za-z0-9_-]{11}$/.test(x)):[];
+    const set=new Set(ids);
+    apply(set);
+    const arr=[...set].slice(0,200);
+    if(arr.length===ids.length && arr.every(x=>set.has(x)) && ids.every(x=>set.has(x))) return; // no change
+    try{ await writeCacheJson(PENDING_INDEX_PATH,{version:1,videoIds:arr,updatedAt:new Date().toISOString()}); }catch{}
+  }).catch(()=>{});
+  return pendingIndexChain;
+}
+export function addPendingPlaybackJob(videoId){
+  const id=String(videoId||'').trim();
+  if(!/^[A-Za-z0-9_-]{11}$/.test(id)) return Promise.resolve();
+  return mutatePendingIndex(set=>set.add(id));
+}
+export function removePendingPlaybackJob(videoId){
+  const id=String(videoId||'').trim();
+  if(!/^[A-Za-z0-9_-]{11}$/.test(id)) return Promise.resolve();
+  return mutatePendingIndex(set=>set.delete(id));
+}
+export async function listPendingPlaybackJobs(){
+  try{
+    const idx=await readCacheJson(PENDING_INDEX_PATH);
+    return Array.isArray(idx?.videoIds)?idx.videoIds.filter(x=>/^[A-Za-z0-9_-]{11}$/.test(x)):[];
+  }catch{ return []; }
+}
+
 const cacheLookups=new Map();
 export function lookupCachedYouTubeAudio(videoId) {
   const id=String(videoId||'').trim();
