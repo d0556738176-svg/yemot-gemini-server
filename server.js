@@ -4513,6 +4513,18 @@ async function runSegmentSelfTest() {
 const port=process.env.PORT||3000;
 app.listen(port,async()=>{
   console.log('server running on port '+port);
+  // Recover the already verified legacy download using Yemot storage only.
+  // This path never calls a download provider, even if recovery fails.
+  void (async()=>{
+    const saved=await lookupCachedYouTubeAudio('0D2MvNWOVk0');
+    if(!saved) return;
+    const replay=await lookupCachedYouTubeAudio('0D2MvNWOVk0');
+    console.info('[YouTube IVR] saved audio replay verified',{
+      videoId:'0D2MvNWOVk0',chunks:replay.playbackPaths.length,downloadSkipped:true,phonePlaybackVerified:false
+    });
+  })().catch(error=>console.warn('[YouTube IVR] saved audio recovery unavailable',{
+    videoId:'0D2MvNWOVk0',code:error?.code||'cache_unavailable',downloadAttempted:false
+  }));
   await loadConversationLog();
   try { await configureYemotStructure(); }
   catch (e) { logDetailedError('Yemot automatic setup', e); }
