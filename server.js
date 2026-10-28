@@ -8,7 +8,7 @@ import { searchYouTubeVideos } from './youtube-ivr.js';
 import { selectedResultIndex, isMoreResultsRequest, isFreshYouTubeSearch } from './youtube-selection.js';
 import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
-import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
+import { downloadAuthorizedAudioToYemot, lookupCachedYouTubeAudio, saveCachedYouTubeAudio } from './youtube-authorized-playback.js';
 import { prepareYouTubePlayback, playbackFailureMessage } from './youtube-playback-prepare.js';
 import { runBranch2SelfTest } from './branch2-selftest.js';
 import { playSegmented, serveTestSource, testSourceUrl, TEST_SOURCE_VERSION } from './segmented-player.js';
@@ -3796,7 +3796,7 @@ const youtubePlaybackJobs = new Map();
 function startYouTubePlaybackJob(video) {
   const key = String(video?.videoId || '').trim();
   const existing = youtubePlaybackJobs.get(key);
-  if (existing && (existing.status === 'running' || existing.status === 'ready')) return existing;
+  if (existing && (existing.status === 'running')) return existing;
   const state = { status: 'running', paths: null, error: null, via: null, startedAt: Date.now() };
   youtubePlaybackJobs.set(key, state);
   // No caller AbortSignal: the job must survive across the short hold requests.
@@ -3804,7 +3804,9 @@ function startYouTubePlaybackJob(video) {
   prepareYouTubePlayback(video, {
     env: { ...process.env, YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS: String(process.env.YOUTUBE_PLAYBACK_JOB_BUDGET_MS || 220000) },
     resolveAlternate: resolvePublisherAudio,
-    downloadToYemot: downloadAuthorizedAudioToYemot
+    downloadToYemot: downloadAuthorizedAudioToYemot,
+    lookupCached: lookupCachedYouTubeAudio,
+    saveCached: saveCachedYouTubeAudio
   }).then(result => {
     state.status = 'ready';
     state.paths = result.playbackPaths;
@@ -4511,6 +4513,18 @@ async function runSegmentSelfTest() {
 const port=process.env.PORT||3000;
 app.listen(port,async()=>{
   console.log('server running on port '+port);
+  // Recover the already verified legacy download using Yemot storage only.
+  // This path never calls a download provider, even if recovery fails.
+  void (async()=>{
+    const saved=await lookupCachedYouTubeAudio('0D2MvNWOVk0');
+    if(!saved) return;
+    const replay=await lookupCachedYouTubeAudio('0D2MvNWOVk0');
+    console.info('[YouTube IVR] saved audio replay verified',{
+      videoId:'0D2MvNWOVk0',chunks:replay.playbackPaths.length,downloadSkipped:true,phonePlaybackVerified:false
+    });
+  })().catch(error=>console.warn('[YouTube IVR] saved audio recovery unavailable',{
+    videoId:'0D2MvNWOVk0',code:error?.code||'cache_unavailable',downloadAttempted:false
+  }));
   await loadConversationLog();
   try { await configureYemotStructure(); }
   catch (e) { logDetailedError('Yemot automatic setup', e); }
