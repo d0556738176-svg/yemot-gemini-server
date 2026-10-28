@@ -21,10 +21,11 @@ export async function runYtMp3Probe(env = process.env) {
   const watch = 'https://www.youtube.com/watch?v=' + videoId;
   const url = 'https://' + HOST + '/downloads/convert_audio?url=' + encodeURIComponent(watch) + '&format=mp3';
   const headers = { 'x-rapidapi-host': HOST, 'x-rapidapi-key': key };
-  console.info(TAG, 'start', { videoId });
+  const timeoutMs = Math.max(30000, Number(env.BRANCH2_YTMP3_TIMEOUT_MS || 240000));
+  console.info(TAG, 'start', { videoId, timeoutMs });
   try {
     const t0 = Date.now();
-    const r = await fetch(url, { headers, signal: AbortSignal.timeout(90000) });
+    const r = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
     const ct = String(r.headers.get('content-type') || '').toLowerCase();
     console.info(TAG, 'response', { httpStatus: r.status, contentType: ct, ms: Date.now() - t0 });
 
@@ -61,7 +62,7 @@ export async function runYtMp3Probe(env = process.env) {
     try {
       const d0 = Date.now();
       const fHeaders = /rapidapi/.test(dlHost) ? headers : {};
-      const fr = await fetch(dl, { headers: fHeaders, signal: AbortSignal.timeout(90000) });
+      const fr = await fetch(dl, { headers: fHeaders, signal: AbortSignal.timeout(timeoutMs) });
       const fct = String(fr.headers.get('content-type') || '').toLowerCase();
       let bytes = 0;
       if (fr.ok && fr.body) bytes = Buffer.from(await fr.arrayBuffer()).length;
