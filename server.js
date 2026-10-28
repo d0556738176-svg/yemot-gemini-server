@@ -11,6 +11,8 @@ import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
 import { prepareYouTubePlayback, playbackFailureMessage } from './youtube-playback-prepare.js';
 import { runBranch2SelfTest } from './branch2-selftest.js';
+import { playSegmented, serveTestSource, testSourceUrl, TEST_SOURCE_VERSION } from './segmented-player.js';
+import { prepareSegment, SEGMENT_FORMAT_VERSION } from './segmented-audio.js';
 import { buildBusinessHoursQueries, buildBusinessHoursFallback, isBusinessHoursQuestion } from './business-hours.js';
 import { extractExplicitLocation, extractLocalArea, extractSearchCity } from './business-location.js';
 import { isLocalBusinessDiscoveryRequest, buildLocalBusinessQueries, filterLocalBusinessResults, filterNearbyLocalBusinessResults, buildNoVerifiedLocalResultsAnswer, buildLocalBusinessResultsAnswer } from './local-business-search.js';
@@ -3870,6 +3872,18 @@ async function youtubeCallHandler(call) {
         ],{removeInvalidChars:true});
       }
 
+      // Owner trial of 3-minute segmented playback on the test source.
+      if(process.env.BRANCH2_SEGMENT_TEST==='1' && testSourceUrl() &&
+         /^בדיק[הת]\s+קטעים/u.test(normalizeConfirm(transcript))) {
+        console.info('[YouTube IVR] owner segmented playback test');
+        const status=await playSegmented(call,{
+          sourceKey:'selftest-'+TEST_SOURCE_VERSION,
+          resolveSourceUrl:async()=>testSourceUrl()
+        });
+        nextPrompt=status+' אמור חיפוש חדש, או בדיקת קטעים לשמיעה חוזרת.';
+        continue;
+      }
+
       if(pendingVideo) {
         if(isYesConfirm(transcript)) {
           const selectedVideo=pendingVideo;
@@ -4189,6 +4203,9 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
 }));
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
 
+// Owner test source for the segmented-playback trial (only when enabled).
+app.get('/branch2-selftest/source.m4a',(req,res,next)=>process.env.BRANCH2_SEGMENT_TEST==='1'?serveTestSource(req,res):next());
+
 app.use('/dashboard', express.static(new URL('./public', import.meta.url).pathname));
 
 app.get('/api/youtube/authorized-source', rateLimit(60, 60 * 1000, 'youtube-authorized-source'), requireDashboardAuth, async (req,res)=>{
@@ -4382,6 +4399,49 @@ async function configureYemotStructure() {
 
 process.on('unhandledRejection',(reason)=>{if(!(reason instanceof ExitError)) logDetailedError('Unhandled Rejection',reason)});
 process.on('uncaughtException',(err)=>{if(!(err instanceof ExitError)) logDetailedError('Uncaught Exception',err)});
+// Boot-time segmented trial without a call: prepares segments 1-3 of the
+// test source over real HTTPS, uploads and verifies them on Yemot, and logs
+// bytes fetched and timings. Runs only when BRANCH2_SEGMENT_SELFTEST_ID is set.
+async function runSegmentSelfTest() {
+  const runId=String(process.env.BRANCH2_SEGMENT_SELFTEST_ID||'').replace(/[^A-Za-z0-9_-]/g,'').slice(0,24);
+  if(!runId || process.env.BRANCH2_SEGMENT_TEST!=='1' || !testSourceUrl()) return;
+  try {
+    const src=await import('node:fs').then(m=>m.readFileSync(new URL('./node_modules/yemot-router2/package.json',import.meta.url),'utf8'));
+    const dir=new URL('./node_modules/yemot-router2/',import.meta.url);
+    const fsm=await import('node:fs');
+    const files=fsm.readdirSync(dir,{recursive:true}).filter(f=>/\.(?:c?js|mjs)$/.test(String(f))&&!/node_modules/.test(String(f)));
+    const found=new Set();
+    for(const f of files){const t=fsm.readFileSync(new URL(String(f),dir),'utf8');for(const k of ['sec_wait','allow_empty','empty_val','max_digits','min_digits','typing_playback_mode'])if(t.includes(k))found.add(k);}
+    console.info('[SEGMENT_SELFTEST] yemot-router2',{version:JSON.parse(src).version,tapOptionsFound:[...found].join(',')});
+  } catch(e){ console.warn('[SEGMENT_SELFTEST] router inspection failed',String(e?.message||e).slice(0,120)); }
+  // During a deploy the previous instance may still answer the public URL
+  // (without this route); wait, bounded, until the source answers 206.
+  let sourceReady=false;
+  for(let i=0;i<18&&!sourceReady;i++){
+    try{const r=await fetch(testSourceUrl(),{headers:{range:'bytes=0-0'},signal:AbortSignal.timeout(10000)});sourceReady=r.status===206;await r.body?.cancel().catch(()=>{});}catch{}
+    if(!sourceReady) await new Promise(r=>setTimeout(r,10000));
+  }
+  console.info('[SEGMENT_SELFTEST] test source reachable',{sourceReady,url:testSourceUrl()});
+  if(!sourceReady) return;
+  const sourceKey='boot-'+runId;
+  const deps={resolveSourceUrl:async()=>testSourceUrl(),yemot:(await import('./segmented-player.js')).yemotSegmentStore,log:console};
+  const t0=Date.now();
+  for(let i=0;i<4;i++){
+    const h=prepareSegment(sourceKey,i,deps);
+    try {
+      const r=await h.promise;
+      console.info('[SEGMENT_SELFTEST] segment',{n:i+1,format:SEGMENT_FORMAT_VERSION,durationSec:r.durationSec,isLast:r.isLast,bytesFetched:r.bytesFetched,rangeRequests:r.rangeRequests,playPath:r.playPath,timings:JSON.stringify(r.timings),msSinceStart:Date.now()-t0});
+      if(r.isLast) break;
+    } catch(e){ console.warn('[SEGMENT_SELFTEST] segment failed',{n:i+1,code:e?.code||'error',message:String(e?.message||'').slice(0,160)}); break; }
+    finally { h.release(); }
+  }
+  // Cache reuse: asking again must not download anything.
+  const again=prepareSegment(sourceKey,0,deps);
+  try { const r=await again.promise; console.info('[SEGMENT_SELFTEST] cache reuse',{cached:r.cached,bytesFetched:r.bytesFetched}); }
+  catch(e){ console.warn('[SEGMENT_SELFTEST] cache reuse failed',String(e?.message||'').slice(0,120)); }
+  finally { again.release(); }
+}
+
 const port=process.env.PORT||3000;
 app.listen(port,async()=>{
   console.log('server running on port '+port);
@@ -4390,4 +4450,5 @@ app.listen(port,async()=>{
   catch (e) { logDetailedError('Yemot automatic setup', e); }
   // Isolated branch 2 self-test; a no-op unless BRANCH2_SELFTEST_ID is set.
   void runBranch2SelfTest().catch(e=>logDetailedError('Branch 2 self-test',e));
+  void runSegmentSelfTest().catch(e=>logDetailedError('Branch 2 segment self-test',e));
 });
