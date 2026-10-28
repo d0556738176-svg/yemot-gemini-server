@@ -87,7 +87,9 @@ export async function prepareYouTubePlayback(video, deps) {
 
   const workerBase = String(env.YOUTUBE_AUDIO_WORKER_URL || '').trim().replace(/\/$/, '');
   const workerSecret = String(env.YOUTUBE_AUDIO_WORKER_SECRET || '').trim();
-  if (workerBase && workerSecret) {
+  // When Apify is selected, a worker must not independently start another
+  // provider run for the same video before the durable run coordinator.
+  if (workerBase && workerSecret && !String(env.APIFY_TOKEN||'').trim()) {
     const workerMs = Math.min(
       numberEnv(env, 'YOUTUBE_AUDIO_WORKER_TIMEOUT_MS', DEFAULT_WORKER_SHARE_MS),
       Math.max(0, remaining() - MIN_FALLBACK_MS)
@@ -156,6 +158,13 @@ export async function prepareYouTubePlayback(video, deps) {
 
 // Short Hebrew explanation for the caller, chosen by failure code.
 export function playbackFailureMessage(code) {
+  if(code==='apify_pending')
+    return 'ההורדה עדיין מתבצעת ברקע. אפשר לחזור ולבחור את אותו סרטון בהמשך, בלי להתחיל הורדה נוספת.';
+  if(code==='apify_start_uncertain')
+    return 'לא ניתן כרגע לאמת את מצב ההורדה הקודמת. לא הופעלה הורדה נוספת כדי למנוע חיוב כפול.';
+  if(code==='apify_run_failed'||code==='apify_actor_failed'||code==='apify_no_file')
+    return 'מנוע ההורדה לא השלים את הסרטון. ניסיון חוזר בתשלום נחסם כדי לשמור על המכסה.';
+
   if (YOUTUBE_REFUSAL_CODES.has(code) || code === 'youtube_source_refused')
     return 'יוטיוב לא מאפשר כרגע לשרת שלנו להוריד את הסרטון הזה, ולכן אי אפשר להשמיע אותו. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
   if (code === 'youtube_unplayable' || code === 'youtube_unavailable' || code === 'no_audio_format')
