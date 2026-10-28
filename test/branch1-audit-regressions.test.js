@@ -52,3 +52,7 @@ test('video ordinal selects second result instead of pinned first',()=>{
  assert.equal(selectReferencedVideo('נתח את הסרטון השני',{currentVideo:first,youtubeResults:[first,second]}),second);
  assert.equal(selectReferencedVideo('נתח את הסרטון מספר 9',{currentVideo:first,youtubeResults:[first,second]}),null);
 });
+
+test('explicit resume request can use previous-call memory',()=>{
+ assert.match(selectRelevantHistoryForTurn('נמשיך עם מה שדיברנו בפעם הקודמת','מתקשר: מופעים בבית שמש\nתשובה: מידע מאומת',[]),/מופעים בבית שמש/);
+});
