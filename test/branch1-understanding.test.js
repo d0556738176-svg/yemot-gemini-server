@@ -125,14 +125,14 @@ test('actual phone handler reads website, continues, switches topic and routes h
     getCallerNumber:()=> 'anonymous',activeCalls:new Map(),conversationLog:[],branch1SpeechItems,
     isCallerHangupError:e=>e.message==='hangup',geminiErrorStatus:e=>e.status||0,
     REQUEST_TIMEOUT_MS:30000,withTimeout:async p=>p,yemotApi:{download_file:async()=>({data:Buffer.from('audio')})},
-    buildCallHistoryText:async()=>'',transcribePhoneAudio:async()=>inputs[transcriptIndex++],
+    refreshCallerMemory:async()=>{},buildCallHistoryText:async()=>'',transcribePhoneAudio:async()=>inputs[transcriptIndex++],
     resolvePendingLookupQuestion:()=>'',resolveBranch1Question,isCorrection,branch1Clarification,selectRelevantHistoryForTurn:()=>'',branch1FollowUpHistory,
     isBranch1WebsiteRequest,isBranch1LocalRequest,isBranch1EventRequest,
     branch1Search:async()=>[],extractBranch1Page:async()=>null,
     answerBranch1Website:(q,state)=>answerBranch1Website(q,state,{search:async()=>[],read:async({url})=>{websiteReads++;return {url,title:'הידברות',content:'טקסט מקורי '.repeat(250),links:[]};}}),
     answerBranch1Events:async q=>{eventCalls++;return findBranch1Events(q,async()=>[],{now,read:async()=>municipal});},
     answerBusinessHoursDirect:async()=>{hoursCalls++;return 'לוח שעות מאומת';},
-    isMultimodalAnalysisRequest:()=>({any:false}),isVisualContinuationRequest:()=>false,
+    selectReferencedVideo:()=>null,wantsYouTubeVideoFollowUp:()=>false,isMultimodalAnalysisRequest:()=>({any:false}),isVisualContinuationRequest:()=>false,
     answerIsraelTimeQuestion:()=>'',answerDailyDateQuestion:()=>'',EXCLUSIVE_INSTRUCTION:'',LONG_ANSWER_MAX_CHARS:12000,
     generateBranch1WithFallback:async()=>{throw Error('Unexpected model call');},
     logDetailedError(context,error){throw error;},sanitizeForYemot:x=>x,correctKnownSpeechNames:x=>x,rewriteFollowUp:async q=>q,normalizePhone:x=>x,persistConversationEntry:async()=>{},MAX_CONVERSATION_LOG:1000,
@@ -151,3 +151,4 @@ test('actual phone handler reads website, continues, switches topic and routes h
   for(const row of context.conversationLog.slice(8))assert.match(row.gemini,/טקסט מקורי/);
   assert.equal(isBranch1WebsiteRequest('תמשיך',{lastRoute:'events',currentWebsitePages:[{content:'old'}]}),false);
 });
+

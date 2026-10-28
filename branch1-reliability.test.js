@@ -80,10 +80,10 @@ test('actual branch1 handler survives model timeout and reaches quick fallback w
     getCallerNumber:()=> 'anonymous',activeCalls:new Map(),conversationLog:[],branch1SpeechItems,
     isCallerHangupError:e=>e.message==='hangup',geminiErrorStatus:e=>e.status||0,
     REQUEST_TIMEOUT_MS:30000,withTimeout:async p=>p,yemotApi:{download_file:async()=>({data:Buffer.from('audio')})},
-    buildCallHistoryText:async()=>'',transcribePhoneAudio:async()=> 'מה היתרונות של אנרגיה סולרית',
+    refreshCallerMemory:async()=>{},buildCallHistoryText:async()=>'',transcribePhoneAudio:async()=> 'מה היתרונות של אנרגיה סולרית',
     resolvePendingLookupQuestion:()=>'',resolveBranch1Question,isCorrection,selectRelevantHistoryForTurn:()=>'',
     branch1Clarification:()=>'',branch1FollowUpHistory:()=>'',isBranch1WebsiteRequest:()=>false,isBranch1LocalRequest:()=>false,isBranch1EventRequest:()=>false,
-    isMultimodalAnalysisRequest:()=>({any:false}),isVisualContinuationRequest:()=>false,
+    selectReferencedVideo:()=>null,wantsYouTubeVideoFollowUp:()=>false,isMultimodalAnalysisRequest:()=>({any:false}),isVisualContinuationRequest:()=>false,
     answerIsraelTimeQuestion:()=>'',answerDailyDateQuestion:()=>'',EXCLUSIVE_INSTRUCTION:'',LONG_ANSWER_MAX_CHARS:12000,
     generateBranch1WithFallback:async()=>{throw Object.assign(Error('timeout'),{status:408});},
     logDetailedError(){},answerWithDirectWebFallback:async(q,h)=>{assert.equal(h,'');fallbacks++;return 'תשובה מהמקורות';},
@@ -94,3 +94,4 @@ test('actual branch1 handler survives model timeout and reaches quick fallback w
   await context.handler({read:async items=>{reads++;if(reads===1)return '/audio.wav';assert.equal(items[0].data,'תשובה מהמקורות');throw Error('hangup');}});
   assert.equal(fallbacks,1);assert.equal(reads,2);assert.equal(context.activeCalls.size,0);
 });
+

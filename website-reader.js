@@ -81,6 +81,26 @@ function extractInternalLinks(html, baseUrl, origin) {
   return links;
 }
 
+// Preserve media URLs from the selected public page; metadata is not visual analysis.
+export function extractPageMedia(html, baseUrl) {
+  const images=[], videos=[], seen=new Set();
+  const attr=(tag,key)=>{
+    const re=new RegExp('(?:^|\\s)'+key+'\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s>]+))','i');
+    const m=tag.match(re); return decodeEntities(m?.[1]||m?.[2]||m?.[3]||'');
+  };
+  const add=(list,value,label='')=>{try{const u=new URL(value,baseUrl);if(!value||!isPublicHttpUrl(u.href)||seen.has(u.href))return;seen.add(u.href);list.push({url:u.href,label});}catch{}};
+  for(const m of String(html).matchAll(/<(?:meta|img|video|source|iframe)\b[^>]*>/gi)) {
+    const tag=m[0];
+    if(/^<meta/i.test(tag)){
+      const kind=attr(tag,'property')||attr(tag,'name');
+      if(/^(?:og:image(?::url)?|twitter:image)$/i.test(kind))add(images,attr(tag,'content'));
+      if(/^og:video(?::url|:secure_url)?$/i.test(kind))add(videos,attr(tag,'content'));
+    }else if(/^<img/i.test(tag))add(images,attr(tag,'src')||attr(tag,'data-src'),attr(tag,'alt'));
+    else {const src=attr(tag,'src'); if(!/^<iframe/i.test(tag)||/(?:youtube\.com|youtu\.be|vimeo\.com)/i.test(src))add(videos,src);}
+  }
+  return {images:images.slice(0,12),videos:videos.slice(0,6)};
+}
+
 async function fetchHtml(url, { timeoutMs, maxBytes }) {
   if (!isPublicHttpUrl(url)) throw new Error('Blocked non-public or unsupported website URL');
   const response = await fetch(url, {
@@ -136,7 +156,7 @@ export async function readSinglePublicWebsitePage({url, timeoutMs=3000, maxBytes
   const selected=main?.[1] || article?.[1] || extractMainContainer(html) || body?.[1] || html;
   const content=stripTags(selected).slice(0,60000);
   if(content.length<80 || /^(?:just a moment|access denied|checking your browser)/i.test(content)) return null;
-  return {url:finalUrl,title:extractTitle(html),content,links:extractInternalLinks(selected,finalUrl,final.origin),sourceLinks:extractInternalLinks(html,finalUrl,null)};
+  return {url:finalUrl,title:extractTitle(html),content,...extractPageMedia(html,finalUrl),links:extractInternalLinks(selected,finalUrl,final.origin),sourceLinks:extractInternalLinks(html,finalUrl,null)};
 }
 
 /**
@@ -181,12 +201,12 @@ export async function readPublicWebsitePages({
       if (finalUrl.origin !== origin) throw new Error('Website redirected outside selected origin');
       const html = fetchedPage.html;
       const text = extractReadableText(html);
-      return { url: finalUrl.href, finalUrl: finalUrl.href, title: extractTitle(html), content: text, links: extractInternalLinks(html, finalUrl.href, origin) };
+      return { url: finalUrl.href, finalUrl: finalUrl.href, title: extractTitle(html), content: text, ...extractPageMedia(html,finalUrl.href), links: extractInternalLinks(html, finalUrl.href, origin) };
     }));
     for (const result of fetched) {
       if (result.status !== 'fulfilled') continue;
       const page = result.value;
-      if (page.content.length > 80) pages.push({ url: page.url, title: page.title, content: page.content });
+      if (page.content.length > 80) pages.push({ url: page.url, title: page.title, content: page.content, links: page.links, images: page.images, videos: page.videos });
       for (const link of page.links) enqueue(link.url);
     }
     // Rank discovered same-site links by URL and anchor text so requested pages
@@ -198,4 +218,5 @@ export async function readPublicWebsitePages({
   }
   return rankWebsitePages(question, pages, rootUrl).slice(0, maxPages);
 }
+
 

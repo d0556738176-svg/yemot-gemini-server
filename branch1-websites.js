@@ -24,7 +24,7 @@ export function isBranch1WebsiteRequest(q, context={}) {
   if(context.currentWebsitePages?.length&&context.lastRoute==='website'&&/מאיזה מקור|מה המקור|איזה אתר פתחת/u.test(q))return true;
   if(context.pendingWebsiteUrl&&/נסה שוב|תנסה שוב|עוד פעם/u.test(q))return true;
   return /https?:\/\/\S+|(?:פתח|תפתח|תיכנס|תכנס|לפתוח|להיכנס).{0,35}(?:אתר|דף|עמוד)|(?:תקרא|תקריא|קרא).{0,25}(?:באתר|מה שכתוב|מה כתוב)/u.test(q) ||
-    !!context.currentWebsitePages?.length && (context.lastRoute==='website'||/חזור לאתר|תחזור לאתר/u.test(q)) && /^(?:כן[, ]*)?(?:תמשיך|המשך|תקרא|תקריא|קרא|מה כתוב|מה ראית|מה יש|תחזור|חזור|עוד|הלאה|דף|עמוד|פתח|תפתח|איזה קישורים|אילו קישורים|תפריט|תעבור)/u.test(q);
+    !!context.currentWebsitePages?.length && (context.lastRoute==='website'||/חזור לאתר|תחזור לאתר/u.test(q)) && /^(?:כן[, ]*)?(?:תמשיך|המשך|תקרא|תקריא|קרא|מה כתוב|מה ראית|מה יש|תחזור|חזור|עוד|הלאה|דף|עמוד|פתח|תפתח|איזה קישורים|אילו קישורים|תפריט|תעבור|תפרט|תרחיב|מי|כמה|מתי|איפה|האם|מצא|תמצא|חפש|תחפש|תסביר|הסבר|סכם|תסכם|פרטים)/u.test(q);
 }
 
 export function requestedSiteName(q) {
@@ -47,7 +47,7 @@ export function websiteChunk(context, restart=false, maxChars=850) {
     (end<page.content.length?' להמשך אפשר לומר תמשיך.':' זה סוף הטקסט הזמין בעמוד.');
 }
 
-export async function answerBranch1Website(q,context,{search,read=readSinglePublicWebsitePage,extract,logger=console}={}) {
+export async function answerBranch1Website(q,context,{search,read=readSinglePublicWebsitePage,extract,answerPage,logger=console}={}) {
   const pages=context.currentWebsitePages||[];
   const current=pages[context.currentWebsitePageIndex||0];
   const site=requestedSiteName(q);
@@ -58,6 +58,15 @@ export async function answerBranch1Website(q,context,{search,read=readSinglePubl
   }
   if(context.pendingWebsiteUrl&&!fresh&&!context.websiteClarification)return load(context.pendingWebsiteUrl);
   if(current&&!fresh) {
+    if(/^(?:תחזור|חזור|חזרה)(?:\s+(?:אחורה|לעמוד הקודם|לדף הקודם))?[.!? ]*$/u.test(q) && context.websiteBackStack?.length) {
+      const previous=context.websiteBackStack.pop();
+      return load(previous,false);
+    }
+    const asksDetails=/(?:מה|מי|כמה|מתי|איפה|האם|מצא|תמצא|חפש|תחפש|תסביר|הסבר|סכם|תסכם|פרטים|תפרט|תרחיב)/u.test(q);
+    if(asksDetails && !/(איזה קישורים|אילו קישורים|מה המקור|מאיזה מקור|איזה אתר פתחת|כתובת (?:האתר|הדף))/u.test(q) && !/^(?:מה כתוב|מה יש|מה ראית)[?.! ]*$/u.test(q) && answerPage) {
+      const result=await answerPage(q,current);
+      if(result)return result;
+    }
     if(/מאיזה מקור|מה המקור|כתובת (?:האתר|הדף)|איזה אתר פתחת/u.test(q))return 'העמוד הפתוח הוא '+(current.title||new URL(current.url).hostname)+'. הכתובת היא '+current.url+'.';
     if(/איזה קישורים|אילו קישורים|תפריט|רשימת (?:קישורים|כתבות)/u.test(q)) {
       const links=(current.links||[]).filter(l=>l.content?.length>3).slice(0,8);
@@ -110,7 +119,7 @@ export async function answerBranch1Website(q,context,{search,read=readSinglePubl
   }
   return load(url);
 
-  async function load(target) {
+  async function load(target,remember=true) {
     if(!isPublicHttpUrl(target))return 'הכתובת אינה כתובת ציבורית תקינה של אתר לקריאה.';
     context.pendingWebsiteUrl=target;context.lastRoute='website';
     let page,source='direct';
@@ -119,6 +128,7 @@ export async function answerBranch1Website(q,context,{search,read=readSinglePubl
     if(!page?.content||page.content.length<80)return 'לא הצלחתי לקרוא כרגע את תוכן העמוד שביקשת. אפשר לומר נסה שוב ואנסה את אותו אתר, בלי להחליף אותו באתר אחר.';
     const expected=new URL(target),actual=new URL(page.url||target);
     if(expected.hostname.replace(/^www\./,'')!==actual.hostname.replace(/^www\./,''))return 'הכתובת הפנתה לאתר אחר ולכן לא אציג אותו כאילו הוא האתר שביקשת.';
+    if(remember && current?.url && current.url!==(page.url||target)){context.websiteBackStack=[...(context.websiteBackStack||[]),current.url].slice(-12);}
     context.currentWebsiteUrl=page.url||target;context.pendingWebsiteUrl=null;
     context.lastRoute='website';
     context.currentWebsitePages=[{...page,url:page.url||target,title:page.title||actual.hostname,links:extractedPageLinks({...page,url:page.url||target})}];
@@ -127,3 +137,4 @@ export async function answerBranch1Website(q,context,{search,read=readSinglePubl
     return websiteChunk(context,true);
   }
 }
+

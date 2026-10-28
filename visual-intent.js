@@ -35,3 +35,13 @@ export function isVisualContinuationRequest(text, historyText = '') {
   const previousIntent = isMultimodalAnalysisRequest(previousUserText);
   return previousIntent.image || previousIntent.video;
 }
+
+// An explicit ordinal wins over the previously pinned video. Never silently
+// substitute result one when the caller selected an unavailable result.
+export function selectReferencedVideo(question, context = {}) {
+  const ordinals={הראשון:1,ראשון:1,הראשונה:1,ראשונה:1,השני:2,שני:2,השנייה:2,שנייה:2,השלישי:3,שלישי:3,השלישית:3,שלישית:3,הרביעי:4,רביעי:4,החמישי:5,חמישי:5};
+  const match=String(question||'').match(/(?:סרטון|סירטון|תוצאה)\s*(?:מספר\s*)?(\d{1,2}|הראשון|ראשון|הראשונה|ראשונה|השני|שני|השנייה|שנייה|השלישי|שלישי|השלישית|שלישית|הרביעי|רביעי|החמישי|חמישי)(?=\s|[?!.,]|$)/u);
+  if(match) return context.youtubeResults?.[(Number(match[1])||ordinals[match[1]])-1] || null;
+  return context.currentVideo || context.youtubeResults?.[0] || null;
+}
+

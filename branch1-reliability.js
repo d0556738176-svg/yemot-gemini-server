@@ -36,7 +36,7 @@ export function resolveBranch1Question(text, history = []) {
     q = (last.resolvedQuestion || last.user) + ' ' + q;
   }
   const lastQuestion=last?.resolvedQuestion || last?.user || '';
-  const dateOnly=/^(?:כן[, ]*)?(?:להיום|היום|מחר|למחר|הערב|השבוע|בסוף השבוע|סוף השבוע|\d{1,2}[./]\d{1,2}(?:[./]20\d{2})?)[?.! ]*$/u.test(q);
+  const dateOnly=/^(?:(?:כן|לא|אז|ואז)[, ]*)*ו?(?:להיום|היום|מחרתיים|מחר|למחר|הערב|השבוע|בסוף השבוע|סוף השבוע|\d{1,2}[./]\d{1,2}(?:[./]20\d{2})?)[?.! ]*$/u.test(q);
   const dateQuestion=/^(?:אז[, ]*)?(?:ו?מה\s+(?:יש|קורה|לגבי)|ו?מה\s+עם|ואילו אירועים|ואיזה אירועים).{0,20}(?:היום|מחר|הערב|השבוע|סוף השבוע)[?.! ]*$/u.test(q);
   const spokenInstructions=q.length<160 && /אם\s+(?:י?שאל|תשאל)|(?:ענה|אענה|אני)\s+רק/u.test(q);
   // A caller may combine a short date reply and a new date question in one
@@ -148,3 +148,4 @@ export async function answerBranch1Local(q, search) {
 export async function answerBranch1Events(q, search, options={}) {
   return findBranch1Events(q,search,options);
 }
+

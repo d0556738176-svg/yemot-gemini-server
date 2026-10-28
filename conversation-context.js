@@ -6,8 +6,8 @@ export function selectRelevantHistoryForTurn(question, persistedHistoryText = ''
 
   // Callers naturally use short status checks after asking the system to look something up.
   // These must stay attached to the pending request ("נו, מצאת?", "הצלחת?", "מה עם זה?").
-  const explicitFollowUp = /(?:נו[, ]*)?(?:מצאת|הצלחת|בדקת|חיפשת|מה יצא|מה התוצאה|מה עם זה|מה עם המספר|יש תשובה|יש עדכון|עדכון|תעדכן|תזכיר לי מה חיפשתי|מה בדיוק חיפשתי|תמשיך|המשך|תרחיב|תפרט|תסביר יותר|הפרט הראשון|הדבר הראשון|מה שאמרת|מה אמרת קודם|תמשיך מאיפה|מאיפה שעצרת|ומה לגבי|ומה עם|כמה זה עולה|מה המחיר|שלהם|שלהן|שלו|שלה|אותו|אותה|באתר הזה|בדף הזה|בעמוד הזה|תבדוק את זה|תנסה שוב|נסה שוב|תמשיך שוב|שמעת מה שאלתי|מה שאלתי אותך|זה לא מה ששאלתי|לא ענית(?: על השאלה)?|לא הבנת אותי|תענה על השאלה|תענה למה ששאלתי)/i.test(q);
-  const shortReferential = q.length <= 90 && /^(?:אז\s*)?(?:נו[, ]*)?(?:כן[, ]*)?(?:מצאת|הצלחת|בדקת|חיפשת|מה יצא|מה התוצאה|ומה עם זה|מה עם המספר|יש תשובה|יש עדכון|למה|איך זה|מה לגבי|ומה עם|כמה זה|איפה זה|מתי זה|תבדוק|בדוק|תחפש|חפש|תמשיך|תרחיב|תפרט|תסביר|זה|אותו|אותה)\b/i.test(q);
+  const explicitFollowUp = /(?:נמשיך|נחזור|דיברנו|השיחה הקודמת|בפעם הקודמת)|(?:נו[, ]*)?(?:מצאת|הצלחת|בדקת|חיפשת|מה יצא|מה התוצאה|מה עם זה|מה עם המספר|יש תשובה|יש עדכון|עדכון|תעדכן|תזכיר לי מה חיפשתי|מה בדיוק חיפשתי|תמשיך|המשך|תרחיב|תפרט|תסביר יותר|הפרט הראשון|הדבר הראשון|מה שאמרת|מה אמרת קודם|תמשיך מאיפה|מאיפה שעצרת|ומה לגבי|ומה עם|כמה זה עולה|מה המחיר|שלהם|שלהן|שלו|שלה|אותו|אותה|באתר הזה|בדף הזה|בעמוד הזה|תבדוק את זה|תנסה שוב|נסה שוב|תמשיך שוב|שמעת מה שאלתי|מה שאלתי אותך|זה לא מה ששאלתי|לא ענית(?: על השאלה)?|לא הבנת אותי|תענה על השאלה|תענה למה ששאלתי)/i.test(q);
+  const shortReferential = q.length <= 90 && /^(?:אז\s*)?(?:נו[, ]*)?(?:כן[, ]*)?(?:מצאת|הצלחת|בדקת|חיפשת|מה יצא|מה התוצאה|ומה עם זה|מה עם המספר|יש תשובה|יש עדכון|למה|איך זה|מה לגבי|ומה עם|כמה זה|איפה זה|מתי זה|תבדוק|בדוק|תחפש|חפש|תמשיך|תרחיב|תפרט|תסביר|זה|אותו|אותה)(?=\s|[,.!?]|$)/i.test(q);
   // Natural follow-ups often omit the topic entirely and ask to reshape the
   // immediately previous answer ("give me three main advantages briefly",
   // "summarize it", "give examples", "explain the second one"). Treat these as
@@ -39,7 +39,14 @@ export function selectRelevantHistoryForTurn(question, persistedHistoryText = ''
     if (currentText) return currentText;
     return persisted;
   }
-  return '';
+  // Keep a small current-call window even when a natural follow-up lacks a trigger.
+  // Explicit topic resets must not carry old answers into a new subject.
+  if (/^(?:נושא אחר|עזוב את זה|שכח מזה|בוא נדבר על משהו אחר)/u.test(q)) return '';
+  const standaloneQuestion=/^(?:מה|מי|איך|למה|מתי|איפה|איזה|אילו|האם)(?:\s|$)/u.test(q) && q.split(/\s+/u).length>=4;
+  const reference=/(?:^|\s)(?:זה|זאת|אלה|אלו|שם|שלו|שלה|שלהם|אותו|אותה|עליו|עליה|אמרת|שאמרת|הקודם|הקודמת)(?:\s|[?.!,]|$)/u.test(q);
+  if(standaloneQuestion && !reference) return '';
+  return current.slice(-3).map((t, i) => 'תור ' + (i+1) + ' — מתקשר: ' +
+    String(t.resolvedQuestion || t.user || '').slice(0,900) + '\nתשובה: ' + String(t.assistant || '').slice(0,2200)).join('\n\n');
 }
 
 
@@ -53,3 +60,4 @@ export function resolvePendingLookupQuestion(question, currentTurnHistory = [], 
   if (!/(בודק|בודקת|בודקים|אבדוק|מחפש|מחפשת|חיפשתי[, ]*אבל|מנסה לאתר|מיד בודק|צריך שתזכיר|תזכיר לי|לא הצלחתי כרגע)/i.test(String(previous.assistant || ''))) return '';
   return String(previous.user).trim();
 }
+
