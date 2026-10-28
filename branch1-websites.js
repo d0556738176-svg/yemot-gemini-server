@@ -24,7 +24,7 @@ export function isBranch1WebsiteRequest(q, context={}) {
   if(context.currentWebsitePages?.length&&context.lastRoute==='website'&&/מאיזה מקור|מה המקור|איזה אתר פתחת/u.test(q))return true;
   if(context.pendingWebsiteUrl&&/נסה שוב|תנסה שוב|עוד פעם/u.test(q))return true;
   return /https?:\/\/\S+|(?:פתח|תפתח|תיכנס|תכנס|לפתוח|להיכנס).{0,35}(?:אתר|דף|עמוד)|(?:תקרא|תקריא|קרא).{0,25}(?:באתר|מה שכתוב|מה כתוב)/u.test(q) ||
-    !!context.currentWebsitePages?.length && (context.lastRoute==='website'||/חזור לאתר|תחזור לאתר/u.test(q)) && /^(?:כן[, ]*)?(?:תמשיך|המשך|תקרא|תקריא|קרא|מה כתוב|מה ראית|מה יש|תחזור|חזור|עוד|הלאה|דף|עמוד|פתח|תפתח|איזה קישורים|אילו קישורים|תפריט|תעבור|מי|כמה|מתי|איפה|האם|מצא|תמצא|חפש|תחפש|תסביר|הסבר|סכם|תסכם|פרטים)/u.test(q);
+    !!context.currentWebsitePages?.length && (context.lastRoute==='website'||/חזור לאתר|תחזור לאתר/u.test(q)) && /^(?:כן[, ]*)?(?:תמשיך|המשך|תקרא|תקריא|קרא|מה כתוב|מה ראית|מה יש|תחזור|חזור|עוד|הלאה|דף|עמוד|פתח|תפתח|איזה קישורים|אילו קישורים|תפריט|תעבור|תפרט|תרחיב|מי|כמה|מתי|איפה|האם|מצא|תמצא|חפש|תחפש|תסביר|הסבר|סכם|תסכם|פרטים)/u.test(q);
 }
 
 export function requestedSiteName(q) {
