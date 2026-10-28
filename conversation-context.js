@@ -39,7 +39,14 @@ export function selectRelevantHistoryForTurn(question, persistedHistoryText = ''
     if (currentText) return currentText;
     return persisted;
   }
-  return '';
+  // Keep a small current-call window even when a natural follow-up lacks a trigger.
+  // Explicit topic resets must not carry old answers into a new subject.
+  if (/^(?:נושא אחר|עזוב את זה|שכח מזה|בוא נדבר על משהו אחר)/u.test(q)) return '';
+  const standaloneQuestion=/^(?:מה|מי|איך|למה|מתי|איפה|איזה|אילו|האם)(?:\s|$)/u.test(q) && q.split(/\s+/u).length>=4;
+  const reference=/(?:^|\s)(?:זה|זאת|אלה|אלו|שם|שלו|שלה|שלהם|אותו|אותה|עליו|עליה|אמרת|שאמרת|הקודם|הקודמת)(?:\s|[?.!,]|$)/u.test(q);
+  if(standaloneQuestion && !reference) return '';
+  return current.slice(-3).map((t, i) => 'תור ' + (i+1) + ' — מתקשר: ' +
+    String(t.resolvedQuestion || t.user || '').slice(0,900) + '\nתשובה: ' + String(t.assistant || '').slice(0,2200)).join('\n\n');
 }
 
 
@@ -53,3 +60,4 @@ export function resolvePendingLookupQuestion(question, currentTurnHistory = [], 
   if (!/(בודק|בודקת|בודקים|אבדוק|מחפש|מחפשת|חיפשתי[, ]*אבל|מנסה לאתר|מיד בודק|צריך שתזכיר|תזכיר לי|לא הצלחתי כרגע)/i.test(String(previous.assistant || ''))) return '';
   return String(previous.user).trim();
 }
+
