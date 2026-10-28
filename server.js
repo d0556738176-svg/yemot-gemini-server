@@ -3794,12 +3794,40 @@ async function callHandler(call) {
 // request, so preparation is never restarted or wasted.
 const youtubePlaybackJobs = new Map();
 
+// Keep-alive: Render's free tier spins an instance down after ~15 minutes with
+// no INBOUND request. A background download (especially a long video on the
+// slower flat engine) would then be frozen when the caller hangs up and no new
+// call arrives. The durable run receipt still resumes it on the next call, but
+// this lets long videos finish on their own: while any job is running, the
+// server pings its own public URL so Render keeps it awake. Best-effort; stops
+// itself once no job is running. Disable with BRANCH2_KEEPALIVE=off.
+let playbackKeepAliveTimer = null;
+function hasRunningPlaybackJob() {
+  for (const st of youtubePlaybackJobs.values()) if (st.status === 'running') return true;
+  return false;
+}
+function ensurePlaybackKeepAlive() {
+  if (String(process.env.BRANCH2_KEEPALIVE || 'on').toLowerCase() === 'off') return;
+  if (playbackKeepAliveTimer) return;
+  const base = String(process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
+  if (!base) return; // no public URL to ping (e.g. local/isolated test services)
+  const intervalMs = Math.max(60000, Number(process.env.BRANCH2_KEEPALIVE_MS || 300000));
+  playbackKeepAliveTimer = setInterval(() => {
+    if (!hasRunningPlaybackJob()) { clearInterval(playbackKeepAliveTimer); playbackKeepAliveTimer = null; return; }
+    fetch(base + '/?keepalive=1', { method: 'GET', signal: AbortSignal.timeout(10000) })
+      .then(() => console.info('[YouTube IVR] keep-alive ping (background job active)'))
+      .catch(() => {});
+  }, intervalMs);
+  playbackKeepAliveTimer.unref?.();
+}
+
 function startYouTubePlaybackJob(video) {
   const key = String(video?.videoId || '').trim();
   const existing = youtubePlaybackJobs.get(key);
   if (existing && (existing.status === 'running')) return existing;
   const state = { status: 'running', paths: null, error: null, via: null, progress: {stage:'checking'}, startedAt: Date.now() };
   youtubePlaybackJobs.set(key, state);
+  ensurePlaybackKeepAlive();
   // No caller AbortSignal: the job must survive across the short hold requests.
   // A larger budget than the old inline path lets long shiurim finish.
   prepareYouTubePlayback(video, {
