@@ -63,6 +63,7 @@ export async function prepareYouTubePlayback(video, deps) {
     downloadToYemot,
     lookupCached = async () => null,
     saveCached = async () => {},
+    onProgress = () => {},
     log = console,
     signal: callerSignal
   } = deps || {};
@@ -77,8 +78,10 @@ export async function prepareYouTubePlayback(video, deps) {
   const attempts = [];
 
   // Always check durable verified audio before calling a billable source/worker.
+  onProgress({stage:'checking'});
   const cached=await lookupCached(videoId);
   if(cached) {
+    onProgress({stage:'cached'});
     if(!validPlaybackPaths(cached.playbackPaths))
       throw codedError('invalid_playback_paths','Invalid cached playback paths');
     log.info('[YouTube IVR] playback reused saved audio',{videoId,chunks:cached.playbackPaths.length,downloadSkipped:true});
@@ -139,7 +142,7 @@ export async function prepareYouTubePlayback(video, deps) {
   }
 
   try {
-    const playback = await downloadToYemot(videoId, { fallbackUrl: alternate?.url || null, signal: overall });
+    const playback = await downloadToYemot(videoId, { fallbackUrl: alternate?.url || null, signal: overall, onProgress });
     if (!playback?.playbackPaths?.length) throw codedError('no_playback_files', 'No playback files generated');
     if (!validPlaybackPaths(playback.playbackPaths)) throw codedError('invalid_playback_paths', 'Playback file paths contain invalid protocol characters');
     log.info('[YouTube IVR] direct playback ready', { videoId, chunks: playback.playbackPaths.length });
