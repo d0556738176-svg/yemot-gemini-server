@@ -18,7 +18,10 @@ function pickAudioFormat(body) {
     for (const f of pool) {
       const url = f?.url || f?.link || f?.downloadUrl;
       const mime = String(f?.mimeType || f?.type || f?.ext || '').toLowerCase();
-      const isAudio = /audio|m4a|mp3|webm|opus|aac/.test(mime) || f?.audioQuality || f?.hasAudio === true;
+      // Audio only: the mime must start with audio/ (or be a bare audio ext),
+      // and must never be a video stream. Picking video/webm by accident sends
+      // a huge video down the phone pipe and fails conversion.
+      const isAudio = (/^audio\//.test(mime) || /^(m4a|mp3|opus|aac|ogg)$/.test(mime) || f?.audioQuality) && !/^video\//.test(mime);
       if (typeof url === 'string' && url && isAudio) {
         candidates.push({ url, bitrate: Number(f?.bitrate || f?.abr || 0), mime });
       }
