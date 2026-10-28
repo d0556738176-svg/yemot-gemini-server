@@ -47,6 +47,14 @@ export function classifyWorkerFailure(httpStatus, body) {
   return 'worker_failed';
 }
 
+// File messages use dots and hyphens as protocol delimiters. Never accept
+// an arbitrary worker path, a WAV extension, or a partial valid file list.
+export function validPlaybackPaths(paths) {
+  return Array.isArray(paths) && paths.length > 0 && paths.every(
+    p => typeof p === 'string' && /^\/(?:[A-Za-z0-9_]+\/)*[A-Za-z0-9_]+$/.test(p)
+  );
+}
+
 export async function prepareYouTubePlayback(video, deps) {
   const {
     env = process.env,
@@ -82,12 +90,13 @@ export async function prepareYouTubePlayback(video, deps) {
           signal: AbortSignal.any([overall, AbortSignal.timeout(workerMs)])
         });
         const body = await response.json().catch(() => null);
-        const paths = Array.isArray(body?.playbackPaths) ? body.playbackPaths.map(String).filter(Boolean) : [];
-        if (response.ok && body?.status === 'ready' && paths.length) {
+        const paths = body?.playbackPaths;
+        if (response.ok && body?.status === 'ready' && validPlaybackPaths(paths)) {
           log.info('[YouTube IVR] audio worker ready', { videoId, chunks: paths.length, cached: Boolean(body.cached) });
           return { playbackPaths: paths, via: 'worker', attempts };
         }
-        const code = classifyWorkerFailure(response.status, body);
+        const code = response.ok && body?.status === 'ready'
+          ? 'invalid_playback_paths' : classifyWorkerFailure(response.status, body);
         attempts.push({ path: 'worker', code, httpStatus: response.status });
         log.warn('[YouTube IVR] audio worker did not prepare audio', { videoId, httpStatus: response.status, code, reason: String(body?.reason || '').slice(0, 60) });
       } catch (error) {
@@ -115,6 +124,7 @@ export async function prepareYouTubePlayback(video, deps) {
   try {
     const playback = await downloadToYemot(videoId, { fallbackUrl: alternate?.url || null, signal: overall });
     if (!playback?.playbackPaths?.length) throw codedError('no_playback_files', 'No playback files generated');
+    if (!validPlaybackPaths(playback.playbackPaths)) throw codedError('invalid_playback_paths', 'Playback file paths contain invalid protocol characters');
     log.info('[YouTube IVR] direct playback ready', { videoId, chunks: playback.playbackPaths.length });
     return { playbackPaths: playback.playbackPaths, via: 'direct', attempts };
   } catch (error) {
