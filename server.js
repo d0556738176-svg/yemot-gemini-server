@@ -3867,7 +3867,7 @@ async function youtubeCallHandler(call) {
     while(state.status==='running'&&Date.now()<fastUntil) await new Promise(resolve=>setTimeout(resolve,100));
     const holdStartedAt=Date.now();
     const maxHoldMs=Number(process.env.YOUTUBE_HOLD_MAX_MS||900000);
-    const holdSec=Number(process.env.YOUTUBE_HOLD_SEC||3);
+    const holdSec=Number(process.env.YOUTUBE_HOLD_SEC||8);
     let holdCycles=0;
     let lastAnnouncement={};
     while(true) {
@@ -3886,10 +3886,10 @@ async function youtubeCallHandler(call) {
       }
       const announcement=progressAnnouncement(state.progress,lastAnnouncement,Date.now());
       if(announcement) lastAnnouncement=announcement.state;
-      // Poll quietly between meaningful stage changes and periodic reminders.
+      // Use the known working text read transport for every hold response.
       const holdMessages=announcement
         ? [{type:'text',data:announcement.text}]
-        : [{type:'music_on_hold',data:{musicName:'ztomao',maxSec:3}}];
+        : [{type:'text',data:'הכנת הסרטון נמשכת, נא להמתין על הקו'}];
       holdCycles++;
       // Play the hold message and wait briefly. Any key pressed is ignored; an
       // empty return simply means "poll the job again". This keeps each HTTP
@@ -4524,7 +4524,7 @@ app.listen(port,async()=>{
   console.log('server running on port '+port);
   // Recover the known timed-out synchronous run with GETs only. The resolver
   // explicitly forbids a new paid run for this ID if no history can be found.
-  if(process.env.APIFY_TOKEN) startYouTubePlaybackJob({videoId:'Nb9xE8J6pgA',title:'הורדה קודמת'});
+  if(process.env.APIFY_TOKEN) for(const videoId of ['Nb9xE8J6pgA','EZeWxl7N2DI']) startYouTubePlaybackJob({videoId,title:'הורדה קודמת'});
   // Recover the already verified legacy download using Yemot storage only.
   // This path never calls a download provider, even if recovery fails.
   void (async()=>{

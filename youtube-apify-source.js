@@ -2,7 +2,7 @@
 // timeout, HTTP error, caller hangup or server restart.
 const API_BASE='https://api.apify.com/v2';
 const terminal=new Set(['FAILED','ABORTED','TIMED-OUT']);
-const legacyRecoveryOnly=new Set(['Nb9xE8J6pgA']); // timed-out real call, 2026-10-28
+const legacyRecoveryOnly=new Set(['Nb9xE8J6pgA','EZeWxl7N2DI']); // timed-out real call, 2026-10-28
 const err=(code,message)=>Object.assign(new Error(message),{code});
 export function isApifyConfigured(env=process.env){return !!String(env.APIFY_TOKEN||'').trim();}
 export function apifyReceiptPath(videoId){
