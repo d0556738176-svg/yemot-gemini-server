@@ -4461,6 +4461,10 @@ app.listen(port,async()=>{
   void import('./branch2-sample-inspect.js')
     .then(m=>m.runSampleInspect())
     .catch(e=>logDetailedError('Branch 2 sample inspect',e));
+  // Isolated Apify probe; no-op unless BRANCH2_APIFY_TEST_ID set.
+  void import('./branch2-apify-selftest.js')
+    .then(m=>m.runBranch2ApifySelfTest())
+    .catch(e=>logDetailedError('Branch 2 Apify self-test',e));
   // The test source takes ~80 s to generate on the free instance; do it at
   // boot so an owner test call does not wait for it.
   if(process.env.BRANCH2_SEGMENT_TEST==='1') void import('./segmented-player.js').then(m=>m.ensureTestSource()).catch(e=>logDetailedError('Branch 2 test source',e));
