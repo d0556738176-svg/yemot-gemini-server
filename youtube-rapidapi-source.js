@@ -61,5 +61,8 @@ export async function resolveRapidApiAudioUrl(videoId, env = process.env) {
   if (!audio) throw Object.assign(new Error('YTStream returned no audio format'), { code: 'no_audio_format', meta });
   const parsed = new URL(audio.url);
   if (parsed.protocol !== 'https:') throw Object.assign(new Error('non-HTTPS audio url'), { code: 'bad_url', meta });
-  return { url: audio.url, mime: audio.mime, bitrate: audio.bitrate, meta };
+  // Also expose the combined (muxed) format, which sometimes downloads when the
+  // adaptive one is refused.
+  const combined = Array.isArray(body?.formats) && body.formats[0]?.url ? String(body.formats[0].url) : null;
+  return { url: audio.url, mime: audio.mime, bitrate: audio.bitrate, combinedUrl: combined, host: parsed.hostname, meta };
 }
