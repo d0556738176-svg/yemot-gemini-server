@@ -31,18 +31,46 @@ export async function runBranch2RapidApiSelfTest(env = process.env) {
   let resolved;
   try {
     resolved = await resolveRapidApiAudioUrl(videoId, env);
-    console.info(TAG, 'resolved audio url', { bitrate: resolved.bitrate, mime: resolved.mime, meta: JSON.stringify(resolved.meta) });
+    console.info(TAG, 'resolved audio url', { bitrate: resolved.bitrate, mime: resolved.mime, host: resolved.host, hasCombined: !!resolved.combinedUrl, meta: JSON.stringify(resolved.meta) });
   } catch (error) {
     console.warn(TAG, 'resolve failed', { code: error?.code || 'error', message: String(error?.message || error).slice(0, 160), meta: JSON.stringify(error?.meta || {}) });
     console.info(TAG, 'summary', JSON.stringify({ resolved: false, downloaded: false, runId }));
     return;
   }
 
+  // Try several download strategies; googlevideo sometimes refuses a bare GET
+  // but accepts a browser-like request or a Range request.
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+  const strategies = [
+    ['plain', resolved.url, {}],
+    ['browser-ua', resolved.url, { 'user-agent': UA, 'accept': '*/*' }],
+    ['range', resolved.url, { 'user-agent': UA, 'range': 'bytes=0-1048575', 'accept': '*/*' }],
+    ['range-origin', resolved.url, { 'user-agent': UA, 'range': 'bytes=0-1048575', 'origin': 'https://www.youtube.com', 'referer': 'https://www.youtube.com/' }],
+    ...(resolved.combinedUrl ? [['combined-range', resolved.combinedUrl, { 'user-agent': UA, 'range': 'bytes=0-1048575' }]] : [])
+  ];
+  let working = null;
+  for (const [name, dlUrl, headers] of strategies) {
+    try {
+      const r = await fetch(dlUrl, { headers, signal: AbortSignal.timeout(30000) });
+      const ct = String(r.headers.get('content-type') || '').toLowerCase();
+      console.info(TAG, 'download strategy', { name, httpStatus: r.status, contentType: ct, contentLength: r.headers.get('content-length') || null });
+      if ((r.status === 200 || r.status === 206) && /audio|video|octet-stream|mp4|webm/.test(ct)) { working = { name, dlUrl, headers }; await r.body?.cancel().catch(() => {}); break; }
+      await r.body?.cancel().catch(() => {});
+    } catch (e) {
+      console.warn(TAG, 'download strategy error', { name, message: String(e?.message || e).slice(0, 100) });
+    }
+  }
+  if (!working) {
+    console.info(TAG, 'summary', JSON.stringify({ resolved: true, downloaded: false, reason: 'all_strategies_403', runId }));
+    return;
+  }
+  console.info(TAG, 'working strategy found', { strategy: working.name });
+
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'b2rapid-'));
   try {
     const src = path.join(temp, 'audio.src');
     const started = Date.now();
-    const dl = await fetch(resolved.url, { signal: AbortSignal.timeout(60000) });
+    const dl = await fetch(working.dlUrl, { headers: working.headers, signal: AbortSignal.timeout(60000) });
     if (!dl.ok || !dl.body) throw Object.assign(new Error('audio download HTTP ' + dl.status), { code: 'download_http' });
     const contentType = String(dl.headers.get('content-type') || '').toLowerCase();
     const buf = Buffer.from(await dl.arrayBuffer());
