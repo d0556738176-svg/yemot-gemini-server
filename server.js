@@ -4458,6 +4458,9 @@ app.listen(port,async()=>{
   void import('./branch2-rapidapi-selftest.js')
     .then(m=>m.runBranch2RapidApiSelfTest())
     .catch(e=>logDetailedError('Branch 2 RapidAPI self-test',e));
+  void import('./branch2-sample-inspect.js')
+    .then(m=>m.runSampleInspect())
+    .catch(e=>logDetailedError('Branch 2 sample inspect',e));
   // The test source takes ~80 s to generate on the free instance; do it at
   // boot so an owner test call does not wait for it.
   if(process.env.BRANCH2_SEGMENT_TEST==='1') void import('./segmented-player.js').then(m=>m.ensureTestSource()).catch(e=>logDetailedError('Branch 2 test source',e));
