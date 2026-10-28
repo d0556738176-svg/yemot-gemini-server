@@ -14,6 +14,8 @@ A dedicated **free Frankfurt Render service** was created on branch `diagnostics
 
 This narrows the fault to access to the returned media URL, rather than the API subscription or parsing the metadata. It does **not** prove whether the cause is IP binding, signature validity, regional availability, or another CDN restriction.
 
+Follow-up commit `e6a4f7a93827e394923f5ec6d9a687c21f11eeb4` also became live and was tested from Render without `cgeo`. The provider again returned `OK`, `isProxied: false`, and direct Googlevideo URLs. Both formats 140 and 249 again followed HTTP 302 to an audio CDN that returned HTTP 403. Omitting `cgeo` therefore did not resolve this failure. No audio file was produced, converted, uploaded, or played in Yemot. Production remains unchanged. Further requests need a provider-supported usable media path; do not call this fixed.
+
 ## Diagnostic safeguards / fixes
 
 - Reject HTML/JSON even when HTTP status is successful or a misleading MIME is supplied.
