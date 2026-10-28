@@ -61,6 +61,8 @@ export async function prepareYouTubePlayback(video, deps) {
     fetchImpl = fetch,
     resolveAlternate = async () => null,
     downloadToYemot,
+    lookupCached = async () => null,
+    saveCached = async () => {},
     log = console,
     signal: callerSignal
   } = deps || {};
@@ -73,6 +75,15 @@ export async function prepareYouTubePlayback(video, deps) {
   const deadline = AbortSignal.timeout(totalMs);
   const overall = callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline;
   const attempts = [];
+
+  // Always check durable verified audio before calling a billable source/worker.
+  const cached=await lookupCached(videoId);
+  if(cached) {
+    if(!validPlaybackPaths(cached.playbackPaths))
+      throw codedError('invalid_playback_paths','Invalid cached playback paths');
+    log.info('[YouTube IVR] playback reused saved audio',{videoId,chunks:cached.playbackPaths.length,downloadSkipped:true});
+    return {...cached,via:'cache',attempts};
+  }
 
   const workerBase = String(env.YOUTUBE_AUDIO_WORKER_URL || '').trim().replace(/\/$/, '');
   const workerSecret = String(env.YOUTUBE_AUDIO_WORKER_SECRET || '').trim();
@@ -92,6 +103,7 @@ export async function prepareYouTubePlayback(video, deps) {
         const body = await response.json().catch(() => null);
         const paths = body?.playbackPaths;
         if (response.ok && body?.status === 'ready' && validPlaybackPaths(paths)) {
+          await saveCached(videoId,paths);
           log.info('[YouTube IVR] audio worker ready', { videoId, chunks: paths.length, cached: Boolean(body.cached) });
           return { playbackPaths: paths, via: 'worker', attempts };
         }
@@ -100,6 +112,9 @@ export async function prepareYouTubePlayback(video, deps) {
         attempts.push({ path: 'worker', code, httpStatus: response.status });
         log.warn('[YouTube IVR] audio worker did not prepare audio', { videoId, httpStatus: response.status, code, reason: String(body?.reason || '').slice(0, 60) });
       } catch (error) {
+        // A completed worker must not be downloaded again just because
+        // persistence failed. Surface the storage failure without a paid retry.
+        if (String(error?.code||'').startsWith('cache_')) throw error;
         const code = callerSignal?.aborted ? 'caller_gone'
           : (error?.name === 'TimeoutError' || error?.name === 'AbortError') ? 'worker_timeout' : 'worker_unreachable';
         attempts.push({ path: 'worker', code });
