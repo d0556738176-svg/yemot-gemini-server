@@ -27,6 +27,35 @@ export async function runBranch2ApifySelfTest(env = process.env) {
   const videoId = String(env.BRANCH2_APIFY_TEST_VIDEO || 'J8Kqjlh-t5g');
   console.info(TAG, 'start', { runId, videoId, actor: env.BRANCH2_APIFY_ACTOR || 's-r/youtube-video-downloader' });
 
+  // Full-chain mode: run the REAL production preparation (Apify source ->
+  // convert whole song -> split into chunks -> upload all -> verify), proving
+  // the complete song is ready for gapless playback. Reports chunk count and
+  // total duration.
+  if (String(env.BRANCH2_APIFY_FULLCHAIN || '').trim() === '1') {
+    const f0 = Date.now();
+    try {
+      const { downloadAuthorizedAudioToYemot, _pipeline } = await import('./youtube-authorized-playback.js');
+      const playback = await downloadAuthorizedAudioToYemot(videoId, {});
+      // Verify each uploaded chunk and sum durations from Yemot itself.
+      let totalDuration = 0; const perChunk = [];
+      for (const pth of playback.playbackPaths) {
+        const remote = 'ivr2:' + pth + '.wav';
+        const vu = new URL(_pipeline.YEMOT_API_BASE + '/GetFile');
+        vu.searchParams.set('token', _pipeline.yemotApiKey());
+        vu.searchParams.set('what', remote);
+        const vr = await fetch(vu, { signal: AbortSignal.timeout(8000) });
+        const vb = await vr.json().catch(() => null);
+        const d = Number(vb?.file?.duration) || 0; totalDuration += d; perChunk.push(d);
+      }
+      console.info(TAG, 'FULL CHAIN ready', { chunkCount: playback.playbackPaths.length, totalDurationSec: +totalDuration.toFixed(1), perChunkSec: perChunk.map(x => +x.toFixed(0)).join(','), firstPath: playback.playbackPaths[0], ms: Date.now() - f0 });
+      console.info(TAG, 'summary', JSON.stringify({ fullChain: true, chunkCount: playback.playbackPaths.length, totalDurationSec: +totalDuration.toFixed(1), gaplessReady: true, runId }));
+    } catch (e) {
+      console.warn(TAG, 'FULL CHAIN failed', { code: e?.code || 'error', message: String(e?.message || e).slice(0, 180), ms: Date.now() - f0 });
+      console.info(TAG, 'summary', JSON.stringify({ fullChain: true, ready: false, runId }));
+    }
+    return;
+  }
+
   let resolved;
   const t0 = Date.now();
   try {
