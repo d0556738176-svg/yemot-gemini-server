@@ -3802,7 +3802,7 @@ function startYouTubePlaybackJob(video) {
   // No caller AbortSignal: the job must survive across the short hold requests.
   // A larger budget than the old inline path lets long shiurim finish.
   prepareYouTubePlayback(video, {
-    env: { ...process.env, YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS: String(process.env.YOUTUBE_PLAYBACK_JOB_BUDGET_MS || 220000) },
+    env: { ...process.env, YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS: String(process.env.YOUTUBE_PLAYBACK_JOB_BUDGET_MS || 1800000) },
     resolveAlternate: resolvePublisherAudio,
     downloadToYemot: downloadAuthorizedAudioToYemot,
     lookupCached: lookupCachedYouTubeAudio,
@@ -3876,10 +3876,10 @@ async function youtubeCallHandler(call) {
         throw Object.assign(new Error('playback preparation failed'),{code:state.error?.code||'direct_failed',attempts:state.error?.attempts||[],cause:state.error});
       }
       if(Date.now()-holdStartedAt>maxHoldMs) {
-        throw Object.assign(new Error('playback preparation timed out on hold'),{code:'timeout'});
+        throw Object.assign(new Error('playback preparation timed out on hold'),{code:'apify_pending'});
       }
       const holdMsg=holdCycles===0
-        ? 'מתחיל להכין את הסרטון להשמעה. ההכנה עשויה לקחת כדקה, לפי אורך הסרטון. נא להמתין על הקו ולא לנתק.'
+        ? 'מתחיל להכין את הסרטון להשמעה. ההכנה עשויה לקחת מספר דקות, לפי אורך הסרטון. נא להמתין על הקו ולא לנתק.'
         : 'עדיין מכין את הסרטון, נא להמתין על הקו.';
       holdCycles++;
       // Play the hold message and wait briefly. Any key pressed is ignored; an
@@ -4513,6 +4513,9 @@ async function runSegmentSelfTest() {
 const port=process.env.PORT||3000;
 app.listen(port,async()=>{
   console.log('server running on port '+port);
+  // Recover the known timed-out synchronous run with GETs only. The resolver
+  // explicitly forbids a new paid run for this ID if no history can be found.
+  if(process.env.APIFY_TOKEN) startYouTubePlaybackJob({videoId:'Nb9xE8J6pgA',title:'הורדה קודמת'});
   // Recover the already verified legacy download using Yemot storage only.
   // This path never calls a download provider, even if recovery fails.
   void (async()=>{
