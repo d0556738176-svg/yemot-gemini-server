@@ -4607,6 +4607,10 @@ app.listen(port,async()=>{
   void import('./branch2-apify-selftest.js')
     .then(m=>m.runBranch2ApifySelfTest())
     .catch(e=>logDetailedError('Branch 2 Apify self-test',e));
+  // Isolated RapidAPI youtube-mp3 backup probe; no-op unless BRANCH2_YTMP3_PROBE=1.
+  void import('./branch2-rapidapi-ytmp3-probe.js')
+    .then(m=>m.runYtMp3Probe())
+    .catch(e=>logDetailedError('Branch 2 ytmp3 probe',e));
   // The test source takes ~80 s to generate on the free instance; do it at
   // boot so an owner test call does not wait for it.
   if(process.env.BRANCH2_SEGMENT_TEST==='1') void import('./segmented-player.js').then(m=>m.ensureTestSource()).catch(e=>logDetailedError('Branch 2 test source',e));
