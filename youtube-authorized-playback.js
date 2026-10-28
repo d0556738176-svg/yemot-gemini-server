@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
 import { downloadVisionAudio } from './vision-audio.mjs';
+import { resolveApifyAudio, isApifyConfigured } from './youtube-apify-source.js';
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const YEMOT_UPLOAD_URL = YEMOT_API_BASE + '/UploadFile';
@@ -225,6 +226,30 @@ async function ensureUploadedAndVerified(filePath, remotePath) {
   });
 }
 
+// Apify is the primary source when configured: the actor downloads the full
+// audio on Apify's residential-proxy infrastructure and stores the file, which
+// we then fetch here. This is what bypasses YouTube's datacenter-IP block.
+async function downloadApifySource(id, output, signal) {
+  const resolved = await resolveApifyAudio(id, process.env);
+  const r = await fetch(resolved.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90000)]) : AbortSignal.timeout(90000) });
+  if (!r.ok || !r.body) throw Object.assign(new Error('Apify file download HTTP ' + r.status), { code: 'apify_download_http' });
+  const file = await fs.open(output, 'w');
+  let total = 0;
+  try {
+    const reader = r.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_SOURCE_BYTES) throw Object.assign(new Error('Apify source too large'), { code: 'too_large' });
+      await file.write(Buffer.from(value));
+    }
+  } finally { await file.close(); }
+  if (!total) throw Object.assign(new Error('Apify source empty'), { code: 'empty' });
+  console.info('[YouTube IVR] apify source downloaded', { videoId: id, bytes: total, title: String(resolved.title || '').slice(0, 60) });
+  return total;
+}
+
 async function build(videoId, fallbackUrl=null, signal=undefined) {
   const id=String(videoId||'').trim();
   if(!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
@@ -233,7 +258,18 @@ async function build(videoId, fallbackUrl=null, signal=undefined) {
   const chunksDir=path.join(temp,'chunks');
   const paths=[];
   try {
-    if (process.env.YOUTUBE_VISIONOS_EXPERIMENT !== 'false') {
+    // Primary: Apify (downloads the full audio on their infra, bypassing the
+    // datacenter block). Falls through to the older paths only if it fails.
+    let apifyOk = false;
+    if (isApifyConfigured(process.env)) {
+      try {
+        await downloadApifySource(id, source, signal);
+        apifyOk = true;
+      } catch (apifyError) {
+        console.warn('[YouTube IVR] apify source unavailable; trying other sources', { videoId: id, code: apifyError?.code || 'unknown', error: String(apifyError?.message || '').slice(0,150) });
+      }
+    }
+    if (!apifyOk && process.env.YOUTUBE_VISIONOS_EXPERIMENT !== 'false') {
       try {
         const {bytes} = await downloadVisionAudio(id, source, {signal});
         console.info('[YouTube IVR] vision audio downloaded', {videoId: id, bytes});
@@ -250,7 +286,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined) {
           throw fallbackError;
         }
       }
-    } else {
+    } else if (!apifyOk) {
       await fetchAuthorizedSource(id,source,fallbackUrl,signal);
     }
     signal?.throwIfAborted();
