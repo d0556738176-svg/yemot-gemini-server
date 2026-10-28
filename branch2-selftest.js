@@ -95,6 +95,20 @@ export async function runBranch2SelfTest(env = process.env) {
     }
   } else summary.worker_first = { ok: false, error: 'YOUTUBE_AUDIO_WORKER_URL not set' };
 
+  // 1b. One real /prepare-audio call through the worker (yt-dlp path).
+  const workerSecret = String(env.YOUTUBE_AUDIO_WORKER_SECRET || '').trim();
+  if (workerBase && workerSecret && /^[A-Za-z0-9_-]{11}$/.test(String(env.BRANCH2_SELFTEST_VIDEO || 'J8Kqjlh-t5g'))) {
+    summary.worker_prepare = await probe('worker prepare-audio', async () => {
+      const r = await fetch(workerBase + '/prepare-audio', {
+        method: 'POST', signal: AbortSignal.timeout(120000),
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + workerSecret },
+        body: JSON.stringify({ videoId: String(env.BRANCH2_SELFTEST_VIDEO || 'J8Kqjlh-t5g'), requestId: crypto.randomUUID() })
+      });
+      const b = await r.json().catch(() => null);
+      return { httpStatus: r.status, json: Boolean(b), status: b?.status ?? null, reason: String(b?.reason || '').slice(0, 60), paths: Array.isArray(b?.playbackPaths) ? b.playbackPaths.length : 0 };
+    });
+  }
+
   // 2. YouTube player answer for one id, from this server's IP (status only).
   const videoId = String(env.BRANCH2_SELFTEST_VIDEO || 'J8Kqjlh-t5g');
   if (/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
@@ -145,15 +159,19 @@ export async function runBranch2SelfTest(env = process.env) {
     for (const [method, params] of [
       ['GetFile', { what }],
       ['DownloadFile', { path: what }],
-      ['GetIVR2Dir', { path: 'ivr2:/2/selftest' }]
+      ['GetIVR2Dir', { path: 'ivr2:/2/selftest' }],
+      ['GetFile_missing', { what: 'ivr2:/2/selftest/' + runId + '-does-not-exist.wav' }]
     ]) {
       summary['verify_' + method] = await probe('verify ' + method, async () => {
-        const r = await yemotCall(method, params);
+        const r = await yemotCall(method.replace(/_missing$/, ''), params);
         const listed = method === 'GetIVR2Dir'
           ? (r.json?.files || []).find(f => String(f?.name || f?.fileName || '').startsWith(runId))
           : null;
         const { json, ...rest } = r;
-        return { ...rest, listedFile: listed ? { name: String(listed.name || listed.fileName).slice(0, 60), size: listed.size ?? null, duration: listed.duration ?? listed.durationStr ?? null, keys: shape(listed) } : undefined };
+        const fileInfo = r.json?.file && typeof r.json.file === 'object'
+          ? { keys: shape(r.json.file), exists: r.json.file.exists ?? null, size: r.json.file.size ?? null, duration: r.json.file.duration ?? null }
+          : undefined;
+        return { ...rest, fileInfo, listedFile: listed ? { name: String(listed.name || listed.fileName).slice(0, 60), size: listed.size ?? null, duration: listed.duration ?? listed.durationStr ?? null, keys: shape(listed) } : undefined };
       });
     }
     summary.playbackPath = '/2/selftest/' + runId + '-001';
