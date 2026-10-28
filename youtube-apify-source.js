@@ -50,7 +50,9 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
     let path;try{path=apifyReceiptPath(id);}catch(e){return Promise.reject(e);}
     const store=options.store;
     if(!store?.read||!store?.write)return Promise.reject(err('cache_unavailable','Durable run storage required before starting provider'));
-    const actorId=String(env.BRANCH2_APIFY_ACTOR||'memo23/youtube-video-downloader').trim().replace('/','~');
+    // Per-call actor (chosen by video length) wins; an existing receipt still
+    // keeps its own recorded actor below, so a video never switches provider.
+    const actorId=String(options.actor||env.BRANCH2_APIFY_ACTOR||'memo23/youtube-video-downloader').trim().replace('/','~');
     const key=id; // changing provider must not evade an existing video's receipt
     if(active.has(key))return active.get(key);
     const task=(async()=>{

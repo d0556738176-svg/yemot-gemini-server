@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
 import { downloadVisionAudio } from './vision-audio.mjs';
 import { resolveApifyAudio, isApifyConfigured } from './youtube-apify-source.js';
+import { pickApifyActor } from './youtube-engine-select.js';
 
 import { createAudioCache, audioCachePaths, verifiedAudioFile } from './youtube-audio-cache.js';
 
@@ -350,7 +351,11 @@ export function lookupCachedYouTubeAudio(videoId) {
 // we then fetch here. This is what bypasses YouTube's datacenter-IP block.
 async function downloadApifySource(id, output, signal, onProgress=()=>{}) {
   onProgress({stage:'provider'});
-  const resolved = await resolveApifyAudio(id, process.env, {store:{read:readCacheJson,write:writeCacheJson}});
+  // Choose the cheaper engine by length (short -> s-r, long -> memo23). An
+  // existing run receipt keeps its own actor, so this only steers NEW runs.
+  const choice = await pickApifyActor(id, process.env).catch(() => ({ actor: undefined, seconds: null, reason: 'error' }));
+  console.info('[YouTube IVR] engine choice', { videoId: id, engine: choice.actor || 'default', lengthSec: choice.seconds ?? null, reason: choice.reason });
+  const resolved = await resolveApifyAudio(id, process.env, {store:{read:readCacheJson,write:writeCacheJson}, actor:choice.actor});
   const r = await fetch(resolved.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(600000)]) : AbortSignal.timeout(600000) });
   if (!r.ok || !r.body) throw Object.assign(new Error('Apify file download HTTP ' + r.status), { code: 'apify_download_http' });
   const encoding=r.headers.get('content-encoding');
