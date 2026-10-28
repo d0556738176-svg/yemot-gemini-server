@@ -3877,7 +3877,8 @@ async function youtubeCallHandler(call) {
          /^בדיק[הת]\s+קטעים/u.test(normalizeConfirm(transcript))) {
         console.info('[YouTube IVR] owner segmented playback test');
         const status=await playSegmented(call,{
-          sourceKey:'selftest-'+TEST_SOURCE_VERSION,
+          // Fresh key per call: the trial must prepare live, not replay cache.
+          sourceKey:'call-'+TEST_SOURCE_VERSION+'-'+Date.now().toString(36),
           resolveSourceUrl:async()=>testSourceUrl()
         });
         nextPrompt=status+' אמור חיפוש חדש, או בדיקת קטעים לשמיעה חוזרת.';
@@ -4453,4 +4454,7 @@ app.listen(port,async()=>{
   // Isolated branch 2 self-test; a no-op unless BRANCH2_SELFTEST_ID is set.
   void runBranch2SelfTest().catch(e=>logDetailedError('Branch 2 self-test',e));
   void runSegmentSelfTest().catch(e=>logDetailedError('Branch 2 segment self-test',e));
+  // The test source takes ~80 s to generate on the free instance; do it at
+  // boot so an owner test call does not wait for it.
+  if(process.env.BRANCH2_SEGMENT_TEST==='1') void import('./segmented-player.js').then(m=>m.ensureTestSource()).catch(e=>logDetailedError('Branch 2 test source',e));
 });
