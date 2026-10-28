@@ -11,7 +11,7 @@ test('first and repeated hold responses use spoken text before ordered playback'
  const state={status:'running',progress:{stage:'provider'}};
  const ctx=vm.createContext({Date:{now:()=>1000*clock++},setTimeout:fn=>fn(),process:{env:{}},console:{info(){}},progressAnnouncement,sanitizeForYemot:x=>x,
   startYouTubePlaybackJob:()=>state,video:{videoId:'EZeWxl7N2DI',title:'test'},
-  call:{read:async messages=>{holds.push(messages);if(holds.length===2){state.status='ready';state.paths=paths;}},id_list_message:m=>m}});
+  call:{read:async (messages,mode,options)=>{assert.equal(mode,'tap');assert.equal(options.allow_empty,true);assert.equal(options.empty_val,'None');assert.equal(options.min_digits,1);holds.push(messages);if(holds.length===2){state.status='ready';state.paths=paths;}},id_list_message:m=>m}});
  const playback=await vm.runInContext(fn+';playSelected(call,video)',ctx);
  assert.equal(holds.length,2);
  assert.ok(holds.every(m=>m.length===1&&m[0].type==='text'));

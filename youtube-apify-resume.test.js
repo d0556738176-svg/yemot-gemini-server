@@ -45,7 +45,7 @@ test('cannot create a run before intent is durably stored',async()=>{
 });
 test('terminal provider failure is not rerun on repeat selection',async()=>{
  const f=fixture();f.setStatus('TIMED-OUT');
- for(let i=0;i<2;i++)await assert.rejects(f.make()(id,env,{store:f.store}),e=>e.code==='apify_run_failed');assert.equal(f.posts(),1);
+ for(let i=0;i<2;i++)await assert.rejects(f.make()(id,env,{store:f.store}),e=>e.code==='apify_provider_timeout');assert.equal(f.posts(),1);
 });
 test('temporary GET failure retains durable run and does not create a new one',async()=>{
  const f=fixture();f.records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'run1'});
@@ -77,3 +77,4 @@ test('missing legacy history blocks a second paid attempt',async()=>{
  const resolve=createApifyResolver({log:quiet,fetchImpl:async(u,o)=>{assert.equal(o.method,'GET');return Response.json({data:{items:[]}});}});
  await assert.rejects(resolve('Nb9xE8J6pgA',env,{store:{read:async()=>null,write:async()=>assert.fail()}}),e=>e.code==='apify_start_uncertain');
 });
+

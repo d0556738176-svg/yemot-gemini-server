@@ -161,6 +161,13 @@ export async function prepareYouTubePlayback(video, deps) {
 
 // Short Hebrew explanation for the caller, chosen by failure code.
 export function playbackFailureMessage(code) {
+  if(code==='apify_provider_blocked')
+    return 'מנוע ההורדה נחסם על ידי יוטיוב ולא הצליח לקבל את הסרטון. לא הופעל ניסיון נוסף בתשלום, כדי לשמור על המכסה.';
+  if(code==='apify_provider_network')
+    return 'מנוע ההורדה נתקל בתקלה בחיבור ליוטיוב. לא הופעלה הורדה נוספת בתשלום.';
+  if(code==='apify_provider_timeout')
+    return 'מנוע ההורדה הפסיק את הניסיון בגלל מגבלת הזמן שלו. ניסיון חוזר בתשלום נחסם כדי לשמור על המכסה.';
+
   if(code==='apify_pending')
     return 'ההורדה עדיין מתבצעת ברקע. אפשר לחזור ולבחור את אותו סרטון בהמשך, בלי להתחיל הורדה נוספת.';
   if(code==='apify_start_uncertain')
