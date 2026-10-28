@@ -4277,4 +4277,9 @@ app.listen(port,async()=>{
   await loadConversationLog();
   try { await configureYemotStructure(); }
   catch (e) { logDetailedError('Yemot automatic setup', e); }
+  // Isolated engine probe; no-op unless BRANCH4_ENGINE_SELFTEST_ID is set.
+  // Needs no Yemot routing, so it cannot affect the live phone line.
+  void import('./branch4-engine-selftest.js')
+    .then(m => m.runBranch4EngineSelfTest())
+    .catch(e => logDetailedError('Branch 4 engine self-test', e));
 });
