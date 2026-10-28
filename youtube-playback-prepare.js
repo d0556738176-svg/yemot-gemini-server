@@ -40,8 +40,10 @@ export function classifyWorkerFailure(httpStatus, body) {
   if (reason === 'timeout' || httpStatus === 504) return 'worker_timeout';
   if (httpStatus === 401) return 'worker_unauthorized';
   if (httpStatus === 429) return 'worker_rate_limited';
-  if (body.status === 'unavailable' || httpStatus === 422) return 'youtube_unavailable';
+  // Checked before the generic 'unavailable' status: in production logs this
+  // reason came with HTTP 422 and yt-dlp's "Sign in to confirm you're not a bot".
   if (reason === 'audio_source_unavailable') return 'youtube_source_refused';
+  if (body.status === 'unavailable' || httpStatus === 422) return 'youtube_unavailable';
   return 'worker_failed';
 }
 
