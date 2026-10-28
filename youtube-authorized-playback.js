@@ -12,7 +12,7 @@ const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const YEMOT_UPLOAD_URL = YEMOT_API_BASE + '/UploadFile';
 const MAX_SOURCE_BYTES = 120 * 1024 * 1024;
 const SOURCE_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_SOURCE_TIMEOUT_MS || 12000);
-const FFMPEG_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_FFMPEG_TIMEOUT_MS || 30000);
+const FFMPEG_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_FFMPEG_TIMEOUT_MS || 120000);
 const UPLOAD_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_UPLOAD_TIMEOUT_MS || 20000);
 const VERIFY_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_VERIFY_TIMEOUT_MS || 8000);
 const activeJobs = new Map();
@@ -322,8 +322,8 @@ export function lookupCachedYouTubeAudio(videoId) {
 // audio on Apify's residential-proxy infrastructure and stores the file, which
 // we then fetch here. This is what bypasses YouTube's datacenter-IP block.
 async function downloadApifySource(id, output, signal) {
-  const resolved = await resolveApifyAudio(id, process.env);
-  const r = await fetch(resolved.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90000)]) : AbortSignal.timeout(90000) });
+  const resolved = await resolveApifyAudio(id, process.env, {store:{read:readCacheJson,write:writeCacheJson}});
+  const r = await fetch(resolved.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(300000)]) : AbortSignal.timeout(300000) });
   if (!r.ok || !r.body) throw Object.assign(new Error('Apify file download HTTP ' + r.status), { code: 'apify_download_http' });
   const file = await fs.open(output, 'w');
   let total = 0;
@@ -358,7 +358,8 @@ async function build(videoId, fallbackUrl=null, signal=undefined) {
         await downloadApifySource(id, source, signal);
         apifyOk = true;
       } catch (apifyError) {
-        console.warn('[YouTube IVR] apify source unavailable; trying other sources', { videoId: id, code: apifyError?.code || 'unknown', error: String(apifyError?.message || '').slice(0,150) });
+        console.warn('[YouTube IVR] provider preparation stopped; no second download attempted', { videoId: id, code: apifyError?.code || 'apify_pending' });
+        throw apifyError;
       }
     }
     if (!apifyOk && process.env.YOUTUBE_VISIONOS_EXPERIMENT !== 'false') {
