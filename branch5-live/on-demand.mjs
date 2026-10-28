@@ -62,14 +62,14 @@ export function createOnDemand({ source, publish, capture = captureChunk,
   if (typeof publish !== 'function') throw new Error('PUBLISH_REQUIRED');
   if (source) validateSource(source);
   const sessions = new Map();
-  const stop = id => {
+  const stop = (id, expected = null) => {
     const s = sessions.get(id);
-    if (!s) return;
+    if (!s || (expected && s !== expected)) return;
     sessions.delete(id); clearTimeout(s.timer); s.controller.abort();
   };
   const touch = (id, s) => {
     clearTimeout(s.timer);
-    s.timer = setTimeout(() => stop(id), Math.min(idleMs, Math.max(0, s.expires - Date.now())));
+    s.timer = setTimeout(() => stop(id, s), Math.min(idleMs, Math.max(0, s.expires - Date.now())));
     s.timer.unref?.();
   };
   function enter(id) {
@@ -91,19 +91,41 @@ export function createOnDemand({ source, publish, capture = captureChunk,
     if (s.work || sequence !== s.seq + 1) return Promise.reject(new Error('BAD_SEQUENCE'));
     s.seq = sequence;
     s.work = (async () => {
-      const dir = await mkdtemp(join(tmpdir(), 'yemot-live-'));
+      let dir;
       try {
+        s.controller.signal.throwIfAborted();
+        dir = await mkdtemp(join(tmpdir(), 'yemot-live-'));
+        s.controller.signal.throwIfAborted();
         const file = join(dir, 'chunk.wav');
         await capture({ source, file, signal: s.controller.signal });
         s.controller.signal.throwIfAborted();
         const result = await publish({ file, sequence, callId: id, signal: s.controller.signal });
         s.controller.signal.throwIfAborted();
         s.result = result; return result;
-      } catch (error) { stop(id); throw error; }
-      finally { await rm(dir, { recursive: true, force: true }); s.work = null; }
+      } catch (error) { stop(id, s); throw error; }
+      finally { if (dir) await rm(dir, { recursive: true, force: true }); s.work = null; }
     })();
     return s.work;
   }
   return { enter, next, stop, close() { for (const id of sessions.keys()) stop(id); },
     get activeSessions() { return sessions.size; } };
+}
+
+// Exact route guard for a future authenticated IVR adapter. An HTTP health check,
+// the /5 parent menu, or another extension must never start source capture.
+export function createExtensionGate(engine) {
+  return ({ callId, folder, event = 'enter', sequence = 0 }) => {
+    if (typeof callId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(callId)) {
+      return Promise.reject(new Error('CALL_ID_REQUIRED'));
+    }
+    if (folder !== '/5/1' || event === 'exit' || event === 'hangup') {
+      engine.stop(callId); return Promise.resolve({ stopped: true });
+    }
+    if (event !== 'enter' && event !== 'next') return Promise.reject(new Error('BAD_EVENT'));
+    if (event === 'enter') {
+      if (sequence !== 0) return Promise.reject(new Error('BAD_SEQUENCE'));
+      engine.enter(callId);
+    }
+    return engine.next(callId, sequence);
+  };
 }
