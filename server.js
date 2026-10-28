@@ -4454,6 +4454,10 @@ app.listen(port,async()=>{
   // Isolated branch 2 self-test; a no-op unless BRANCH2_SELFTEST_ID is set.
   void runBranch2SelfTest().catch(e=>logDetailedError('Branch 2 self-test',e));
   void runSegmentSelfTest().catch(e=>logDetailedError('Branch 2 segment self-test',e));
+  // Isolated RapidAPI/YTStream probe; no-op unless BRANCH2_RAPIDAPI_TEST_ID set.
+  void import('./branch2-rapidapi-selftest.js')
+    .then(m=>m.runBranch2RapidApiSelfTest())
+    .catch(e=>logDetailedError('Branch 2 RapidAPI self-test',e));
   // The test source takes ~80 s to generate on the free instance; do it at
   // boot so an owner test call does not wait for it.
   if(process.env.BRANCH2_SEGMENT_TEST==='1') void import('./segmented-player.js').then(m=>m.ensureTestSource()).catch(e=>logDetailedError('Branch 2 test source',e));
