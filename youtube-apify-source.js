@@ -32,6 +32,15 @@ export function redactProviderDiagnostic(value,token=''){
     .replace(/[A-Za-z0-9_-]{24,}/g,'[redacted]').slice(0,320);
 }
 
+
+export function classifyProviderTerminal(run,lines=[]){
+  const reason=[run.statusMessage||'',...lines].join('\n').toLowerCase();
+  if(/confirm.*not a bot|sign in to confirm|blocked on our side/.test(reason))return 'apify_provider_blocked';
+  if(/tls|ssl|connection.*closed|connection.*reset/.test(reason))return 'apify_provider_network';
+  if(run.status==='TIMED-OUT'||/timed out|timeout/.test(reason))return 'apify_provider_timeout';
+  return 'apify_run_failed';
+}
+
 export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>setTimeout(r,ms)),now=Date.now,log=console}={}){
   const active=new Map();
   return function resolve(videoId,env=process.env,options={}){
@@ -122,7 +131,7 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
             usageTotalUsd:run.usageTotalUsd??null,maxTotalChargeUsd:run.options?.maxTotalChargeUsd??null,
             errorLines:lines,newRunStarted:false
           });
-          throw err('apify_run_failed','Saved provider run ended '+run.status+'; automatic paid retry blocked');
+          throw err(classifyProviderTerminal(run,lines),'Saved provider run ended '+run.status+'; automatic paid retry blocked');
         }
         if(now()>=until)throw err('apify_pending','Provider still working; saved run will be resumed');
         await sleep(5000);
