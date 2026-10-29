@@ -117,6 +117,19 @@ test('consent switches to the other engine after a failed run; without consent i
  await assert.rejects(noC.resolver(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader'},{store:noC.store,actor:'memo23/youtube-video-downloader',fallbackActor:'s-r/youtube-video-downloader'}),e=>e.code==='apify_provider_timeout');
  assert.equal(noC.posts(),1);
 });
+test('a run timed out under an older shorter limit is retried fresh on the cheap engine',async()=>{
+ const records=new Map();records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'oldRun',triedActors:['memo23~youtube-video-downloader'],runTimeoutSec:1200,createdAt:new Date(0).toISOString()});
+ const store={read:async p=>records.get(p)||null,write:async(p,v)=>records.set(p,v===null?null:structuredClone(v))};
+ let posts=0,status='TIMED-OUT';
+ const fetchImpl=async(u,o)=>{
+  if(u.includes('/log'))return new Response('run timed out');
+  if(o.method==='POST'){posts++;status='SUCCEEDED';return Response.json({data:{id:'newRun'}});}
+  if(u.includes('/actor-runs/'))return Response.json({data:{status,defaultDatasetId:'ds'}});
+  if(u.includes('/datasets/'))return Response.json([{videoId:id,downloadUrl:'https://example.com/a.mp3'}]);
+  throw Error('unexpected '+u);};
+ const r=await createApifyResolver({fetchImpl,now:()=>10000000,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader'},{store,actor:'memo23/youtube-video-downloader'});
+ assert.equal(posts,1);assert.equal(r.runId,'newRun');
+});
 test('a resume polls the same account that started the run',async()=>{
  const records=new Map();records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'run9',tokenIndex:1});
  const store={read:async p=>records.get(p)||null,write:async(p,v)=>records.set(p,structuredClone(v))};let polledWith=null;
