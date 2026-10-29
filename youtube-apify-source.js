@@ -5,6 +5,14 @@ const terminal=new Set(['FAILED','ABORTED','TIMED-OUT']);
 const legacyRecoveryOnly=new Set(['Nb9xE8J6pgA','EZeWxl7N2DI']); // timed-out real call, 2026-10-28
 const err=(code,message)=>Object.assign(new Error(message),{code});
 export function isApifyConfigured(env=process.env){return !!String(env.APIFY_TOKEN||'').trim();}
+// Multiple Apify accounts: the primary plus optional extras. When one account's
+// free usage is exhausted (HTTP 402 on run start), the next is tried. A run's
+// owning account is recorded in the receipt (tokenIndex) so a resume polls the
+// same account that started it.
+export function apifyTokens(env=process.env){
+  return ['APIFY_TOKEN','APIFY_TOKEN_2','APIFY_TOKEN_3','APIFY_TOKEN_4']
+    .map(k=>String(env[k]||'').trim()).filter(Boolean);
+}
 export function apifyReceiptPath(videoId){
   if(!/^[A-Za-z0-9_-]{11}$/.test(videoId))throw err('invalid_video','Invalid video ID');
   return 'ivr2:/2/youtubejobs/'+Buffer.from(videoId).toString('hex')+'/run.json';
@@ -45,8 +53,9 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
   const active=new Map();
   return function resolve(videoId,env=process.env,options={}){
     const id=String(videoId||'').trim();
-    const token=String(env.APIFY_TOKEN||'').trim();
-    if(!token)return Promise.reject(err('not_configured','APIFY_TOKEN not configured'));
+    const tokens=apifyTokens(env);
+    if(!tokens.length)return Promise.reject(err('not_configured','APIFY_TOKEN not configured'));
+    let token=tokens[0]; let tokenIndex=0;
     let path;try{path=apifyReceiptPath(id);}catch(e){return Promise.reject(e);}
     const store=options.store;
     if(!store?.read||!store?.write)return Promise.reject(err('cache_unavailable','Durable run storage required before starting provider'));
@@ -69,27 +78,44 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       // Longer, configurable actor run timeout: memo23 is slow and a big video
       // was aborted at the old 1200s. The other engine (passed as fallbackActor)
       // is tried once if a run ends FAILED/ABORTED/TIMED-OUT.
-      const runTimeoutSec=Math.max(300,Math.min(7200,Number(env.BRANCH2_APIFY_RUN_TIMEOUT_SEC)||1800));
+      // memo23 is slow; give it a full hour (configurable) before the fast engine
+      // takes over, so large videos finish on the cheap engine when possible.
+      const runTimeoutSec=Math.max(300,Math.min(7200,Number(env.BRANCH2_APIFY_RUN_TIMEOUT_SEC)||3600));
       const fallbackActor=options.fallbackActor?String(options.fallbackActor).trim().replace('/','~'):null;
       const allowFallback=String(env.BRANCH2_APIFY_ENGINE_FALLBACK||'on').toLowerCase()!=='off';
-      // Starts ONE fresh run for `useActor`, recording intent before and the run
-      // id after the single POST so a lost ack fails closed (no duplicate charge).
-      // Updates the outer receipt; triedActors tracks which engines were attempted.
+      // Starts ONE fresh run for `useActor`, trying each Apify account in turn and
+      // moving to the next only when an account is out of free usage (HTTP 402).
+      // Intent (account + actor) is written before each POST so a lost ack fails
+      // closed (no duplicate charge); triedActors tracks which engines were used.
       async function startRun(useActor,tried){
         const watch='https://www.youtube.com/watch?v='+id;
         const maxCharge=useActor.startsWith('memo23~')?'0.06':'0.25';
-        receipt={version:1,videoId:id,actorId:useActor,state:'starting',triedActors:tried,createdAt:new Date(now()).toISOString()};
-        await store.write(path,receipt);
-        const b=await api('/acts/'+useActor+'/runs?restartOnError=false&timeout='+runTimeoutSec+'&maxTotalChargeUsd='+maxCharge,{
-          method:'POST',timeout:30000,body:{urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
-            format:'mp3',audioQuality:'192',quality:'best',downloadSubtitles:false,metadataOnly:false}});
-        if(!/^[A-Za-z0-9]+$/.test(String(b?.data?.id||'')))throw err('apify_start_uncertain','Provider run ID missing; duplicate blocked');
-        receipt={...receipt,runId:b.data.id,state:'running'};
-        await store.write(path,receipt);
-        return b.data.id;
+        const route='/acts/'+useActor+'/runs?restartOnError=false&timeout='+runTimeoutSec+'&maxTotalChargeUsd='+maxCharge;
+        const payload=JSON.stringify({urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
+          format:'mp3',audioQuality:'192',quality:'best',downloadSubtitles:false,metadataOnly:false});
+        for(let ti=0;ti<tokens.length;ti++){
+          receipt={version:1,videoId:id,actorId:useActor,state:'starting',triedActors:tried,tokenIndex:ti,createdAt:new Date(now()).toISOString()};
+          await store.write(path,receipt);
+          let r;
+          try{r=await fetchImpl(API_BASE+route,{method:'POST',headers:{authorization:'Bearer '+tokens[ti],'content-type':'application/json'},body:payload,signal:AbortSignal.timeout(30000)});}
+          catch{throw err('apify_start_uncertain','Provider response unavailable; existing run retained');}
+          if(r.status===402){ log.info?.('[YouTube IVR] provider account out of free usage; trying next',{videoId:id,account:ti+1}); continue; }
+          const b=await r.json().catch(()=>null);
+          if(!r.ok||!/^[A-Za-z0-9]+$/.test(String(b?.data?.id||'')))throw err('apify_start_uncertain','Provider run ID missing; duplicate blocked');
+          token=tokens[ti]; tokenIndex=ti;
+          receipt={...receipt,runId:b.data.id,state:'running'};
+          await store.write(path,receipt);
+          return b.data.id;
+        }
+        // Every account is out of free usage: nothing started or charged, so clear
+        // the blocking receipt to allow a retry later (free usage resets monthly).
+        await store.write(path,null).catch(()=>{});
+        throw err('needs_payment','All provider accounts are out of free usage');
       }
       let receipt=await store.read(path);
       if(receipt&&(receipt.version!==1||receipt.videoId!==id))throw err('cache_invalid','Invalid provider receipt');
+      // Resume with the SAME account that started the run (so the run id is valid).
+      if(receipt&&Number.isInteger(receipt.tokenIndex)&&tokens[receipt.tokenIndex]){token=tokens[receipt.tokenIndex];tokenIndex=receipt.tokenIndex;}
       if(!receipt&&legacyRecoveryOnly.has(id)){
         // Adopt the old synchronous run using GETs only. Missing history must
         // never trigger another charged attempt for this failed call.
@@ -111,8 +137,11 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       }
       if(!receipt.runId)throw err('apify_start_uncertain','Unconfirmed earlier start; duplicate download blocked');
       if(!/^[A-Za-z0-9]+$/.test(receipt.runId))throw err('cache_invalid','Invalid saved run ID');
-      const waitMs=Number(env.BRANCH2_APIFY_WAIT_MS)||1500000;
-      const until=now()+Math.max(1000,Math.min(waitMs,1800000));
+      // Poll long enough to cover the whole run (plus a margin for the engine
+      // fallback) in one keep-alive-sustained session, so a long download finishes
+      // on its own without needing a second call.
+      const waitMs=Number(env.BRANCH2_APIFY_WAIT_MS)||(runTimeoutSec*1000+600000);
+      const until=now()+Math.max(1000,Math.min(waitMs,6000000));
       for(;;){
         const b=await api('/actor-runs/'+receipt.runId);
         const run=b.data;

@@ -77,4 +77,35 @@ test('missing legacy history blocks a second paid attempt',async()=>{
  const resolve=createApifyResolver({log:quiet,fetchImpl:async(u,o)=>{assert.equal(o.method,'GET');return Response.json({data:{items:[]}});}});
  await assert.rejects(resolve('Nb9xE8J6pgA',env,{store:{read:async()=>null,write:async()=>assert.fail()}}),e=>e.code==='apify_start_uncertain');
 });
+test('an exhausted account (402) falls through to the next key',async()=>{
+ const records=new Map();let posts=0;const used=[];
+ const store={read:async p=>records.get(p)||null,write:async(p,v)=>records.set(p,v===null?null:structuredClone(v))};
+ const fetchImpl=async(u,o)=>{
+  if(o.method==='POST'){posts++;used.push(o.headers.authorization);
+   if(o.headers.authorization==='Bearer k1')return new Response('',{status:402});
+   return Response.json({data:{id:'run2'}});}
+  if(u.includes('/actor-runs/'))return Response.json({data:{status:'SUCCEEDED',defaultDatasetId:'ds'}});
+  if(u.includes('/datasets/'))return Response.json([{videoId:id,downloadUrl:'https://api.apify.com/v2/key-value-stores/kv/records/a.mp3'}]);
+  throw Error('unexpected');};
+ const r=await createApifyResolver({fetchImpl,now:()=>0,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',APIFY_TOKEN_2:'k2',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader'},{store});
+ assert.equal(r.runId,'run2');assert.equal(posts,2);assert.deepEqual(used,['Bearer k1','Bearer k2']);
+ assert.equal(records.get(apifyReceiptPath(id)).tokenIndex,1);
+});
+test('all accounts exhausted clears the receipt so a later retry is allowed',async()=>{
+ const records=new Map();let posts=0;
+ const store={read:async p=>records.get(p)||null,write:async(p,v)=>records.set(p,v===null?null:structuredClone(v))};
+ const fetchImpl=async(u,o)=>{if(o.method==='POST'){posts++;return new Response('',{status:402});}throw Error('no run should be polled');};
+ await assert.rejects(createApifyResolver({fetchImpl,now:()=>0,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',APIFY_TOKEN_2:'k2'},{store}),e=>e.code==='needs_payment');
+ assert.equal(posts,2);assert.equal(records.get(apifyReceiptPath(id)),null);
+});
+test('a resume polls the same account that started the run',async()=>{
+ const records=new Map();records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'run9',tokenIndex:1});
+ const store={read:async p=>records.get(p)||null,write:async(p,v)=>records.set(p,structuredClone(v))};let polledWith=null;
+ const fetchImpl=async(u,o)=>{if(o.method==='POST')assert.fail('resume must not start a run');
+  polledWith=o.headers.authorization;
+  if(u.includes('/actor-runs/'))return Response.json({data:{status:'SUCCEEDED',defaultDatasetId:'ds'}});
+  return Response.json([{videoId:id,downloadUrl:'https://example.com/a.mp3'}]);};
+ await createApifyResolver({fetchImpl,now:()=>0,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',APIFY_TOKEN_2:'k2'},{store});
+ assert.equal(polledWith,'Bearer k2');
+});
 
