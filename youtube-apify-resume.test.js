@@ -98,6 +98,25 @@ test('all accounts exhausted clears the receipt so a later retry is allowed',asy
  await assert.rejects(createApifyResolver({fetchImpl,now:()=>0,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',APIFY_TOKEN_2:'k2'},{store}),e=>e.code==='needs_payment');
  assert.equal(posts,2);assert.equal(records.get(apifyReceiptPath(id)),null);
 });
+test('consent switches to the other engine after a failed run; without consent it does not',async()=>{
+ function run(consent){
+  const records=new Map();let posts=0;const actors=[];let status='TIMED-OUT';
+  const store={read:async p=>records.get(p)||null,write:async(p,v)=>records.set(p,v===null?null:structuredClone(v))};
+  const fetchImpl=async(u,o)=>{
+   if(u.includes('/log'))return new Response('run timed out');
+   if(o.method==='POST'){posts++;actors.push(u.match(/\/acts\/([^/]+)\//)[1]);if(posts===2)status='SUCCEEDED';return Response.json({data:{id:'run'+posts}});}
+   if(u.includes('/actor-runs/'))return Response.json({data:{status,defaultDatasetId:'ds'}});
+   if(u.includes('/datasets/'))return Response.json([{videoId:id,downloadUrl:'https://example.com/a.mp3'}]);
+   throw Error('unexpected '+u);};
+  return {resolver:createApifyResolver({fetchImpl,now:()=>0,sleep:async()=>{},log:quiet}),store,posts:()=>posts,actors};
+ }
+ const withC=run(true);
+ await withC.resolver(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader'},{store:withC.store,actor:'memo23/youtube-video-downloader',fallbackActor:'s-r/youtube-video-downloader',consentToFallback:true});
+ assert.equal(withC.posts(),2);assert.deepEqual(withC.actors,['memo23~youtube-video-downloader','s-r~youtube-video-downloader']);
+ const noC=run(false);
+ await assert.rejects(noC.resolver(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader'},{store:noC.store,actor:'memo23/youtube-video-downloader',fallbackActor:'s-r/youtube-video-downloader'}),e=>e.code==='apify_provider_timeout');
+ assert.equal(noC.posts(),1);
+});
 test('a resume polls the same account that started the run',async()=>{
  const records=new Map();records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'run9',tokenIndex:1});
  const store={read:async p=>records.get(p)||null,write:async(p,v)=>records.set(p,structuredClone(v))};let polledWith=null;

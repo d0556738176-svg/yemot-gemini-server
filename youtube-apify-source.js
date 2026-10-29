@@ -80,7 +80,7 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       // is tried once if a run ends FAILED/ABORTED/TIMED-OUT.
       // memo23 is slow; give it a full hour (configurable) before the fast engine
       // takes over, so large videos finish on the cheap engine when possible.
-      const runTimeoutSec=Math.max(300,Math.min(7200,Number(env.BRANCH2_APIFY_RUN_TIMEOUT_SEC)||3600));
+      const runTimeoutSec=Math.max(300,Math.min(7200,Number(env.BRANCH2_APIFY_RUN_TIMEOUT_SEC)||7200));
       const fallbackActor=options.fallbackActor?String(options.fallbackActor).trim().replace('/','~'):null;
       const allowFallback=String(env.BRANCH2_APIFY_ENGINE_FALLBACK||'on').toLowerCase()!=='off';
       // Starts ONE fresh run for `useActor`, trying each Apify account in turn and
@@ -141,7 +141,7 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       // fallback) in one keep-alive-sustained session, so a long download finishes
       // on its own without needing a second call.
       const waitMs=Number(env.BRANCH2_APIFY_WAIT_MS)||(runTimeoutSec*1000+600000);
-      const until=now()+Math.max(1000,Math.min(waitMs,6000000));
+      const until=now()+Math.max(1000,Math.min(waitMs,8000000));
       for(;;){
         const b=await api('/actor-runs/'+receipt.runId);
         const run=b.data;
@@ -178,7 +178,8 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
           // duplicate. Each engine is tried at most once (triedActors), so there
           // is no loop and no second charge on an engine that already ran.
           const tried=Array.isArray(receipt.triedActors)?receipt.triedActors:[receipt.actorId];
-          if(allowFallback&&fallbackActor&&!tried.includes(fallbackActor)){
+          // Only switch to the other (costlier) engine with the caller's consent.
+          if(allowFallback&&options.consentToFallback&&fallbackActor&&!tried.includes(fallbackActor)){
             log.info('[YouTube IVR] provider engine fallback',{videoId:id,from:receipt.actorId,to:fallbackActor,prevCode:failCode});
             log.info('[YouTube IVR] provider run started',{videoId:id,actorId:fallbackActor,fallback:true,runId:await startRun(fallbackActor,[...tried,fallbackActor])});
             continue;

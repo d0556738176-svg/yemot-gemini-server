@@ -3821,10 +3821,11 @@ function ensurePlaybackKeepAlive() {
   playbackKeepAliveTimer.unref?.();
 }
 
-function startYouTubePlaybackJob(video) {
+function startYouTubePlaybackJob(video, opts = {}) {
   const key = String(video?.videoId || '').trim();
   const existing = youtubePlaybackJobs.get(key);
   if (existing && (existing.status === 'running')) return existing;
+  const consentToFallback = !!opts.consentToFallback;
   const state = { status: 'running', paths: null, error: null, via: null, progress: {stage:'checking'}, startedAt: Date.now() };
   youtubePlaybackJobs.set(key, state);
   ensurePlaybackKeepAlive();
@@ -3835,7 +3836,8 @@ function startYouTubePlaybackJob(video) {
   prepareYouTubePlayback(video, {
     env: { ...process.env, YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS: String(process.env.YOUTUBE_PLAYBACK_JOB_BUDGET_MS || 2700000) },
     resolveAlternate: resolvePublisherAudio,
-    downloadToYemot: downloadAuthorizedAudioToYemot,
+    // Pass the caller's consent to switch to the costlier engine through to the resolver.
+    downloadToYemot: (vid, dopts) => downloadAuthorizedAudioToYemot(vid, { ...dopts, consentToFallback }),
     lookupCached: lookupCachedYouTubeAudio,
     saveCached: saveCachedYouTubeAudio,
     onProgress: progress => { state.progress=progress; }
@@ -3873,6 +3875,9 @@ async function youtubeCallHandler(call) {
   let resultOffset=0;
   let nextPrompt=null;
   let pendingVideo=null;
+  let pendingFallbackVideo=null;
+  // Provider failures where trying the OTHER (faster, costlier) engine may help.
+  const FALLBACK_ELIGIBLE=new Set(['apify_provider_timeout','apify_provider_blocked','apify_provider_network','apify_run_failed','apify_actor_failed','direct_failed','timeout']);
 
   const normalizeConfirm=(text)=>String(text||'').normalize('NFKC').toLowerCase()
     .replace(/[.,!?;:״"'׳]/g,' ').replace(/\s+/g,' ').trim();
@@ -3890,13 +3895,13 @@ async function youtubeCallHandler(call) {
     return 'מצאתי כמה תוצאות. '+lines.join(' ')+' אמור את מספר התוצאה או את השם שלה. אחרי הבחירה אבקש ממך אישור לפני ההשמעה. אפשר גם לומר עוד לתוצאות נוספות.';
   }
 
-  async function playSelected(call, video) {
-    console.info('[YouTube IVR] direct playback requested', { videoId: video.videoId });
+  async function playSelected(call, video, playOpts={}) {
+    console.info('[YouTube IVR] direct playback requested', { videoId: video.videoId, consent: !!playOpts.consentToFallback });
     // Preparation runs in the background (download -> convert -> upload). We keep
     // the caller on the line with short "please hold" prompts and poll the job,
     // instead of holding one HTTP request open for the whole ~60s (which drops
     // the call). When ready, every chunk plays in ONE id_list_message => gapless.
-    const state=startYouTubePlaybackJob(video);
+    const state=startYouTubePlaybackJob(video, playOpts);
     // A short grace period avoids a full spoken hold cycle on fast cached hits.
     const fastUntil=Date.now()+1500;
     while(state.status==='running'&&Date.now()<fastUntil) await new Promise(resolve=>setTimeout(resolve,100));
@@ -4004,6 +4009,28 @@ async function youtubeCallHandler(call) {
         continue;
       }
 
+      // Consent to switch to the faster, costlier engine after the cheap one failed.
+      if(pendingFallbackVideo) {
+        if(isYesConfirm(transcript)) {
+          const v=pendingFallbackVideo; pendingFallbackVideo=null;
+          try {
+            return await playSelected(call,v,{consentToFallback:true});
+          } catch(playbackError) {
+            if(playbackError instanceof ExitError||isCallerHangupError(playbackError)) throw playbackError;
+            console.warn('[YouTube IVR] fallback playback failed',{videoId:v.videoId,code:playbackError?.code||'unknown'});
+            nextPrompt=playbackFailureMessage(playbackError?.code);
+            continue;
+          }
+        }
+        if(isNoConfirm(transcript)) {
+          pendingFallbackVideo=null;
+          nextPrompt='בסדר, לא ננסה במנוע המהיר. אמור מספר של תוצאה אחרת, או חיפוש חדש.';
+          continue;
+        }
+        nextPrompt='לא הבנתי. אם לנסות במנוע המהיר יותר אמור כן, אחרת אמור לא.';
+        continue;
+      }
+
       if(pendingVideo) {
         if(isYesConfirm(transcript)) {
           const selectedVideo=pendingVideo;
@@ -4012,12 +4039,20 @@ async function youtubeCallHandler(call) {
             return await playSelected(call,selectedVideo);
           } catch(playbackError) {
             if(playbackError instanceof ExitError||isCallerHangupError(playbackError)) throw playbackError;
+            const code=playbackError?.code||'unknown';
             console.warn('[YouTube IVR] playback failed',{
               videoId:selectedVideo.videoId,
-              code:playbackError?.code||'unknown',
+              code,
               attempts:(playbackError?.attempts||[]).map(a=>a.path+':'+a.code).join(',')
             });
-            nextPrompt=playbackFailureMessage(playbackError?.code);
+            // Cheap engine failed on a large/blocked video: offer the faster,
+            // costlier engine and let the caller decide before we spend on it.
+            if(FALLBACK_ELIGIBLE.has(code)) {
+              pendingFallbackVideo=selectedVideo;
+              nextPrompt='לא הצלחתי להוריד את הסרטון הזה במנוע הרגיל. אפשר לנסות במנוע מהיר יותר, אבל הוא עולה קצת יותר. האם לנסות? אמור כן או לא.';
+              continue;
+            }
+            nextPrompt=playbackFailureMessage(code);
             continue;
           }
         }

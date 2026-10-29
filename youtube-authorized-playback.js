@@ -386,13 +386,13 @@ export function lookupCachedYouTubeAudio(videoId) {
 // Apify is the primary source when configured: the actor downloads the full
 // audio on Apify's residential-proxy infrastructure and stores the file, which
 // we then fetch here. This is what bypasses YouTube's datacenter-IP block.
-async function downloadApifySource(id, output, signal, onProgress=()=>{}) {
+async function downloadApifySource(id, output, signal, onProgress=()=>{}, consent=false) {
   onProgress({stage:'provider'});
   // Choose the cheaper engine by length (short -> s-r, long -> memo23). An
   // existing run receipt keeps its own actor, so this only steers NEW runs.
   const choice = await pickApifyActor(id, process.env).catch(() => ({ actor: undefined, fallback: undefined, seconds: null, reason: 'error' }));
-  console.info('[YouTube IVR] engine choice', { videoId: id, engine: choice.actor || 'default', fallback: choice.fallback || null, lengthSec: choice.seconds ?? null, reason: choice.reason });
-  const resolved = await resolveApifyAudio(id, process.env, {store:{read:readCacheJson,write:writeCacheJson}, actor:choice.actor, fallbackActor:choice.fallback});
+  console.info('[YouTube IVR] engine choice', { videoId: id, engine: choice.actor || 'default', fallback: choice.fallback || null, lengthSec: choice.seconds ?? null, reason: choice.reason, consent });
+  const resolved = await resolveApifyAudio(id, process.env, {store:{read:readCacheJson,write:writeCacheJson}, actor:choice.actor, fallbackActor:choice.fallback, consentToFallback:consent});
   const r = await fetch(resolved.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(600000)]) : AbortSignal.timeout(600000) });
   if (!r.ok || !r.body) throw Object.assign(new Error('Apify file download HTTP ' + r.status), { code: 'apify_download_http' });
   const encoding=r.headers.get('content-encoding');
@@ -423,7 +423,7 @@ async function downloadApifySource(id, output, signal, onProgress=()=>{}) {
   return total;
 }
 
-async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=>{}) {
+async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=>{}, consent=false) {
   const id=String(videoId||'').trim();
   if(!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'authorized-audio-'));
@@ -436,7 +436,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     let apifyOk = false;
     if (isApifyConfigured(process.env)) {
       try {
-        await downloadApifySource(id, source, signal, onProgress);
+        await downloadApifySource(id, source, signal, onProgress, consent);
         apifyOk = true;
       } catch (apifyError) {
         console.warn('[YouTube IVR] provider preparation stopped; no second download attempted', { videoId: id, code: apifyError?.code || 'apify_pending' });
@@ -483,12 +483,13 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
 export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
   const id=String(videoId||'').trim();
   const fallbackUrl=String(options?.fallbackUrl||'').trim()||null;
-  const jobKey=id+(fallbackUrl?'|alternate':'');
+  const consent=options?.consentToFallback?true:false;
+  const jobKey=id+(fallbackUrl?'|alternate':'')+(consent?'|consent':'');
   if(activeJobs.has(jobKey)) return activeJobs.get(jobKey);
   // The first caller's deadline signal cancels download/ffmpeg/upload so no
   // orphan work keeps running on the free instance after the call gave up.
   const report=event=>{try{options?.onProgress?.(event);}catch{ /* Progress must never interrupt audio preparation. */ }};
-  const job=build(id,fallbackUrl,options?.signal,report).finally(()=>activeJobs.delete(jobKey));
+  const job=build(id,fallbackUrl,options?.signal,report,consent).finally(()=>activeJobs.delete(jobKey));
   activeJobs.set(jobKey,job);
   return job;
 }
