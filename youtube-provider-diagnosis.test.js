@@ -21,3 +21,20 @@ test('diagnostics remove credentials and signed URLs',()=>{
  const value=redactProviderDiagnostic('ERROR secretValue https://host/path?token=abc password=pass123','secretValue');
  assert.ok(!value.includes('secretValue'));assert.ok(!value.includes('pass123'));assert.ok(!value.includes('https://'));
 });
+
+test('a "blocked on our side" summary with TLS/read-timeout detail is network trouble, not a bot-block',()=>{
+ assert.equal(classifyProviderTerminal(
+   {status:'FAILED',statusMessage:'This run produced no videos: 1 blocked on our side'},
+   ['SSL/TLS handshake failure: Error in the pull function',
+    "[youtube] 86eLl-ZYt4A: Unable to download API page: ...Read timed out (read timeout=20.0)"]
+ ),'apify_provider_network');
+});
+test('an explicit bot-wall is still classified as a real block',()=>{
+ assert.equal(classifyProviderTerminal(
+   {status:'FAILED',statusMessage:'blocked on our side'},
+   ['Sign in to confirm you are not a bot']
+ ),'apify_provider_blocked');
+});
+test('a generic "blocked on our side" with no network or bot detail stays a block',()=>{
+ assert.equal(classifyProviderTerminal({status:'FAILED',statusMessage:'1 blocked on our side'},[]),'apify_provider_blocked');
+});

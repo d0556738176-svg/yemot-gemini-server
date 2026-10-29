@@ -43,9 +43,17 @@ export function redactProviderDiagnostic(value,token=''){
 
 export function classifyProviderTerminal(run,lines=[]){
   const reason=[run.statusMessage||'',...lines].join('\n').toLowerCase();
-  if(/confirm.*not a bot|sign in to confirm|blocked on our side/.test(reason))return 'apify_provider_blocked';
-  if(/tls|ssl|connection.*closed|connection.*reset/.test(reason))return 'apify_provider_network';
+  // A genuine YouTube bot-wall is the only thing we treat as a true "block": it
+  // will not clear by re-running the same engine, so it goes to the fast engine.
+  if(/not a bot|sign in to confirm/.test(reason))return 'apify_provider_blocked';
+  // Concrete connection/TLS/read-timeout errors are network trouble reaching
+  // YouTube (often transient or throttling), NOT a deliberate block — even when
+  // the actor's own summary generically calls it "blocked on our side". These
+  // are retryable, so this concrete signal must win over that generic wording.
+  if(/tls|ssl|handshake|connection.*(closed|reset)|read timed out|failed to receive data|decoding the received/.test(reason))return 'apify_provider_network';
   if(run.status==='TIMED-OUT'||/timed out|timeout/.test(reason))return 'apify_provider_timeout';
+  // Generic actor "blocked" summary with no concrete network or bot signal.
+  if(/blocked on our side/.test(reason))return 'apify_provider_blocked';
   return 'apify_run_failed';
 }
 
