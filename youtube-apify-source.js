@@ -66,6 +66,28 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
         if(!b)throw err('apify_pending','Provider returned invalid JSON');
         return b;
       }
+      // Longer, configurable actor run timeout: memo23 is slow and a big video
+      // was aborted at the old 1200s. The other engine (passed as fallbackActor)
+      // is tried once if a run ends FAILED/ABORTED/TIMED-OUT.
+      const runTimeoutSec=Math.max(300,Math.min(7200,Number(env.BRANCH2_APIFY_RUN_TIMEOUT_SEC)||1800));
+      const fallbackActor=options.fallbackActor?String(options.fallbackActor).trim().replace('/','~'):null;
+      const allowFallback=String(env.BRANCH2_APIFY_ENGINE_FALLBACK||'on').toLowerCase()!=='off';
+      // Starts ONE fresh run for `useActor`, recording intent before and the run
+      // id after the single POST so a lost ack fails closed (no duplicate charge).
+      // Updates the outer receipt; triedActors tracks which engines were attempted.
+      async function startRun(useActor,tried){
+        const watch='https://www.youtube.com/watch?v='+id;
+        const maxCharge=useActor.startsWith('memo23~')?'0.06':'0.25';
+        receipt={version:1,videoId:id,actorId:useActor,state:'starting',triedActors:tried,createdAt:new Date(now()).toISOString()};
+        await store.write(path,receipt);
+        const b=await api('/acts/'+useActor+'/runs?restartOnError=false&timeout='+runTimeoutSec+'&maxTotalChargeUsd='+maxCharge,{
+          method:'POST',timeout:30000,body:{urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
+            format:'mp3',audioQuality:'192',quality:'best',downloadSubtitles:false,metadataOnly:false}});
+        if(!/^[A-Za-z0-9]+$/.test(String(b?.data?.id||'')))throw err('apify_start_uncertain','Provider run ID missing; duplicate blocked');
+        receipt={...receipt,runId:b.data.id,state:'running'};
+        await store.write(path,receipt);
+        return b.data.id;
+      }
       let receipt=await store.read(path);
       if(receipt&&(receipt.version!==1||receipt.videoId!==id))throw err('cache_invalid','Invalid provider receipt');
       if(!receipt&&legacyRecoveryOnly.has(id)){
@@ -80,29 +102,17 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
           if(input.format==='mp3'&&urls.length===1&&String(urls[0]).includes(id)){previous=run;break;}
         }
         if(!previous?.id)throw err('apify_start_uncertain','Previous run not found; duplicate download blocked');
-        receipt={version:1,videoId:id,actorId,runId:previous.id,state:'running',adopted:true};
+        receipt={version:1,videoId:id,actorId,runId:previous.id,state:'running',adopted:true,triedActors:[actorId]};
         await store.write(path,receipt);
         log.info('[YouTube IVR] previous provider run adopted',{videoId:id,runId:receipt.runId,newRunStarted:false});
       }
       if(!receipt){
-        // Publish intent BEFORE the sole POST. If acknowledgement is lost,
-        // later attempts fail closed rather than guessing whether it was billed.
-        receipt={version:1,videoId:id,actorId,state:'starting',createdAt:new Date(now()).toISOString()};
-        await store.write(path,receipt);
-        const watch='https://www.youtube.com/watch?v='+id;
-        const maxCharge=actorId.startsWith('memo23~')?'0.06':'0.25';
-        const b=await api('/acts/'+actorId+'/runs?restartOnError=false&timeout=1200&maxTotalChargeUsd='+maxCharge,{
-          method:'POST',timeout:30000,body:{urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
-            format:'mp3',audioQuality:'192',quality:'best',downloadSubtitles:false,metadataOnly:false}});
-        if(!/^[A-Za-z0-9]+$/.test(String(b?.data?.id||'')))throw err('apify_start_uncertain','Provider run ID missing; duplicate blocked');
-        receipt={...receipt,runId:b.data.id,state:'running'};
-        await store.write(path,receipt);
-        log.info('[YouTube IVR] provider run started',{videoId:id,actorId,runId:receipt.runId});
+        log.info('[YouTube IVR] provider run started',{videoId:id,actorId,runId:await startRun(actorId,[actorId])});
       }
       if(!receipt.runId)throw err('apify_start_uncertain','Unconfirmed earlier start; duplicate download blocked');
       if(!/^[A-Za-z0-9]+$/.test(receipt.runId))throw err('cache_invalid','Invalid saved run ID');
-      const waitMs=Number(env.BRANCH2_APIFY_WAIT_MS)||900000;
-      const until=now()+Math.max(1000,Math.min(waitMs,1200000));
+      const waitMs=Number(env.BRANCH2_APIFY_WAIT_MS)||1500000;
+      const until=now()+Math.max(1000,Math.min(waitMs,1800000));
       for(;;){
         const b=await api('/actor-runs/'+receipt.runId);
         const run=b.data;
@@ -133,7 +143,18 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
             usageTotalUsd:run.usageTotalUsd??null,maxTotalChargeUsd:run.options?.maxTotalChargeUsd??null,
             errorLines:lines,newRunStarted:false
           });
-          throw err(classifyProviderTerminal(run,lines),'Saved provider run ended '+run.status+'; automatic paid retry blocked');
+          const failCode=classifyProviderTerminal(run,lines);
+          // Engine fallback: a FAILED/ABORTED/TIMED-OUT run produced nothing
+          // usable, so trying the OTHER engine once is a new attempt, not a
+          // duplicate. Each engine is tried at most once (triedActors), so there
+          // is no loop and no second charge on an engine that already ran.
+          const tried=Array.isArray(receipt.triedActors)?receipt.triedActors:[receipt.actorId];
+          if(allowFallback&&fallbackActor&&!tried.includes(fallbackActor)){
+            log.info('[YouTube IVR] provider engine fallback',{videoId:id,from:receipt.actorId,to:fallbackActor,prevCode:failCode});
+            log.info('[YouTube IVR] provider run started',{videoId:id,actorId:fallbackActor,fallback:true,runId:await startRun(fallbackActor,[...tried,fallbackActor])});
+            continue;
+          }
+          throw err(failCode,'Saved provider run ended '+run.status+'; automatic paid retry blocked');
         }
         if(now()>=until)throw err('apify_pending','Provider still working; saved run will be resumed');
         await sleep(5000);

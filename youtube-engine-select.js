@@ -44,13 +44,14 @@ export async function pickApifyActor(videoId, env = process.env, fetchImpl = fet
   const longActor = String(env.BRANCH2_APIFY_ACTOR_LONG || env.BRANCH2_APIFY_ACTOR || LONG_DEFAULT).trim();
   // Routing can be turned off to force a single actor (the long one).
   if (String(env.BRANCH2_ENGINE_ROUTING || 'on').toLowerCase() === 'off') {
-    return { actor: longActor, seconds: null, reason: 'routing_off' };
+    return { actor: longActor, fallback: shortActor, seconds: null, reason: 'routing_off' };
   }
   const threshold = Number(env.BRANCH2_ENGINE_LENGTH_THRESHOLD_SEC || 600);
   let seconds = null;
   try { seconds = await fetchVideoDurationSeconds(videoId, env, fetchImpl); } catch { seconds = null; }
-  if (!Number.isFinite(seconds) || seconds <= 0) return { actor: longActor, seconds: null, reason: 'unknown_length' };
+  if (!Number.isFinite(seconds) || seconds <= 0) return { actor: longActor, fallback: shortActor, seconds: null, reason: 'unknown_length' };
+  // `fallback` is the OTHER engine, tried once if the primary run fails.
   return seconds <= threshold
-    ? { actor: shortActor, seconds, reason: 'short' }
-    : { actor: longActor, seconds, reason: 'long' };
+    ? { actor: shortActor, fallback: longActor, seconds, reason: 'short' }
+    : { actor: longActor, fallback: shortActor, seconds, reason: 'long' };
 }
