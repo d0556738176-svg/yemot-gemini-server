@@ -141,3 +141,22 @@ test('a resume polls the same account that started the run',async()=>{
  assert.equal(polledWith,'Bearer k2');
 });
 
+test('webhook query is attached to run start only when a public URL and secret are set',async()=>{
+ const {apifyWebhookQuery}=await import('./youtube-apify-source.js');
+ const q=apifyWebhookQuery({RENDER_EXTERNAL_URL:'https://host.onrender.com/',BRANCH2_WEBHOOK_SECRET:'shh'},id);
+ assert.ok(q.startsWith('&webhooks='));
+ const decoded=JSON.parse(Buffer.from(decodeURIComponent(q.split('&webhooks=')[1]),'base64').toString('utf8'));
+ assert.deepEqual(decoded[0].eventTypes,['ACTOR.RUN.SUCCEEDED']);
+ assert.equal(decoded[0].requestUrl,'https://host.onrender.com/apify-webhook?videoId='+id+'&secret=shh');
+ assert.equal(apifyWebhookQuery({RENDER_EXTERNAL_URL:'https://host.onrender.com'},id),'');
+ assert.equal(apifyWebhookQuery({BRANCH2_WEBHOOK_SECRET:'shh'},id),'');
+ assert.equal(apifyWebhookQuery({RENDER_EXTERNAL_URL:'https://host.onrender.com',BRANCH2_WEBHOOK_SECRET:'shh'},'nope'),'');
+});
+test('a completed provider run reuses the finished run with no new POST (webhook wake path)',async()=>{
+ const f=fixture();f.setStatus('SUCCEEDED');
+ const result=await f.make()(id,env,{store:f.store});
+ assert.equal(f.posts(),1);
+ const r2=await f.make()(id,env,{store:f.store});
+ assert.equal(f.posts(),1,'no second POST — the finished run is reused');
+ assert.ok(r2.url.includes('audio.mp3'),'reused run returns the finished audio file');
+});

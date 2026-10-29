@@ -4348,6 +4348,28 @@ async function backupCallHandler(call) {
 router.get('/yemot', callHandler);
 router.get('/yemot-backup', backupCallHandler);
 router.get('/yemot-youtube', youtubeCallHandler);
+
+// Apify completion webhook. Apify POSTs here the MOMENT a download run finishes
+// (ACTOR.RUN.SUCCEEDED), which wakes a spun-down free-tier instance exactly when
+// the file is 100% ready — no 24/7 keep-alive, no pinger. We verify the shared
+// secret (kept only in a Render env var, never logged), then run the normal
+// resume path: the provider run is already done, so resolve() polls it once,
+// sees SUCCEEDED, and finishes immediately — fetch + convert + upload to Yemot +
+// cache. Registered before app.use(router) so the IVR router cannot swallow it.
+app.post('/apify-webhook', (req, res) => {
+  const secret = String(process.env.BRANCH2_WEBHOOK_SECRET || '').trim();
+  if (!secret || String(req.query.secret || '') !== secret) { res.status(403).json({ ok: false }); return; }
+  const videoId = String(req.query.videoId || '').trim();
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) { res.status(400).json({ ok: false }); return; }
+  console.info('[YouTube IVR] apify completion webhook received; finishing download now', { videoId });
+  // The run succeeded, so no fast-engine consent is needed and this returns fast.
+  // If a job for this video is already running (a caller is on the line), the
+  // existing job is reused — no duplicate work or charge.
+  try { startYouTubePlaybackJob({ videoId }); }
+  catch (e) { console.warn('[YouTube IVR] webhook resume failed to start', { videoId, code: e?.code || 'unknown' }); }
+  res.status(200).json({ ok: true });
+});
+
 app.use(router);
 
 app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDashboardAuth, (req,res)=>res.json({

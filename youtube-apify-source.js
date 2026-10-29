@@ -49,6 +49,23 @@ export function classifyProviderTerminal(run,lines=[]){
   return 'apify_run_failed';
 }
 
+// Build the Apify ad-hoc `webhooks` run-start parameter so the provider notifies
+// our server the MOMENT a download run finishes (ACTOR.RUN.SUCCEEDED). That
+// inbound request wakes a spun-down free-tier Render instance exactly when the
+// file is 100% ready, so a long download (up to 2h) completes on its own without
+// keeping the server awake the whole time. The value is a URL-encoded,
+// base64-encoded JSON array (Apify's required format). The shared secret lives
+// only in a Render env var and is never logged. Returns '' when no public URL or
+// secret is configured (local/test), leaving behaviour unchanged.
+export function apifyWebhookQuery(env=process.env,videoId=''){
+  const base=String(env.RENDER_EXTERNAL_URL||env.PUBLIC_BASE_URL||'').trim().replace(/\/+$/,'');
+  const secret=String(env.BRANCH2_WEBHOOK_SECRET||'').trim();
+  if(!base||!secret||!/^[A-Za-z0-9_-]{11}$/.test(String(videoId||'')))return '';
+  const requestUrl=base+'/apify-webhook?videoId='+encodeURIComponent(videoId)+'&secret='+encodeURIComponent(secret);
+  const json=JSON.stringify([{eventTypes:['ACTOR.RUN.SUCCEEDED'],requestUrl}]);
+  return '&webhooks='+encodeURIComponent(Buffer.from(json,'utf8').toString('base64'));
+}
+
 export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>setTimeout(r,ms)),now=Date.now,log=console}={}){
   const active=new Map();
   return function resolve(videoId,env=process.env,options={}){
@@ -90,7 +107,7 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       async function startRun(useActor,tried){
         const watch='https://www.youtube.com/watch?v='+id;
         const maxCharge=useActor.startsWith('memo23~')?'0.06':'0.25';
-        const route='/acts/'+useActor+'/runs?restartOnError=false&timeout='+runTimeoutSec+'&maxTotalChargeUsd='+maxCharge;
+        const route='/acts/'+useActor+'/runs?restartOnError=false&timeout='+runTimeoutSec+'&maxTotalChargeUsd='+maxCharge+apifyWebhookQuery(env,id);
         const payload=JSON.stringify({urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
           format:'mp3',audioQuality:'192',quality:'best',downloadSubtitles:false,metadataOnly:false});
         for(let ti=0;ti<tokens.length;ti++){
