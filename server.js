@@ -11,6 +11,7 @@ import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot, lookupCachedYouTubeAudio, saveCachedYouTubeAudio, addPendingPlaybackJob, removePendingPlaybackJob, listPendingPlaybackJobs } from './youtube-authorized-playback.js';
 import { apifyTokens } from './youtube-apify-source.js';
+import { fetchVideoDurationSeconds } from './youtube-engine-select.js';
 import { prepareYouTubePlayback, playbackFailureMessage } from './youtube-playback-prepare.js';
 import { runBranch2SelfTest } from './branch2-selftest.js';
 import { playSegmented, serveTestSource, testSourceUrl, TEST_SOURCE_VERSION } from './segmented-player.js';
@@ -3822,6 +3823,36 @@ function ensurePlaybackKeepAlive() {
   playbackKeepAliveTimer.unref?.();
 }
 
+// Say the audio length right after the video's name, so the caller knows how
+// long it is before choosing to play it. Natural Hebrew: "שעה ו-23 דקות",
+// "4 דקות ו-30 שניות". Seconds are dropped once the clip is at least a minute.
+function formatAudioLengthHebrew(seconds) {
+  const s = Math.round(Number(seconds) || 0);
+  if (!(s > 0)) return '';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const parts = [];
+  if (h) parts.push(h === 1 ? 'שעה' : (h === 2 ? 'שעתיים' : h + ' שעות'));
+  if (m) parts.push(m === 1 ? 'דקה' : (m === 2 ? 'שתי דקות' : m + ' דקות'));
+  if (sec && h === 0 && m === 0) parts.push(sec === 1 ? 'שנייה' : (sec === 2 ? 'שתי שניות' : sec + ' שניות'));
+  else if (sec && h === 0) parts.push(sec + ' שניות');
+  return parts.join(' ו-');
+}
+// Build the "you chose X" confirmation, appending the audio length. The duration
+// comes from the YouTube Data API and is cached on the video object so it is
+// fetched at most once. On any lookup failure the length is simply omitted —
+// it must never block or delay the confirmation prompt.
+async function confirmPlaybackPrompt(video) {
+  let suffix = '';
+  try {
+    if (video && video.durationSeconds == null) {
+      video.durationSeconds = await fetchVideoDurationSeconds(video.videoId, process.env);
+    }
+    const txt = formatAudioLengthHebrew(video?.durationSeconds);
+    if (txt) suffix = ' אורך השמע ' + txt + '.';
+  } catch { /* length is optional */ }
+  return 'בחרת את ' + sanitizeForYemot(video.title) + '.' + suffix + ' האם להשמיע את הסרטון הזה? אמור כן או לא.';
+}
+
 function startYouTubePlaybackJob(video, opts = {}) {
   const key = String(video?.videoId || '').trim();
   const existing = youtubePlaybackJobs.get(key);
@@ -3956,7 +3987,7 @@ async function youtubeCallHandler(call) {
   try {
     while(true) {
       const basePrompt=pendingVideo
-        ? 'בחרת את '+sanitizeForYemot(pendingVideo.title)+'. האם להשמיע את הסרטון הזה? אמור כן או לא.'
+        ? await confirmPlaybackPrompt(pendingVideo)
         : (!results.length
           ? 'אמור מה תרצה לחפש ביוטיוב. אפשר לומר נושא, אדם, ערוץ או שם סרטון. ולסיום ההקלטה הקש סולמית'
           : 'אמור את מספר התוצאה או את השם שלה. אפשר גם לומר עוד או חיפוש חדש. ולסיום ההקלטה הקש סולמית');
@@ -4076,7 +4107,7 @@ async function youtubeCallHandler(call) {
       const selectedIndex=selectedResultIndex(transcript,results);
       if(selectedIndex>=0) {
         pendingVideo=results[selectedIndex];
-        nextPrompt='בחרת את '+sanitizeForYemot(pendingVideo.title)+'. האם להשמיע את הסרטון הזה? אמור כן או לא.';
+        nextPrompt=await confirmPlaybackPrompt(pendingVideo);
         continue;
       }
 
