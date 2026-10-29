@@ -199,7 +199,13 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
           const ageMs=now()-(Date.parse(receipt.createdAt)||0);
           const retryCooldownMs=Math.max(0,Number(env.BRANCH2_RETRY_COOLDOWN_MS)||900000);
           const timeoutRaised=failCode==='apify_provider_timeout'&&(!Number.isFinite(receipt.runTimeoutSec)||receipt.runTimeoutSec<runTimeoutSec);
-          if(timeoutRaised||ageMs>retryCooldownMs){
+          // A YouTube block does NOT clear by re-running the SAME engine/method, so
+          // the cooldown retry would only make the caller wait for another certain
+          // failure. For a block we skip it and fall through to the consent-gated
+          // fast engine (a different method) right away. Timeouts and transient
+          // network/other failures still get the cooldown retry on the cheap engine.
+          const blocked=failCode==='apify_provider_blocked';
+          if(timeoutRaised||(ageMs>retryCooldownMs&&!blocked)){
             log.info('[YouTube IVR] retrying failed run fresh on the cheap engine',{videoId:id,reason:timeoutRaised?'timeout_raised':'cooldown_elapsed',ageMs,prevCode:failCode});
             log.info('[YouTube IVR] provider run started',{videoId:id,actorId:receipt.actorId,retry:true,runId:await startRun(receipt.actorId,[receipt.actorId])});
             continue;
