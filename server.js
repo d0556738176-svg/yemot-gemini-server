@@ -10,6 +10,7 @@ import { selectedResultIndex, isMoreResultsRequest, isFreshYouTubeSearch } from 
 import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot, lookupCachedYouTubeAudio, saveCachedYouTubeAudio, addPendingPlaybackJob, removePendingPlaybackJob, listPendingPlaybackJobs } from './youtube-authorized-playback.js';
+import { apifyTokens } from './youtube-apify-source.js';
 import { prepareYouTubePlayback, playbackFailureMessage } from './youtube-playback-prepare.js';
 import { runBranch2SelfTest } from './branch2-selftest.js';
 import { playSegmented, serveTestSource, testSourceUrl, TEST_SOURCE_VERSION } from './segmented-player.js';
@@ -4602,6 +4603,9 @@ async function runSegmentSelfTest() {
 const port=process.env.PORT||3000;
 app.listen(port,async()=>{
   console.log('server running on port '+port);
+  // Report how many Apify accounts are configured (count only — never values),
+  // so multi-account fallback can be verified in the logs.
+  console.info('[YouTube IVR] apify accounts configured',{count:apifyTokens().length});
   // Recover the known timed-out synchronous run with GETs only. The resolver
   // explicitly forbids a new paid run for this ID if no history can be found.
   if(process.env.APIFY_TOKEN) for(const videoId of ['Nb9xE8J6pgA','EZeWxl7N2DI']) startYouTubePlaybackJob({videoId,title:'הורדה קודמת'});
