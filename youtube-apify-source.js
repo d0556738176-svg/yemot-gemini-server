@@ -112,14 +112,26 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       // moving to the next only when an account is out of free usage (HTTP 402).
       // Intent (account + actor) is written before each POST so a lost ack fails
       // closed (no duplicate charge); triedActors tracks which engines were used.
-      async function startRun(useActor,tried){
+      async function startRun(useActor,tried,attemptNo=1){
         const watch='https://www.youtube.com/watch?v='+id;
-        const maxCharge=useActor.startsWith('memo23~')?'0.06':'0.25';
+        const isLongEngine=useActor.startsWith('memo23~');
+        const maxCharge=isLongEngine?'0.06':'0.25';
+        // ROOT-CAUSE FIX for large files on the slow engine: the phone line plays
+        // 8 kHz mono, so a high source bitrate is inaudible here but makes a long
+        // file far bigger and slower to pull through the actor's residential
+        // proxy — the proxy connection then drops mid-transfer ("bytes read, more
+        // expected", TLS reset) before the file finishes. The long/large engine
+        // therefore fetches a smaller file (default 96 kbps); the short engine
+        // keeps full quality. Both are configurable and harmless if the actor
+        // ignores the field.
+        const audioQuality=isLongEngine
+          ? String(env.BRANCH2_APIFY_AUDIO_QUALITY_LONG||'96').trim()
+          : String(env.BRANCH2_APIFY_AUDIO_QUALITY_SHORT||env.BRANCH2_APIFY_AUDIO_QUALITY||'192').trim();
         const route='/acts/'+useActor+'/runs?restartOnError=false&timeout='+runTimeoutSec+'&maxTotalChargeUsd='+maxCharge+apifyWebhookQuery(env,id);
         const payload=JSON.stringify({urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
-          format:'mp3',audioQuality:'192',quality:'best',downloadSubtitles:false,metadataOnly:false});
+          format:'mp3',audioQuality,quality:'best',downloadSubtitles:false,metadataOnly:false});
         for(let ti=0;ti<tokens.length;ti++){
-          receipt={version:1,videoId:id,actorId:useActor,state:'starting',triedActors:tried,tokenIndex:ti,runTimeoutSec,createdAt:new Date(now()).toISOString()};
+          receipt={version:1,videoId:id,actorId:useActor,state:'starting',triedActors:tried,tokenIndex:ti,runTimeoutSec,attemptCount:attemptNo,createdAt:new Date(now()).toISOString()};
           await store.write(path,receipt);
           let r;
           try{r=await fetchImpl(API_BASE+route,{method:'POST',headers:{authorization:'Bearer '+tokens[ti],'content-type':'application/json'},body:payload,signal:AbortSignal.timeout(30000)});}
@@ -198,24 +210,36 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
             errorLines:lines,newRunStarted:false
           });
           const failCode=classifyProviderTerminal(run,lines);
-          // Un-stick a failed video with a FRESH run on the same cheap engine when
-          // either (a) the run was cut short by an OLD, shorter timeout we have
-          // since raised, or (b) the failed run is older than the retry cooldown
-          // (a temporary YouTube block may have cleared). Bounded: the fresh run
-          // records the current timeout and createdAt, so it will not loop within
-          // the cooldown or re-retry the same timeout.
           const ageMs=now()-(Date.parse(receipt.createdAt)||0);
+          const attempts=Number.isFinite(receipt.attemptCount)?receipt.attemptCount:1;
           const retryCooldownMs=Math.max(0,Number(env.BRANCH2_RETRY_COOLDOWN_MS)||900000);
           const timeoutRaised=failCode==='apify_provider_timeout'&&(!Number.isFinite(receipt.runTimeoutSec)||receipt.runTimeoutSec<runTimeoutSec);
-          // A YouTube block does NOT clear by re-running the SAME engine/method, so
-          // the cooldown retry would only make the caller wait for another certain
-          // failure. For a block we skip it and fall through to the consent-gated
-          // fast engine (a different method) right away. Timeouts and transient
-          // network/other failures still get the cooldown retry on the cheap engine.
+          // A real YouTube bot-wall does NOT clear by re-running the SAME engine, so
+          // we never retry it on the cheap engine — it falls through to the
+          // consent-gated fast engine (a different method) right away.
           const blocked=failCode==='apify_provider_blocked';
-          if(timeoutRaised||(ageMs>retryCooldownMs&&!blocked)){
-            log.info('[YouTube IVR] retrying failed run fresh on the cheap engine',{videoId:id,reason:timeoutRaised?'timeout_raised':'cooldown_elapsed',ageMs,prevCode:failCode});
-            log.info('[YouTube IVR] provider run started',{videoId:id,actorId:receipt.actorId,retry:true,runId:await startRun(receipt.actorId,[receipt.actorId])});
+          // ROOT-CAUSE FIX for large files: the slow engine's failures on big files
+          // are intermittent residential-proxy drops / connection resets / internal
+          // command timeouts — a FRESH run usually gets a healthy proxy session and
+          // succeeds. So network/connection and generic run failures get an
+          // immediate, bounded burst of fresh cheap-engine retries (default up to 3
+          // more attempts) before we ever bother the caller with the costlier
+          // engine. Bounded by attemptCount so cost and looping stay capped
+          // (~3×$0.02 worst case on memo23).
+          const transient=failCode==='apify_provider_network'||failCode==='apify_run_failed';
+          const maxCheapRetries=Math.max(0,Number(env.BRANCH2_MAX_CHEAP_RETRIES)||3);
+          const transientCooldownMs=Math.max(0,Number(env.BRANCH2_TRANSIENT_RETRY_COOLDOWN_MS)||0);
+          let retryReason=null;
+          if(timeoutRaised) retryReason='timeout_raised';
+          else if(transient&&attempts<=maxCheapRetries&&ageMs>=transientCooldownMs) retryReason='transient_retry';
+          // After the fast burst is spent (or for a non-raised timeout), a much
+          // later call still re-tries the cheap engine once the long cooldown has
+          // passed (proxy trouble may have cleared), with a fresh burst budget.
+          else if(!blocked&&ageMs>retryCooldownMs) retryReason='cooldown_elapsed';
+          if(retryReason){
+            const nextAttempt=retryReason==='transient_retry'?attempts+1:1;
+            log.info('[YouTube IVR] retrying failed run fresh on the cheap engine',{videoId:id,reason:retryReason,ageMs,attempt:nextAttempt,prevCode:failCode});
+            log.info('[YouTube IVR] provider run started',{videoId:id,actorId:receipt.actorId,retry:true,runId:await startRun(receipt.actorId,[receipt.actorId],nextAttempt)});
             continue;
           }
           // Engine fallback: a recent FAILED/ABORTED/TIMED-OUT run produced nothing

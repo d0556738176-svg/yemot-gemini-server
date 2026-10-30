@@ -160,3 +160,31 @@ test('a completed provider run reuses the finished run with no new POST (webhook
  assert.equal(f.posts(),1,'no second POST — the finished run is reused');
  assert.ok(r2.url.includes('audio.mp3'),'reused run returns the finished audio file');
 });
+test('an intermittent network/proxy failure gets a bounded burst of fresh cheap-engine retries until one works',async()=>{
+ const records=new Map();
+ records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'r0',triedActors:['memo23~youtube-video-downloader'],runTimeoutSec:7200,attemptCount:1,createdAt:new Date(0).toISOString()});
+ const store={read:async p=>records.get(p)||null,write:async(p,v)=>records.set(p,v===null?null:structuredClone(v))};
+ let posts=0,succeed=false;
+ const fetchImpl=async(u,o)=>{
+  if(u.includes('/log'))return new Response('SSL/TLS handshake failure: Error in the pull function');
+  if(o.method==='POST'){posts++;if(posts>=2)succeed=true;return Response.json({data:{id:'r'+posts}});}
+  if(u.includes('/actor-runs/'))return Response.json({data:{status:succeed?'SUCCEEDED':'FAILED',defaultDatasetId:'ds',statusMessage:'1 blocked on our side'}});
+  if(u.includes('/datasets/'))return Response.json([{videoId:id,downloadUrl:'https://example.com/a.mp3'}]);
+  throw Error('unexpected '+u);};
+ const r=await createApifyResolver({fetchImpl,now:()=>10000000,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader'},{store,actor:'memo23/youtube-video-downloader'});
+ assert.equal(posts,2,'retried on a fresh run then succeeded');
+ assert.equal(r.runId,'r2');
+});
+test('the cheap-engine retry burst is capped, then it stops without consent',async()=>{
+ const records=new Map();
+ records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'r0',triedActors:['memo23~youtube-video-downloader'],runTimeoutSec:7200,attemptCount:1,createdAt:new Date(0).toISOString()});
+ const store={read:async p=>records.get(p)||null,write:async(p,v)=>records.set(p,v===null?null:structuredClone(v))};
+ let posts=0;
+ const fetchImpl=async(u,o)=>{
+  if(u.includes('/log'))return new Response('aria2c exited with code 1\nFailed to receive data, cause: Error decoding the received TLS packet');
+  if(o.method==='POST'){posts++;return Response.json({data:{id:'r'+posts}});}
+  if(u.includes('/actor-runs/'))return Response.json({data:{status:'FAILED',defaultDatasetId:'ds',statusMessage:'1 blocked on our side'}});
+  throw Error('unexpected '+u);};
+ await assert.rejects(createApifyResolver({fetchImpl,now:()=>10000000,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader',BRANCH2_MAX_CHEAP_RETRIES:'3'},{store,actor:'memo23/youtube-video-downloader'}));
+ assert.equal(posts,3,'at most 3 fresh retries, then stop');
+});
