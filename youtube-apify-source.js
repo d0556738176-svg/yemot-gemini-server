@@ -255,6 +255,24 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
           }
           throw err(failCode,'Saved provider run ended '+run.status+'; automatic paid retry blocked');
         }
+        // Un-stick a zombie run: if the saved run has been RUNNING past its own
+        // maximum lifetime (Apify's own timeout should have ended it by now, or
+        // the instance that started it died mid-download), stop resuming it and
+        // start a FRESH run — which attaches the completion webhook and uses the
+        // current engine/bitrate logic, so it can actually reach a terminal state
+        // (success, or a block that then offers the fast engine). Bounded by the
+        // run's own timeout so a legitimately long (up to 2h) download is never
+        // cut short.
+        const createdMs=Date.parse(receipt.createdAt), startedMs=Date.parse(run.startedAt);
+        const baseMs=Number.isFinite(createdMs)?createdMs:(Number.isFinite(startedMs)?startedMs:now());
+        const runAgeMs=now()-baseMs;
+        const staleMs=runTimeoutSec*1000+Math.max(300000,Number(env.BRANCH2_STALE_RUN_MARGIN_MS)||600000);
+        if(runAgeMs>staleMs){
+          const tried=Array.isArray(receipt.triedActors)?receipt.triedActors:[receipt.actorId];
+          log.warn?.('[YouTube IVR] abandoning stale running run; starting fresh',{videoId:id,runId:receipt.runId,runAgeMs});
+          log.info('[YouTube IVR] provider run started',{videoId:id,actorId:receipt.actorId,staleRestart:true,runId:await startRun(receipt.actorId,tried,1)});
+          continue;
+        }
         if(now()>=until)throw err('apify_pending','Provider still working; saved run will be resumed');
         await sleep(5000);
       }

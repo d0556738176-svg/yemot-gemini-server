@@ -10,7 +10,7 @@ import { selectedResultIndex, isMoreResultsRequest, isFreshYouTubeSearch } from 
 import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot, lookupCachedYouTubeAudio, saveCachedYouTubeAudio, addPendingPlaybackJob, removePendingPlaybackJob, listPendingPlaybackJobs } from './youtube-authorized-playback.js';
-import { apifyTokens } from './youtube-apify-source.js';
+import { apifyTokens, apifyWebhookQuery } from './youtube-apify-source.js';
 import { fetchVideoDurationSeconds } from './youtube-engine-select.js';
 import { prepareYouTubePlayback, playbackFailureMessage } from './youtube-playback-prepare.js';
 import { runBranch2SelfTest } from './branch2-selftest.js';
@@ -4659,6 +4659,7 @@ app.listen(port,async()=>{
   // Report how many Apify accounts are configured (count only — never values),
   // so multi-account fallback can be verified in the logs.
   console.info('[YouTube IVR] apify accounts configured',{count:apifyTokens().length});
+  console.info('[YouTube IVR] apify completion webhook',{configured:!!apifyWebhookQuery(process.env,'abcdefghijk')});
   // Recover the known timed-out synchronous run with GETs only. The resolver
   // explicitly forbids a new paid run for this ID if no history can be found.
   if(process.env.APIFY_TOKEN) for(const videoId of ['Nb9xE8J6pgA','EZeWxl7N2DI']) startYouTubePlaybackJob({videoId,title:'הורדה קודמת'});

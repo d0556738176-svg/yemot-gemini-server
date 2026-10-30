@@ -188,3 +188,18 @@ test('the cheap-engine retry burst is capped, then it stops without consent',asy
  await assert.rejects(createApifyResolver({fetchImpl,now:()=>10000000,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader',BRANCH2_MAX_CHEAP_RETRIES:'3'},{store,actor:'memo23/youtube-video-downloader'}));
  assert.equal(posts,3,'at most 3 fresh retries, then stop');
 });
+test('a run stuck RUNNING past its lifetime is abandoned and a fresh run starts (webhook-attached)',async()=>{
+ const records=new Map();
+ const NOW=Date.parse('2026-10-30T03:00:00Z'), OLD=new Date('2026-10-30T00:00:00Z').toISOString();
+ records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'r0',triedActors:['memo23~youtube-video-downloader'],runTimeoutSec:7200,createdAt:OLD});
+ const store={read:async p=>records.get(p)||null,write:async(p,v)=>records.set(p,v===null?null:structuredClone(v))};
+ let posts=0;
+ const fetchImpl=async(u,o)=>{
+  if(o?.method==='POST'){posts++;return Response.json({data:{id:'r1'}});}
+  if(u.includes('/actor-runs/'))return Response.json({data:{status:u.includes('/r0')?'RUNNING':'SUCCEEDED',defaultDatasetId:'ds',startedAt:OLD}});
+  if(u.includes('/datasets/'))return Response.json([{videoId:id,downloadUrl:'https://example.com/a.mp3'}]);
+  throw Error('unexpected '+u);};
+ const r=await createApifyResolver({fetchImpl,now:()=>NOW,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader'},{store,actor:'memo23/youtube-video-downloader'});
+ assert.equal(posts,1,'abandoned the zombie and started exactly one fresh run');
+ assert.equal(r.runId,'r1');
+});
