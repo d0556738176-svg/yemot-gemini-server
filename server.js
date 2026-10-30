@@ -1767,6 +1767,25 @@ function wantsYouTubeVideoFollowUp(text) {
   return /(על מה|מה דיברו|מה דיבר|מה אמרו|מה נאמר|מה היה|מה קרה בסרטון|מה בדיוק|תוכן הסרטון|תוכן השיר|מילים|סכם|סיכום|תספר לי מה יש|כמה צפיות|מספר צפיות|צפיות|כמה לייקים|לייקים|כמה תגובות|תגובות|מה אומרים בתגובות|מה כתבו בתגובות|פרטי הסרטון|פרטים על הסרטון|מידע על הסרטון|מתי עלה|מתי פורסם|תאריך הפרסום|תיאור הסרטון|מי העלה|באיזה ערוץ|שם הערוץ)/i.test(String(text||''));
 }
 
+// Distil a spoken, conversational request into the core search keywords, so the
+// YouTube query is "סט שירים שבת מזרחי" and not the whole sentence "אני רוצה
+// שתגיד לי את הסט החדש ביוטיוב הכי פופולרי...". A long conversational Hebrew
+// query made YouTube return unrelated clips (observed live: fridge/Pesach
+// videos for a Shabbat-songs request). Conservative: strips request framing,
+// platform words, superlative filler, a few standalone connectors, and repeated
+// words (ASR echoes like "סט סט סט"); keeps the content terms.
+function distillSearchQuery(text){
+  let q=' '+String(text||'')+' ';
+  q=q.replace(/(ביוטיוב|ביויוטב|ביוטוב|יוטיוב)/g,' ')
+     .replace(/youtube/gi,' ')
+     .replace(/(שתגיד לי|תגיד לי|תחפש לי|תחפש|חפש לי|חפש|תמצא לי|תמצא|תביא לי|תביא|תן לי|תראה לי|תשמיע לי|אני רוצה לשמוע|אני רוצה לראות|אני רוצה|אני מחפש|אני מבקש|תעשה לי)/g,' ')
+     .replace(/(הכי הכי הכי|הכי הכי|הכי מטורף|הכי שווה|הכי פופולרי|הכי טוב|הכי מדהים|מטורף מטורף|מהמם|בבקשה|אפשר)/g,' ')
+     .replace(/(?:^|\s)(?:אז|נו|טוב|בקיצור|תקשיב|שמע|רוצה|לי|את|של|זה|אותו|אותה|כן|שם)(?=\s)/g,' ')
+     .replace(/[?.!,־]/g,' ')
+     .replace(/(\S+)(?:\s+\1)+/g,'$1')
+     .replace(/\s+/g,' ').trim();
+  return q;
+}
 async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   const key=((arguments[3]||'').trim() || process.env.YOUTUBE_API_KEY || '').trim();
   if(!key) return null;
@@ -1821,8 +1840,11 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
     const n=Number(resultMatch[1]) || words[resultMatch[1]];
     if(n && context.youtubeResults[n-1]) videos=[context.youtubeResults[n-1]];
   }
+  // For a free-text request, search by the distilled keywords; when we resolved
+  // an exact previous video title, keep that title verbatim.
+  const searchQuery=(resolvedQuestion===question)?(distillSearchQuery(question)||question):resolvedQuestion;
   try {
-    if (!videos.length) videos=await searchYouTubeVideos(resolvedQuestion,{
+    if (!videos.length) videos=await searchYouTubeVideos(searchQuery,{
       apiKey:key,      regionCode:process.env.YOUTUBE_REGION_CODE||'IL',      timeoutMs:REQUEST_TIMEOUT_MS
     });
   } catch(e) {
@@ -1830,7 +1852,7 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   }
 
   if(!videos.length) {
-    let query=resolvedQuestion
+    let query=searchQuery
       .replace(/(תחפש לי באינטרנט|תחפש באינטרנט|חפש באינטרנט|ביוטיוב|ביויוטב|ביוטוב|ב youtube|youtube)/gi,' ')
       .replace(/\\s+/g,' ').trim();
     // For natural requests such as "find a funny clip from X", remove
@@ -4024,7 +4046,7 @@ async function callHandler(call) {
         const longAnswer=isLongAnswerRequest(userTranscript);
         const answerPrompt=EXCLUSIVE_INSTRUCTION+'\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\n\nהקשר קודם של השיחה, לפי הסדר:\n'+(relevantHistoryText || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\n'+userTranscript+'\n\n'+(longAnswer
           ? 'זו בקשה לתשובה ארוכה ומפורטת. אל תקצר ל-1 עד 4 משפטים. בנה תשובה רציפה ומסודרת, בדרך כלל 8 עד 20 פסקאות או משפטים קצרים לפי הצורך, עד כ-'+LONG_ANSWER_MAX_CHARS+' תווים. שמור על רצף טבעי להקראה בטלפון, בלי כותרות טכניות ובלי לחזור על עצמך. '
-          : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. ')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. חשוב מאוד: אם השאלה קצרה או מתייחסת למשהו מההקשר הקודם בלי לנקוב בו במפורש (למשל "אז מה המתכון?", "ומה עם השני?", "נו, אז?"), המשך את אותו נושא מהתורים האחרונים וענה לגופו ישירות. אל תשאל "למה התכוונת" או "מה אתה מחפש" כאשר מהשיחה האחרונה ברור על מה מדובר — שאל שאלת הבהרה רק אם באמת אי אפשר להבין מההקשר. אם התמלול אינו ברור לגמרי, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
+          : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. ')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. חשוב מאוד: אם השאלה קצרה או מתייחסת למשהו מההקשר הקודם בלי לנקוב בו במפורש (למשל "אז מה המתכון?", "ומה עם השני?", "נו, אז?"), המשך את אותו נושא מהתורים האחרונים וענה לגופו ישירות. אל תשאל "למה התכוונת" או "מה אתה מחפש" כאשר מהשיחה האחרונה ברור על מה מדובר — שאל שאלת הבהרה רק אם באמת אי אפשר להבין מההקשר. אל תמציא שמות ספציפיים של שירים, אמנים, ספרים, אתרים או מספרים שאינך בטוח בהם; אם המתקשר רוצה שיר או סרטון מדויק, הצע לחפש אותו ביוטיוב, ואם הוא רוצה מידע עדכני או מספר טלפון, הצע לחפש באינטרנט במקום לנחש. אם התמלול אינו ברור לגמרי, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
         const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
         let parsedTurn=null;
         try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\{[\s\S]*\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
