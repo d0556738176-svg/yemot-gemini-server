@@ -95,3 +95,13 @@ test('actual branch1 handler survives model timeout and reaches quick fallback w
   await context.handler({read:async items=>{reads++;if(reads===1)return '/audio.wav';assert.equal(items[0].data,'תשובה מהמקורות');throw Error('hangup');}});
   assert.equal(fallbacks,1);assert.equal(reads,2);assert.equal(context.activeCalls.size,0);
 });
+
+test('short elliptical follow-ups surface the recent call history', async () => {
+  const { branch1FollowUpHistory } = await import('./branch1-reliability.js');
+  const history=[{user:'תן לי מתכון עוגיות',assistant:'הנה מתכון עוגיות שוקולד צ׳יפס'},{user:'אני לא אוהב חמאת בוטנים',assistant:'אפשר שקדים'}];
+  assert.ok(branch1FollowUpHistory('אז מה המתכון?',history).includes('מתכון'),'continues the recipe topic');
+  assert.ok(branch1FollowUpHistory('ומה עם השני?',history).length>0);
+  assert.ok(branch1FollowUpHistory('נו, אז?',history).length>0);
+  // A fresh standalone request should NOT be treated as an elliptical follow-up.
+  assert.equal(branch1FollowUpHistory('תן לי מתכון לעוגיות שקדים',history),'');
+});

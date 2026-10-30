@@ -71,8 +71,16 @@ export function isBranch1LocalRequest(q) {
 export function branch1FollowUpHistory(q, history=[]) {
   if(!history.length)return '';
   const contextual=/^(?:כן[, ]*)?(?:היום|מחר|הערב|השבוע|תמשיך|המשך|עוד|תסביר|תרחיב|תפרט|מה הכוונה|למה|איך זה|איפה זה|מתי זה|מה השעות|מה יש|מה קורה|ומה|כמה זה|הראשון|השני|השלישי|זה|אותו|אותה)(?:\s|[?!.,]|$)/u.test(q) || isCorrection(q);
+  // A short, elliptical question that leans on what was just said — "אז מה
+  // המתכון?", "מה עם השני?", "אז נו?", "ובלי זה?", "טוב, ומה עכשיו?". These lost
+  // their topic before, so the caller heard "מה אתה מחפש?" instead of an answer.
+  const shortElliptical = q.length <= 55 && (
+    /^(?:אז|נו|טוב|אוקיי|אוקי|בסדר|יופי)[, ]*(?:אז|נו|מה|ומה|איך|למה|כמה|מתי|איפה|תן|תגיד)?(?:\s|[?!.,]|$)/u.test(q) ||
+    /^(?:אז\s*)?(?:מה|ומה|איזה|איזו)\s+(?:ה|עם|לגבי|בדיוק|אם כן|הכי)/u.test(q) ||
+    /^(?:בלי|עם|ומה עם|אבל|רק)(?:\s|$)/u.test(q)
+  );
   const details=/(?:מאיזה מקור|מה המקור|פרטים על (?:האירוע|החנות|הדבר|הפרט) הראשון|הדף שפתחת)/u.test(q);
-  if(!contextual&&!details)return '';
+  if(!contextual&&!shortElliptical&&!details)return '';
   return history.slice(-4).map((t,i)=>'תור '+(i+1)+' — מתקשר: '+(t.resolvedQuestion||t.user)+'\nתשובה: '+t.assistant).join('\n\n');
 }
 
