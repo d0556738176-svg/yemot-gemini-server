@@ -3908,6 +3908,7 @@ async function youtubeCallHandler(call) {
   let nextPrompt=null;
   let pendingVideo=null;
   let pendingFallbackVideo=null;
+  let transcriptFailAttempts=0;
   // Provider failures where trying the OTHER (faster, costlier) engine may help.
   const FALLBACK_ELIGIBLE=new Set(['apify_provider_timeout','apify_provider_blocked','apify_provider_network','apify_run_failed','apify_actor_failed','direct_failed','timeout']);
 
@@ -4007,12 +4008,29 @@ async function youtubeCallHandler(call) {
         REQUEST_TIMEOUT_MS,
         'youtube conversational recording download'
       );
-      const transcript=await transcribePhoneAudio(audioResponse.data);
+      // A failed/empty transcription must NOT drop the caller out of the
+      // extension. transcribePhoneAudio THROWS when every speech provider fails
+      // (observed live: Deepgram empty + all Gemini fallbacks empty → the outer
+      // catch exited extension 2 mid-call). Catch it here, re-prompt, and keep
+      // the call in the loop; only after a few failures end gracefully.
+      let transcript;
+      try {
+        transcript=await transcribePhoneAudio(audioResponse.data);
+      } catch(txErr) {
+        transcriptFailAttempts++;
+        console.warn('[YouTube IVR] transcription failed; staying in extension and re-prompting',{attempt:transcriptFailAttempts,status:geminiErrorStatus(txErr)});
+        if(transcriptFailAttempts>=4) return call.id_list_message([{type:'text',data:'מתקשה לשמוע אותך כרגע. אפשר לנסות שוב בעוד רגע. להתראות.'}]);
+        nextPrompt='לא שמעתי אותך טוב. אמור שוב את הבקשה או את מספר התוצאה, ולסיום הקש סולמית.';
+        continue;
+      }
       console.info('[YouTube IVR] transcript',{chars:transcript.length,transcript});
       if(!transcript) {
+        transcriptFailAttempts++;
+        if(transcriptFailAttempts>=4) return call.id_list_message([{type:'text',data:'מתקשה לשמוע אותך כרגע. אפשר לנסות שוב בעוד רגע. להתראות.'}]);
         nextPrompt='לא הצלחתי להבין. אמור שוב את הבקשה או את מספר התוצאה.';
         continue;
       }
+      transcriptFailAttempts=0;
 
       // Owner's playback test: plays a file the self-test uploaded, through
       // the same id_list_message path real playback uses. Active only while
