@@ -137,7 +137,8 @@ test('actual phone handler reads website, continues, switches topic and routes h
     generateBranch1WithFallback:async()=>{throw Error('Unexpected model call');},
     logDetailedError(context,error){throw error;},sanitizeForYemot:x=>x,correctKnownSpeechNames:x=>x,rewriteFollowUp:async q=>q,normalizePhone:x=>x,persistConversationEntry:async()=>{},MAX_CONVERSATION_LOG:1000,
     knownPrimaryPhoneAnswer:()=>''};
-  for(const key of ['isWeatherQuestion','isNewsQuestion','isWebsiteCapabilityQuestion','isWebsiteNavigationRequest','isGenericWebsiteRequest','isLongAnswerRequest','isDeepWebSearchRequest','isTransitRequest','isPhoneNumberRequest','isPharmacySearchRequest'])context[key]=()=>false;
+  for(const key of ['isWeatherQuestion','isNewsQuestion','isWebsiteCapabilityQuestion','isWebsiteNavigationRequest','isGenericWebsiteRequest','isLongAnswerRequest','isDeepWebSearchRequest','isTransitRequest','isPhoneNumberRequest','isPharmacySearchRequest','isZmanimQuestion'])context[key]=()=>false;
+  context.answerZmanimQuestion=async()=>'';
   context.shouldForceWebSearch=q=>q.includes('שעות');context.isBusinessHoursRequest=q=>q.includes('שעות');context.extractExplicitHttpUrl=()=>'';
   vm.createContext(context);vm.runInContext(handler+'\nglobalThis.handler=callHandler;',context);
   await context.handler({read:async items=>{reads++;if(reads>inputs.length)throw Error('hangup');return '/audio.wav';}});
