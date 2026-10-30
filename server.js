@@ -244,10 +244,13 @@ async function addConversationEntry({phone, callId, userText, geminiText}) {
 }
 function sanitizeForYemot(text) {
   if (!text) return '';
-  // Keep branch 1 speech output conservative: strip URLs/markdown/control
-  // characters and normalize punctuation that can confuse phone TTS.
-  return String(text)
+  // Keep branch 1 speech output conservative: decode HTML entities FIRST (so
+  // "&#39;" becomes "'" and is then removed as punctuation, never spoken as
+  // "39"), strip emoji/pictographs/symbols that TTS reads aloud or garbles,
+  // then strip URLs/markdown/control chars and normalize punctuation.
+  return decodeHtmlEntities(String(text))
     .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{2122}\u{2139}]/gu, ' ')
     .replace(/[|]/g, ' ')
     .replace(/[\\*_#<>\[\]{}]/g, ' ')
     .replace(/[.&"“”‘’']/g, ' ')
@@ -2677,9 +2680,13 @@ function stripHtml(value){
 }
 function decodeHtmlEntities(value){
   return String(value||'')
+    // General numeric entities first (decimal and hex), so any "&#NNN;" is
+    // decoded to its character instead of being read aloud (e.g. "&#39;" → "'",
+    // not a spoken "39"). Then the common named entities.
+    .replace(/&#x([0-9a-fA-F]+);/g,(_,h)=>{try{return String.fromCodePoint(parseInt(h,16));}catch{return ' ';}})
+    .replace(/&#(\d+);/g,(_,d)=>{try{return String.fromCodePoint(parseInt(d,10));}catch{return ' ';}})
     .replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'")
-    .replace(/&lt;/gi,'<').replace(/&gt;/gi,'>')
-    .replace(/&#x2F;/gi,'/').replace(/&#x27;/gi,"'");
+    .replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/&nbsp;/gi,' ');
 }
 
 function isPhoneNumberRequest(question){
