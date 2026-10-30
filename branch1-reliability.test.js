@@ -88,7 +88,8 @@ test('actual branch1 handler survives model timeout and reaches quick fallback w
     generateBranch1WithFallback:async()=>{throw Object.assign(Error('timeout'),{status:408});},
     logDetailedError(){},answerWithDirectWebFallback:async(q,h)=>{assert.equal(h,'');fallbacks++;return 'תשובה מהמקורות';},
     sanitizeForYemot:x=>x,correctKnownSpeechNames:x=>x,rewriteFollowUp:async q=>q,normalizePhone:x=>x,persistConversationEntry:async()=>{},MAX_CONVERSATION_LOG:1000};
-  for(const key of ['isWeatherQuestion','isNewsQuestion','isWebsiteCapabilityQuestion','isWebsiteNavigationRequest','isGenericWebsiteRequest','shouldForceWebSearch','isLongAnswerRequest','isDeepWebSearchRequest','isTransitRequest','isPhoneNumberRequest','isPharmacySearchRequest','isBusinessHoursRequest']) context[key]=()=>false;
+  for(const key of ['isWeatherQuestion','isNewsQuestion','isWebsiteCapabilityQuestion','isWebsiteNavigationRequest','isGenericWebsiteRequest','shouldForceWebSearch','isLongAnswerRequest','isDeepWebSearchRequest','isTransitRequest','isPhoneNumberRequest','isPharmacySearchRequest','isBusinessHoursRequest','isZmanimQuestion']) context[key]=()=>false;
+  context.answerZmanimQuestion=async()=>'';
   context.extractExplicitHttpUrl=()=>'';
   vm.createContext(context);vm.runInContext(handler+'\nglobalThis.handler=callHandler;',context);
   await context.handler({read:async items=>{reads++;if(reads===1)return '/audio.wav';assert.equal(items[0].data,'תשובה מהמקורות');throw Error('hangup');}});

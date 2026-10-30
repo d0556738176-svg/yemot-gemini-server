@@ -19,6 +19,7 @@ import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
 import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visual-intent.js';
 import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion } from './conversation-context.js';
+import { isZmanimQuestion, answerZmanimQuestion } from './zmanim.js';
 import { buildPharmacySearchQueries, buildPharmacySearchAnswer } from './pharmacy-search.js';
 import { shouldForceWebSearch } from './branch1-web-router.js';
 import { fuzzyCorrectEntities, lexiconKeyterms, ENTITY_LEXICON } from './speech-lexicon.js';
@@ -4004,6 +4005,7 @@ async function callHandler(call) {
         transcriptChars:userTranscript.length
       });
       const directDataRequest = !!clarification || branch1Website || branch1Local || branch1Events ||
+        isZmanimQuestion(userTranscript) ||
         isMultimodalAnalysisRequest(userTranscript).any ||
         isVisualContinuationRequest(userTranscript,visualHistoryText) ||
         !!answerIsraelTimeQuestion(userTranscript) ||
@@ -4056,6 +4058,17 @@ async function callHandler(call) {
       else if(branch1Events) replyText=await answerBranch1Events(userTranscript,branch1Search,{extract:extractBranch1Page});
       else if(deterministicDailyDateAnswer) replyText=deterministicDailyDateAnswer;
       else if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
+      else if(isZmanimQuestion(userTranscript)) {
+        // Halachic times come from a real astronomical source, never the LLM.
+        // On any lookup failure we say so honestly rather than risk a wrong zman.
+        try {
+          const z=await answerZmanimQuestion(userTranscript);
+          replyText = z || 'לא הצלחתי כרגע לשלוף את הזמן המדויק. כדאי לבדוק בלוח זמנים מקומי או באתר כמו דרשו או היברו קלנדר.';
+        } catch(e) {
+          console.warn('[ZMANIM] direct lookup failed',{callId:activeKey,status:geminiErrorStatus(e)});
+          replyText='לא הצלחתי כרגע לשלוף את הזמן המדויק. כדאי לבדוק בלוח זמנים מקומי או באתר זמנים מוכר.';
+        }
+      }
       else if(isWeatherQuestion(userTranscript)) {
         try { replyText=await answerWeatherDirect(userTranscript); }
         catch(e) { replyText=await answerBranch1Web(userTranscript, relevantHistoryText, turnContext); }
