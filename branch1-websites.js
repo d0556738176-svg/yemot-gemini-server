@@ -35,7 +35,7 @@ export function requestedSiteName(q) {
   return /^(?:הזה|זה|שפתחת|שנפתח|הנוכחי)(?:\s|$)/u.test(name)?'':name;
 }
 
-export function websiteChunk(context, restart=false, maxChars=850) {
+export function websiteChunk(context, restart=false, maxChars=Math.max(400, Math.min(2400, Number(process.env.BRANCH1_WEBSITE_CHUNK_CHARS)||1100))) {
   const page=context.currentWebsitePages?.[context.currentWebsitePageIndex||0];
   if(!page?.content)return null;
   const offset=restart?0:Number(context.currentWebsiteReadOffset||0);

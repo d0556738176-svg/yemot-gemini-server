@@ -80,7 +80,7 @@ test('Hidabroot opens its homepage directly and continues without search/model c
   const context={};let reads=0;
   const deps={search:()=>{throw Error('must not search');},read:async({url})=>{reads++;assert.equal(url,'https://www.hidabroot.org/');return {url,title:'הידברות',content:('טקסט מתוך הדף הראשי בלבד. '.repeat(70)),links:[]};}};
   const first=await answerBranch1Website('תפתח לי את האתר הידברות וקרא לי מה שכתוב שמה',context,deps);
-  assert.match(first,/טקסט מתוך הדף הראשי בלבד/);assert.ok(first.length<900);const offset=context.currentWebsiteReadOffset;
+  assert.match(first,/טקסט מתוך הדף הראשי בלבד/);assert.ok(first.length<1400);const offset=context.currentWebsiteReadOffset;
   await answerBranch1Website('תמשיך',context,deps);assert.ok(context.currentWebsiteReadOffset>offset);assert.equal(reads,1);
 });
 test('arbitrary named sites open the selected origin, not a random search article',async()=>{
