@@ -118,7 +118,7 @@ test('consent switches to the other engine after a failed run; without consent i
  assert.equal(noC.posts(),1);
 });
 test('a run timed out under an older shorter limit is retried fresh on the cheap engine',async()=>{
- const records=new Map();records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'oldRun',triedActors:['memo23~youtube-video-downloader'],runTimeoutSec:1200,createdAt:new Date(0).toISOString()});
+ const records=new Map();records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'oldRun',perVideoTimeoutSecs:180,triedActors:['memo23~youtube-video-downloader'],runTimeoutSec:1200,createdAt:new Date(0).toISOString()});
  const store={read:async p=>records.get(p)||null,write:async(p,v)=>records.set(p,v===null?null:structuredClone(v))};
  let posts=0,status='TIMED-OUT';
  const fetchImpl=async(u,o)=>{
@@ -171,7 +171,7 @@ test('an intermittent network/proxy failure gets a bounded burst of fresh cheap-
   if(u.includes('/actor-runs/'))return Response.json({data:{status:succeed?'SUCCEEDED':'FAILED',defaultDatasetId:'ds',statusMessage:'1 blocked on our side'}});
   if(u.includes('/datasets/'))return Response.json([{videoId:id,downloadUrl:'https://example.com/a.mp3'}]);
   throw Error('unexpected '+u);};
- const r=await createApifyResolver({fetchImpl,now:()=>10000000,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader'},{store,actor:'memo23/youtube-video-downloader'});
+ const r=await createApifyResolver({fetchImpl,now:()=>10000000,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader',BRANCH2_MAX_CHEAP_RETRIES:'3'},{store,actor:'memo23/youtube-video-downloader'});
  assert.equal(posts,2,'retried on a fresh run then succeeded');
  assert.equal(r.runId,'r2');
 });
@@ -188,7 +188,7 @@ test('the cheap-engine retry burst is capped, then it stops without consent',asy
  await assert.rejects(createApifyResolver({fetchImpl,now:()=>10000000,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader',BRANCH2_MAX_CHEAP_RETRIES:'3'},{store,actor:'memo23/youtube-video-downloader'}));
  assert.equal(posts,3,'at most 3 fresh retries, then stop');
 });
-test('a run stuck RUNNING past its lifetime is abandoned and a fresh run starts (webhook-attached)',async()=>{
+test('an overdue RUNNING run cannot start a duplicate billed run',async()=>{
  const records=new Map();
  const NOW=Date.parse('2026-10-30T03:00:00Z'), OLD=new Date('2026-10-30T00:00:00Z').toISOString();
  records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'r0',triedActors:['memo23~youtube-video-downloader'],runTimeoutSec:7200,createdAt:OLD});
@@ -199,7 +199,40 @@ test('a run stuck RUNNING past its lifetime is abandoned and a fresh run starts 
   if(u.includes('/actor-runs/'))return Response.json({data:{status:u.includes('/r0')?'RUNNING':'SUCCEEDED',defaultDatasetId:'ds',startedAt:OLD}});
   if(u.includes('/datasets/'))return Response.json([{videoId:id,downloadUrl:'https://example.com/a.mp3'}]);
   throw Error('unexpected '+u);};
- const r=await createApifyResolver({fetchImpl,now:()=>NOW,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader'},{store,actor:'memo23/youtube-video-downloader'});
- assert.equal(posts,1,'abandoned the zombie and started exactly one fresh run');
- assert.equal(r.runId,'r1');
+ await assert.rejects(createApifyResolver({fetchImpl,now:()=>NOW,sleep:async()=>{},log:quiet})(id,{APIFY_TOKEN:'k1'},{store}),e=>e.code==='apify_pending');
+ assert.equal(posts,0);
+ assert.equal(records.get(apifyReceiptPath(id)).runId,'r0');
+});
+
+
+test('long source requests the documented maximum attempt timeout and one concurrent download',async()=>{
+ const f=fixture();f.setStatus('SUCCEEDED');
+ const resolve=createApifyResolver({log:quiet,fetchImpl:async(u,o)=>{
+  if(o.method==='POST'){const body=JSON.parse(o.body);assert.equal(body.perVideoTimeoutSecs,300);assert.equal(body.maxConcurrency,1);}
+  return f.fetchImpl(u,o);
+ }});
+ await resolve(id,env,{store:f.store});assert.equal(f.posts(),1);
+});
+test('exhausted retries stay exhausted across days and process restarts',async()=>{
+ const f=fixture();f.records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'old',attemptCount:4,createdAt:new Date(0).toISOString()});
+ let posts=0;
+ for(const clock of [86400000,172800000]){
+  const resolve=createApifyResolver({now:()=>clock,log:quiet,fetchImpl:async(u,o)=>{
+   if(o.method==='POST'){posts++;assert.fail('budget must never reset');}
+   if(u.endsWith('/log'))return new Response('ERROR download stalled; SSL connection reset');
+   return Response.json({data:{status:'FAILED'}});
+  }});
+  await assert.rejects(resolve(id,env,{store:f.store}),e=>e.code==='apify_provider_network');
+ }
+ assert.equal(posts,0);assert.equal(f.records.get(apifyReceiptPath(id)).attemptCount,4);
+});
+test('explicit zero retry budget is respected',async()=>{
+ const f=fixture();f.setStatus('FAILED');
+ const resolve=createApifyResolver({log:quiet,fetchImpl:async(u,o)=>u.endsWith('/log')?new Response('ERROR SSL connection reset'):f.fetchImpl(u,o)});
+ await assert.rejects(resolve(id,{...env,BRANCH2_MAX_CHEAP_RETRIES:'0'},{store:f.store}),e=>e.code==='apify_provider_network');
+ assert.equal(f.posts(),1);
+});
+test('local cancellation retains the receipt without starting another run',async()=>{
+ const f=fixture();f.records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'run1'});
+ await assert.rejects(f.make()(id,env,{store:f.store,signal:AbortSignal.abort()}));assert.equal(f.posts(),0);
 });
