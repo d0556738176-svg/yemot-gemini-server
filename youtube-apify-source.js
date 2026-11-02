@@ -77,6 +77,7 @@ export function apifyWebhookQuery(env=process.env,videoId=''){
 export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>setTimeout(r,ms)),now=Date.now,log=console}={}){
   const active=new Map();
   return function resolve(videoId,env=process.env,options={}){
+    if(options.signal?.aborted)return Promise.reject(options.signal.reason||err('apify_pending','Local preparation cancelled'));
     const id=String(videoId||'').trim();
     const tokens=apifyTokens(env);
     if(!tokens.length)return Promise.reject(err('not_configured','APIFY_TOKEN not configured'));
@@ -113,25 +114,23 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       // Intent (account + actor) is written before each POST so a lost ack fails
       // closed (no duplicate charge); triedActors tracks which engines were used.
       async function startRun(useActor,tried,attemptNo=1){
+        if(options.signal?.aborted)throw options.signal.reason||err('apify_pending','Local preparation cancelled; saved run retained');
         const watch='https://www.youtube.com/watch?v='+id;
         const isLongEngine=useActor.startsWith('memo23~');
         const maxCharge=isLongEngine?'0.06':'0.25';
-        // ROOT-CAUSE FIX for large files on the slow engine: the phone line plays
-        // 8 kHz mono, so a high source bitrate is inaudible here but makes a long
-        // file far bigger and slower to pull through the actor's residential
-        // proxy — the proxy connection then drops mid-transfer ("bytes read, more
-        // expected", TLS reset) before the file finishes. The long/large engine
-        // therefore fetches a smaller file (default 96 kbps); the short engine
-        // keeps full quality. Both are configurable and harmless if the actor
-        // ignores the field.
+        const perVideoTimeoutSecs=isLongEngine?300:180;
+        // Output bitrate is a conversion preference, not a guarantee that the
+        // actor fetches fewer source bytes. The documented attempt timeout is
+        // capped at 300s; asking for more cannot fix a slow provider route.
         const audioQuality=isLongEngine
           ? String(env.BRANCH2_APIFY_AUDIO_QUALITY_LONG||'96').trim()
           : String(env.BRANCH2_APIFY_AUDIO_QUALITY_SHORT||env.BRANCH2_APIFY_AUDIO_QUALITY||'192').trim();
         const route='/acts/'+useActor+'/runs?restartOnError=false&timeout='+runTimeoutSec+'&maxTotalChargeUsd='+maxCharge+apifyWebhookQuery(env,id);
         const payload=JSON.stringify({urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
-          format:'mp3',audioQuality,quality:'best',downloadSubtitles:false,metadataOnly:false});
+          format:'mp3',audioQuality,quality:'best',downloadSubtitles:false,metadataOnly:false,
+          ...(isLongEngine?{perVideoTimeoutSecs,maxConcurrency:1}:{})});
         for(let ti=0;ti<tokens.length;ti++){
-          receipt={version:1,videoId:id,actorId:useActor,state:'starting',triedActors:tried,tokenIndex:ti,runTimeoutSec,attemptCount:attemptNo,createdAt:new Date(now()).toISOString()};
+          receipt={version:1,videoId:id,actorId:useActor,state:'starting',triedActors:tried,tokenIndex:ti,runTimeoutSec,perVideoTimeoutSecs,attemptCount:attemptNo,createdAt:new Date(now()).toISOString()};
           await store.write(path,receipt);
           let r;
           try{r=await fetchImpl(API_BASE+route,{method:'POST',headers:{authorization:'Bearer '+tokens[ti],'content-type':'application/json'},body:payload,signal:AbortSignal.timeout(30000)});}
@@ -180,6 +179,7 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       const waitMs=Number(env.BRANCH2_APIFY_WAIT_MS)||(runTimeoutSec*1000+600000);
       const until=now()+Math.max(1000,Math.min(waitMs,8000000));
       for(;;){
+        if(options.signal?.aborted)throw options.signal.reason||err('apify_pending','Local preparation cancelled; saved run retained');
         const b=await api('/actor-runs/'+receipt.runId);
         const run=b.data;
         if(!run?.status)throw err('apify_pending','Missing run state; saved run retained');
@@ -212,34 +212,22 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
           const failCode=classifyProviderTerminal(run,lines);
           const ageMs=now()-(Date.parse(receipt.createdAt)||0);
           const attempts=Number.isFinite(receipt.attemptCount)?receipt.attemptCount:1;
-          const retryCooldownMs=Math.max(0,Number(env.BRANCH2_RETRY_COOLDOWN_MS)||900000);
-          const timeoutRaised=failCode==='apify_provider_timeout'&&(!Number.isFinite(receipt.runTimeoutSec)||receipt.runTimeoutSec<runTimeoutSec);
-          // A real YouTube bot-wall does NOT clear by re-running the SAME engine, so
-          // we never retry it on the cheap engine — it falls through to the
-          // consent-gated fast engine (a different method) right away.
+          // A durable per-engine budget never resets with age or a process restart.
+          // One fresh retry by default; explicit zero disables it. Never retry a
+          // bot wall or an unclassified failure that may be permanent.
+          const configured=Number(env.BRANCH2_MAX_CHEAP_RETRIES ?? 1);
+          const maxCheapRetries=Number.isFinite(configured)?Math.max(0,Math.min(3,Math.floor(configured))):1;
           const blocked=failCode==='apify_provider_blocked';
-          // ROOT-CAUSE FIX for large files: the slow engine's failures on big files
-          // are intermittent residential-proxy drops / connection resets / internal
-          // command timeouts — a FRESH run usually gets a healthy proxy session and
-          // succeeds. So network/connection and generic run failures get an
-          // immediate, bounded burst of fresh cheap-engine retries (default up to 3
-          // more attempts) before we ever bother the caller with the costlier
-          // engine. Bounded by attemptCount so cost and looping stay capped
-          // (~3×$0.02 worst case on memo23).
-          const transient=failCode==='apify_provider_network'||failCode==='apify_run_failed';
-          const maxCheapRetries=Math.max(0,Number(env.BRANCH2_MAX_CHEAP_RETRIES)||3);
-          const transientCooldownMs=Math.max(0,Number(env.BRANCH2_TRANSIENT_RETRY_COOLDOWN_MS)||0);
-          let retryReason=null;
-          if(timeoutRaised) retryReason='timeout_raised';
-          else if(transient&&attempts<=maxCheapRetries&&ageMs>=transientCooldownMs) retryReason='transient_retry';
-          // After the fast burst is spent (or for a non-raised timeout), a much
-          // later call still re-tries the cheap engine once the long cooldown has
-          // passed (proxy trouble may have cleared), with a fresh burst budget.
-          else if(!blocked&&ageMs>retryCooldownMs) retryReason='cooldown_elapsed';
+          const transient=failCode==='apify_provider_network';
+          const timeoutRaised=failCode==='apify_provider_timeout'&&
+            (!Number.isFinite(receipt.perVideoTimeoutSecs)||receipt.perVideoTimeoutSecs<300);
+          const cheapEngine=receipt.actorId.startsWith('memo23~');
+          const retryReason=cheapEngine&&!blocked&&attempts<=maxCheapRetries&&
+            (transient||timeoutRaised)?(transient?'transient_retry':'attempt_timeout_raised'):null;
           if(retryReason){
-            const nextAttempt=retryReason==='transient_retry'?attempts+1:1;
+            const nextAttempt=attempts+1;
             log.info('[YouTube IVR] retrying failed run fresh on the cheap engine',{videoId:id,reason:retryReason,ageMs,attempt:nextAttempt,prevCode:failCode});
-            log.info('[YouTube IVR] provider run started',{videoId:id,actorId:receipt.actorId,retry:true,runId:await startRun(receipt.actorId,[receipt.actorId],nextAttempt)});
+            log.info('[YouTube IVR] provider run started',{videoId:id,actorId:receipt.actorId,retry:true,runId:await startRun(receipt.actorId,Array.isArray(receipt.triedActors)?receipt.triedActors:[receipt.actorId],nextAttempt)});
             continue;
           }
           // Engine fallback: a recent FAILED/ABORTED/TIMED-OUT run produced nothing
@@ -255,23 +243,15 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
           }
           throw err(failCode,'Saved provider run ended '+run.status+'; automatic paid retry blocked');
         }
-        // Un-stick a zombie run: if the saved run has been RUNNING past its own
-        // maximum lifetime (Apify's own timeout should have ended it by now, or
-        // the instance that started it died mid-download), stop resuming it and
-        // start a FRESH run — which attaches the completion webhook and uses the
-        // current engine/bitrate logic, so it can actually reach a terminal state
-        // (success, or a block that then offers the fast engine). Bounded by the
-        // run's own timeout so a legitimately long (up to 2h) download is never
-        // cut short.
-        const createdMs=Date.parse(receipt.createdAt), startedMs=Date.parse(run.startedAt);
-        const baseMs=Number.isFinite(createdMs)?createdMs:(Number.isFinite(startedMs)?startedMs:now());
-        const runAgeMs=now()-baseMs;
-        const staleMs=runTimeoutSec*1000+Math.max(300000,Number(env.BRANCH2_STALE_RUN_MARGIN_MS)||600000);
-        if(runAgeMs>staleMs){
-          const tried=Array.isArray(receipt.triedActors)?receipt.triedActors:[receipt.actorId];
-          log.warn?.('[YouTube IVR] abandoning stale running run; starting fresh',{videoId:id,runId:receipt.runId,runAgeMs});
-          log.info('[YouTube IVR] provider run started',{videoId:id,actorId:receipt.actorId,staleRestart:true,runId:await startRun(receipt.actorId,tried,1)});
-          continue;
+        // A remote RUNNING state is not proof that the run has stopped. Keep
+        // its receipt; never create a second billed run alongside it.
+        const startedMs=Date.parse(run.startedAt);
+        const createdMs=Date.parse(receipt.createdAt);
+        const baseMs=Number.isFinite(startedMs)?startedMs:createdMs;
+        const savedTimeout=Number(receipt.runTimeoutSec)||runTimeoutSec;
+        if(Number.isFinite(baseMs)&&now()-baseMs>(savedTimeout+600)*1000){
+          log.warn?.('[YouTube IVR] provider run overdue; duplicate start blocked',{videoId:id,runId:receipt.runId});
+          throw err('apify_pending','Provider state overdue; saved run retained for reconciliation');
         }
         if(now()>=until)throw err('apify_pending','Provider still working; saved run will be resumed');
         await sleep(5000);
@@ -281,3 +261,4 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
   };
 }
 export const resolveApifyAudio=createApifyResolver();
+
