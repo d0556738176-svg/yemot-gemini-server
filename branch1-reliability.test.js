@@ -1,3 +1,4 @@
+import * as turnContextHelpers from './branch1-turn-context.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -76,7 +77,7 @@ test('actual branch1 handler survives model timeout and reaches quick fallback w
   const source=readFileSync(new URL('./server.js',import.meta.url),'utf8');
   const handler=source.slice(source.indexOf('async function callHandler(call)'),source.indexOf('\n\n/**\n * Isolated YouTube'));
   let reads=0,fallbacks=0;
-  const context={console:{info(){},warn(){},error(){}},Buffer,Date,Intl,process:{env:{ENABLE_AI_OPENING:'false'}},
+  const context={...turnContextHelpers,console:{info(){},warn(){},error(){}},Buffer,Date,Intl,process:{env:{ENABLE_AI_OPENING:'false'}},
     getCallerNumber:()=> 'anonymous',activeCalls:new Map(),conversationLog:[],branch1SpeechItems,
     isCallerHangupError:e=>e.message==='hangup',geminiErrorStatus:e=>e.status||0,
     REQUEST_TIMEOUT_MS:30000,withTimeout:async p=>p,yemotApi:{download_file:async()=>({data:Buffer.from('audio')})},
@@ -94,3 +95,4 @@ test('actual branch1 handler survives model timeout and reaches quick fallback w
   await context.handler({read:async items=>{reads++;if(reads===1)return '/audio.wav';assert.equal(items[0].data,'תשובה מהמקורות');throw Error('hangup');}});
   assert.equal(fallbacks,1);assert.equal(reads,2);assert.equal(context.activeCalls.size,0);
 });
+
