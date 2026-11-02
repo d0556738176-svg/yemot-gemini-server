@@ -301,6 +301,11 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
             if(PERMANENT_CODES.has(code))throw rowError;
             const attempts=Number.isFinite(receipt.attemptCount)?receipt.attemptCount:1;
             const tried=Array.isArray(receipt.triedActors)?receipt.triedActors:[receipt.actorId];
+            if(actorId===NATIVE_ACTOR_ID&&receipt.actorId!==NATIVE_ACTOR_ID&&!tried.includes(NATIVE_ACTOR_ID)&&code!=='youtube_unavailable'){
+              log.info('[YouTube IVR] earlier engine delivered no audio; handing video to native engine',{videoId:id,from:receipt.actorId,prevCode:code});
+              log.info('[YouTube IVR] provider run started',{videoId:id,actorId,native:true,runId:await startRun(actorId,[...tried,actorId])});
+              continue;
+            }
             if(receipt.actorId===NATIVE_ACTOR_ID&&code!=='apify_invalid_result'&&attempts<=nativeRetries()){
               log.info('[YouTube IVR] retrying native engine fresh',{videoId:id,attempt:attempts+1,prevCode:code});
               log.info('[YouTube IVR] provider run started',{videoId:id,actorId:receipt.actorId,retry:true,runId:await startRun(receipt.actorId,tried,attempts+1)});
@@ -336,6 +341,15 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
             errorLines:lines,newRunStarted:false
           });
           const failCode=classifyProviderTerminal(run,lines);
+          const triedNow=Array.isArray(receipt.triedActors)?receipt.triedActors:[receipt.actorId];
+          // A run saved by an older engine must not lock the video out of the
+          // native engine: a native attempt is the cheaper one, so it needs no
+          // consent and is still a single new attempt (never repeated).
+          if(actorId===NATIVE_ACTOR_ID&&receipt.actorId!==NATIVE_ACTOR_ID&&!triedNow.includes(NATIVE_ACTOR_ID)){
+            log.info('[YouTube IVR] earlier engine failed; handing video to native engine',{videoId:id,from:receipt.actorId,prevCode:failCode});
+            log.info('[YouTube IVR] provider run started',{videoId:id,actorId,native:true,runId:await startRun(actorId,[...triedNow,actorId])});
+            continue;
+          }
           const ageMs=now()-(Date.parse(receipt.createdAt)||0);
           const attempts=Number.isFinite(receipt.attemptCount)?receipt.attemptCount:1;
           // A durable per-engine budget never resets with age or a process restart.

@@ -117,3 +117,13 @@ test('row classification and limits',()=>{
   assert.deepEqual(nativeLimits({BRANCH2_NATIVE_MAX_MINUTES:'1440',BRANCH2_MAX_SOURCE_MB:'1500'}).maxMegabytes,1500);
   assert.ok(Number(nativeLimits({BRANCH2_NATIVE_MAX_MINUTES:'1440'}).maxCharge)>=0.0144);
 });
+
+test('a video whose saved run failed on the old engine is handed to the native engine once',async()=>{
+  const {fetchImpl,calls}=fakeApify({runStatus:n=>n===0?'FAILED':'SUCCEEDED'});
+  let receipt={version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'Run0',state:'running',triedActors:['memo23~youtube-video-downloader'],createdAt:new Date().toISOString()};
+  const store={read:async()=>receipt,write:async(_,v)=>{receipt=v;}};
+  const r=await createApifyResolver({fetchImpl,log:quiet,sleep:async()=>{}})(id,{APIFY_TOKEN:'k'},{actor:'johnvc/youtube-download-api',store});
+  assert.equal(r.actorId,'johnvc~youtube-download-api');
+  assert.equal(calls.starts.length,1);
+  assert.deepEqual(receipt.triedActors,['memo23~youtube-video-downloader','johnvc~youtube-download-api']);
+});
