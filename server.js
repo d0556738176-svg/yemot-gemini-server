@@ -1,3 +1,4 @@
+import { isConversationalReference, currentConversationText, resolveLookupContinuation, isYouTubeTechnicalDiscussion, mayUseYouTubeSearch, asksForFeedback } from './branch1-turn-context.js';
 import { isBranch1WebsiteRequest, answerBranch1Website } from './branch1-websites.js';
 import express from 'express';
 import crypto from 'node:crypto';
@@ -1096,7 +1097,7 @@ async function answerNormalQuestion(transcript, historyText='') {
 }
 async function transcribeForDashboard(audioBase64) { return transcribePhoneAudio(Buffer.from(audioBase64,'base64')); }
 function knownContactFallback(transcript, historyText='') {
-  const context=(String(transcript||'')+' '+String(historyText||'')).toLowerCase();
+  const context=String(transcript||'').toLowerCase();
   if(/פאגי|פאג״י|pagi/.test(context) && /(מספר|טלפון|יצירת קשר|מוקד|להתקשר|תחפש|חפש)/.test(context))
     return 'מספר שירות הלקוחות של בנק פאגי הוא כוכבית 3360. לתמיכה טכנית באתר ובאפליקציה ניתן להתקשר לאפס שלוש, חמש אחת שלוש, אפס אפס אפס שלוש.';
   return null;
@@ -1768,6 +1769,7 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   if(!key) return null;
   const question=String(transcript||'').trim();
   if(!question) return null;
+  if(!mayUseYouTubeSearch(question,context))return null;
   const explicitYouTube=/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(question);
   const hasResultReference=/(?:תוצאה|סרטון|בדיחה)\s*(?:מספר\s*)?(ראשונה|שנייה|שלישית|רביעית|חמישית|שישית|שביעית|שמינית|תשיעית|1|2|3|4|5|6|7|8|9)/i.test(question) ||
     /(?:הראשונה|השנייה|השלישית|הרביעית|החמישית|הראשון|השני|השלישי|הרביעי|החמישי)/i.test(question);
@@ -3977,10 +3979,16 @@ async function callHandler(call) {
         userTranscript=pendingLookup;
       }
       userTranscript=resolveBranch1Question(userTranscript,turnHistory);
-      userTranscript=await rewriteFollowUp(userTranscript,turnHistory);
+      userTranscript=resolveLookupContinuation(userTranscript,turnHistory, q=>
+        shouldForceWebSearch(q)||/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(q));
       relevantHistoryText=isCorrection(originalSpokenTranscript)
         ? selectRelevantHistoryForTurn('מה שאמרת קודם',historyText,turnHistory)
         : (branch1FollowUpHistory(originalSpokenTranscript,turnHistory) || selectRelevantHistoryForTurn(originalSpokenTranscript,historyText,turnHistory));
+      if(isConversationalReference(originalSpokenTranscript)&&turnHistory.length)
+        relevantHistoryText=currentConversationText(turnHistory);
+      const conversationOnly=isYouTubeTechnicalDiscussion(userTranscript)&&
+        !/(?:חפש|תחפש|תבדוק).{0,25}(?:באינטרנט|ברשת|בגוגל)|(?:חפש|תחפש) מידע/u.test(userTranscript);
+      const youtubeIntent=mayUseYouTubeSearch(userTranscript,turnContext);
       // Avoid spending a Gemini generation call on requests that are already
       // handled by deterministic/direct data paths below. This reduces quota use,
       // improves phone latency, and leaves more capacity for real conversation/advice.
@@ -3988,15 +3996,15 @@ async function callHandler(call) {
       const branch1Website=!clarification && isBranch1WebsiteRequest(userTranscript,turnContext);
       const branch1Local=!branch1Website && isBranch1LocalRequest(userTranscript);
       const branch1Events=!branch1Website && isBranch1EventRequest(userTranscript);
-      turnContext.lastRoute=branch1Website?'website':branch1Local?'local':branch1Events?'events':'other';
-      const forcedWebSearch=shouldForceWebSearch(userTranscript);
+      turnContext.lastRoute=branch1Website?'website':branch1Local?'local':branch1Events?'events':youtubeIntent?'youtube':'other';
+      const forcedWebSearch=!conversationOnly&&shouldForceWebSearch(userTranscript);
       console.info('[BRANCH1_ROUTER]',{
         callId:activeKey,
         route:branch1Website?'website':branch1Local?'local':branch1Events?'events':forcedWebSearch?'web':'conversation',
         forcedWebSearch,
         transcriptChars:userTranscript.length
       });
-      const directDataRequest = !!clarification || branch1Website || branch1Local || branch1Events ||
+      const directDataRequest = !conversationOnly && (!!clarification || branch1Website || branch1Local || branch1Events ||
         isMultimodalAnalysisRequest(userTranscript).any ||
         isVisualContinuationRequest(userTranscript,visualHistoryText) ||
         !!answerIsraelTimeQuestion(userTranscript) ||
@@ -4009,11 +4017,12 @@ async function callHandler(call) {
         !!extractExplicitHttpUrl(userTranscript) ||
         forcedWebSearch ||
         /(חפש|תחפש|תמצא|חיפוש|באינטרנט|בגוגל|מה קורה עכשיו|מידע עדכני)/i.test(userTranscript) ||
-        /(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript);
+        youtubeIntent);
 
       if(!directDataRequest) {
         const longAnswer=isLongAnswerRequest(userTranscript);
-        const answerPrompt=EXCLUSIVE_INSTRUCTION+'\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\n\nהקשר קודם של השיחה, לפי הסדר:\n'+(relevantHistoryText || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המדויקת של המתקשר לאחר תמלול ייעודי:\n'+userTranscript+'\n\n'+(longAnswer
+        const conversationalHistory=currentConversationText(turnHistory)||relevantHistoryText;
+        const answerPrompt=EXCLUSIVE_INSTRUCTION+'\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\n\nהקשר קודם של השיחה, לפי הסדר:\n'+(conversationalHistory || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המקורית של המתקשר (אין לשנות את כוונתה):\n'+originalSpokenTranscript+'\nנושא הבקשה הנוכחית: '+userTranscript+'\n\n'+(longAnswer
           ? 'זו בקשה לתשובה ארוכה ומפורטת. אל תקצר ל-1 עד 4 משפטים. בנה תשובה רציפה ומסודרת, בדרך כלל 8 עד 20 פסקאות או משפטים קצרים לפי הצורך, עד כ-'+LONG_ANSWER_MAX_CHARS+' תווים. שמור על רצף טבעי להקראה בטלפון, בלי כותרות טכניות ובלי לחזור על עצמך. '
           : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. ')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
         const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
@@ -4040,7 +4049,8 @@ async function callHandler(call) {
       const deterministicDailyDateAnswer=answerDailyDateQuestion(userTranscript);
       if(deterministicDailyDateAnswer) replyText=deterministicDailyDateAnswer;
       const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
-      if(clarification) replyText=clarification;
+      if(conversationOnly) { /* Keep the conversational answer; cached results do not select a tool. */ }
+      else if(clarification) replyText=clarification;
       else if(branch1Website) {
         console.info('[BRANCH1 WEBSITE] direct reading route selected',{callId:activeKey});
         replyText=await answerBranch1Website(userTranscript,turnContext,{search:branch1Search,extract:extractBranch1Page});
@@ -4111,13 +4121,13 @@ async function callHandler(call) {
       else if(isLocalBusinessDiscoveryRequest(userTranscript,extractExplicitLocation(userTranscript))) {
         replyText=await answerLocalBusinessDiscoveryDirect(userTranscript);
       }
-      else if(shouldForceWebSearch(userTranscript) ||
-        /(חפש|תחפש|תמצא|חיפוש|באינטרנט|בגוגל|מה קורה עכשיו|מידע עדכני)/i.test(userTranscript) ||
-        /(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript)) {
+      else if(forcedWebSearch || youtubeIntent ||
+        /(חפש|תחפש|תמצא|חיפוש|באינטרנט|בגוגל|מה קורה עכשיו|מידע עדכני)/i.test(userTranscript)) {
         try {
-          const youtubeAnswer=await searchYouTubeForPhone(userTranscript, relevantHistoryText, turnContext);
+          const youtubeAnswer=youtubeIntent?await searchYouTubeForPhone(userTranscript, relevantHistoryText, turnContext):null;
           if (youtubeAnswer) {
             replyText=youtubeAnswer;
+            turnContext.lastRoute='youtube';
           } else if (/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(userTranscript)) {
             // Do not immediately fall back to another Gemini web-grounding call.
             // If YouTube search itself is unavailable, that second Gemini call
@@ -4211,7 +4221,7 @@ async function callHandler(call) {
     // next read: Yemot will play the answer and immediately collect the next turn.
     // This keeps the same phone call and the same in-memory conversation context.
     nextPrompt=replyText;
-    feedbackPending=true;
+    feedbackPending=asksForFeedback(replyText);
     console.info('[CALL_FLOW] next_turn_armed', {
       callId: activeKey,
       historyTurns: turnHistory.length,
@@ -4900,3 +4910,4 @@ app.listen(port,async()=>{
   try { await configureYemotStructure(); }
   catch (e) { logDetailedError('Yemot automatic setup', e); }
 });
+
