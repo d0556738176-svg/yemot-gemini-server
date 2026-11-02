@@ -14,7 +14,7 @@ const fakeFetch = (seconds) => async () => ({
   ok: true,
   json: async () => ({ items: [{ contentDetails: { duration: 'PT' + seconds + 'S' } }] })
 });
-const env = { YOUTUBE_API_KEY: 'k', BRANCH2_ENGINE_LENGTH_THRESHOLD_SEC: '600' };
+const env = { BRANCH2_NATIVE_AUDIO_ENGINE: 'off', YOUTUBE_API_KEY: 'k', BRANCH2_ENGINE_LENGTH_THRESHOLD_SEC: '600' };
 
 test('short video routes to s-r', async () => {
   const r = await pickApifyActor('abcdef12345', env, fakeFetch(300));
@@ -44,3 +44,4 @@ test('threshold boundary is inclusive for short', async () => {
   const r = await pickApifyActor('abcdef12345', env, fakeFetch(600));
   assert.equal(r.reason, 'short');
 });
+
