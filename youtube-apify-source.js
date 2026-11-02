@@ -20,6 +20,8 @@ export function apifyReceiptPath(videoId){
 }
 function resultFromItem(item,videoId,actorId,runId,token){
   if(!item||item.succeeded===false||item.status==='failed'||item.error)throw err('apify_actor_failed','Provider returned no audio');
+  const native=actorId==='johnvc~youtube-download-api';
+  if(native&&(item.resultType!=='file'||item.videoId!==videoId||!Number.isFinite(item.durationSeconds)||item.durationSeconds<=0||!Number.isSafeInteger(item.fileSizeBytes)||item.fileSizeBytes<=0||!/^[a-f0-9]{64}$/i.test(item.sha256||'')))throw err('apify_invalid_result','Native audio result lacks verified identity or integrity metadata');
   const itemId=item.videoId||item.video_id;
   if(itemId&&itemId!==videoId)throw err('apify_invalid_result','Provider returned a different video');
   // Never mistake the original YouTube watch URL for a downloadable audio file.
@@ -28,7 +30,7 @@ function resultFromItem(item,videoId,actorId,runId,token){
   if(!value)throw err('apify_no_file','Provider returned no audio file');
   const url=new URL(value);
   if(/(^|\.)youtube\.com$|(^|\.)youtu\.be$/.test(url.hostname))throw err('apify_no_file','Source page is not an audio file');
-  if(url.hostname==='api.apify.com'&&!url.searchParams.has('token'))url.searchParams.set('token',token);
+  if(url.hostname==='api.apify.com'&&!url.searchParams.has('token')&&!url.searchParams.has('signature'))url.searchParams.set('token',token);
   return {url:url.toString(),item,actorId,runId,title:item.title||null,
     durationSeconds:item.durationSeconds||item.durationSec||item.duration_seconds||item.duration||null};
 }
@@ -120,8 +122,9 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       async function startRun(useActor,tried,attemptNo=1){
         if(options.signal?.aborted)throw options.signal.reason||err('apify_pending','Local preparation cancelled; saved run retained');
         const watch='https://www.youtube.com/watch?v='+id;
+        const native=useActor==='johnvc~youtube-download-api';
         const isLongEngine=useActor.startsWith('memo23~');
-        const maxCharge=isLongEngine?'0.06':'0.25';
+        const maxCharge=native?'0.01':isLongEngine?'0.06':'0.25';
         const perVideoTimeoutSecs=isLongEngine?300:180;
         // Output bitrate is a conversion preference, not a guarantee that the
         // actor fetches fewer source bytes. The documented attempt timeout is
@@ -130,7 +133,7 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
           ? String(env.BRANCH2_APIFY_AUDIO_QUALITY_LONG||'96').trim()
           : String(env.BRANCH2_APIFY_AUDIO_QUALITY_SHORT||env.BRANCH2_APIFY_AUDIO_QUALITY||'192').trim();
         const route='/acts/'+useActor+'/runs?restartOnError=false&timeout='+runTimeoutSec+'&maxTotalChargeUsd='+maxCharge+apifyWebhookQuery(env,id);
-        const payload=JSON.stringify({urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
+        const payload=JSON.stringify(native?{videoUrls:[watch],format:'audio',audioFormat:'m4a',audioQuality:'high',storageProvider:'apify',maxMinutes:720,maxMegabytes:256}:{urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
           format:'mp3',audioQuality,quality:'best',downloadSubtitles:false,metadataOnly:false,
           ...(isLongEngine?{perVideoTimeoutSecs,maxConcurrency:1}:{})});
         for(let ti=0;ti<tokens.length;ti++){
@@ -304,6 +307,7 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
   };
 }
 export const resolveApifyAudio=createApifyResolver();
+
 
 
 
