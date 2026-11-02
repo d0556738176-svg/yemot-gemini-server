@@ -4,15 +4,20 @@ export function progressAnnouncement(progress={},last={},now=Date.now()){
   const bytes=Number(progress.bytes),total=Number(progress.totalBytes);
   const measured=stage==='transferring'&&Number.isFinite(total)&&total>0&&Number.isFinite(bytes)&&bytes>=0;
   const percent=measured?Math.min(99,Math.floor(bytes/total*100)):null;
-  const bucket=percent===null?null:Math.floor(percent/20)*20;
+  const providerMeasured=stage==='provider'&&typeof progress.providerPercent==='number'&&Number.isFinite(progress.providerPercent)&&progress.providerPercent>=0&&progress.providerPercent<=99;
+  const providerPercent=providerMeasured?Math.floor(progress.providerPercent):null;
+  const bucket=providerMeasured?Math.floor(providerPercent/10)*10:percent===null?null:Math.floor(percent/20)*20;
   const done=Number(progress.completed)||0,count=Number(progress.total)||0;
-  const key=stage+':'+(stage==='transferring'?bucket:stage==='uploading'?done:'');
+  const key=stage+':'+(stage==='transferring'||stage==='provider'?String(bucket)+':'+Boolean(progress.providerStale):stage==='uploading'?done:'');
   if(last.key===key&&now-last.at<35000)return null;
   // Avoid speaking every individual chunk or percentage change.
   if(last.stage===stage&&now-last.at<12000)return null;
   let text;
   switch(stage){
     case 'provider':
+      if(providerMeasured){
+        text=(progress.providerStale?'בדיווח האחרון מהמנוע הורדו ':'לפי הדיווח האחרון מהמנוע הורדו ')+providerPercent+' אחוז מקובץ המקור ביוטיוב. '+(progress.providerStale?'ממתין לעדכון חדש. ':'')+'הקובץ עדיין אינו מוכן להשמעה.';break;
+      }
       text='מנוע ההורדה מכין את קובץ השמע מיוטיוב. עדיין אין דיווח אחוזים מהמנוע. העבודה נמשכת, נא להמתין על הקו.';break;
     case 'transferring':
       text=measured?'קובץ השמע מוכן במנוע וכעת מועבר לשרת. התקבלו '+percent+' אחוז מהקובץ. נא להמתין.'
@@ -33,3 +38,4 @@ export function progressAnnouncement(progress={},last={},now=Date.now()){
   }
   return {text,state:{key,stage,at:now}};
 }
+
