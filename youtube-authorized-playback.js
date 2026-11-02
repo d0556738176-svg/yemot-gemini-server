@@ -392,7 +392,7 @@ async function downloadApifySource(id, output, signal, onProgress=()=>{}, consen
   // existing run receipt keeps its own actor, so this only steers NEW runs.
   const choice = await pickApifyActor(id, process.env).catch(() => ({ actor: undefined, fallback: undefined, seconds: null, reason: 'error' }));
   console.info('[YouTube IVR] engine choice', { videoId: id, engine: choice.actor || 'default', fallback: choice.fallback || null, lengthSec: choice.seconds ?? null, reason: choice.reason, consent });
-  const resolved = await resolveApifyAudio(id, process.env, {store:{read:readCacheJson,write:writeCacheJson}, actor:choice.actor, fallbackActor:choice.fallback, consentToFallback:consent});
+  const resolved = await resolveApifyAudio(id, process.env, {store:{read:readCacheJson,write:writeCacheJson}, actor:choice.actor, fallbackActor:choice.fallback, consentToFallback:consent,signal});
   const r = await fetch(resolved.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(600000)]) : AbortSignal.timeout(600000) });
   if (!r.ok || !r.body) throw Object.assign(new Error('Apify file download HTTP ' + r.status), { code: 'apify_download_http' });
   const encoding=r.headers.get('content-encoding');
@@ -498,3 +498,4 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
 // the same conversion and upload code as real playback, so a passing
 // self-test proves the production path, not a copy of it.
 export const _pipeline = { makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE };
+
