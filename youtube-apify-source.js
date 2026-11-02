@@ -1,3 +1,4 @@
+import { parseProviderProgress, boundedLogText } from './youtube-provider-progress.js';
 // One durable run receipt per video. Never restart a paid run on a local
 // timeout, HTTP error, caller hangup or server restart.
 const API_BASE='https://api.apify.com/v2';
@@ -143,6 +144,7 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
           if(!r.ok||!/^[A-Za-z0-9]+$/.test(String(b?.data?.id||'')))throw err('apify_start_uncertain','Provider run ID missing; duplicate blocked');
           token=tokens[ti]; tokenIndex=ti;
           receipt={...receipt,runId:b.data.id,state:'running'};
+          try{options.onProgress?.({stage:'provider',providerPercent:null});}catch{}
           await store.write(path,receipt);
           return b.data.id;
         }
@@ -181,11 +183,48 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       // on its own without needing a second call.
       const waitMs=Number(env.BRANCH2_APIFY_WAIT_MS)||(runTimeoutSec*1000+600000);
       const until=now()+Math.max(1000,Math.min(waitMs,8000000));
+      let lastProgressPoll=-Infinity,lastProgressWrite=-Infinity,restoredProgressSent=false;
+      function reportProvider(sample,restored=false){
+        try{options.onProgress?.({stage:'provider',providerPercent:sample?.percent??null,
+          providerObservedAt:sample?.observedAt||null,providerRunId:receipt.runId,
+          providerStale:restored||!!sample?.observedAt&&now()-Date.parse(sample.observedAt)>60000});}catch{}
+      }
+      async function refreshProviderProgress(){
+        if(typeof options.onProgress!=='function'||now()-lastProgressPoll<30000)return;
+        lastProgressPoll=now();
+        try{
+          const response=await fetchImpl(API_BASE+'/logs/'+receipt.runId+'?stream=false',{
+            headers:{authorization:'Bearer '+token},signal:AbortSignal.timeout(10000)});
+          if(!response.ok)throw Error('log unavailable');
+          const parsed=parseProviderProgress(await boundedLogText(response));
+          const sample=parsed?{...parsed,runId:receipt.runId}:null;
+          const previous=receipt.progress;
+          reportProvider(sample);
+          if(JSON.stringify(previous)!==JSON.stringify(sample)&&
+            (sample===null||!previous||Math.abs(sample.percent-previous.percent)>=5||now()-lastProgressWrite>=30000)){
+            const updated={...receipt,progress:sample};
+            try{
+              await store.write(path,updated);receipt=updated;lastProgressWrite=now();
+              log.info?.('[YouTube IVR] provider progress saved',{videoId:id,runId:receipt.runId,percent:sample?.percent??null,observedAt:sample?.observedAt||null});
+            }
+            catch{log.warn?.('[YouTube IVR] provider progress persistence unavailable',{videoId:id});}
+          }
+        }catch{
+          // A status/log request failing must never restart a paid download.
+          reportProvider(receipt.progress?.runId===receipt.runId?receipt.progress:null,true);
+        }
+      }
+
       for(;;){
         if(options.signal?.aborted)throw options.signal.reason||err('apify_pending','Local preparation cancelled; saved run retained');
         const b=await api('/actor-runs/'+receipt.runId);
         const run=b.data;
         if(!run?.status)throw err('apify_pending','Missing run state; saved run retained');
+        if(!terminal.has(run.status)&&run.status!=='SUCCEEDED'){
+          if(!restoredProgressSent&&receipt.progress?.runId===receipt.runId)reportProvider(receipt.progress,true);
+          restoredProgressSent=true;
+          await refreshProviderProgress();
+        }
         if(run.status==='SUCCEEDED'){
           if(!/^[A-Za-z0-9]+$/.test(String(run.defaultDatasetId||'')))throw err('apify_no_file','Completed run has no dataset');
           const rows=await api('/datasets/'+run.defaultDatasetId+'/items?format=json&clean=true&limit=2');
@@ -265,5 +304,6 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
   };
 }
 export const resolveApifyAudio=createApifyResolver();
+
 
 
