@@ -12,6 +12,7 @@
 // which works for every length.
 const SHORT_DEFAULT = 's-r/youtube-video-downloader';
 const LONG_DEFAULT = 'memo23/youtube-video-downloader';
+export const NATIVE_ACTOR = 'johnvc/youtube-download-api';
 
 export function parseIsoDurationSeconds(iso) {
   const m = String(iso || '').match(/^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/);
@@ -40,10 +41,18 @@ export async function fetchVideoDurationSeconds(videoId, env = process.env, fetc
 // Returns { actor, seconds, reason }. actor is the Apify actor id to start a
 // NEW run with (an existing run's receipt keeps its own recorded actor).
 export async function pickApifyActor(videoId, env = process.env, fetchImpl = fetch) {
-  // Native audio avoids supplier MP3 encoding and a duration API roundtrip.
-  if(String(env.BRANCH2_NATIVE_AUDIO_ENGINE||'johnvc').toLowerCase()!=='off')return {actor:'johnvc/youtube-download-api',fallback:null,seconds:null,reason:'native_audio'};
   const shortActor = String(env.BRANCH2_APIFY_ACTOR_SHORT || SHORT_DEFAULT).trim();
   const longActor = String(env.BRANCH2_APIFY_ACTOR_LONG || env.BRANCH2_APIFY_ACTOR || LONG_DEFAULT).trim();
+  // Primary engine: johnvc native audio (~$0.00001 per audio minute, original
+  // YouTube audio without re-encoding, any length). It needs no duration
+  // lookup. The flat-price long engine stays as a consent-gated backup for
+  // the rare video johnvc cannot deliver; BRANCH2_NATIVE_FALLBACK_ACTOR=none
+  // disables that backup.
+  if (String(env.BRANCH2_NATIVE_AUDIO_ENGINE || 'johnvc').toLowerCase() !== 'off') {
+    const configured = String(env.BRANCH2_NATIVE_FALLBACK_ACTOR ?? longActor).trim();
+    const fallback = !configured || configured.toLowerCase() === 'none' ? null : configured;
+    return { actor: NATIVE_ACTOR, fallback, seconds: null, reason: 'native_audio' };
+  }
   // Routing can be turned off to force a single actor (the long one).
   if (String(env.BRANCH2_ENGINE_ROUTING || 'on').toLowerCase() === 'off') {
     return { actor: longActor, fallback: shortActor, seconds: null, reason: 'routing_off' };

@@ -6,14 +6,19 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
 import { downloadVisionAudio } from './vision-audio.mjs';
-import { resolveApifyAudio, isApifyConfigured } from './youtube-apify-source.js';
+import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID } from './youtube-apify-source.js';
 import { pickApifyActor } from './youtube-engine-select.js';
 
 import { createAudioCache, audioCachePaths, verifiedAudioFile } from './youtube-audio-cache.js';
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const YEMOT_UPLOAD_URL = YEMOT_API_BASE + '/UploadFile';
-const MAX_SOURCE_BYTES = 256 * 1024 * 1024;
+// Native audio of a 12-hour video is ~690MB at YouTube's standard m4a rate.
+// Kept in step with the provider's maxMegabytes (nativeLimits) so a file the
+// provider accepts is never rejected here.
+const MAX_SOURCE_BYTES = nativeLimits(process.env).maxMegabytes * 1024 * 1024;
+// A 700MB file over a slow route needs more than the old 10 minutes.
+const TRANSFER_TIMEOUT_MS = Number(process.env.BRANCH2_TRANSFER_TIMEOUT_MS || 1800000);
 const SOURCE_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_SOURCE_TIMEOUT_MS || 12000);
 const FFMPEG_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_FFMPEG_TIMEOUT_MS || 900000);
 const UPLOAD_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_UPLOAD_TIMEOUT_MS || 20000);
@@ -112,7 +117,6 @@ async function fetchAuthorizedSource(videoId, output, fallbackUrl=null, signal=u
       const {done, value} = await reader.read();
       if (done) break;
       total += value.byteLength;
-      digest.update(value);
       if (total > MAX_SOURCE_BYTES) throw new Error('Authorized audio source is too large');
       await file.write(Buffer.from(value));
     }
@@ -391,16 +395,44 @@ export function lookupCachedYouTubeAudio(videoId) {
 // we then fetch here. This is what bypasses YouTube's datacenter-IP block.
 async function downloadApifySource(id, output, signal, onProgress=()=>{}, consent=false) {
   onProgress({stage:'provider'});
-  // Choose the cheaper engine by length (short -> s-r, long -> memo23). An
-  // existing run receipt keeps its own actor, so this only steers NEW runs.
+  // Native johnvc audio is the primary engine for every length; the backup
+  // engine is used only with the caller's consent. An existing run receipt
+  // keeps its own actor, so this only steers NEW runs.
   const choice = await pickApifyActor(id, process.env).catch(() => ({ actor: undefined, fallback: undefined, seconds: null, reason: 'error' }));
   console.info('[YouTube IVR] engine choice', { videoId: id, engine: choice.actor || 'default', fallback: choice.fallback || null, lengthSec: choice.seconds ?? null, reason: choice.reason, consent });
   const resolved = await resolveApifyAudio(id, process.env, {store:{read:readCacheJson,write:writeCacheJson}, actor:choice.actor, fallbackActor:choice.fallback, consentToFallback:consent,signal,onProgress});
-  const r = await fetch(resolved.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(600000)]) : AbortSignal.timeout(600000) });
+  // The provider file stays stored after the run, so a broken transfer is
+  // fetched again from the same link: no new run and no new charge.
+  const native=resolved.actorId===NATIVE_ACTOR_ID;
+  const expectedBytes=native?resolved.item.fileSizeBytes:null;
+  if(expectedBytes>MAX_SOURCE_BYTES) throw Object.assign(new Error('Source exceeds supported audio size'),{code:'too_large'});
+  let total=0;
+  for(let attempt=1;;attempt++){
+    try{
+      total=await transferProviderFile(resolved,output,signal,onProgress,expectedBytes);
+      break;
+    }catch(e){
+      const retryable=e?.code==='transfer_incomplete'||e?.code==='apify_invalid_result'||e?.code==='apify_download_http'||e?.name==='TimeoutError'||e?.name==='TypeError';
+      if(signal?.aborted||!retryable||attempt>=2){
+        if(e?.code==='transfer_incomplete')e.code='apify_pending';
+        throw e;
+      }
+      console.warn('[YouTube IVR] provider file transfer failed; fetching the stored file again',{videoId:id,attempt,code:e?.code||e?.name||'unknown'});
+    }
+  }
+  onProgress({stage:'downloaded',bytes:total,totalBytes:total});
+  console.info('[YouTube IVR] apify source downloaded', { videoId: id, bytes: total, title: String(resolved.title || '').slice(0, 60) });
+  return total;
+}
+
+// Streams one stored provider file to disk, verifying length and (for native
+// audio) the provider's SHA-256 so a damaged file never reaches the caller.
+async function transferProviderFile(resolved,output,signal,onProgress,expectedBytes){
+  const r = await fetch(resolved.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(TRANSFER_TIMEOUT_MS)]) : AbortSignal.timeout(TRANSFER_TIMEOUT_MS) });
   if (!r.ok || !r.body) throw Object.assign(new Error('Apify file download HTTP ' + r.status), { code: 'apify_download_http' });
   const encoding=r.headers.get('content-encoding');
   const declared=encoding&&encoding!=='identity'?NaN:Number(r.headers.get('content-length'));
-  const totalBytes=Number.isFinite(declared)&&declared>0?declared:null;
+  const totalBytes=Number.isFinite(declared)&&declared>0?declared:expectedBytes||null;
   if(totalBytes>MAX_SOURCE_BYTES) {
     await r.body.cancel().catch(()=>{});
     throw Object.assign(new Error('Source exceeds supported audio size'),{code:'too_large'});
@@ -421,11 +453,10 @@ async function downloadApifySource(id, output, signal, onProgress=()=>{}, consen
       await file.write(Buffer.from(value));
     }
   } finally { await file.close(); }
-  if (!total) throw Object.assign(new Error('Apify source empty'), { code: 'empty' });
-  if(totalBytes&&total!==totalBytes)throw Object.assign(new Error('Incomplete provider audio transfer'),{code:'apify_pending'});
-  if(resolved.actorId==='johnvc~youtube-download-api'&&(total!==resolved.item.fileSizeBytes||digest.digest('hex')!==resolved.item.sha256.toLowerCase()))throw Object.assign(new Error('Provider file checksum or size mismatch'),{code:'apify_invalid_result'});
-  onProgress({stage:'downloaded',bytes:total,totalBytes:total});
-  console.info('[YouTube IVR] apify source downloaded', { videoId: id, bytes: total, title: String(resolved.title || '').slice(0, 60) });
+  if (!total) throw Object.assign(new Error('Apify source empty'), { code: 'transfer_incomplete' });
+  if(totalBytes&&total!==totalBytes)throw Object.assign(new Error('Incomplete provider audio transfer'),{code:'transfer_incomplete'});
+  if(resolved.actorId===NATIVE_ACTOR_ID&&digest.digest('hex')!==String(resolved.item.sha256).toLowerCase())
+    throw Object.assign(new Error('Provider file checksum mismatch'),{code:'apify_invalid_result'});
   return total;
 }
 

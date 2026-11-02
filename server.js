@@ -3885,7 +3885,7 @@ async function youtubeCallHandler(call) {
   let pendingFallbackVideo=null;
   let transcriptFailAttempts=0;
   // Provider failures where trying the OTHER (faster, costlier) engine may help.
-  const FALLBACK_ELIGIBLE=new Set(['apify_provider_slow','apify_provider_timeout','apify_provider_blocked','apify_provider_network','apify_run_failed','apify_actor_failed','direct_failed','timeout']);
+  const FALLBACK_ELIGIBLE=new Set(['apify_provider_slow','apify_provider_timeout','apify_provider_blocked','apify_provider_network','apify_run_failed','apify_actor_failed','apify_invalid_result','direct_failed','timeout']);
 
   const normalizeConfirm=(text)=>String(text||'').normalize('NFKC').toLowerCase()
     .replace(/[.,!?;:״"'׳]/g,' ').replace(/\s+/g,' ').trim();
