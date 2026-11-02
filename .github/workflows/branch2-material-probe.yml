@@ -1,0 +1,55 @@
+name: Branch 2 Material download and Yemot probe
+on:
+  push:
+    branches: [test/branch2-material-download-yemot-20261102]
+    paths:
+      - experiments/material-probe/probe.mjs
+      - .github/workflows/branch2-material-probe.yml
+permissions:
+  contents: read
+concurrency:
+  group: branch2-material-probe
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test strict upload verification
+        run: node --test experiments/material-probe/probe.test.mjs
+      - name: Fetch pinned upstream backend
+        uses: actions/checkout@v4
+        with:
+          repository: Tzahi12345/YoutubeDL-Material
+          ref: 28234c0d4ba65059be18f3692f6f5e5b1170b1a6
+          path: upstream
+          persist-credentials: false
+      - name: Install upstream backend and media tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install yt-dlp==2026.10.26
+          npm install --prefix upstream/backend --omit=dev --ignore-scripts --no-audit --no-fund
+          mkdir -p upstream/backend/appdata/bin
+          ln -s "$(command -v yt-dlp)" upstream/backend/appdata/bin/yt-dlp
+      - name: Real upstream downloader then Yemot upload and readback
+        env:
+          MATERIAL_BACKEND: upstream/backend
+          MATERIAL_COMMIT: 28234c0d4ba65059be18f3692f6f5e5b1170b1a6
+          YEMOT_API_KEY: ${{ secrets.YEMOT_API_KEY }}
+        run: node experiments/material-probe/probe.mjs
+      - name: Save diagnostic report only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch2-material-probe-report
+          path: material-probe-report.json
+          if-no-files-found: warn
+          retention-days: 7
