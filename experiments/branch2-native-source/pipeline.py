@@ -1,5 +1,5 @@
 """Isolated source/convert experiment. No IVR routes, credentials or provider API."""
-import argparse, json, os, pathlib, subprocess, tempfile
+import argparse, json, os, pathlib, subprocess, tempfile, wave
 
 def run(args, timeout):
     # communicate drains output while enforcing the deadline, even for silent children.
@@ -31,6 +31,24 @@ def inspect(path):
         raise ValueError('missing audio or duration')
     return duration
 
+def validate_phone(path, expected):
+    import wave
+    duration = inspect(path)
+    if abs(duration-expected)>max(2,expected*.005):
+        raise ValueError('converted duration mismatch')
+    # RIFF headers alone can describe audio that was never written.
+    with wave.open(str(path),'rb') as wav:
+        if (wav.getnchannels(),wav.getsampwidth(),wav.getframerate()) != (1,2,8000):
+            raise ValueError('unexpected phone audio format')
+        frames = 0
+        while True:
+            block = wav.readframes(65536)
+            if not block: break
+            frames += len(block)//2
+        if frames != wav.getnframes() or abs(frames/8000-expected)>max(2,expected*.005):
+            raise ValueError('truncated phone audio')
+    return duration
+
 def prepare(video_id, root, source=None, expected=None):
     import re
     if not re.fullmatch(r'[A-Za-z0-9_-]{11}', video_id):
@@ -60,16 +78,23 @@ def prepare(video_id, root, source=None, expected=None):
         if expected and abs(duration-expected)>max(2,expected*.005):
             raise ValueError('source duration mismatch')
         target = folder/'phone.wav'
+        if target.exists():
+            try:
+                validate_phone(target,duration)
+            except (ValueError,RuntimeError,EOFError,wave.Error):
+                target.unlink()
+                receipt.unlink(missing_ok=True)
         if not target.exists():
-            run(['ffmpeg','-nostdin','-v','error','-y','-i',str(raw),'-map','0:a:0','-vn',
+            import shutil
+            # PCM mono 8kHz requires 16,000 bytes/sec; retain a 64MiB reserve.
+            required = int(duration*16000)+64*1024*1024
+            if shutil.disk_usage(folder).free < required:
+                raise OSError('insufficient space for conversion; source retained')
+            run(['ffmpeg','-nostdin','-v','error','-xerror','-y','-i',str(raw),'-map','0:a:0','-vn',
                  '-ar','8000','-ac','1','-c:a','pcm_s16le','-f','wav',str(folder/'phone.pending')],900)
-            converted = inspect(folder/'phone.pending')
-            if abs(converted-duration)>max(2,duration*.005):
-                raise ValueError('converted duration mismatch')
+            validate_phone(folder/'phone.pending',duration)
             os.replace(folder/'phone.pending',target)
-        converted = inspect(target)
-        if abs(converted-duration)>max(2,duration*.005):
-            raise ValueError('cached duration mismatch')
+        converted = validate_phone(target,duration)
         result={'videoId':video_id,'sourceBytes':raw.stat().st_size,'durationSec':converted,
                 'converted':True,'yemotUploaded':False,'phonePlaybackVerified':False}
         tmp=folder/'ready.pending';tmp.write_text(json.dumps(result));os.replace(tmp,receipt)
