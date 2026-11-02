@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { playbackAwake } from './playback-awake.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -111,6 +112,7 @@ async function fetchAuthorizedSource(videoId, output, fallbackUrl=null, signal=u
       const {done, value} = await reader.read();
       if (done) break;
       total += value.byteLength;
+      digest.update(value);
       if (total > MAX_SOURCE_BYTES) throw new Error('Authorized audio source is too large');
       await file.write(Buffer.from(value));
     }
@@ -156,7 +158,7 @@ async function makeChunks(source, dir, signal=undefined, onChunk=undefined) {
     .sort((a,b)=>Number(a.match(/\d+/)[0])-Number(b.match(/\d+/)[0]));
   console.info('[YouTube IVR] playback step 4: starting ffmpeg');
   const conversion=runFfmpeg([
-    '-hide_banner','-loglevel','error','-y','-i',source,
+    '-nostdin','-hide_banner','-loglevel','error','-xerror','-y','-i',source,
     '-vn','-ar','8000','-ac','1','-c:a','pcm_s16le',
     '-f','segment','-segment_time','120','-reset_timestamps','1',pattern
   ],combined).then(()=>{done=true;},e=>{failure=e;done=true;});
@@ -406,12 +408,14 @@ async function downloadApifySource(id, output, signal, onProgress=()=>{}, consen
   onProgress({stage:'transferring',bytes:0,totalBytes});
   const file = await fs.open(output, 'w');
   let total = 0;
+  const digest=createHash('sha256');
   try {
     const reader = r.body.getReader();
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
+      digest.update(value);
       if (total > MAX_SOURCE_BYTES) throw Object.assign(new Error('Apify source too large'), { code: 'too_large' });
       onProgress({stage:'transferring',bytes:total,totalBytes});
       await file.write(Buffer.from(value));
@@ -419,6 +423,7 @@ async function downloadApifySource(id, output, signal, onProgress=()=>{}, consen
   } finally { await file.close(); }
   if (!total) throw Object.assign(new Error('Apify source empty'), { code: 'empty' });
   if(totalBytes&&total!==totalBytes)throw Object.assign(new Error('Incomplete provider audio transfer'),{code:'apify_pending'});
+  if(resolved.actorId==='johnvc~youtube-download-api'&&(total!==resolved.item.fileSizeBytes||digest.digest('hex')!==resolved.item.sha256.toLowerCase()))throw Object.assign(new Error('Provider file checksum or size mismatch'),{code:'apify_invalid_result'});
   onProgress({stage:'downloaded',bytes:total,totalBytes:total});
   console.info('[YouTube IVR] apify source downloaded', { videoId: id, bytes: total, title: String(resolved.title || '').slice(0, 60) });
   return total;
@@ -503,6 +508,7 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
 // the same conversion and upload code as real playback, so a passing
 // self-test proves the production path, not a copy of it.
 export const _pipeline = { makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE };
+
 
 
 
