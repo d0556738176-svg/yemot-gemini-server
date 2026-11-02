@@ -12,7 +12,11 @@ def run(args, timeout):
         p.communicate()
         raise TimeoutError('stage deadline exceeded') from None
     if p.returncode:
-        raise RuntimeError('stage failed (exit %s)' % p.returncode)
+        import re
+        detail=error.decode('utf-8',errors='replace')[-4000:]
+        detail=re.sub(r'https?://\S+','[url]',detail)
+        detail=re.sub(r'(?i)(cookie|token|authorization|password)[=: ]+\S+',r'\1=[redacted]',detail)
+        raise RuntimeError('stage failed (exit %s): %s' % (p.returncode,detail))
     return out
 
 def inspect(path):
