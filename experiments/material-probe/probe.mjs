@@ -75,7 +75,7 @@ export async function runProbe() {
     for(const videoId of videoIds) {
       if(!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new Error('INVALID_VIDEO_ID');
       const dir=path.join(temp,videoId); await fs.mkdir(dir);
-      const args=['--no-playlist','--no-progress','--socket-timeout','12','--retries','0','--extractor-retries','0','--max-filesize','32M','--match-filters','duration <= 180','-f','bestaudio/best','-o',path.join(dir,'source.%(ext)s')];
+      const args=['--js-runtimes','node','--no-playlist','--no-progress','--socket-timeout','12','--retries','0','--extractor-retries','0','--max-filesize','32M','--match-filters','duration <= 180','-f','bestaudio/best','-o',path.join(dir,'source.%(ext)s')];
       const started=Date.now();
       const {child_process,callback}=await downloader.runYoutubeDL('https://www.youtube.com/watch?v='+videoId,args);
       const timer=setTimeout(()=>child_process.kill('SIGKILL'),60000);
@@ -83,8 +83,14 @@ export async function runProbe() {
       const message=String(result.err?.stderr||result.err?.message||result.err||'');
       const files=(await fs.readdir(dir)).filter(n=>/^source\./.test(n)&&!n.endsWith('.part')&&!n.endsWith('.ytdl'));
       if(child_process.exitCode===0 && files.length===1) {
-        source=path.join(dir,files[0]);
-        report.download={status:'success',videoId,...await audioFacts(source)};
+        const candidate=path.join(dir,files[0]);
+        let facts;
+        try {facts=await audioFacts(candidate)} catch {
+          report.attempts.push({videoId,status:'failed',code:'INVALID_AUDIO',ms:Date.now()-started});
+          continue;
+        }
+        source=candidate;
+        report.download={status:'success',videoId,...facts};
         report.attempts.push({videoId,status:'success',ms:Date.now()-started}); break;
       }
       report.attempts.push({videoId,status:'failed',code:classify(message),ms:Date.now()-started});
