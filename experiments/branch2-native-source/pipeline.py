@@ -45,7 +45,8 @@ def prepare(video_id, root, source=None, expected=None):
                 shutil.copyfile(source,folder/'source.pending')
             else:
                 # Native audio only: no MP3 encoding in the downloader.
-                run(['yt-dlp','--no-playlist','--no-progress','--retries','2','--fragment-retries','2',
+                trust=['--compat-options','no-certifi'] if os.environ.get('SSL_CERT_FILE') else []
+                run(['yt-dlp',*trust,'--js-runtimes','node','--no-playlist','--no-progress','--retries','2','--fragment-retries','2',
                      '--socket-timeout','30','-f','bestaudio','-o',str(folder/'source.pending'),
                      'https://www.youtube.com/watch?v='+video_id],1800)
             inspect(folder/'source.pending')
