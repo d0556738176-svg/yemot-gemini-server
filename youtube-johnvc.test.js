@@ -29,11 +29,10 @@ function fakeApify({startStatus=()=>201,rowFor=()=>fileRow(),runStatus=()=>'SUCC
   return {fetchImpl,calls};
 }
 
-test('native engine is primary for every length, with the long engine as consent-gated backup',async()=>{
-  const r=await pickApifyActor(id,{},()=>{throw Error('unexpected lookup');});
+test('native engine is the only engine: no backup engine is ever chosen',async()=>{
+  const r=await pickApifyActor(id,{BRANCH2_NATIVE_FALLBACK_ACTOR:'memo23/youtube-video-downloader'},()=>{throw Error('unexpected lookup');});
   assert.equal(r.actor,'johnvc/youtube-download-api');
-  assert.equal(r.fallback,'memo23/youtube-video-downloader');
-  assert.equal((await pickApifyActor(id,{BRANCH2_NATIVE_FALLBACK_ACTOR:'none'})).fallback,null);
+  assert.equal(r.fallback,null);
 });
 
 test('every configured key is collected, deduplicated and in priority order',()=>{
@@ -41,14 +40,14 @@ test('every configured key is collected, deduplicated and in priority order',()=
   assert.deepEqual(keys,['a','b','c','d','e']);
 });
 
-test('native run uses standard m4a, size/length caps and a cost cap that covers 12 hours',async()=>{
+test('native run uses standard m4a, size/length caps and a cost cap that covers the longest YouTube video',async()=>{
   const {fetchImpl,calls}=fakeApify();const {store}=memStore();
   const result=await createApifyResolver({fetchImpl,log:quiet,sleep:async()=>{}})(id,{APIFY_TOKEN:'k1'},{actor:'johnvc/youtube-download-api',store});
   const b=calls.starts[0].body;
   assert.equal(b.format,'audio');assert.equal(b.audioFormat,'m4a');assert.equal(b.audioQuality,'standard');
-  assert.equal(b.maxMinutes,720);assert.equal(b.maxMegabytes,768);
+  assert.equal(b.maxMinutes,900);assert.equal(b.maxMegabytes,1024);
   const cap=Number(new URL(calls.starts[0].url,'https://x').searchParams.get('maxTotalChargeUsd'));
-  assert.ok(cap>=720*0.00001,'cap must cover the longest allowed video');
+  assert.ok(cap>=900*0.00001,'cap must cover the longest allowed video');
   assert.equal(new URL(result.url).searchParams.has('token'),false,'signed link needs no key');
 });
 
@@ -86,20 +85,27 @@ test('missing integrity metadata is rejected',async()=>{
   await assert.rejects(createApifyResolver({fetchImpl,log:quiet})(id,{APIFY_TOKEN:'k'},{actor:'johnvc/youtube-download-api',store}),{code:'apify_invalid_result'});
 });
 
-test('a free native error row gets one fresh native retry, then the backup engine with consent',async()=>{
-  const {fetchImpl,calls}=fakeApify({rowFor:n=>n<=2?{resultType:'error',videoId:id,error:'DOWNLOAD_FAILED',errorMessage:'network reset'}:{download_url:'https://files.example/a.mp3',videoId:id}});
+test('a failing native run is retried free on the native engine only, even if a backup engine is passed',async()=>{
+  const {fetchImpl,calls}=fakeApify({rowFor:n=>n<=2?{resultType:'error',videoId:id,error:'DOWNLOAD_FAILED',errorMessage:'network reset'}:fileRow()});
   const {store}=memStore();
   const r=await createApifyResolver({fetchImpl,log:quiet,sleep:async()=>{}})(id,{APIFY_TOKEN:'k'},
     {actor:'johnvc/youtube-download-api',fallbackActor:'memo23/youtube-video-downloader',consentToFallback:true,store});
-  assert.deepEqual(calls.starts.map(s=>s.url.match(/acts\/([^/]+)\//)[1]),['johnvc~youtube-download-api','johnvc~youtube-download-api','memo23~youtube-video-downloader']);
-  assert.equal(r.actorId,'memo23~youtube-video-downloader');
+  assert.deepEqual(calls.starts.map(s=>s.url.match(/acts\/([^/]+)\//)[1]),Array(3).fill('johnvc~youtube-download-api'));
+  assert.equal(r.actorId,'johnvc~youtube-download-api');
 });
 
-test('without consent the backup engine is never started',async()=>{
+test('when free retries run out the caller gets the real reason; no other engine starts',async()=>{
   const {fetchImpl,calls}=fakeApify({rowFor:()=>({resultType:'error',videoId:id,errorMessage:'network reset'})});const {store}=memStore();
   await assert.rejects(createApifyResolver({fetchImpl,log:quiet,sleep:async()=>{}})(id,{APIFY_TOKEN:'k'},
-    {actor:'johnvc/youtube-download-api',fallbackActor:'memo23/youtube-video-downloader',store}),{code:'apify_provider_network'});
-  assert.equal(calls.starts.length,2);
+    {actor:'johnvc/youtube-download-api',fallbackActor:'memo23/youtube-video-downloader',consentToFallback:true,store}),{code:'apify_provider_network'});
+  assert.equal(calls.starts.length,3);
+  assert.ok(calls.starts.every(s=>s.url.includes('johnvc~youtube-download-api')));
+});
+
+test('a resolver called without an engine uses the native engine, never an old env setting',async()=>{
+  const {fetchImpl,calls}=fakeApify();const {store}=memStore();
+  await createApifyResolver({fetchImpl,log:quiet,sleep:async()=>{}})(id,{APIFY_TOKEN:'k',BRANCH2_APIFY_ACTOR:'memo23/youtube-video-downloader'},{store});
+  assert.ok(calls.starts[0].url.includes('johnvc~youtube-download-api'));
 });
 
 test('a private or too-long video is final: no retry and no paid backup',async()=>{

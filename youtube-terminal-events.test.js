@@ -20,7 +20,7 @@ test('the observed slow failure stays terminal across repeated callbacks and res
    if(u.endsWith('/log'))return new Response('ERROR download too slow to finish in time\nERROR download stalled');
    return Response.json({data:{status:'FAILED',statusMessage:'1 blocked on our side'}});
   }});
-  await assert.rejects(resolve(id,{APIFY_TOKEN:'fixture'},{store}),e=>e.code==='apify_provider_slow');
+  await assert.rejects(resolve(id,{APIFY_TOKEN:'fixture'},{store,actor:'memo23/youtube-video-downloader'}),e=>e.code==='apify_provider_slow');
  }
  assert.equal(posts,0);assert.equal(records.get(apifyReceiptPath(id)).runId,'savedRun');
 });

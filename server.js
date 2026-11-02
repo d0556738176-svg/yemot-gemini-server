@@ -3884,8 +3884,6 @@ async function youtubeCallHandler(call) {
   let pendingVideo=null;
   let pendingFallbackVideo=null;
   let transcriptFailAttempts=0;
-  // Provider failures where trying the OTHER (faster, costlier) engine may help.
-  const FALLBACK_ELIGIBLE=new Set(['apify_provider_slow','apify_provider_timeout','apify_provider_blocked','apify_provider_network','apify_run_failed','apify_actor_failed','apify_invalid_result','direct_failed','timeout']);
 
   const normalizeConfirm=(text)=>String(text||'').normalize('NFKC').toLowerCase()
     .replace(/[.,!?;:״"'׳]/g,' ').replace(/\s+/g,' ').trim();
@@ -4070,13 +4068,9 @@ async function youtubeCallHandler(call) {
               code,
               attempts:(playbackError?.attempts||[]).map(a=>a.path+':'+a.code).join(',')
             });
-            // Cheap engine failed on a large/blocked video: offer the faster,
-            // costlier engine and let the caller decide before we spend on it.
-            if(FALLBACK_ELIGIBLE.has(code)) {
-              pendingFallbackVideo=selectedVideo;
-              nextPrompt='לא הצלחתי להוריד את הסרטון הזה במנוע הרגיל. אפשר לנסות במנוע מהיר יותר, אבל הוא עולה קצת יותר. האם לנסות? אמור כן או לא.';
-              continue;
-            }
+            // Branch 2 runs only the native engine (free retries and backup keys
+            // are already exhausted inside the resolver), so no costlier engine
+            // is offered: the caller hears the real reason instead.
             nextPrompt=playbackFailureMessage(code);
             continue;
           }

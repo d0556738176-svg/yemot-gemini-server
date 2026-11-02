@@ -161,14 +161,16 @@ export async function prepareYouTubePlayback(video, deps) {
 
 // Short Hebrew explanation for the caller, chosen by failure code.
 export function playbackFailureMessage(code) {
+  // Every failure below is reported only after the native engine's free
+  // retries and every backup key were tried.
   if(code==='apify_provider_slow')
-    return 'ספק ההורדה עצר את הקובץ בגלל קצב הורדה נמוך או תקיעה. לא התקבל קובץ מלא. לא הופעל ניסיון נוסף באותו מנוע, כדי לשמור על המכסה.';
-  if(code==='apify_provider_blocked')
-    return 'מנוע ההורדה נחסם על ידי יוטיוב ולא הצליח לקבל את הסרטון. לא הופעל ניסיון נוסף בתשלום, כדי לשמור על המכסה.';
-  if(code==='apify_provider_network')
-    return 'מנוע ההורדה נתקל בתקלה בחיבור ליוטיוב. לא הופעלה הורדה נוספת בתשלום.';
+    return 'מנוע ההורדה עצר בגלל קצב הורדה נמוך או תקיעה, גם אחרי ניסיונות חוזרים, ולא התקבל קובץ מלא. אפשר לנסות שוב בעוד כמה דקות, או לבחור תוצאה אחרת.';
   if(code==='apify_provider_timeout')
-    return 'מנוע ההורדה הפסיק את הניסיון בגלל מגבלת הזמן שלו. ניסיון חוזר בתשלום נחסם כדי לשמור על המכסה.';
+    return 'מנוע ההורדה הגיע למגבלת הזמן שלו, גם אחרי ניסיונות חוזרים. אפשר לנסות שוב בעוד כמה דקות, או לבחור תוצאה אחרת.';
+  if(code==='apify_provider_blocked')
+    return 'מנוע ההורדה נחסם כרגע על ידי יוטיוב עבור הסרטון הזה, גם אחרי ניסיונות חוזרים. אפשר לנסות שוב בעוד כמה דקות, או לבחור תוצאה אחרת.';
+  if(code==='apify_provider_network')
+    return 'מנוע ההורדה נתקל בתקלת חיבור ליוטיוב, גם אחרי ניסיונות חוזרים. אפשר לנסות שוב בעוד כמה דקות.';
 
   if(code==='needs_payment')
     return 'כל חשבונות מנוע ההורדה הגיעו למכסה החודשית שלהם. ההורדה לא הופעלה ולא חויבה. אפשר לנסות שוב בהמשך.';
@@ -182,7 +184,7 @@ export function playbackFailureMessage(code) {
   if(code==='apify_start_uncertain')
     return 'לא ניתן כרגע לאמת את מצב ההורדה הקודמת. לא הופעלה הורדה נוספת כדי למנוע חיוב כפול.';
   if(code==='apify_run_failed'||code==='apify_actor_failed'||code==='apify_no_file')
-    return 'מנוע ההורדה לא השלים את הסרטון. ניסיון חוזר בתשלום נחסם כדי לשמור על המכסה.';
+    return 'מנוע ההורדה לא השלים את הסרטון הזה, גם אחרי ניסיונות חוזרים. אפשר לנסות שוב בעוד כמה דקות, או לבחור תוצאה אחרת.';
 
   if (YOUTUBE_REFUSAL_CODES.has(code) || code === 'youtube_source_refused')
     return 'יוטיוב לא מאפשר כרגע לשרת שלנו להוריד את הסרטון הזה, ולכן אי אפשר להשמיע אותו. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';

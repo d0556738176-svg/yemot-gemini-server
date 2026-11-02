@@ -10,8 +10,8 @@ export const NATIVE_ACTOR_ID='johnvc~youtube-download-api';
 // Native audio is ~$0.00001 per delivered minute; the cap is derived from the
 // longest allowed video so a legitimate long file is never cut off mid-run.
 export function nativeLimits(env=process.env){
-  const maxMinutes=Math.max(10,Math.min(1440,Math.floor(Number(env.BRANCH2_NATIVE_MAX_MINUTES)||720)));
-  const maxMegabytes=Math.max(16,Math.min(4096,Math.floor(Number(env.BRANCH2_MAX_SOURCE_MB)||768)));
+  const maxMinutes=Math.max(10,Math.min(1440,Math.floor(Number(env.BRANCH2_NATIVE_MAX_MINUTES)||900)));
+  const maxMegabytes=Math.max(16,Math.min(4096,Math.floor(Number(env.BRANCH2_MAX_SOURCE_MB)||1024)));
   const maxCharge=Math.max(0.01,Number(env.BRANCH2_NATIVE_MAX_CHARGE_USD)||0,
     Math.ceil((maxMinutes*0.00001+0.002)*1000)/1000);
   return {maxMinutes,maxMegabytes,maxCharge:maxCharge.toFixed(3)};
@@ -128,7 +128,7 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
     if(!store?.read||!store?.write)return Promise.reject(err('cache_unavailable','Durable run storage required before starting provider'));
     // Per-call actor (chosen by video length) wins; an existing receipt still
     // keeps its own recorded actor below, so a video never switches provider.
-    const actorId=String(options.actor||env.BRANCH2_APIFY_ACTOR||'memo23/youtube-video-downloader').trim().replace('/','~');
+    const actorId=String(options.actor||NATIVE_ACTOR_ID).trim().replace('/','~');
     const key=id; // changing provider must not evade an existing video's receipt
     if(active.has(key))return active.get(key);
     const task=(async()=>{
@@ -147,12 +147,17 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       // is tried once if a run ends FAILED/ABORTED/TIMED-OUT.
       // memo23 is slow; give it a full hour (configurable) before the fast engine
       // takes over, so large videos finish on the cheap engine when possible.
-      const runTimeoutSec=Math.max(300,Math.min(7200,Number(env.BRANCH2_APIFY_RUN_TIMEOUT_SEC)||7200));
-      const fallbackActor=options.fallbackActor?String(options.fallbackActor).trim().replace('/','~'):null;
+      // A 12-hour native file took ~10 min per hour of audio in testing, so the
+      // native run gets up to 4 hours; old engines keep their 2-hour limit.
+      const runTimeoutSec=actorId===NATIVE_ACTOR_ID
+        ?Math.max(600,Math.min(21600,Number(env.BRANCH2_NATIVE_RUN_TIMEOUT_SEC)||14400))
+        :Math.max(300,Math.min(7200,Number(env.BRANCH2_APIFY_RUN_TIMEOUT_SEC)||7200));
+      // Native-only: no other engine is ever started, whatever a caller passes.
+      const fallbackActor=actorId===NATIVE_ACTOR_ID?null:(options.fallbackActor?String(options.fallbackActor).trim().replace('/','~'):null);
       const allowFallback=String(env.BRANCH2_APIFY_ENGINE_FALLBACK||'on').toLowerCase()!=='off';
       // Native runs that fail cost nothing, so one fresh native retry is the
-      // default before the backup engine is offered. 0 disables it.
-      const nativeRetries=()=>{const n=Number(env.BRANCH2_NATIVE_RETRIES??1);return Number.isFinite(n)?Math.max(0,Math.min(3,Math.floor(n))):1;};
+      // default (each may land on a new route/worker). 0 disables them.
+      const nativeRetries=()=>{const n=Number(env.BRANCH2_NATIVE_RETRIES??2);return Number.isFinite(n)?Math.max(0,Math.min(4,Math.floor(n))):2;};
       // Starts ONE fresh run for `useActor`, trying each Apify account in turn and
       // moving to the next only when an account is out of free usage (HTTP 402).
       // Intent (account + actor) is written before each POST so a lost ack fails

@@ -18,9 +18,11 @@ const YEMOT_UPLOAD_URL = YEMOT_API_BASE + '/UploadFile';
 // provider accepts is never rejected here.
 const MAX_SOURCE_BYTES = nativeLimits(process.env).maxMegabytes * 1024 * 1024;
 // A 700MB file over a slow route needs more than the old 10 minutes.
-const TRANSFER_TIMEOUT_MS = Number(process.env.BRANCH2_TRANSFER_TIMEOUT_MS || 1800000);
+const TRANSFER_TIMEOUT_MS = Number(process.env.BRANCH2_TRANSFER_TIMEOUT_MS || 3600000);
 const SOURCE_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_SOURCE_TIMEOUT_MS || 12000);
-const FFMPEG_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_FFMPEG_TIMEOUT_MS || 900000);
+// A hung ffmpeg is still stopped, but a genuine 12-hour conversion (paced by
+// overlapped uploads on the free CPU) must be allowed to finish.
+const FFMPEG_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_FFMPEG_TIMEOUT_MS || 10800000);
 const UPLOAD_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_UPLOAD_TIMEOUT_MS || 20000);
 const VERIFY_TIMEOUT_MS = Number(process.env.YOUTUBE_AUTHORIZED_VERIFY_TIMEOUT_MS || 8000);
 const activeJobs = new Map();
@@ -180,13 +182,16 @@ async function makeChunks(source, dir, signal=undefined, onChunk=undefined) {
         if(index!==files.length)throw new Error('Non-contiguous audio segment sequence');
         const file=path.join(dir,name);
         if((await fs.stat(file)).size<=44)throw Object.assign(new Error('Empty audio chunk'),{code:'empty_audio'});
-        if(onChunk)await onChunk(file,index,{converting:!done,total:done?names.length:null});
+        if(onChunk)await onChunk(file,index,{converting:!done,total:done?files.length+eligible.filter(n=>!produced.has(n)).length:null});
         produced.add(name);files.push(file);
+        // Once a piece is uploaded and verified it lives in Yemot; removing the
+        // local copy keeps disk use at ~2 pieces, so any length fits the free disk.
+        if(onChunk)await fs.rm(file,{force:true}).catch(()=>{});
       }
       if(done){
         if(failure)throw failure;
         // A new segment may have appeared between the listing and process exit.
-        if((await list()).length===files.length)break;
+        if((await list()).every(n=>produced.has(n)))break;
         continue;
       }
       await new Promise(resolve=>setTimeout(resolve,250));

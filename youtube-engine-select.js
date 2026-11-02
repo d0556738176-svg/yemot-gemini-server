@@ -1,5 +1,5 @@
-// Branch 2: pick the Apify actor by the selected video's length, so each
-// download uses the cheaper engine.
+// Branch 2 download engine selection. Historical notes on the old engines
+// are kept below for reference; only the native engine is used now.
 //
 //   memo23  — flat ~$0.04 per file regardless of length (cheap for long
 //             shiurim; relatively expensive for short songs, and its start
@@ -38,31 +38,11 @@ export async function fetchVideoDurationSeconds(videoId, env = process.env, fetc
   return parseIsoDurationSeconds(data?.items?.[0]?.contentDetails?.duration);
 }
 
-// Returns { actor, seconds, reason }. actor is the Apify actor id to start a
-// NEW run with (an existing run's receipt keeps its own recorded actor).
-export async function pickApifyActor(videoId, env = process.env, fetchImpl = fetch) {
-  const shortActor = String(env.BRANCH2_APIFY_ACTOR_SHORT || SHORT_DEFAULT).trim();
-  const longActor = String(env.BRANCH2_APIFY_ACTOR_LONG || env.BRANCH2_APIFY_ACTOR || LONG_DEFAULT).trim();
-  // Primary engine: johnvc native audio (~$0.00001 per audio minute, original
-  // YouTube audio without re-encoding, any length). It needs no duration
-  // lookup. The flat-price long engine stays as a consent-gated backup for
-  // the rare video johnvc cannot deliver; BRANCH2_NATIVE_FALLBACK_ACTOR=none
-  // disables that backup.
-  if (String(env.BRANCH2_NATIVE_AUDIO_ENGINE || 'johnvc').toLowerCase() !== 'off') {
-    const configured = String(env.BRANCH2_NATIVE_FALLBACK_ACTOR ?? longActor).trim();
-    const fallback = !configured || configured.toLowerCase() === 'none' ? null : configured;
-    return { actor: NATIVE_ACTOR, fallback, seconds: null, reason: 'native_audio' };
-  }
-  // Routing can be turned off to force a single actor (the long one).
-  if (String(env.BRANCH2_ENGINE_ROUTING || 'on').toLowerCase() === 'off') {
-    return { actor: longActor, fallback: shortActor, seconds: null, reason: 'routing_off' };
-  }
-  const threshold = Number(env.BRANCH2_ENGINE_LENGTH_THRESHOLD_SEC || 600);
-  let seconds = null;
-  try { seconds = await fetchVideoDurationSeconds(videoId, env, fetchImpl); } catch { seconds = null; }
-  if (!Number.isFinite(seconds) || seconds <= 0) return { actor: longActor, fallback: shortActor, seconds: null, reason: 'unknown_length' };
-  // `fallback` is the OTHER engine, tried once if the primary run fails.
-  return seconds <= threshold
-    ? { actor: shortActor, fallback: longActor, seconds, reason: 'short' }
-    : { actor: longActor, fallback: shortActor, seconds, reason: 'long' };
+// Branch 2 uses ONE engine: johnvc native audio (~$0.00001 per audio minute,
+// any length, original YouTube audio). No other engine is ever started; the
+// only alternatives on failure are free native retries and the backup keys.
+// An existing run receipt keeps its own recorded actor (a run already paid
+// for is reused, never repeated).
+export async function pickApifyActor() {
+  return { actor: NATIVE_ACTOR, fallback: null, seconds: null, reason: 'native_only' };
 }
