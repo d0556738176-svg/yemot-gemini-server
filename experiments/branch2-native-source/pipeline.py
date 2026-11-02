@@ -20,9 +20,14 @@ def run(args, timeout):
     return out
 
 def inspect(path):
+    import math
+    with open(path,'rb') as f:
+        header=f.read(512).lstrip().lower()
+    if header.startswith((b'<html',b'<!doctype html',b'<?xml')):
+        raise ValueError('media_unavailable: received a document instead of audio')
     data = json.loads(run(['ffprobe','-v','error','-show_entries','format=duration:stream=codec_type','-of','json',str(path)],30))
     duration = float(data['format']['duration'])
-    if duration <= 0 or not any(s.get('codec_type') == 'audio' for s in data.get('streams',[])):
+    if not math.isfinite(duration) or duration <= 0 or not any(s.get('codec_type') == 'audio' for s in data.get('streams',[])):
         raise ValueError('missing audio or duration')
     return duration
 
