@@ -46,6 +46,9 @@ export function classifyProviderTerminal(run,lines=[]){
   // A genuine YouTube bot-wall is the only thing we treat as a true "block": it
   // will not clear by re-running the same engine, so it goes to the fast engine.
   if(/not a bot|sign in to confirm/.test(reason))return 'apify_provider_blocked';
+  // A generic actor summary calls every failed route blocked. Concrete slow
+  // download evidence must win over that wording and over incidental TLS errors.
+  if(/download too slow|download stalled|too slow to finish/.test(reason))return 'apify_provider_slow';
   // Concrete connection/TLS/read-timeout errors are network trouble reaching
   // YouTube (often transient or throttling), NOT a deliberate block — even when
   // the actor's own summary generically calls it "blocked on our side". These
@@ -58,9 +61,9 @@ export function classifyProviderTerminal(run,lines=[]){
 }
 
 // Build the Apify ad-hoc `webhooks` run-start parameter so the provider notifies
-// our server the MOMENT a download run finishes (ACTOR.RUN.SUCCEEDED). That
+// our server when a download run reaches any terminal state. That
 // inbound request wakes a spun-down free-tier Render instance exactly when the
-// file is 100% ready, so a long download (up to 2h) completes on its own without
+// result can be reconciled, including failures, without
 // keeping the server awake the whole time. The value is a URL-encoded,
 // base64-encoded JSON array (Apify's required format). The shared secret lives
 // only in a Render env var and is never logged. Returns '' when no public URL or
@@ -70,7 +73,7 @@ export function apifyWebhookQuery(env=process.env,videoId=''){
   const secret=String(env.BRANCH2_WEBHOOK_SECRET||'').trim();
   if(!base||!secret||!/^[A-Za-z0-9_-]{11}$/.test(String(videoId||'')))return '';
   const requestUrl=base+'/apify-webhook?videoId='+encodeURIComponent(videoId)+'&secret='+encodeURIComponent(secret);
-  const json=JSON.stringify([{eventTypes:['ACTOR.RUN.SUCCEEDED'],requestUrl}]);
+  const json=JSON.stringify([{eventTypes:['ACTOR.RUN.SUCCEEDED','ACTOR.RUN.FAILED','ACTOR.RUN.ABORTED','ACTOR.RUN.TIMED_OUT'],requestUrl}]);
   return '&webhooks='+encodeURIComponent(Buffer.from(json,'utf8').toString('base64'));
 }
 
@@ -199,8 +202,9 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
             if(response.ok){
               const text=await response.text();
               lines=text.slice(-100000).split('\n')
-                .filter(line=>/error|failed|timeout|timed.out|exceed|limit|killed|oom|memory|no video|no audio|unable|forbidden|403|429/i.test(line))
-                .slice(-8).map(line=>redactProviderDiagnostic(line,token));
+                .filter(line=>/error|failed|timeout|timed.out|exceed|limit|killed|oom|memory|no video|no audio|unable|forbidden|403|429|too slow|stalled/i.test(line))
+                .filter(line=>!/If there are any errors|free user, your access|LIMITED_PERMISSIONS/i.test(line))
+                .slice(-12).map(line=>redactProviderDiagnostic(line,token));
             }
           }catch{ /* diagnostics must not change billing/retry behavior */ }
           log.warn?.('[YouTube IVR] provider terminal diagnosis',{
@@ -261,4 +265,5 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
   };
 }
 export const resolveApifyAudio=createApifyResolver();
+
 

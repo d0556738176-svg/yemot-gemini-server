@@ -3910,7 +3910,7 @@ async function youtubeCallHandler(call) {
   let pendingFallbackVideo=null;
   let transcriptFailAttempts=0;
   // Provider failures where trying the OTHER (faster, costlier) engine may help.
-  const FALLBACK_ELIGIBLE=new Set(['apify_provider_timeout','apify_provider_blocked','apify_provider_network','apify_run_failed','apify_actor_failed','direct_failed','timeout']);
+  const FALLBACK_ELIGIBLE=new Set(['apify_provider_slow','apify_provider_timeout','apify_provider_blocked','apify_provider_network','apify_run_failed','apify_actor_failed','direct_failed','timeout']);
 
   const normalizeConfirm=(text)=>String(text||'').normalize('NFKC').toLowerCase()
     .replace(/[.,!?;:״"'׳]/g,' ').replace(/\s+/g,' ').trim();
@@ -4399,19 +4399,22 @@ router.get('/yemot-backup', backupCallHandler);
 router.get('/yemot-youtube', youtubeCallHandler);
 
 // Apify completion webhook. Apify POSTs here the MOMENT a download run finishes
-// (ACTOR.RUN.SUCCEEDED), which wakes a spun-down free-tier instance exactly when
-// the file is 100% ready — no 24/7 keep-alive, no pinger. We verify the shared
+// (success or failure), which wakes a spun-down free-tier instance exactly when
+// its terminal state must be reconciled. We verify the shared
 // secret (kept only in a Render env var, never logged), then run the normal
-// resume path: the provider run is already done, so resolve() polls it once,
-// sees SUCCEEDED, and finishes immediately — fetch + convert + upload to Yemot +
-// cache. Registered before app.use(router) so the IVR router cannot swallow it.
+// resume path: resolve() fetches the saved run state, diagnoses a failure or
+// retrieves a successful file for conversion, upload, verification and cache. Registered before app.use(router) so the IVR router cannot swallow it.
 app.post('/apify-webhook', (req, res) => {
   const secret = String(process.env.BRANCH2_WEBHOOK_SECRET || '').trim();
   if (!secret || String(req.query.secret || '') !== secret) { res.status(403).json({ ok: false }); return; }
   const videoId = String(req.query.videoId || '').trim();
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) { res.status(400).json({ ok: false }); return; }
-  console.info('[YouTube IVR] apify completion webhook received; finishing download now', { videoId });
-  // The run succeeded, so no fast-engine consent is needed and this returns fast.
+  const eventType=String(req.body?.eventType||'');
+  const terminalEvents=['ACTOR.RUN.SUCCEEDED','ACTOR.RUN.FAILED','ACTOR.RUN.ABORTED','ACTOR.RUN.TIMED_OUT'];
+  if(!terminalEvents.includes(eventType)){res.status(400).json({ok:false});return;}
+  console.info('[YouTube IVR] apify terminal webhook received; reconciling saved run', { videoId,eventType });
+  // Fetch the actual saved run state; the callback body is never proof of a
+  // valid file and never grants consent to the costlier engine.
   // If a job for this video is already running (a caller is on the line), the
   // existing job is reused — no duplicate work or charge.
   try { startYouTubePlaybackJob({ videoId }); }
@@ -4725,3 +4728,4 @@ app.listen(port,async()=>{
   // boot so an owner test call does not wait for it.
   if(process.env.BRANCH2_SEGMENT_TEST==='1') void import('./segmented-player.js').then(m=>m.ensureTestSource()).catch(e=>logDetailedError('Branch 2 test source',e));
 });
+

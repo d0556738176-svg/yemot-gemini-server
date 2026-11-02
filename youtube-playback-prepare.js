@@ -161,6 +161,8 @@ export async function prepareYouTubePlayback(video, deps) {
 
 // Short Hebrew explanation for the caller, chosen by failure code.
 export function playbackFailureMessage(code) {
+  if(code==='apify_provider_slow')
+    return 'ספק ההורדה עצר את הקובץ בגלל קצב הורדה נמוך או תקיעה. לא התקבל קובץ מלא. לא הופעל ניסיון נוסף באותו מנוע, כדי לשמור על המכסה.';
   if(code==='apify_provider_blocked')
     return 'מנוע ההורדה נחסם על ידי יוטיוב ולא הצליח לקבל את הסרטון. לא הופעל ניסיון נוסף בתשלום, כדי לשמור על המכסה.';
   if(code==='apify_provider_network')
@@ -185,3 +187,4 @@ export function playbackFailureMessage(code) {
     return 'הכנת ההשמעה לקחה יותר מדי זמן. אפשר לנסות שוב את אותה תוצאה, או לבחור תוצאה אחרת.';
   return 'לא הצלחתי להשמיע את התוצאה הזאת כרגע. התוצאות נשארו זמינות. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
 }
+

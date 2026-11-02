@@ -146,7 +146,7 @@ test('webhook query is attached to run start only when a public URL and secret a
  const q=apifyWebhookQuery({RENDER_EXTERNAL_URL:'https://host.onrender.com/',BRANCH2_WEBHOOK_SECRET:'shh'},id);
  assert.ok(q.startsWith('&webhooks='));
  const decoded=JSON.parse(Buffer.from(decodeURIComponent(q.split('&webhooks=')[1]),'base64').toString('utf8'));
- assert.deepEqual(decoded[0].eventTypes,['ACTOR.RUN.SUCCEEDED']);
+ assert.deepEqual(decoded[0].eventTypes,['ACTOR.RUN.SUCCEEDED','ACTOR.RUN.FAILED','ACTOR.RUN.ABORTED','ACTOR.RUN.TIMED_OUT']);
  assert.equal(decoded[0].requestUrl,'https://host.onrender.com/apify-webhook?videoId='+id+'&secret=shh');
  assert.equal(apifyWebhookQuery({RENDER_EXTERNAL_URL:'https://host.onrender.com'},id),'');
  assert.equal(apifyWebhookQuery({BRANCH2_WEBHOOK_SECRET:'shh'},id),'');
@@ -219,7 +219,7 @@ test('exhausted retries stay exhausted across days and process restarts',async()
  for(const clock of [86400000,172800000]){
   const resolve=createApifyResolver({now:()=>clock,log:quiet,fetchImpl:async(u,o)=>{
    if(o.method==='POST'){posts++;assert.fail('budget must never reset');}
-   if(u.endsWith('/log'))return new Response('ERROR download stalled; SSL connection reset');
+   if(u.endsWith('/log'))return new Response('ERROR SSL connection reset');
    return Response.json({data:{status:'FAILED'}});
   }});
   await assert.rejects(resolve(id,env,{store:f.store}),e=>e.code==='apify_provider_network');
@@ -236,3 +236,4 @@ test('local cancellation retains the receipt without starting another run',async
  const f=fixture();f.records.set(apifyReceiptPath(id),{version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'run1'});
  await assert.rejects(f.make()(id,env,{store:f.store,signal:AbortSignal.abort()}));assert.equal(f.posts(),0);
 });
+
