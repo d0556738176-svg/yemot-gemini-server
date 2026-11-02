@@ -3796,32 +3796,8 @@ async function callHandler(call) {
 // request, so preparation is never restarted or wasted.
 const youtubePlaybackJobs = new Map();
 
-// Keep-alive: Render's free tier spins an instance down after ~15 minutes with
-// no INBOUND request. A background download (especially a long video on the
-// slower flat engine) would then be frozen when the caller hangs up and no new
-// call arrives. The durable run receipt still resumes it on the next call, but
-// this lets long videos finish on their own: while any job is running, the
-// server pings its own public URL so Render keeps it awake. Best-effort; stops
-// itself once no job is running. Disable with BRANCH2_KEEPALIVE=off.
-let playbackKeepAliveTimer = null;
-function hasRunningPlaybackJob() {
-  for (const st of youtubePlaybackJobs.values()) if (st.status === 'running') return true;
-  return false;
-}
-function ensurePlaybackKeepAlive() {
-  if (String(process.env.BRANCH2_KEEPALIVE || 'on').toLowerCase() === 'off') return;
-  if (playbackKeepAliveTimer) return;
-  const base = String(process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
-  if (!base) return; // no public URL to ping (e.g. local/isolated test services)
-  const intervalMs = Math.max(60000, Number(process.env.BRANCH2_KEEPALIVE_MS || 300000));
-  playbackKeepAliveTimer = setInterval(() => {
-    if (!hasRunningPlaybackJob()) { clearInterval(playbackKeepAliveTimer); playbackKeepAliveTimer = null; return; }
-    fetch(base + '/?keepalive=1', { method: 'GET', signal: AbortSignal.timeout(10000) })
-      .then(() => console.info('[YouTube IVR] keep-alive ping (background job active)'))
-      .catch(() => {});
-  }, intervalMs);
-  playbackKeepAliveTimer.unref?.();
-}
+// Preparation owns its keep-awake lifecycle in playback-awake.js.
+// Terminal webhooks arrive externally and can wake a stopped instance.
 
 // Say the audio length right after the video's name, so the caller knows how
 // long it is before choosing to play it. Natural Hebrew: "שעה ו-23 דקות",
@@ -3860,7 +3836,6 @@ function startYouTubePlaybackJob(video, opts = {}) {
   const consentToFallback = !!opts.consentToFallback;
   const state = { status: 'running', paths: null, error: null, via: null, progress: {stage:'checking'}, startedAt: Date.now() };
   youtubePlaybackJobs.set(key, state);
-  ensurePlaybackKeepAlive();
   // Record this download as in-flight so a restart can resume it on its own.
   void addPendingPlaybackJob(key);
   // No caller AbortSignal: the job must survive across the short hold requests.
@@ -4728,4 +4703,5 @@ app.listen(port,async()=>{
   // boot so an owner test call does not wait for it.
   if(process.env.BRANCH2_SEGMENT_TEST==='1') void import('./segmented-player.js').then(m=>m.ensureTestSource()).catch(e=>logDetailedError('Branch 2 test source',e));
 });
+
 
