@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
-          python -m pip install yt-dlp==2026.10.26
+          python -m pip install 'yt-dlp[default]==2026.10.26'
           npm install --prefix upstream/backend --omit=dev --ignore-scripts --no-audit --no-fund
           mkdir -p upstream/backend/appdata/bin
           ln -s "$(command -v yt-dlp)" upstream/backend/appdata/bin/yt-dlp
