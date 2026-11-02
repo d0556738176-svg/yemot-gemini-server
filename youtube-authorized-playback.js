@@ -1,3 +1,4 @@
+import { playbackAwake } from './playback-awake.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -489,7 +490,11 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
   // The first caller's deadline signal cancels download/ffmpeg/upload so no
   // orphan work keeps running on the free instance after the call gave up.
   const report=event=>{try{options?.onProgress?.(event);}catch{ /* Progress must never interrupt audio preparation. */ }};
-  const job=build(id,fallbackUrl,options?.signal,report,consent).finally(()=>activeJobs.delete(jobKey));
+  const releaseAwake=playbackAwake.acquire();
+  const job=build(id,fallbackUrl,options?.signal,report,consent).finally(()=>{
+    activeJobs.delete(jobKey);
+    releaseAwake();
+  });
   activeJobs.set(jobKey,job);
   return job;
 }
@@ -498,4 +503,5 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
 // the same conversion and upload code as real playback, so a passing
 // self-test proves the production path, not a copy of it.
 export const _pipeline = { makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE };
+
 
