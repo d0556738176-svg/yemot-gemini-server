@@ -40,6 +40,8 @@ export async function fetchVideoDurationSeconds(videoId, env = process.env, fetc
 // Returns { actor, seconds, reason }. actor is the Apify actor id to start a
 // NEW run with (an existing run's receipt keeps its own recorded actor).
 export async function pickApifyActor(videoId, env = process.env, fetchImpl = fetch) {
+  // Native audio avoids supplier MP3 encoding and a duration API roundtrip.
+  if(String(env.BRANCH2_NATIVE_AUDIO_ENGINE||'johnvc').toLowerCase()!=='off')return {actor:'johnvc/youtube-download-api',fallback:null,seconds:null,reason:'native_audio'};
   const shortActor = String(env.BRANCH2_APIFY_ACTOR_SHORT || SHORT_DEFAULT).trim();
   const longActor = String(env.BRANCH2_APIFY_ACTOR_LONG || env.BRANCH2_APIFY_ACTOR || LONG_DEFAULT).trim();
   // Routing can be turned off to force a single actor (the long one).
