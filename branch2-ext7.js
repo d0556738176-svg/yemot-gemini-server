@@ -21,6 +21,16 @@ export const EXT7_SETTINGS = {
   control_play4: 'minus',
   control_play5: 'wait',
   control_play6: 'plus',
+  // Remember where the caller stopped, so extension 8 can return there.
+  save_last_play: 'yes',
+};
+
+// Extension 8: return to the exact place the caller last stopped listening
+// (Yemot's built-in "last_play" module; positions are saved by extension 7).
+export const EXT8_PATH = 'ivr2:/8';
+export const EXT8_SETTINGS = {
+  type: 'last_play',
+  title: 'חזרה למקום האחרון',
 };
 
 // Which video got which number; kept beside the extension 2 audio, not in /7,

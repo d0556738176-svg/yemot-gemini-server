@@ -4638,8 +4638,9 @@ async function configureYemotStructure() {
     // A failure here must never affect extension 2.
     if (String(process.env.BRANCH2_EXT7 || 'on').toLowerCase() !== 'off') {
       try {
-        const { EXT7_PATH, EXT7_SETTINGS } = await import('./branch2-ext7.js');
+        const { EXT7_PATH, EXT7_SETTINGS, EXT8_PATH, EXT8_SETTINGS } = await import('./branch2-ext7.js');
         await updateExtension(EXT7_PATH, EXT7_SETTINGS);
+        await updateExtension(EXT8_PATH, EXT8_SETTINGS);
       } catch (e) { console.warn('[Yemot automatic setup] extension 7 not configured', { message: String(e?.message || e).slice(0, 200) }); }
     }
     console.log('[Yemot automatic setup] branch-2-only mode; extensions 1 and 3 were left untouched');

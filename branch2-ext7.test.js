@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { publishToExt7, EXT7_SETTINGS } from './branch2-ext7.js';
+import { publishToExt7, EXT7_SETTINGS, EXT8_SETTINGS } from './branch2-ext7.js';
 
 function fakeIo({ failUploadOnce = false } = {}) {
   const json = new Map(), uploads = [];
@@ -61,4 +61,9 @@ test('an empty listing is not marked done', async () => {
   const f = fakeIo();
   await backfillExt7({ ...f.io, listSongDirs: async () => [] });
   assert.equal(f.json.get('ivr2:/2/youtubeaudio/ext7_backfill_v1.json'), undefined);
+});
+
+test('extension 8 returns to the last place; extension 7 saves that place', () => {
+  assert.equal(EXT8_SETTINGS.type, 'last_play');
+  assert.equal(EXT7_SETTINGS.save_last_play, 'yes');
 });
