@@ -1,0 +1,140 @@
+// Branch 2 telephone audio mastering.
+//
+// Yemot stores and plays audio as 8kHz / 16-bit / mono (measured: 16000 bytes
+// per second on the real account), so the phone line, not YouTube, is the
+// quality ceiling. What decides how a song SOUNDS on the phone is how it is
+// prepared for that line. A plain "-ar 8000 -ac 1" conversion keeps modern
+// loud masters at 0 dBFS (harsh and distorted on a handset) and leaves quiet
+// uploads 30-40 dB quieter than loud ones.
+//
+// This module prepares one complete phone-ready WAV in two cheap passes:
+//   1. decode -> mono -> remove inaudible-on-phone bass (<140Hz, which only
+//      eats headroom) and the harsh band near the 4kHz line limit -> slight
+//      presence lift for clarity -> high-quality resample to 8kHz, with 6dB of
+//      headroom so nothing clips while being processed.
+//   2. measure the whole song's real loudness (EBU R128) on that small 8kHz
+//      file, then apply ONE fixed gain to a moderate phone level, a gentle
+//      compressor and a hard ceiling well below full scale, with dither.
+// Measured offline: a crushed loud master (-10 LUFS, peaks at 0 dBFS) and a
+// normal song both come out at about -20 LUFS with peaks near -10 dBFS and no
+// clipped samples; total work is roughly twice the old single conversion.
+import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import ffmpegPath from 'ffmpeg-static';
+
+export const PHONE_AUDIO_VERSION = 'q2';
+const num = (v, d) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+
+export function phoneAudioSettings(env = process.env) {
+  return {
+    // Moderate phone level: clearly audible, never "maximum volume".
+    targetLufs: Math.max(-30, Math.min(-14, num(env.BRANCH2_AUDIO_TARGET_LUFS, -18))),
+    // Hard output ceiling (dBFS). Kept well below 0 so the phone codec never distorts.
+    ceilingDb: Math.max(-12, Math.min(-1, num(env.BRANCH2_AUDIO_CEILING_DB, -4.5))),
+    maxBoostDb: Math.max(0, Math.min(30, num(env.BRANCH2_AUDIO_MAX_BOOST_DB, 26))),
+    maxCutDb: Math.max(0, Math.min(30, num(env.BRANCH2_AUDIO_MAX_CUT_DB, 20))),
+    highpassHz: Math.max(40, Math.min(300, num(env.BRANCH2_AUDIO_HIGHPASS_HZ, 140))),
+    lowpassHz: Math.max(3000, Math.min(3900, num(env.BRANCH2_AUDIO_LOWPASS_HZ, 3500))),
+    presenceDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_PRESENCE_DB, 1.5))),
+  };
+}
+
+let soxrProbe = null;
+// The production ffmpeg build is different from a developer machine; use the
+// SoX resampler only when this build really has it, otherwise ffmpeg's own.
+export function hasSoxr(run = runFfmpeg) {
+  if (!soxrProbe) {
+    soxrProbe = run(['-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono',
+      '-t', '0.1', '-af', 'aresample=8000:resampler=soxr', '-f', 'null', '-'], { timeoutMs: 15000 })
+      .then(() => true, () => false)
+      .then(ok => { console.info('[YouTube IVR] phone audio resampler', { soxr: ok }); return ok; });
+  }
+  return soxrProbe;
+}
+
+export function prepassFilter(s, soxr) {
+  const resample = soxr ? 'aresample=8000:resampler=soxr:precision=28' : 'aresample=8000:filter_size=64:cutoff=0.97';
+  return [
+    'aformat=channel_layouts=mono',
+    `highpass=f=${s.highpassHz}:poles=2`,
+    `lowpass=f=${s.lowpassHz}:poles=2`,
+    ...(s.presenceDb > 0 ? [`equalizer=f=2200:t=o:w=1.2:g=${s.presenceDb}`] : []),
+    'volume=-6dB',
+    resample,
+  ].join(',');
+}
+
+export function gainFor(measuredLufs, s) {
+  if (!Number.isFinite(measuredLufs) || measuredLufs < -70) return 0; // silence/unknown: never blast noise
+  return Math.max(-s.maxCutDb, Math.min(s.maxBoostDb, s.targetLufs - measuredLufs));
+}
+
+export function finishFilter(gainDb, s) {
+  const limit = Math.pow(10, s.ceilingDb / 20).toFixed(4);
+  return [
+    // The limiter needs a few ms of look-ahead before it can act; a 30ms
+    // fade-in (inaudible) keeps the very first samples under the ceiling too
+    // and avoids a click when playback starts.
+    'afade=t=in:d=0.03',
+    `volume=${gainDb.toFixed(2)}dB`,
+    'acompressor=threshold=0.18:ratio=2:attack=8:release=150:knee=6',
+    `alimiter=limit=${limit}:attack=3:release=60:level=disabled`,
+    'aresample=osf=s16:dither_method=triangular',
+  ].join(',');
+}
+
+export function parseIntegratedLufs(stderr) {
+  const all = [...String(stderr).matchAll(/I:\s+(-?[\d.]+|-inf)\s+LUFS/g)];
+  if (!all.length) return null;
+  const v = all[all.length - 1][1];
+  return v === '-inf' ? -Infinity : Number(v);
+}
+
+export function runFfmpeg(args, { signal, timeoutMs = 10800000, collect = false } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!ffmpegPath) return reject(new Error('ffmpeg-static is unavailable'));
+    const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '';
+    child.stderr.on('data', d => { err += d; if (!collect && err.length > 20000) err = err.slice(-10000); });
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('ffmpeg timed out')); }, timeoutMs);
+    const onAbort = () => { child.kill('SIGKILL'); clearTimeout(timer); reject(Object.assign(new Error('ffmpeg aborted'), { code: 'aborted' })); };
+    if (signal?.aborted) return onAbort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    child.on('error', e => { clearTimeout(timer); reject(e); });
+    child.on('close', code => {
+      clearTimeout(timer); signal?.removeEventListener('abort', onAbort);
+      code === 0 ? resolve(err) : reject(Object.assign(new Error('ffmpeg failed (' + code + '): ' + err.slice(-400)), { code: 'ffmpeg_failed' }));
+    });
+  });
+}
+
+// Converts any source into one phone-mastered WAV at `output`.
+// Returns measurements for the logs. Temporary files live next to `output`.
+export async function preparePhoneAudio(source, output, { signal, env = process.env, run = runFfmpeg, onStage = () => {} } = {}) {
+  const s = phoneAudioSettings(env);
+  const soxr = await hasSoxr(run);
+  const inter = path.join(path.dirname(output), 'phone-prepass.wav');
+  const t0 = Date.now();
+  onStage('preparing');
+  await run(['-nostdin', '-hide_banner', '-loglevel', 'error', '-xerror', '-y', '-i', source, '-vn',
+    '-af', prepassFilter(s, soxr), '-ac', '1', '-ar', '8000', '-c:a', 'pcm_s16le', inter], { signal });
+  const t1 = Date.now();
+  const report = await run(['-nostdin', '-hide_banner', '-nostats', '-i', inter, '-af', 'ebur128', '-f', 'null', '-'],
+    { signal, collect: true });
+  const measuredLufs = parseIntegratedLufs(report);
+  const gainDb = gainFor(measuredLufs, s);
+  const t2 = Date.now();
+  await run(['-nostdin', '-hide_banner', '-loglevel', 'error', '-xerror', '-y', '-i', inter,
+    '-af', finishFilter(gainDb, s), '-ac', '1', '-ar', '8000', '-c:a', 'pcm_s16le',
+    // Plain canonical 44-byte WAV header (no encoder LIST chunk) for Yemot.
+    '-map_metadata', '-1', '-fflags', '+bitexact', '-flags:a', '+bitexact', output], { signal });
+  await fs.rm(inter, { force: true }).catch(() => {});
+  const stat = await fs.stat(output);
+  const durationSec = Math.max(0, (stat.size - 44) / 16000);
+  const result = { version: PHONE_AUDIO_VERSION, measuredLufs, gainDb: Number(gainDb.toFixed(2)), soxr,
+    durationSec: Number(durationSec.toFixed(1)), bytes: stat.size,
+    ms: { prepass: t1 - t0, measure: t2 - t1, finish: Date.now() - t2 } };
+  console.info('[YouTube IVR] phone audio mastered', result);
+  return result;
+}

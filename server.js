@@ -4005,6 +4005,28 @@ async function youtubeCallHandler(call) {
       }
       transcriptFailAttempts=0;
 
+      // Owner's listening test: the same excerpt in the old conversion and the
+      // new phone mastering, back to back. Plays only once both files exist.
+      if(/^בדיק[הת]\s+(?:ה)?איכות/u.test(normalizeConfirm(transcript))) {
+        const {AB_OLD_PATH,AB_NEW_PATH}=await import('./branch2-audio-ab.js');
+        const {_pipeline}=await import('./youtube-authorized-playback.js');
+        const {verifiedAudioFile}=await import('./youtube-audio-cache.js');
+        const [a,b]=await Promise.all([AB_OLD_PATH,AB_NEW_PATH].map(p=>
+          _pipeline.getYemotFile('ivr2:'+p+'.wav').then(verifiedAudioFile,()=>false)));
+        if(a&&b){
+          console.info('[YouTube IVR] owner audio quality A/B test');
+          return call.id_list_message([
+            {type:'text',data:'בדיקת איכות. דוגמה ראשונה, ההמרה הקודמת.'},
+            {type:'file',data:AB_OLD_PATH},
+            {type:'text',data:'דוגמה שנייה, אותו קטע בהמרה החדשה.'},
+            {type:'file',data:AB_NEW_PATH},
+            {type:'text',data:'סוף בדיקת האיכות.'}
+          ],{removeInvalidChars:true});
+        }
+        nextPrompt='קבצי בדיקת האיכות עדיין בהכנה. נסה שוב בעוד כמה דקות, או אמור חיפוש חדש.';
+        continue;
+      }
+
       // Owner's playback test: plays a file the self-test uploaded, through
       // the same id_list_message path real playback uses. Active only while
       // BRANCH2_SELFTEST_PLAY_PATH is set; never reached by normal callers.
@@ -4689,6 +4711,10 @@ app.listen(port,async()=>{
   void import('./branch2-sample-inspect.js')
     .then(m=>m.runSampleInspect())
     .catch(e=>logDetailedError('Branch 2 sample inspect',e));
+  // Listening test files (old vs new phone mastering); once per version.
+  if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
+    .then(m=>m.runBranch2AudioAB())
+    .catch(e=>logDetailedError('Branch 2 audio A/B',e));
   // Isolated Apify probe; no-op unless BRANCH2_APIFY_TEST_ID set.
   void import('./branch2-apify-selftest.js')
     .then(m=>m.runBranch2ApifySelfTest())

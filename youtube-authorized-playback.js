@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { playbackAwake } from './playback-awake.js';
 import fs from 'node:fs/promises';
+import { openAsBlob } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -8,6 +9,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { downloadVisionAudio } from './vision-audio.mjs';
 import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID } from './youtube-apify-source.js';
 import { pickApifyActor } from './youtube-engine-select.js';
+import { preparePhoneAudio, PHONE_AUDIO_VERSION } from './youtube-phone-audio.js';
 
 import { createAudioCache, audioCachePaths, verifiedAudioFile } from './youtube-audio-cache.js';
 
@@ -205,17 +207,22 @@ async function makeChunks(source, dir, signal=undefined, onChunk=undefined) {
   }
 }
 
-async function uploadToYemot(filePath, remotePath) {
-  const buffer=await fs.readFile(filePath);
+async function uploadToYemot(filePath, remotePath, signal=undefined) {
+  // File-backed Blob: a long song is streamed from disk, never held in memory.
+  const blob=await openAsBlob(filePath,{type:'audio/wav'});
+  const bytes=blob.size;
+  // ~250KB/s worst case, never less than the normal short-file timeout.
+  const timeoutMs=Math.max(UPLOAD_TIMEOUT_MS,Math.ceil(bytes/250000)*1000);
   const url=new URL(YEMOT_UPLOAD_URL);
   url.searchParams.set('token',yemotApiKey());
   url.searchParams.set('path',remotePath);
   url.searchParams.set('convertAudio','1');
   url.searchParams.set('autoNumbering','false');
   const form=new FormData();
-  form.append('file',new Blob([buffer],{type:'audio/wav'}),path.basename(filePath));
-  console.info('[YouTube IVR] playback step 6: uploading to Yemot', { remotePath, bytes: buffer.length });
-  const response=await fetch(url,{method:'POST',body:form,signal:AbortSignal.timeout(UPLOAD_TIMEOUT_MS)});
+  form.append('file',blob,path.basename(filePath));
+  console.info('[YouTube IVR] playback step 6: uploading to Yemot', { remotePath, bytes, timeoutMs });
+  const timeout=AbortSignal.timeout(timeoutMs);
+  const response=await fetch(url,{method:'POST',body:form,signal:signal?AbortSignal.any([signal,timeout]):timeout});
   const body=await response.text();
   if(!response.ok) throw new Error('Yemot UploadFile HTTP '+response.status+': '+body.slice(0,300));
   let result;
@@ -247,18 +254,25 @@ function yemotFileReady(data) {
   return verifiedAudioFile(data);
 }
 
-async function ensureUploadedAndVerified(filePath, remotePath) {
+// A full-length file must also have the full duration in Yemot; a shorter one
+// (interrupted earlier upload) is uploaded again instead of being trusted.
+function durationMatches(data, expectedDurationSec) {
+  if (!Number.isFinite(expectedDurationSec)) return true;
+  const d = Number(data?.file?.duration);
+  return Number.isFinite(d) ? Math.abs(d - expectedDurationSec) <= Math.max(2, expectedDurationSec * 0.01) : true;
+}
+async function ensureUploadedAndVerified(filePath, remotePath, { expectedDurationSec, signal } = {}) {
   const existing = await getYemotFile(remotePath).catch(() => null);
-  if (yemotFileReady(existing)) {
+  if (yemotFileReady(existing) && durationMatches(existing, expectedDurationSec)) {
     console.info('[YouTube IVR] cached Yemot audio verified', { remotePath });
     return;
   }
 
-  await uploadToYemot(filePath, remotePath);
+  await uploadToYemot(filePath, remotePath, signal);
 
   console.info('[YouTube IVR] playback step 8: verifying Yemot file', { remotePath });
   const verified = await getYemotFile(remotePath);
-  if (!yemotFileReady(verified)) {
+  if (!yemotFileReady(verified) || !durationMatches(verified, expectedDurationSec)) {
     throw new Error('Yemot file upload was not verified: ' + (verified?.message || 'file missing after upload'));
   }
   console.info('[YouTube IVR] Yemot audio verified', {
@@ -507,13 +521,37 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     }
     signal?.throwIfAborted();
     onProgress({stage:'converting'});
-    await makeChunks(source,chunksDir,signal,async(file,index,info)=>{
-      signal?.throwIfAborted();
-      const playbackPath='/2/youtubeaudio/'+Buffer.from(id,'utf8').toString('hex')+'/'+String(index+1).padStart(3,'0');
-      await ensureUploadedAndVerified(file,'ivr2:'+playbackPath+'.wav');
-      paths.push(playbackPath);
-      onProgress({stage:info.converting?'preparing':'uploading',completed:paths.length,total:info.total});
-    });
+    // Master the whole song for the phone line once (level, clarity, no
+    // clipping), then upload it to Yemot as ONE complete file.
+    const phone=path.join(temp,'phone.wav');
+    const mastered=await preparePhoneAudio(source,phone,{signal});
+    await fs.rm(source,{force:true}).catch(()=>{}); // free disk before upload
+    const dir='/2/youtubeaudio/'+Buffer.from(id,'utf8').toString('hex');
+    const fullPath=dir+'/'+PHONE_AUDIO_VERSION+'full';
+    const singleMaxBytes=Math.max(1,Number(process.env.BRANCH2_SINGLE_FILE_MAX_MB)||1024)*1024*1024;
+    let single=false;
+    if(mastered.bytes<=singleMaxBytes){
+      try{
+        onProgress({stage:'uploading',completed:0,total:1});
+        const t=Date.now();
+        await ensureUploadedAndVerified(phone,'ivr2:'+fullPath+'.wav',{expectedDurationSec:mastered.durationSec,signal});
+        paths.push(fullPath);single=true;
+        console.info('[YouTube IVR] single full file uploaded',{videoId:id,bytes:mastered.bytes,durationSec:mastered.durationSec,uploadMs:Date.now()-t});
+      }catch(e){
+        if(signal?.aborted)throw e;
+        console.warn('[YouTube IVR] single full file not accepted; uploading in pieces instead',{videoId:id,bytes:mastered.bytes,error:String(e?.message||e).slice(0,200)});
+      }
+    }
+    if(!single){
+      // Same mastered audio, split only because Yemot refused the full file.
+      await makeChunks(phone,chunksDir,signal,async(file,index,info)=>{
+        signal?.throwIfAborted();
+        const playbackPath=dir+'/'+PHONE_AUDIO_VERSION+'_'+String(index+1).padStart(3,'0');
+        await ensureUploadedAndVerified(file,'ivr2:'+playbackPath+'.wav',{signal});
+        paths.push(playbackPath);
+        onProgress({stage:info.converting?'preparing':'uploading',completed:paths.length,total:info.total});
+      });
+    }
     onProgress({stage:'verifying',completed:paths.length,total:paths.length});
     await audioCache.save(id,paths);
     return {playbackPaths:paths,chunkCount:paths.length};
@@ -543,7 +581,7 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
 // Narrow exports for the branch 2 self-test (branch2-selftest.js). They use
 // the same conversion and upload code as real playback, so a passing
 // self-test proves the production path, not a copy of it.
-export const _pipeline = { makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE };
+export const _pipeline = { makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE, ensureUploadedAndVerified, getYemotFile, transferProviderFile, readCacheJson, writeCacheJson };
 
 
 
