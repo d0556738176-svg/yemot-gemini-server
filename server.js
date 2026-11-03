@@ -3861,7 +3861,9 @@ function startYouTubePlaybackJob(video, opts = {}) {
     // 'apify_pending' is not a real failure — the provider run is still working.
     // Keep it in the pending index so a restart resumes it on its own.
     if (code !== 'apify_pending') void removePendingPlaybackJob(key);
-    console.warn('[YouTube IVR] background job failed', { videoId: key, code, prepMs: Date.now() - state.startedAt });
+    console.warn('[YouTube IVR] background job failed', { videoId: key, code, prepMs: Date.now() - state.startedAt,
+      // The real reason, so a failure is never just "unknown" in the logs.
+      message: String(error?.message || error || '').replace(/token=[^&\s]+/g, 'token=[redacted]').slice(0, 240) });
     // Let a later retry of the same video start fresh rather than replay a failure.
     const timer = setTimeout(() => { if (youtubePlaybackJobs.get(key) === state) youtubePlaybackJobs.delete(key); }, 2000);
     timer.unref?.();

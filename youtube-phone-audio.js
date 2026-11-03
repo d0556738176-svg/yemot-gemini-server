@@ -23,7 +23,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 
-export const PHONE_AUDIO_VERSION = 'q2';
+// q3: downmix-correct order and in-pass loudness measurement (q2 was the first test build).
+export const PHONE_AUDIO_VERSION = 'q3';
 const num = (v, d) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
 
 export function phoneAudioSettings(env = process.env) {
@@ -32,7 +33,7 @@ export function phoneAudioSettings(env = process.env) {
     targetLufs: Math.max(-30, Math.min(-14, num(env.BRANCH2_AUDIO_TARGET_LUFS, -18))),
     // Hard output ceiling (dBFS). Kept well below 0 so the phone codec never distorts.
     ceilingDb: Math.max(-12, Math.min(-1, num(env.BRANCH2_AUDIO_CEILING_DB, -4.5))),
-    maxBoostDb: Math.max(0, Math.min(30, num(env.BRANCH2_AUDIO_MAX_BOOST_DB, 26))),
+    maxBoostDb: Math.max(0, Math.min(32, num(env.BRANCH2_AUDIO_MAX_BOOST_DB, 29))),
     maxCutDb: Math.max(0, Math.min(30, num(env.BRANCH2_AUDIO_MAX_CUT_DB, 20))),
     highpassHz: Math.max(40, Math.min(300, num(env.BRANCH2_AUDIO_HIGHPASS_HZ, 140))),
     lowpassHz: Math.max(3000, Math.min(3900, num(env.BRANCH2_AUDIO_LOWPASS_HZ, 3500))),
@@ -53,15 +54,23 @@ export function hasSoxr(run = runFfmpeg) {
   return soxrProbe;
 }
 
+// Downmix and drop to 8kHz first (filters then run on 6x fewer samples), and
+// measure loudness (ebur128) in the same pass, so the only real cost is the
+// source decode the old conversion paid anyway.
 export function prepassFilter(s, soxr) {
-  const resample = soxr ? 'aresample=8000:resampler=soxr:precision=28' : 'aresample=8000:filter_size=64:cutoff=0.97';
+  const resample = soxr ? 'aresample=8000:resampler=soxr' : 'aresample=8000:filter_size=64:cutoff=0.97';
   return [
+    // aresample must directly follow aformat: it then performs the downmix as
+    // a true average (L+R)/2. With any filter in between, ffmpeg inserts an
+    // automatic converter that sums 3dB hotter (measured), which only risks
+    // overload on loud masters.
     'aformat=channel_layouts=mono',
+    resample,
     `highpass=f=${s.highpassHz}:poles=2`,
     `lowpass=f=${s.lowpassHz}:poles=2`,
     ...(s.presenceDb > 0 ? [`equalizer=f=2200:t=o:w=1.2:g=${s.presenceDb}`] : []),
     'volume=-6dB',
-    resample,
+    'ebur128=framelog=verbose', // summary only; no per-frame lines
   ].join(',');
 }
 
@@ -117,11 +126,10 @@ export async function preparePhoneAudio(source, output, { signal, env = process.
   const inter = path.join(path.dirname(output), 'phone-prepass.wav');
   const t0 = Date.now();
   onStage('preparing');
-  await run(['-nostdin', '-hide_banner', '-loglevel', 'error', '-xerror', '-y', '-i', source, '-vn',
-    '-af', prepassFilter(s, soxr), '-ac', '1', '-ar', '8000', '-c:a', 'pcm_s16le', inter], { signal });
+  // ebur128 prints its summary at info level, so no -loglevel error here.
+  const report = await run(['-nostdin', '-hide_banner', '-nostats', '-xerror', '-y', '-i', source, '-vn',
+    '-af', prepassFilter(s, soxr), '-ac', '1', '-ar', '8000', '-c:a', 'pcm_s16le', inter], { signal, collect: true });
   const t1 = Date.now();
-  const report = await run(['-nostdin', '-hide_banner', '-nostats', '-i', inter, '-af', 'ebur128', '-f', 'null', '-'],
-    { signal, collect: true });
   const measuredLufs = parseIntegratedLufs(report);
   const gainDb = gainFor(measuredLufs, s);
   const t2 = Date.now();

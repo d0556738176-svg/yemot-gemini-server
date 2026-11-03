@@ -35,6 +35,16 @@ export async function runBranch2ApifySelfTest(env = process.env) {
     const f0 = Date.now();
     try {
       const { downloadAuthorizedAudioToYemot, _pipeline } = await import('./youtube-authorized-playback.js');
+      // The free instance restarts after every idle period. A full re-download
+      // and re-master of a 1-hour video on each wake-up would compete with the
+      // first real caller for CPU, so this proof runs once per audio pipeline
+      // version and video (marker saved in Yemot after success).
+      const { PHONE_AUDIO_VERSION } = await import('./youtube-phone-audio.js');
+      const marker = 'ivr2:/2/selftest/fullchain_' + PHONE_AUDIO_VERSION + '_' + Buffer.from(videoId).toString('hex') + '.json';
+      if (env.BRANCH2_FULLCHAIN_FORCE !== '1' && await _pipeline.readCacheJson(marker).catch(() => null)) {
+        console.info(TAG, 'FULL CHAIN already proven for this pipeline version; skipped', { videoId, version: PHONE_AUDIO_VERSION });
+        return;
+      }
       const playback = await downloadAuthorizedAudioToYemot(videoId, {});
       // Verify each uploaded chunk and sum durations from Yemot itself.
       let totalDuration = 0; const perChunk = [];
@@ -49,6 +59,8 @@ export async function runBranch2ApifySelfTest(env = process.env) {
       }
       console.info(TAG, 'FULL CHAIN ready', { chunkCount: playback.playbackPaths.length, totalDurationSec: +totalDuration.toFixed(1), perChunkSec: perChunk.map(x => +x.toFixed(0)).join(','), firstPath: playback.playbackPaths[0], ms: Date.now() - f0 });
       console.info(TAG, 'summary', JSON.stringify({ fullChain: true, chunkCount: playback.playbackPaths.length, totalDurationSec: +totalDuration.toFixed(1), gaplessReady: true, runId }));
+      await _pipeline.writeCacheJson(marker, { videoId, version: PHONE_AUDIO_VERSION, chunkCount: playback.playbackPaths.length,
+        totalDurationSec: +totalDuration.toFixed(1), ms: Date.now() - f0, at: new Date().toISOString() }).catch(() => {});
     } catch (e) {
       console.warn(TAG, 'FULL CHAIN failed', { code: e?.code || 'error', message: String(e?.message || e).slice(0, 180), ms: Date.now() - f0 });
       console.info(TAG, 'summary', JSON.stringify({ fullChain: true, ready: false, runId }));
