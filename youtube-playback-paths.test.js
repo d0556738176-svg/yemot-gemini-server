@@ -38,3 +38,11 @@ test('worker 502 still falls back to safe direct paths',async()=>{
  const result=await prepareYouTubePlayback(video,{env,log:silent,fetchImpl:async()=>({ok:false,status:502,json:async()=>{throw Error('not JSON');}}),downloadToYemot:async()=>({playbackPaths:[safe]})});
  assert.equal(result.via,'direct');assert.equal(result.attempts[0].code,'worker_unreachable');
 });
+
+import { validPlaybackPaths as validPathsForTitles } from './youtube-playback-prepare.js';
+test('Hebrew-titled playback paths are accepted; unsafe ones still rejected', () => {
+  assert.equal(validPathsForTitles(['/2/youtubeaudio/abc/מוטי_שטיינמץ_אבינו_מלכנו_Official_Video']), true);
+  assert.equal(validPathsForTitles(['/2/youtubeaudio/abc/1_Hour_of_Animals']), true);
+  for (const bad of ['/2/a/b-c', '/2/a/b.c', '/2/a/b c', '/2/a/../x', '2/a/b', '/2/a/b"c'])
+    assert.equal(validPathsForTitles([bad]), false, bad);
+});

@@ -1,0 +1,65 @@
+// Facts about a selected video, spoken before the caller confirms playback:
+// length, how long ago it was published, and how many views it has.
+// One YouTube Data API call (videos.list, 1 quota unit) returns all three.
+import { parseIsoDurationSeconds } from './youtube-engine-select.js';
+
+export async function fetchVideoFacts(videoId, env = process.env, fetchImpl = fetch) {
+  const key = String(env.YOUTUBE_API_KEY || '').trim();
+  if (!key || !/^[A-Za-z0-9_-]{11}$/.test(String(videoId || ''))) return null;
+  const url = new URL('https://www.googleapis.com/youtube/v3/videos');
+  url.searchParams.set('part', 'contentDetails,snippet,statistics');
+  url.searchParams.set('id', String(videoId));
+  url.searchParams.set('key', key);
+  const r = await fetchImpl(url, { signal: AbortSignal.timeout(Number(env.YOUTUBE_DURATION_TIMEOUT_MS || 8000)) });
+  if (!r.ok) return null;
+  const item = (await r.json().catch(() => null))?.items?.[0];
+  if (!item) return null;
+  const views = Number(item.statistics?.viewCount);
+  return {
+    durationSeconds: parseIsoDurationSeconds(item.contentDetails?.duration),
+    publishedAt: item.snippet?.publishedAt || null,
+    // A channel can hide its view count; then nothing is said about views.
+    viewCount: Number.isFinite(views) && views >= 0 ? views : null,
+  };
+}
+
+// "לפני 3 שנים", "לפני חודשיים", "אתמול", "היום" — natural spoken Hebrew.
+export function publishedAgoHebrew(publishedAt, now = Date.now()) {
+  const t = Date.parse(publishedAt || '');
+  if (!Number.isFinite(t) || t > now + 3600000) return '';
+  const hours = (now - t) / 3600000, days = hours / 24;
+  const pick = (n, one, two, many) => n === 1 ? one : n === 2 ? two : n + ' ' + many;
+  if (hours < 1) return 'לפני פחות משעה';
+  if (hours < 24) return 'לפני ' + pick(Math.floor(hours), 'שעה', 'שעתיים', 'שעות');
+  if (days < 2) return 'אתמול';
+  if (days < 7) return 'לפני ' + pick(Math.floor(days), 'יום', 'יומיים', 'ימים');
+  if (days < 30) return 'לפני ' + pick(Math.floor(days / 7), 'שבוע', 'שבועיים', 'שבועות');
+  if (days < 365) return 'לפני ' + pick(Math.max(1, Math.floor(days / 30.44)), 'חודש', 'חודשיים', 'חודשים');
+  return 'לפני ' + pick(Math.floor(days / 365.25), 'שנה', 'שנתיים', 'שנים');
+}
+
+// Spoken view count: exact below 1,000, then rounded the way people say it
+// ("בערך 12 אלף", "בערך מיליון ושלוש מאות אלף", "בערך 45 מיליון"). No hyphens:
+// the phone text filter turns "-" into a space, which would split "כ-" apart.
+const HUNDREDS = ['', 'מאה', 'מאתיים', 'שלוש מאות', 'ארבע מאות', 'חמש מאות', 'שש מאות', 'שבע מאות', 'שמונה מאות', 'תשע מאות'];
+export function viewsHebrew(views) {
+  if (views === null || views === undefined || views === '') return '';
+  const v = Math.floor(Number(views));
+  if (!Number.isFinite(v) || v < 0) return '';
+  if (v === 0) return 'אין לו עדיין צפיות';
+  if (v === 1) return 'יש לו צפייה אחת';
+  if (v < 1000) return 'יש לו ' + v + ' צפיות';
+  if (v < 1000000) {
+    const k = Math.round(v / 1000);
+    if (k >= 1000) return viewsHebrew(1000000);
+    return 'יש לו בערך ' + (k === 1 ? 'אלף' : k === 2 ? 'אלפיים' : k + ' אלף') + ' צפיות';
+  }
+  if (v < 1000000000) {
+    const m = Math.floor(v / 1000000), rest = Math.round((v % 1000000) / 100000);
+    const mm = m === 1 ? 'מיליון' : m === 2 ? 'שני מיליון' : m + ' מיליון';
+    if (m < 10 && rest > 0 && rest < 10) return 'יש לו בערך ' + mm + ' ו' + HUNDREDS[rest] + ' אלף צפיות';
+    return 'יש לו בערך ' + mm + ' צפיות';
+  }
+  const b = Math.round(v / 1000000000);
+  return 'יש לו בערך ' + (b === 1 ? 'מיליארד' : b + ' מיליארד') + ' צפיות';
+}

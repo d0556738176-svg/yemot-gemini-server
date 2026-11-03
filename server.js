@@ -9,6 +9,7 @@ import { searchYouTubeVideos } from './youtube-ivr.js';
 import { selectedResultIndex, isMoreResultsRequest, isFreshYouTubeSearch } from './youtube-selection.js';
 import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
+import { fetchVideoFacts, publishedAgoHebrew, viewsHebrew } from './youtube-video-facts.js';
 import { downloadAuthorizedAudioToYemot, lookupCachedYouTubeAudio, saveCachedYouTubeAudio, addPendingPlaybackJob, removePendingPlaybackJob, listPendingPlaybackJobs } from './youtube-authorized-playback.js';
 import { apifyTokens, apifyWebhookQuery } from './youtube-apify-source.js';
 import { fetchVideoDurationSeconds } from './youtube-engine-select.js';
@@ -3813,19 +3814,31 @@ function formatAudioLengthHebrew(seconds) {
   else if (sec && h === 0) parts.push(sec + ' שניות');
   return parts.join(' ו-');
 }
-// Build the "you chose X" confirmation, appending the audio length. The duration
-// comes from the YouTube Data API and is cached on the video object so it is
-// fetched at most once. On any lookup failure the length is simply omitted —
-// it must never block or delay the confirmation prompt.
+// Build the "you chose X" confirmation: the audio length, then how long ago the
+// video was published and how many views it has. One YouTube Data API call,
+// cached on the video object so it is fetched at most once. Any lookup failure
+// just omits that fact; it must never block or delay the confirmation prompt.
 async function confirmPlaybackPrompt(video) {
   let suffix = '';
   try {
-    if (video && video.durationSeconds == null) {
-      video.durationSeconds = await fetchVideoDurationSeconds(video.videoId, process.env);
+    if (video && !video.factsLoaded) {
+      video.factsLoaded = true;
+      const facts = await fetchVideoFacts(video.videoId, process.env);
+      if (facts) {
+        if (video.durationSeconds == null) video.durationSeconds = facts.durationSeconds;
+        video.publishedAt = facts.publishedAt || video.publishedAt || null;
+        video.viewCount = facts.viewCount;
+      } else if (video.durationSeconds == null) {
+        video.durationSeconds = await fetchVideoDurationSeconds(video.videoId, process.env);
+      }
     }
     const txt = formatAudioLengthHebrew(video?.durationSeconds);
-    if (txt) suffix = ' אורך השמע ' + txt + '.';
-  } catch { /* length is optional */ }
+    if (txt) suffix += ' אורך השמע ' + txt + '.';
+    const age = publishedAgoHebrew(video?.publishedAt);
+    if (age) suffix += ' הסרטון עלה ' + age + '.';
+    const views = viewsHebrew(video?.viewCount);
+    if (views) suffix += ' ' + views + '.';
+  } catch { /* facts are optional */ }
   return 'בחרת את ' + sanitizeForYemot(video.title) + '.' + suffix + ' האם להשמיע את הסרטון הזה? אמור כן או לא.';
 }
 

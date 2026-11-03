@@ -51,7 +51,9 @@ export function classifyWorkerFailure(httpStatus, body) {
 // an arbitrary worker path, a WAV extension, or a partial valid file list.
 export function validPlaybackPaths(paths) {
   return Array.isArray(paths) && paths.length > 0 && paths.every(
-    p => typeof p === 'string' && /^\/(?:[A-Za-z0-9_]+\/)*[A-Za-z0-9_]+$/.test(p)
+    // Letters of any script (files are named after the YouTube title, often
+    // Hebrew), digits and "_" only; same rule as the audio cache.
+    p => typeof p === 'string' && /^\/(?:[\p{L}\p{N}_]+\/)*[\p{L}\p{N}_]+$/u.test(p)
   );
 }
 
