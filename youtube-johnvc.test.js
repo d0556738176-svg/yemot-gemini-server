@@ -45,9 +45,9 @@ test('native run uses standard m4a, size/length caps and a cost cap that covers 
   const result=await createApifyResolver({fetchImpl,log:quiet,sleep:async()=>{}})(id,{APIFY_TOKEN:'k1'},{actor:'johnvc/youtube-download-api',store});
   const b=calls.starts[0].body;
   assert.equal(b.format,'audio');assert.equal(b.audioFormat,'m4a');assert.equal(b.audioQuality,'standard');
-  assert.equal(b.maxMinutes,900);assert.equal(b.maxMegabytes,1024);
+  assert.equal(b.maxMinutes,720);assert.equal(b.maxMegabytes,768);
   const cap=Number(new URL(calls.starts[0].url,'https://x').searchParams.get('maxTotalChargeUsd'));
-  assert.ok(cap>=900*0.00001,'cap must cover the longest allowed video');
+  assert.ok(cap>=720*0.00001,'cap must cover the longest allowed video');
   assert.equal(new URL(result.url).searchParams.has('token'),false,'signed link needs no key');
 });
 
@@ -121,7 +121,7 @@ test('row classification and limits',()=>{
   assert.equal(classifyNativeRow({resultType:'error',errorMessage:"Sign in to confirm you're not a bot"}),'apify_provider_blocked');
   assert.equal(classifyNativeRow({resultType:'error',error:'NOT_PROCESSED'}),'apify_run_failed');
   assert.deepEqual(nativeLimits({BRANCH2_NATIVE_MAX_MINUTES:'1440',BRANCH2_MAX_SOURCE_MB:'1500'}).maxMegabytes,1500);
-  assert.ok(Number(nativeLimits({BRANCH2_NATIVE_MAX_MINUTES:'1440'}).maxCharge)>=0.0144);
+  assert.equal(nativeLimits({BRANCH2_NATIVE_MAX_MINUTES:'1440'}).maxMinutes,720,'never above the engine limit');
 });
 
 test('a video whose saved run failed on the old engine is handed to the native engine once',async()=>{
@@ -135,16 +135,18 @@ test('a video whose saved run failed on the old engine is handed to the native e
 });
 
 test('a definite start rejection (4xx) is retried once minimally, then cleared — never a stuck receipt', async () => {
-  let posts = 0; const routes = [];
+  let posts = 0; const routes = []; const bodies = [];
   let receipt = null; const store = { read: async () => receipt, write: async (_, v) => { receipt = v; } };
   const fetchImpl = async (url, opts = {}) => {
-    if (opts.method === 'POST') { posts++; routes.push(url); return Response.json({ error: { type: 'invalid-input', message: 'timeout too large' } }, { status: 400 }); }
+    if (opts.method === 'POST') { posts++; routes.push(url); bodies.push(JSON.parse(opts.body)); return Response.json({ error: { type: 'invalid-input', message: 'timeout too large' } }, { status: 400 }); }
     throw Error('unexpected ' + url);
   };
   await assert.rejects(createApifyResolver({ fetchImpl, log: quiet })(id, { APIFY_TOKEN: 'k' }, { actor: 'johnvc/youtube-download-api', store }), { code: 'apify_start_rejected' });
   assert.equal(posts, 2);
   assert.match(routes[0], /timeout=/); assert.doesNotMatch(routes[1], /timeout=/);
   assert.match(routes[1], /maxTotalChargeUsd=/);
+  assert.equal(bodies[1].maxMinutes, undefined, 'minimal retry drops optional limits');
+  assert.equal(bodies[0].maxMinutes, 720);
   assert.equal(receipt, null, 'nothing left that would block the video');
 });
 

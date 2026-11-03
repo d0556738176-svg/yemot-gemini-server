@@ -10,8 +10,11 @@ export const NATIVE_ACTOR_ID='johnvc~youtube-download-api';
 // Native audio is ~$0.00001 per delivered minute; the cap is derived from the
 // longest allowed video so a legitimate long file is never cut off mid-run.
 export function nativeLimits(env=process.env){
-  const maxMinutes=Math.max(10,Math.min(1440,Math.floor(Number(env.BRANCH2_NATIVE_MAX_MINUTES)||900)));
-  const maxMegabytes=Math.max(16,Math.min(4096,Math.floor(Number(env.BRANCH2_MAX_SOURCE_MB)||1024)));
+  // The engine REJECTS maxMinutes > 720 ("Field input.maxMinutes must be
+  // <= 720", live 03.11); 720 is also YouTube's 12-hour upload limit.
+  // 768MB is the value of the proven successful runs (12h of m4a ~690MB).
+  const maxMinutes=Math.max(10,Math.min(720,Math.floor(Number(env.BRANCH2_NATIVE_MAX_MINUTES)||720)));
+  const maxMegabytes=Math.max(16,Math.min(4096,Math.floor(Number(env.BRANCH2_MAX_SOURCE_MB)||768)));
   const maxCharge=Math.max(0.01,Number(env.BRANCH2_NATIVE_MAX_CHARGE_USD)||0,
     Math.ceil((maxMinutes*0.00001+0.002)*1000)/1000);
   return {maxMinutes,maxMegabytes,maxCharge:maxCharge.toFixed(3)};
@@ -149,7 +152,6 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       // takes over, so large videos finish on the cheap engine when possible.
       // 2 hours: every successful run so far was started with 7200s, and the
       // native engine needs ~10 min per hour of audio (so even 12h fits).
-      // A 14400s value was followed by a start rejection on 03.11.
       const runTimeoutSec=actorId===NATIVE_ACTOR_ID
         ?Math.max(600,Math.min(7200,Number(env.BRANCH2_NATIVE_RUN_TIMEOUT_SEC)||7200))
         :Math.max(300,Math.min(7200,Number(env.BRANCH2_APIFY_RUN_TIMEOUT_SEC)||7200));
@@ -185,7 +187,11 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
         // phone line is 8kHz mono, so 'standard' loses nothing audible and keeps
         // long files small enough for the free server's disk.
         const nativeQuality=String(env.BRANCH2_NATIVE_AUDIO_QUALITY||'standard').trim()==='high'?'high':'standard';
-        const payload=JSON.stringify(native?{videoUrls:[watch],format:'audio',audioFormat:'m4a',audioQuality:nativeQuality,storageProvider:'apify',metadataOnly:false,maxMinutes:limits.maxMinutes,maxMegabytes:limits.maxMegabytes}:{urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
+        // After a rejection the retry sends only the required fields, so an
+        // optional limit the engine dislikes can never stop a download.
+        const payload=JSON.stringify(native?(startRun.minimal
+          ?{videoUrls:[watch],format:'audio',audioFormat:'m4a',audioQuality:nativeQuality}
+          :{videoUrls:[watch],format:'audio',audioFormat:'m4a',audioQuality:nativeQuality,storageProvider:'apify',metadataOnly:false,maxMinutes:limits.maxMinutes,maxMegabytes:limits.maxMegabytes}):{urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
           format:'mp3',audioQuality,quality:'best',downloadSubtitles:false,metadataOnly:false,
           ...(isLongEngine?{perVideoTimeoutSecs,maxConcurrency:1}:{})});
         // Start on the account that owns the current run when it still works,
