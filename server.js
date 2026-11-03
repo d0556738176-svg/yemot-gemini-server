@@ -4634,6 +4634,14 @@ async function configureYemotStructure() {
   const configureBranch2Only = process.env.YEMOT_AUTO_CONFIGURE_BRANCH2_ONLY === 'true';
   if (configureBranch2Only) {
     await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
+    // Extension 7: the downloaded songs, newest first, with the owner's keys.
+    // A failure here must never affect extension 2.
+    if (String(process.env.BRANCH2_EXT7 || 'on').toLowerCase() !== 'off') {
+      try {
+        const { EXT7_PATH, EXT7_SETTINGS } = await import('./branch2-ext7.js');
+        await updateExtension(EXT7_PATH, EXT7_SETTINGS);
+      } catch (e) { console.warn('[Yemot automatic setup] extension 7 not configured', { message: String(e?.message || e).slice(0, 200) }); }
+    }
     console.log('[Yemot automatic setup] branch-2-only mode; extensions 1 and 3 were left untouched');
     return;
   }
@@ -4757,6 +4765,40 @@ app.listen(port,async()=>{
   void import('./branch2-sample-inspect.js')
     .then(m=>m.runSampleInspect())
     .catch(e=>logDetailedError('Branch 2 sample inspect',e));
+  // Extension 7: add songs saved before it existed (once), newest last-numbered.
+  if(String(process.env.BRANCH2_EXT7||'on').toLowerCase()!=='off') void (async()=>{
+    const ext7=await import('./branch2-ext7.js');
+    const {_pipeline:p}=await import('./youtube-authorized-playback.js');
+    const {runFfmpeg}=await import('./youtube-phone-audio.js');
+    const fsp=await import('node:fs/promises');const os=await import('node:os');const pathm=await import('node:path');
+    const {Readable}=await import('node:stream');const {pipeline}=await import('node:stream/promises');const {createWriteStream}=await import('node:fs');
+    const api=(name,params)=>{const u=new URL(p.YEMOT_API_BASE+'/'+name);u.searchParams.set('token',p.yemotApiKey());for(const [k,v] of Object.entries(params))u.searchParams.set(k,v);return u;};
+    await ext7.backfillExt7({
+      log:console,
+      readJson:p.readCacheJson, writeJson:p.writeCacheJson,
+      upload:(file,remote)=>p.uploadToYemot(file,remote),
+      async listSongDirs(){
+        const r=await fetch(api('GetIVR2Dir',{path:'ivr2:/2/youtubeaudio'}),{signal:AbortSignal.timeout(20000)});
+        const j=await r.json().catch(()=>null);
+        const dirs=(j?.dirs||[]).map(d=>String(d?.name||d?.what||'').split('/').pop()).filter(Boolean);
+        console.info('[EXT7] saved song folders found',{count:dirs.length,responseStatus:j?.responseStatus||null,keys:j?Object.keys(j).slice(0,8):null});
+        return dirs;
+      },
+      async downloadTo(remote,local){
+        const r=await fetch(api('DownloadFile',{path:remote}),{signal:AbortSignal.timeout(600000)});
+        if(!r.ok||!r.body)throw new Error('DownloadFile HTTP '+r.status);
+        await pipeline(Readable.fromWeb(r.body),createWriteStream(local));
+      },
+      async joinWavs(parts,out){
+        const list=out+'.txt';
+        await fsp.writeFile(list,parts.map(f=>"file '"+f.replace(/'/g,"'\\''")+"'").join('\n'));
+        await runFfmpeg(['-hide_banner','-loglevel','error','-y','-f','concat','-safe','0','-i',list,
+          '-ac','1','-ar','8000','-c:a','pcm_s16le','-map_metadata','-1','-fflags','+bitexact','-flags:a','+bitexact',out]);
+      },
+      tempDir:()=>fsp.mkdtemp(pathm.join(os.tmpdir(),'ext7-')),
+      removeDir:dir=>fsp.rm(dir,{recursive:true,force:true}).catch(()=>{})
+    });
+  })().catch(e=>console.warn('[EXT7] backfill failed',{message:String(e?.message||e).slice(0,200)}));
   // One-time read of a finished johnvc run log (GET only) to learn its real
   // progress output.
   if(process.env.APIFY_TOKEN) void import('./branch2-provider-log-probe.js')

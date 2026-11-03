@@ -10,6 +10,7 @@ import { downloadVisionAudio } from './vision-audio.mjs';
 import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID } from './youtube-apify-source.js';
 import { pickApifyActor } from './youtube-engine-select.js';
 import { preparePhoneAudio, PHONE_AUDIO_VERSION } from './youtube-phone-audio.js';
+import { publishToExt7 } from './branch2-ext7.js';
 
 import { createAudioCache, audioCachePaths, verifiedAudioFile, titleFileName } from './youtube-audio-cache.js';
 
@@ -488,6 +489,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
   const source=path.join(temp,id+'.source');
   const chunksDir=path.join(temp,'chunks');
   const paths=[];
+  let ext7Job=null;
   try {
     // Primary: Apify (downloads the full audio on their infra, bypassing the
     // datacenter block). Falls through to the older paths only if it fails.
@@ -561,9 +563,18 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     }
     onProgress({stage:'verifying',completed:paths.length,total:paths.length});
     await audioCache.save(id,paths);
+    // Extension 7 (newest songs first): copy the complete song there in the
+    // background, AFTER it is ready here, so playback is never delayed.
+    if(single&&String(process.env.BRANCH2_EXT7||'on').toLowerCase()!=='off'){
+      ext7Job=publishToExt7(id,phone,sourceTitle,{readJson:readCacheJson,writeJson:writeCacheJson,
+        upload:(file,remote)=>uploadToYemot(file,remote),log:console})
+        .catch(e=>console.warn('[EXT7] song not added',{videoId:id,message:String(e?.message||e).slice(0,200)}));
+    }
     return {playbackPaths:paths,chunkCount:paths.length};
   } finally {
-    await fs.rm(temp,{recursive:true,force:true}).catch(()=>{});
+    // The temporary copy is removed only after extension 7 has its copy.
+    const cleanup=()=>fs.rm(temp,{recursive:true,force:true}).catch(()=>{});
+    if(ext7Job) void ext7Job.finally(cleanup); else await cleanup();
   }
 }
 
