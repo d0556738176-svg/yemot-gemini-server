@@ -4715,6 +4715,11 @@ app.listen(port,async()=>{
   void import('./branch2-sample-inspect.js')
     .then(m=>m.runSampleInspect())
     .catch(e=>logDetailedError('Branch 2 sample inspect',e));
+  // One-time read of a finished johnvc run log (GET only) to learn its real
+  // progress output.
+  if(process.env.APIFY_TOKEN) void import('./branch2-provider-log-probe.js')
+    .then(m=>m.runProviderLogProbe())
+    .catch(e=>logDetailedError('Branch 2 provider log probe',e));
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())
