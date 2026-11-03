@@ -4010,18 +4010,20 @@ async function youtubeCallHandler(call) {
       // Owner's listening test: the same excerpt in the old conversion and the
       // new phone mastering, back to back. Plays only once both files exist.
       if(/^בדיק[הת]\s+(?:ה)?איכות/u.test(normalizeConfirm(transcript))) {
-        const {AB_OLD_PATH,AB_NEW_PATH}=await import('./branch2-audio-ab.js');
+        const {AB_MARKER}=await import('./branch2-audio-ab.js');
         const {_pipeline}=await import('./youtube-authorized-playback.js');
-        const {verifiedAudioFile}=await import('./youtube-audio-cache.js');
-        const [a,b]=await Promise.all([AB_OLD_PATH,AB_NEW_PATH].map(p=>
-          _pipeline.getYemotFile('ivr2:'+p+'.wav').then(verifiedAudioFile,()=>false)));
-        if(a&&b){
-          console.info('[YouTube IVR] owner audio quality A/B test');
+        const marker=await _pipeline.readCacheJson(AB_MARKER).catch(()=>null);
+        const paths=marker?.paths;
+        if(paths?.old&&paths?.titled){
+          console.info('[YouTube IVR] owner audio quality A/B test',paths);
           return call.id_list_message([
             {type:'text',data:'בדיקת איכות. דוגמה ראשונה, ההמרה הקודמת.'},
-            {type:'file',data:AB_OLD_PATH},
-            {type:'text',data:'דוגמה שנייה, אותו קטע בהמרה החדשה.'},
-            {type:'file',data:AB_NEW_PATH},
+            {type:'file',data:paths.old},
+            {type:'text',data:'דוגמה שנייה, ההמרה החדשה, שמורה בשם המקורי מיוטיוב.'},
+            {type:'file',data:paths.titled},
+            ...(paths.hifi?[
+              {type:'text',data:'דוגמה שלישית, איכות דיסק מלאה, בלי המרה של ימות.'},
+              {type:'file',data:paths.hifi}]:[]),
             {type:'text',data:'סוף בדיקת האיכות.'}
           ],{removeInvalidChars:true});
         }

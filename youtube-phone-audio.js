@@ -57,8 +57,9 @@ export function hasSoxr(run = runFfmpeg) {
 // Downmix and drop to 8kHz first (filters then run on 6x fewer samples), and
 // measure loudness (ebur128) in the same pass, so the only real cost is the
 // source decode the old conversion paid anyway.
-export function prepassFilter(s, soxr) {
-  const resample = soxr ? 'aresample=8000:resampler=soxr' : 'aresample=8000:filter_size=64:cutoff=0.97';
+export function prepassFilter(s, soxr, sampleRate = 8000) {
+  const phone = sampleRate <= 8000;
+  const resample = soxr ? `aresample=${sampleRate}:resampler=soxr` : `aresample=${sampleRate}:filter_size=64:cutoff=0.97`;
   return [
     // aresample must directly follow aformat: it then performs the downmix as
     // a true average (L+R)/2. With any filter in between, ffmpeg inserts an
@@ -66,9 +67,10 @@ export function prepassFilter(s, soxr) {
     // overload on loud masters.
     'aformat=channel_layouts=mono',
     resample,
-    `highpass=f=${s.highpassHz}:poles=2`,
-    `lowpass=f=${s.lowpassHz}:poles=2`,
-    ...(s.presenceDb > 0 ? [`equalizer=f=2200:t=o:w=1.2:g=${s.presenceDb}`] : []),
+    // Full-band (non-phone) rendering keeps the deep bass and the highs.
+    `highpass=f=${phone ? s.highpassHz : 30}:poles=2`,
+    ...(phone ? [`lowpass=f=${s.lowpassHz}:poles=2`] : []),
+    ...(phone && s.presenceDb > 0 ? [`equalizer=f=2200:t=o:w=1.2:g=${s.presenceDb}`] : []),
     'volume=-6dB',
     'ebur128=framelog=verbose', // summary only; no per-frame lines
   ].join(',');
@@ -120,7 +122,7 @@ export function runFfmpeg(args, { signal, timeoutMs = 10800000, collect = false 
 
 // Converts any source into one phone-mastered WAV at `output`.
 // Returns measurements for the logs. Temporary files live next to `output`.
-export async function preparePhoneAudio(source, output, { signal, env = process.env, run = runFfmpeg, onStage = () => {} } = {}) {
+export async function preparePhoneAudio(source, output, { signal, env = process.env, run = runFfmpeg, onStage = () => {}, sampleRate = 8000 } = {}) {
   const s = phoneAudioSettings(env);
   const soxr = await hasSoxr(run);
   const inter = path.join(path.dirname(output), 'phone-prepass.wav');
@@ -128,19 +130,19 @@ export async function preparePhoneAudio(source, output, { signal, env = process.
   onStage('preparing');
   // ebur128 prints its summary at info level, so no -loglevel error here.
   const report = await run(['-nostdin', '-hide_banner', '-nostats', '-xerror', '-y', '-i', source, '-vn',
-    '-af', prepassFilter(s, soxr), '-ac', '1', '-ar', '8000', '-c:a', 'pcm_s16le', inter], { signal, collect: true });
+    '-af', prepassFilter(s, soxr, sampleRate), '-ac', '1', '-ar', String(sampleRate), '-c:a', 'pcm_s16le', inter], { signal, collect: true });
   const t1 = Date.now();
   const measuredLufs = parseIntegratedLufs(report);
   const gainDb = gainFor(measuredLufs, s);
   const t2 = Date.now();
   await run(['-nostdin', '-hide_banner', '-loglevel', 'error', '-xerror', '-y', '-i', inter,
-    '-af', finishFilter(gainDb, s), '-ac', '1', '-ar', '8000', '-c:a', 'pcm_s16le',
+    '-af', finishFilter(gainDb, s), '-ac', '1', '-ar', String(sampleRate), '-c:a', 'pcm_s16le',
     // Plain canonical 44-byte WAV header (no encoder LIST chunk) for Yemot.
     '-map_metadata', '-1', '-fflags', '+bitexact', '-flags:a', '+bitexact', output], { signal });
   await fs.rm(inter, { force: true }).catch(() => {});
   const stat = await fs.stat(output);
-  const durationSec = Math.max(0, (stat.size - 44) / 16000);
-  const result = { version: PHONE_AUDIO_VERSION, measuredLufs, gainDb: Number(gainDb.toFixed(2)), soxr,
+  const durationSec = Math.max(0, (stat.size - 44) / (sampleRate * 2));
+  const result = { version: PHONE_AUDIO_VERSION, sampleRate, measuredLufs, gainDb: Number(gainDb.toFixed(2)), soxr,
     durationSec: Number(durationSec.toFixed(1)), bytes: stat.size,
     ms: { prepass: t1 - t0, measure: t2 - t1, finish: Date.now() - t2 } };
   console.info('[YouTube IVR] phone audio mastered', result);

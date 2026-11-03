@@ -54,3 +54,15 @@ export function createAudioCache({getFile,readJson,writeJson,log=console}) {
     }
   };
 }
+
+// A Yemot file name made from the original YouTube title: letters (Hebrew,
+// Latin, any script) and digits are kept, everything else (spaces, quotes,
+// slashes, emoji, punctuation) becomes a single underscore. The video's own
+// folder (hex of its id) stays the unique key, so two videos with the same
+// title never collide.
+export function titleFileName(title, max = 60) {
+  const clean = String(title || '').normalize('NFC')
+    .replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '');
+  const cut = Array.from(clean).slice(0, max).join('').replace(/_+$/, '');
+  return cut || 'audio';
+}

@@ -10,11 +10,15 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { resolveApifyAudio, NATIVE_ACTOR_ID } from './youtube-apify-source.js';
 import { preparePhoneAudio, runFfmpeg, parseIntegratedLufs, PHONE_AUDIO_VERSION } from './youtube-phone-audio.js';
+import { titleFileName } from './youtube-audio-cache.js';
 
 const TAG = '[BRANCH2_AUDIO_AB]';
 export const AB_OLD_PATH = '/2/selftest/ab_old';
 export const AB_NEW_PATH = '/2/selftest/ab_new';
-const MARKER = 'ivr2:/2/selftest/ab_' + PHONE_AUDIO_VERSION + '.json';
+export const AB_MARKER = 'ivr2:/2/selftest/ab_' + PHONE_AUDIO_VERSION + '_t2.json';
+const MARKER = AB_MARKER;
+// Hebrew file name on purpose: proves Yemot stores and plays Hebrew names.
+export const AB_HIFI_PATH = '/2/selftest/דוגמה_איכות_גבוהה';
 
 async function measure(file) {
   const r = await runFfmpeg(['-hide_banner', '-nostats', '-i', file, '-af', 'ebur128=peak=true', '-f', 'null', '-'], { collect: true });
@@ -54,10 +58,28 @@ export async function runBranch2AudioAB(env = process.env) {
     const before = { old: await measure(oldWav), new: await measure(newWav) };
     console.info(TAG, 'levels', { videoId, startSec, lenSec, old: before.old, new: before.new, gainDb: mastered.gainDb, soxr: mastered.soxr });
 
-    for (const [file, target] of [[oldWav, AB_OLD_PATH], [newWav, AB_NEW_PATH]]) {
-      await p.uploadToYemot(file, 'ivr2:' + target + '.wav');
-      const meta = await p.getYemotFile('ivr2:' + target + '.wav');
-      console.info(TAG, 'uploaded', { target, size: meta?.file?.size ?? null, duration: meta?.file?.duration ?? null });
+    // CD-quality rendering (44.1kHz, full band, same level control), sent
+    // WITHOUT Yemot conversion, to learn what Yemot really keeps and plays.
+    const hifiWav = path.join(dir, 'hifi.wav');
+    await preparePhoneAudio(excerpt, hifiWav, { env, sampleRate: 44100 });
+    // The new phone version, saved under the original YouTube title.
+    const titledPath = '/2/selftest/' + titleFileName(resolved.title || videoId);
+    const uploads = [[oldWav, AB_OLD_PATH, true], [newWav, AB_NEW_PATH, true], [newWav, titledPath, true], [hifiWav, AB_HIFI_PATH, false]];
+    const stored = {};
+    for (const [file, target, convertAudio] of uploads) {
+      const sent = (await fs.stat(file)).size;
+      try {
+        const res = await p.uploadToYemot(file, 'ivr2:' + target + '.wav', undefined, { convertAudio });
+        const meta = await p.getYemotFile('ivr2:' + target + '.wav');
+        const size = Number(meta?.file?.size), dur = Number(meta?.file?.duration);
+        stored[target] = { ok: true, size, duration: dur };
+        console.info(TAG, 'uploaded', { target, convertAudio, sentBytes: sent, storedBytes: size || null, duration: dur || null,
+          // 16000 = 8kHz/16-bit mono (phone); 88200 would mean 44.1kHz kept as sent.
+          storedBytesPerSecond: size && dur ? Math.round(size / dur) : null, convertedSize: res?.convertedSize ?? null });
+      } catch (e) {
+        stored[target] = { ok: false, error: String(e?.message || e).slice(0, 200) };
+        console.warn(TAG, 'upload rejected', { target, convertAudio, error: stored[target].error });
+      }
     }
     // Does Yemot change what we upload? If the bytes come back identical, the
     // phone plays exactly our mastering with no second conversion.
@@ -73,7 +95,9 @@ export async function runBranch2AudioAB(env = process.env) {
     const afterYemot = r.ok && back.subarray(0, 4).toString() === 'RIFF' ? await measure(backFile).catch(() => null) : null;
     console.info(TAG, 'yemot round trip', { httpOk: r.ok, sentBytes: sent.length, returnedBytes: back.length,
       identical: sha(sent) === sha(back), returnedHeader: back.subarray(0, 4).toString('latin1'), afterYemot });
-    await p.writeCacheJson(MARKER, { version: PHONE_AUDIO_VERSION, videoId, startSec, lenSec, levels: before, createdAt: new Date().toISOString() });
+    await p.writeCacheJson(MARKER, { version: PHONE_AUDIO_VERSION, videoId, startSec, lenSec, levels: before,
+      paths: { old: AB_OLD_PATH, titled: stored[titledPath]?.ok ? titledPath : AB_NEW_PATH, hifi: stored[AB_HIFI_PATH]?.ok ? AB_HIFI_PATH : null },
+      stored, createdAt: new Date().toISOString() });
     console.info(TAG, 'ready: call extension 2 and say "בדיקת איכות"');
   } catch (e) {
     console.warn(TAG, 'failed', { code: e?.code || null, message: String(e?.message || e).slice(0, 300) });

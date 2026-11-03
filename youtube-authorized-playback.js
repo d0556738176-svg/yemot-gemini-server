@@ -207,7 +207,7 @@ async function makeChunks(source, dir, signal=undefined, onChunk=undefined) {
   }
 }
 
-async function uploadToYemot(filePath, remotePath, signal=undefined) {
+async function uploadToYemot(filePath, remotePath, signal=undefined, {convertAudio=true}={}) {
   // File-backed Blob: a long song is streamed from disk, never held in memory.
   const blob=await openAsBlob(filePath,{type:'audio/wav'});
   const bytes=blob.size;
@@ -216,7 +216,7 @@ async function uploadToYemot(filePath, remotePath, signal=undefined) {
   const url=new URL(YEMOT_UPLOAD_URL);
   url.searchParams.set('token',yemotApiKey());
   url.searchParams.set('path',remotePath);
-  url.searchParams.set('convertAudio','1');
+  url.searchParams.set('convertAudio',convertAudio?'1':'0');
   url.searchParams.set('autoNumbering','false');
   const form=new FormData();
   form.append('file',blob,path.basename(filePath));
