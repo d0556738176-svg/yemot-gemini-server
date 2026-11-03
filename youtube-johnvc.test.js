@@ -133,3 +133,54 @@ test('a video whose saved run failed on the old engine is handed to the native e
   assert.equal(calls.starts.length,1);
   assert.deepEqual(receipt.triedActors,['memo23~youtube-video-downloader','johnvc~youtube-download-api']);
 });
+
+test('a definite start rejection (4xx) is retried once minimally, then cleared — never a stuck receipt', async () => {
+  let posts = 0; const routes = [];
+  let receipt = null; const store = { read: async () => receipt, write: async (_, v) => { receipt = v; } };
+  const fetchImpl = async (url, opts = {}) => {
+    if (opts.method === 'POST') { posts++; routes.push(url); return Response.json({ error: { type: 'invalid-input', message: 'timeout too large' } }, { status: 400 }); }
+    throw Error('unexpected ' + url);
+  };
+  await assert.rejects(createApifyResolver({ fetchImpl, log: quiet })(id, { APIFY_TOKEN: 'k' }, { actor: 'johnvc/youtube-download-api', store }), { code: 'apify_start_rejected' });
+  assert.equal(posts, 2);
+  assert.match(routes[0], /timeout=/); assert.doesNotMatch(routes[1], /timeout=/);
+  assert.match(routes[1], /maxTotalChargeUsd=/);
+  assert.equal(receipt, null, 'nothing left that would block the video');
+});
+
+test('a rejection followed by a successful minimal start downloads normally', async () => {
+  let posts = 0;
+  const { fetchImpl: base } = fakeApify();
+  const fetchImpl = async (url, opts = {}) => {
+    if (opts.method === 'POST' && ++posts === 1) return Response.json({ error: { type: 'invalid-input', message: 'x' } }, { status: 400 });
+    return base(url, opts);
+  };
+  const { store } = memStore();
+  const r = await createApifyResolver({ fetchImpl, log: quiet, sleep: async () => {} })(id, { APIFY_TOKEN: 'k' }, { actor: 'johnvc/youtube-download-api', store });
+  assert.equal(r.actorId, 'johnvc~youtube-download-api');
+});
+
+test('a receipt stuck in "starting" heals itself: adopt the matching run, or start cleanly when none exists', async () => {
+  const stuck = () => ({ version: 1, videoId: id, actorId: 'johnvc~youtube-download-api', state: 'starting', tokenIndex: 0, triedActors: ['johnvc~youtube-download-api'], createdAt: new Date(Date.parse('2026-11-03T00:57:45Z')).toISOString() });
+  const clock = () => Date.parse('2026-11-03T01:05:00Z');
+  // (a) no run exists -> one clean start
+  {
+    const { fetchImpl: base, calls } = fakeApify();
+    const fetchImpl = async (url, opts = {}) => url.includes('/acts/johnvc~youtube-download-api/runs?desc=1') ? Response.json({ data: { items: [] } }) : base(url, opts);
+    let receipt = stuck(); const store = { read: async () => receipt, write: async (_, v) => { receipt = v; } };
+    const r = await createApifyResolver({ fetchImpl, log: quiet, sleep: async () => {}, now: clock })(id, { APIFY_TOKEN: 'k' }, { actor: 'johnvc/youtube-download-api', store });
+    assert.equal(calls.starts.length, 1); assert.equal(r.actorId, 'johnvc~youtube-download-api');
+  }
+  // (b) a run for this video exists -> adopted, no new start
+  {
+    const { fetchImpl: base, calls } = fakeApify();
+    const fetchImpl = async (url, opts = {}) => {
+      if (url.includes('/acts/johnvc~youtube-download-api/runs?desc=1')) return Response.json({ data: { items: [{ id: 'Run1', startedAt: '2026-11-03T00:57:46Z', defaultKeyValueStoreId: 'kv1' }] } });
+      if (url.includes('/key-value-stores/kv1/records/INPUT')) return Response.json({ videoUrls: ['https://www.youtube.com/watch?v=' + id] });
+      return base(url, opts);
+    };
+    let receipt = stuck(); const store = { read: async () => receipt, write: async (_, v) => { receipt = v; } };
+    await createApifyResolver({ fetchImpl, log: quiet, sleep: async () => {}, now: clock })(id, { APIFY_TOKEN: 'k' }, { actor: 'johnvc/youtube-download-api', store });
+    assert.equal(calls.starts.length, 0); assert.equal(receipt.runId, 'Run1');
+  }
+});

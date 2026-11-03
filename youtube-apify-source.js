@@ -147,10 +147,11 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       // is tried once if a run ends FAILED/ABORTED/TIMED-OUT.
       // memo23 is slow; give it a full hour (configurable) before the fast engine
       // takes over, so large videos finish on the cheap engine when possible.
-      // A 12-hour native file took ~10 min per hour of audio in testing, so the
-      // native run gets up to 4 hours; old engines keep their 2-hour limit.
+      // 2 hours: every successful run so far was started with 7200s, and the
+      // native engine needs ~10 min per hour of audio (so even 12h fits).
+      // A 14400s value was followed by a start rejection on 03.11.
       const runTimeoutSec=actorId===NATIVE_ACTOR_ID
-        ?Math.max(600,Math.min(21600,Number(env.BRANCH2_NATIVE_RUN_TIMEOUT_SEC)||14400))
+        ?Math.max(600,Math.min(7200,Number(env.BRANCH2_NATIVE_RUN_TIMEOUT_SEC)||7200))
         :Math.max(300,Math.min(7200,Number(env.BRANCH2_APIFY_RUN_TIMEOUT_SEC)||7200));
       // Native-only: no other engine is ever started, whatever a caller passes.
       const fallbackActor=actorId===NATIVE_ACTOR_ID?null:(options.fallbackActor?String(options.fallbackActor).trim().replace('/','~'):null);
@@ -176,7 +177,10 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
         const audioQuality=isLongEngine
           ? String(env.BRANCH2_APIFY_AUDIO_QUALITY_LONG||'96').trim()
           : String(env.BRANCH2_APIFY_AUDIO_QUALITY_SHORT||env.BRANCH2_APIFY_AUDIO_QUALITY||'192').trim();
-        const route='/acts/'+useActor+'/runs?restartOnError=false&timeout='+runTimeoutSec+'&maxTotalChargeUsd='+maxCharge+apifyWebhookQuery(env,id);
+        // Minimal retry after a rejection: only the cost cap stays (safety).
+        const route=startRun.minimal
+          ? '/acts/'+useActor+'/runs?maxTotalChargeUsd='+maxCharge
+          : '/acts/'+useActor+'/runs?restartOnError=false&timeout='+runTimeoutSec+'&maxTotalChargeUsd='+maxCharge+apifyWebhookQuery(env,id);
         // Native m4a is YouTube's own audio track (no re-encode, fastest). The
         // phone line is 8kHz mono, so 'standard' loses nothing audible and keeps
         // long files small enough for the free server's disk.
@@ -200,6 +204,19 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
             continue;
           }
           const b=await r.json().catch(()=>null);
+          // A 4xx answer is a definite "no": Apify created no run. Record the
+          // exact reason, retry once with only the required parameters, and
+          // never leave a receipt that would block the video forever.
+          if(r.status>=400&&r.status<500){
+            const reason=redactProviderDiagnostic((b?.error?.type||'')+' '+(b?.error?.message||''),tokens[ti]);
+            log.warn?.('[YouTube IVR] provider rejected run start',{videoId:id,actorId:useActor,status:r.status,reason,account:ti+1,minimal:!!startRun.minimal});
+            if(!startRun.minimal){
+              startRun.minimal=true;
+              try{return await startRun(useActor,tried,attemptNo);}finally{startRun.minimal=false;}
+            }
+            await store.write(path,null).catch(()=>{});
+            throw err('apify_start_rejected','Provider rejected the download start: '+reason);
+          }
           if(!r.ok||!/^[A-Za-z0-9]+$/.test(String(b?.data?.id||'')))throw err('apify_start_uncertain','Provider run ID missing; duplicate blocked');
           token=tokens[ti]; tokenIndex=ti;
           receipt={...receipt,runId:b.data.id,state:'running'};
@@ -241,7 +258,35 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       if(!receipt){
         log.info('[YouTube IVR] provider run started',{videoId:id,actorId,runId:await startRun(actorId,[actorId])});
       }
-      if(!receipt.runId)throw err('apify_start_uncertain','Unconfirmed earlier start; duplicate download blocked');
+      if(!receipt.runId){
+        // A start that never got a run id. Look on Apify (GETs only) for a run
+        // of this video created around that time: adopt it if found; if none
+        // exists after 2 minutes, nothing was started, so start cleanly.
+        const created=Date.parse(receipt.createdAt)||0;
+        let adopted=null;
+        try{
+          const list=await api('/acts/'+receipt.actorId+'/runs?desc=1&limit=20');
+          for(const run of list?.data?.items||[]){
+            if(Date.parse(run.startedAt)<created-120000)break;
+            if(!run.defaultKeyValueStoreId)continue;
+            const input=await api('/key-value-stores/'+run.defaultKeyValueStoreId+'/records/INPUT').catch(()=>null);
+            const urls=[...(input?.videoUrls||[]),...(input?.urls||[]),input?.videoUrl,input?.url].map(String);
+            if(urls.some(u=>u.includes(id))){adopted=run;break;}
+          }
+        }catch{ /* lookup failure: fall through to the age rule */ }
+        if(adopted){
+          receipt={...receipt,runId:adopted.id,state:'running',adoptedAfterUncertainStart:true};
+          await store.write(path,receipt);
+          log.info('[YouTube IVR] uncertain start resolved: existing run adopted',{videoId:id,runId:adopted.id});
+        }else if(now()-created>120000){
+          log.info('[YouTube IVR] uncertain start resolved: no run exists, starting cleanly',{videoId:id,ageMs:now()-created});
+          const tried=Array.isArray(receipt.triedActors)?receipt.triedActors:[receipt.actorId];
+          log.info('[YouTube IVR] provider run started',{videoId:id,actorId:receipt.actorId,afterUncertain:true,
+            runId:await startRun(receipt.actorId,tried,Number.isFinite(receipt.attemptCount)?receipt.attemptCount:1)});
+        }else{
+          throw err('apify_start_uncertain','Unconfirmed earlier start; duplicate download blocked');
+        }
+      }
       if(!/^[A-Za-z0-9]+$/.test(receipt.runId))throw err('cache_invalid','Invalid saved run ID');
       // Poll long enough to cover the whole run (plus a margin for the engine
       // fallback) in one keep-alive-sustained session, so a long download finishes
