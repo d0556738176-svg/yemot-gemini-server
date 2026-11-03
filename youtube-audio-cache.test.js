@@ -58,3 +58,19 @@ test('worker success saved for later replay before result returned',async()=>{
 test('receipt write failure after worker success never causes a second download',async()=>{
  await assert.rejects(prepareYouTubePlayback({videoId:id},{env:{YOUTUBE_AUDIO_WORKER_URL:'https://worker.invalid',YOUTUBE_AUDIO_WORKER_SECRET:'test'},fetchImpl:async()=>({ok:true,status:200,json:async()=>({status:'ready',playbackPaths:paths})}),saveCached:async()=>{throw Object.assign(new Error('storage failed'),{code:'cache_write_failed'});},downloadToYemot:async()=>assert.fail('second paid download'),log:quiet}),e=>e.code==='cache_write_failed');
 });
+
+import { titleFileName } from './youtube-audio-cache.js';
+test('YouTube titles become safe Yemot file names, Hebrew kept', () => {
+  assert.equal(titleFileName('מוטי שטיינמץ - "אבינו מלכנו" | Official Video'), 'מוטי_שטיינמץ_אבינו_מלכנו_Official_Video');
+  assert.equal(titleFileName('1 Hour of Animals 🐾'), '1_Hour_of_Animals');
+  assert.equal(titleFileName(' ... '), 'audio');
+  assert.doesNotMatch(titleFileName('a.b-c"d\'e&f|g/h'), /[.\-"'&|/]/);
+});
+test('cache accepts a Hebrew title path and still rejects unsafe ones', async () => {
+  const files = new Map(); const json = new Map();
+  const cache = createAudioCache({ getFile: async p => ({ responseStatus: 'OK', file: { exists: true, size: 1000 } }),
+    readJson: async p => json.get(p) || null, writeJson: async (p, v) => json.set(p, v), log: { info() {} } });
+  await cache.save('9scnWAgV6us', ['/2/youtubeaudio/abc/שיר_בעברית_1']);
+  assert.deepEqual((await cache.lookup('9scnWAgV6us')).playbackPaths, ['/2/youtubeaudio/abc/שיר_בעברית_1']);
+  await assert.rejects(cache.save('9scnWAgV6us', ['/2/youtubeaudio/abc/bad-name']), { code: 'cache_invalid' });
+});

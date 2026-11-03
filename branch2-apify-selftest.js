@@ -40,7 +40,8 @@ export async function runBranch2ApifySelfTest(env = process.env) {
       // first real caller for CPU, so this proof runs once per audio pipeline
       // version and video (marker saved in Yemot after success).
       const { PHONE_AUDIO_VERSION } = await import('./youtube-phone-audio.js');
-      const marker = 'ivr2:/2/selftest/fullchain_' + PHONE_AUDIO_VERSION + '_' + Buffer.from(videoId).toString('hex') + '.json';
+      // '_named': one more proof once files are named after the YouTube title.
+      const marker = 'ivr2:/2/selftest/fullchain_' + PHONE_AUDIO_VERSION + '_named_' + Buffer.from(videoId).toString('hex') + '.json';
       if (env.BRANCH2_FULLCHAIN_FORCE !== '1' && await _pipeline.readCacheJson(marker).catch(() => null)) {
         console.info(TAG, 'FULL CHAIN already proven for this pipeline version; skipped', { videoId, version: PHONE_AUDIO_VERSION });
         return;

@@ -4021,9 +4021,9 @@ async function youtubeCallHandler(call) {
             {type:'file',data:paths.old},
             {type:'text',data:'דוגמה שנייה, ההמרה החדשה, שמורה בשם המקורי מיוטיוב.'},
             {type:'file',data:paths.titled},
-            ...(paths.hifi?[
-              {type:'text',data:'דוגמה שלישית, איכות דיסק מלאה, בלי המרה של ימות.'},
-              {type:'file',data:paths.hifi}]:[]),
+            ...(paths.hebrew?[
+              {type:'text',data:'דוגמה שלישית, אותה המרה חדשה, שמורה בשם בעברית.'},
+              {type:'file',data:paths.hebrew}]:[]),
             {type:'text',data:'סוף בדיקת האיכות.'}
           ],{removeInvalidChars:true});
         }

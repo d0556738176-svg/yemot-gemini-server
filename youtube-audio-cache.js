@@ -16,7 +16,8 @@ export function verifiedAudioFile(data) {
 function validSavedPaths(paths) {
   return Array.isArray(paths) && paths.length>0 && paths.length<=10000 &&
     new Set(paths).size===paths.length &&
-    paths.every(p=>typeof p==='string' && /^\/2\/(?:[A-Za-z0-9_]+\/)*[A-Za-z0-9_]+$/.test(p));
+    // Letters of any script (Hebrew titles), digits and "_" only.
+    paths.every(p=>typeof p==='string' && /^\/2\/(?:[\p{L}\p{N}_]+\/)*[\p{L}\p{N}_]+$/u.test(p));
 }
 export function createAudioCache({getFile,readJson,writeJson,log=console}) {
   return {

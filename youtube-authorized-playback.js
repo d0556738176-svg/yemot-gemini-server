@@ -11,7 +11,7 @@ import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID } f
 import { pickApifyActor } from './youtube-engine-select.js';
 import { preparePhoneAudio, PHONE_AUDIO_VERSION } from './youtube-phone-audio.js';
 
-import { createAudioCache, audioCachePaths, verifiedAudioFile } from './youtube-audio-cache.js';
+import { createAudioCache, audioCachePaths, verifiedAudioFile, titleFileName } from './youtube-audio-cache.js';
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const YEMOT_UPLOAD_URL = YEMOT_API_BASE + '/UploadFile';
@@ -261,8 +261,10 @@ function durationMatches(data, expectedDurationSec) {
   const d = Number(data?.file?.duration);
   return Number.isFinite(d) ? Math.abs(d - expectedDurationSec) <= Math.max(2, expectedDurationSec * 0.01) : true;
 }
-async function ensureUploadedAndVerified(filePath, remotePath, { expectedDurationSec, signal } = {}) {
-  const existing = await getYemotFile(remotePath).catch(() => null);
+async function ensureUploadedAndVerified(filePath, remotePath, { expectedDurationSec, signal, replace = false } = {}) {
+  // replace: the name has no version in it, so an existing file may hold an
+  // older preparation of the same video; always upload this build's audio.
+  const existing = replace ? null : await getYemotFile(remotePath).catch(() => null);
   if (yemotFileReady(existing) && durationMatches(existing, expectedDurationSec)) {
     console.info('[YouTube IVR] cached Yemot audio verified', { remotePath });
     return;
@@ -441,7 +443,7 @@ async function downloadApifySource(id, output, signal, onProgress=()=>{}, consen
   }
   onProgress({stage:'downloaded',bytes:total,totalBytes:total});
   console.info('[YouTube IVR] apify source downloaded', { videoId: id, bytes: total, title: String(resolved.title || '').slice(0, 60) });
-  return total;
+  return { bytes: total, title: resolved.title || null };
 }
 
 // Streams one stored provider file to disk, verifying length and (for native
@@ -490,9 +492,10 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     // Primary: Apify (downloads the full audio on their infra, bypassing the
     // datacenter block). Falls through to the older paths only if it fails.
     let apifyOk = false;
+    let sourceTitle = null;
     if (isApifyConfigured(process.env)) {
       try {
-        await downloadApifySource(id, source, signal, onProgress, consent);
+        ({ title: sourceTitle } = await downloadApifySource(id, source, signal, onProgress, consent));
         apifyOk = true;
       } catch (apifyError) {
         console.warn('[YouTube IVR] provider preparation stopped; no second download attempted', { videoId: id, code: apifyError?.code || 'apify_pending' });
@@ -527,14 +530,18 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     const mastered=await preparePhoneAudio(source,phone,{signal});
     await fs.rm(source,{force:true}).catch(()=>{}); // free disk before upload
     const dir='/2/youtubeaudio/'+Buffer.from(id,'utf8').toString('hex');
-    const fullPath=dir+'/'+PHONE_AUDIO_VERSION+'full';
+    // The file is named after the original YouTube title (measured 03.11:
+    // Yemot stores English and Hebrew names). The video's own folder keeps it
+    // unique. BRANCH2_TITLE_FILENAMES=off returns to the technical name.
+    const useTitle=String(process.env.BRANCH2_TITLE_FILENAMES||'on').toLowerCase()!=='off';
+    const fullPath=dir+'/'+(useTitle&&sourceTitle?titleFileName(sourceTitle):PHONE_AUDIO_VERSION+'full');
     const singleMaxBytes=Math.max(1,Number(process.env.BRANCH2_SINGLE_FILE_MAX_MB)||1024)*1024*1024;
     let single=false;
     if(mastered.bytes<=singleMaxBytes){
       try{
         onProgress({stage:'uploading',completed:0,total:1});
         const t=Date.now();
-        await ensureUploadedAndVerified(phone,'ivr2:'+fullPath+'.wav',{expectedDurationSec:mastered.durationSec,signal});
+        await ensureUploadedAndVerified(phone,'ivr2:'+fullPath+'.wav',{expectedDurationSec:mastered.durationSec,signal,replace:true});
         paths.push(fullPath);single=true;
         console.info('[YouTube IVR] single full file uploaded',{videoId:id,bytes:mastered.bytes,durationSec:mastered.durationSec,uploadMs:Date.now()-t});
       }catch(e){
