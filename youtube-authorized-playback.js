@@ -527,7 +527,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     // Master the whole song for the phone line once (level, clarity, no
     // clipping), then upload it to Yemot as ONE complete file.
     const phone=path.join(temp,'phone.wav');
-    const mastered=await preparePhoneAudio(source,phone,{signal});
+    const mastered=await preparePhoneAudio(source,phone,{signal,onPercent:percent=>onProgress({stage:'converting',percent})});
     await fs.rm(source,{force:true}).catch(()=>{}); // free disk before upload
     const dir='/2/youtubeaudio/'+Buffer.from(id,'utf8').toString('hex');
     // The file is named after the original YouTube title (measured 03.11:

@@ -3839,7 +3839,36 @@ async function confirmPlaybackPrompt(video) {
     const views = viewsHebrew(video?.viewCount);
     if (views) suffix += ' ' + views + '.';
   } catch { /* facts are optional */ }
-  return 'בחרת את ' + sanitizeForYemot(video.title) + '.' + suffix + ' האם להשמיע את הסרטון הזה? אמור כן או לא.';
+  const status = await existingPreparationStatus(video);
+  return 'בחרת את ' + sanitizeForYemot(video.title) + '.' + suffix + (status ? ' ' + status : '') + ' האם להשמיע את הסרטון הזה? אמור כן או לא.';
+}
+
+// When the caller comes back to a video that is already being prepared (for
+// example after hanging up mid-download) or is already saved, say so before
+// asking to confirm. Confirming joins the SAME job / provider run: nothing is
+// downloaded again (the job map and the durable provider receipt ensure it).
+async function existingPreparationStatus(video) {
+  const id = String(video?.videoId || '').trim();
+  const state = youtubePlaybackJobs.get(id);
+  if (state?.status === 'running') {
+    const now = progressAnnouncement(state.progress || {}, {}, Date.now());
+    const text = String(now?.text || 'ההכנה נמשכת.').replace(/\s*נא להמתין(?: על הקו)?\.?\s*$/u, '');
+    return 'הסרטון הזה כבר בהכנה מהבקשה הקודמת שלך, וההורדה לא תתחיל מחדש. המצב כרגע: ' + text;
+  }
+  if (state?.status === 'ready') return 'הסרטון הזה כבר מוכן ושמור, ויושמע מיד בלי הורדה נוספת.';
+  try {
+    // Bounded: a slow storage check must never delay the confirmation prompt.
+    const cached = await Promise.race([lookupCachedYouTubeAudio(id), new Promise(r => setTimeout(() => r(null), 2500))]);
+    if (cached?.playbackPaths?.length) return 'הסרטון הזה כבר שמור במערכת, ויושמע מיד בלי הורדה נוספת.';
+    // No job in memory (e.g. the server restarted) but the engine run is
+    // still saved as running: confirming continues that same run.
+    const { _pipeline } = await import('./youtube-authorized-playback.js');
+    const { apifyReceiptPath } = await import('./youtube-apify-source.js');
+    const receipt = await Promise.race([_pipeline.readCacheJson('ivr2:' + apifyReceiptPath(id)).catch(() => null), new Promise(r => setTimeout(() => r(null), 2500))]);
+    if (receipt?.runId && receipt.state === 'running')
+      return 'ההורדה של הסרטון הזה כבר רצה במנוע מהבקשה הקודמת שלך. אם תאשר, אמשיך מאותה הורדה בלי להתחיל מחדש.';
+  } catch { /* status is optional */ }
+  return '';
 }
 
 function startYouTubePlaybackJob(video, opts = {}) {

@@ -102,12 +102,26 @@ export function parseIntegratedLufs(stderr) {
   return v === '-inf' ? -Infinity : Number(v);
 }
 
-export function runFfmpeg(args, { signal, timeoutMs = 10800000, collect = false } = {}) {
+// onTime(seconds, inputDurationSeconds|null) receives ffmpeg's real position in
+// the file when "-progress pipe:2" is in args (measured, never estimated).
+export function runFfmpeg(args, { signal, timeoutMs = 10800000, collect = false, onTime } = {}) {
   return new Promise((resolve, reject) => {
     if (!ffmpegPath) return reject(new Error('ffmpeg-static is unavailable'));
     const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    let err = '';
-    child.stderr.on('data', d => { err += d; if (!collect && err.length > 20000) err = err.slice(-10000); });
+    let err = '', partial = '', inputDuration = null;
+    child.stderr.on('data', d => {
+      partial += d;
+      const lines = partial.split(/\r?\n/); partial = lines.pop();
+      for (const line of lines) {
+        const t = line.match(/^out_time_(?:us|ms)=(\d+)$/);
+        if (t) { try { onTime?.(Number(t[1]) / 1e6, inputDuration); } catch {} continue; }
+        if (/^[a-z_]+=\S*$/.test(line)) continue; // other -progress keys
+        const dur = inputDuration === null && line.match(/Duration:\s+(\d+):(\d\d):(\d\d(?:\.\d+)?)/);
+        if (dur) inputDuration = Number(dur[1]) * 3600 + Number(dur[2]) * 60 + Number(dur[3]);
+        err += line + '\n';
+        if (!collect && err.length > 20000) err = err.slice(-10000);
+      }
+    });
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('ffmpeg timed out')); }, timeoutMs);
     const onAbort = () => { child.kill('SIGKILL'); clearTimeout(timer); reject(Object.assign(new Error('ffmpeg aborted'), { code: 'aborted' })); };
     if (signal?.aborted) return onAbort();
@@ -115,6 +129,7 @@ export function runFfmpeg(args, { signal, timeoutMs = 10800000, collect = false 
     child.on('error', e => { clearTimeout(timer); reject(e); });
     child.on('close', code => {
       clearTimeout(timer); signal?.removeEventListener('abort', onAbort);
+      err += partial;
       code === 0 ? resolve(err) : reject(Object.assign(new Error('ffmpeg failed (' + code + '): ' + err.slice(-400)), { code: 'ffmpeg_failed' }));
     });
   });
@@ -122,23 +137,33 @@ export function runFfmpeg(args, { signal, timeoutMs = 10800000, collect = false 
 
 // Converts any source into one phone-mastered WAV at `output`.
 // Returns measurements for the logs. Temporary files live next to `output`.
-export async function preparePhoneAudio(source, output, { signal, env = process.env, run = runFfmpeg, onStage = () => {}, sampleRate = 8000 } = {}) {
+export async function preparePhoneAudio(source, output, { signal, env = process.env, run = runFfmpeg, onStage = () => {}, sampleRate = 8000, onPercent = () => {} } = {}) {
   const s = phoneAudioSettings(env);
   const soxr = await hasSoxr(run);
   const inter = path.join(path.dirname(output), 'phone-prepass.wav');
   const t0 = Date.now();
   onStage('preparing');
   // ebur128 prints its summary at info level, so no -loglevel error here.
-  const report = await run(['-nostdin', '-hide_banner', '-nostats', '-xerror', '-y', '-i', source, '-vn',
-    '-af', prepassFilter(s, soxr, sampleRate), '-ac', '1', '-ar', String(sampleRate), '-c:a', 'pcm_s16le', inter], { signal, collect: true });
+  // Real progress: ffmpeg's position in the file / the file's length. The first
+  // pass (decode + filters) is ~70% of the work, the second ~30% (measured).
+  let lastPct = -1;
+  const pct = (from, span) => (sec, dur) => {
+    if (!(dur > 0)) return;
+    const p = Math.min(99, Math.floor(from + span * Math.min(1, sec / dur)));
+    if (p > lastPct) { lastPct = p; try { onPercent(p); } catch {} }
+  };
+  const report = await run(['-nostdin', '-hide_banner', '-nostats', '-progress', 'pipe:2', '-stats_period', '2', '-xerror', '-y', '-i', source, '-vn',
+    '-af', prepassFilter(s, soxr, sampleRate), '-ac', '1', '-ar', String(sampleRate), '-c:a', 'pcm_s16le', inter], { signal, collect: true, onTime: pct(0, 70) });
   const t1 = Date.now();
   const measuredLufs = parseIntegratedLufs(report);
   const gainDb = gainFor(measuredLufs, s);
   const t2 = Date.now();
-  await run(['-nostdin', '-hide_banner', '-loglevel', 'error', '-xerror', '-y', '-i', inter,
+  const interSeconds = Math.max(0, ((await fs.stat(inter)).size - 44) / (sampleRate * 2));
+  const finishTime = pct(70, 30);
+  await run(['-nostdin', '-hide_banner', '-loglevel', 'error', '-progress', 'pipe:2', '-stats_period', '2', '-xerror', '-y', '-i', inter,
     '-af', finishFilter(gainDb, s), '-ac', '1', '-ar', String(sampleRate), '-c:a', 'pcm_s16le',
     // Plain canonical 44-byte WAV header (no encoder LIST chunk) for Yemot.
-    '-map_metadata', '-1', '-fflags', '+bitexact', '-flags:a', '+bitexact', output], { signal });
+    '-map_metadata', '-1', '-fflags', '+bitexact', '-flags:a', '+bitexact', output], { signal, onTime: sec => finishTime(sec, interSeconds) });
   await fs.rm(inter, { force: true }).catch(() => {});
   const stat = await fs.stat(output);
   const durationSec = Math.max(0, (stat.size - 44) / (sampleRate * 2));

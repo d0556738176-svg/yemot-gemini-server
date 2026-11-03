@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { parseProviderProgress, boundedLogText } from './youtube-provider-progress.js';
+import { parseProviderProgress, parseNativeAttempts, boundedLogText } from './youtube-provider-progress.js';
 // One durable run receipt per video. Never restart a paid run on a local
 // timeout, HTTP error, caller hangup or server restart.
 const API_BASE='https://api.apify.com/v2';
@@ -249,10 +249,15 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       const waitMs=Number(env.BRANCH2_APIFY_WAIT_MS)||(runTimeoutSec*1000+600000);
       const until=now()+Math.max(1000,Math.min(waitMs,8000000));
       let lastProgressPoll=-Infinity,lastProgressWrite=-Infinity,restoredProgressSent=false;
+      // Real facts only: a provider percentage when the engine prints one, and
+      // for the native engine (which prints none while downloading) the route
+      // attempts it has finished plus when the engine run really started.
+      let nativeAttempts=null,runStartedAt=null;
       function reportProvider(sample,restored=false){
         try{options.onProgress?.({stage:'provider',providerPercent:sample?.percent??null,
           providerObservedAt:sample?.observedAt||null,providerRunId:receipt.runId,
-          providerStale:restored||!!sample?.observedAt&&now()-Date.parse(sample.observedAt)>60000});}catch{}
+          providerStale:restored||!!sample?.observedAt&&now()-Date.parse(sample.observedAt)>60000,
+          providerStartedAt:runStartedAt,providerAttempts:nativeAttempts});}catch{}
       }
       async function refreshProviderProgress(){
         if(typeof options.onProgress!=='function'||now()-lastProgressPoll<30000)return;
@@ -261,7 +266,9 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
           const response=await fetchImpl(API_BASE+'/logs/'+receipt.runId+'?stream=false',{
             headers:{authorization:'Bearer '+token},signal:AbortSignal.timeout(10000)});
           if(!response.ok)throw Error('log unavailable');
-          const parsed=parseProviderProgress(await boundedLogText(response));
+          const logText=await boundedLogText(response);
+          const parsed=parseProviderProgress(logText);
+          nativeAttempts=parseNativeAttempts(logText)||nativeAttempts;
           const sample=parsed?{...parsed,runId:receipt.runId}:null;
           const previous=receipt.progress;
           reportProvider(sample);
@@ -285,6 +292,7 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
         const b=await api('/actor-runs/'+receipt.runId);
         const run=b.data;
         if(!run?.status)throw err('apify_pending','Missing run state; saved run retained');
+        if(run.startedAt)runStartedAt=run.startedAt;
         if(!terminal.has(run.status)&&run.status!=='SUCCEEDED'){
           if(!restoredProgressSent&&receipt.progress?.runId===receipt.runId)reportProvider(receipt.progress,true);
           restoredProgressSent=true;

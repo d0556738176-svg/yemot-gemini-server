@@ -8,7 +8,9 @@ export function progressAnnouncement(progress={},last={},now=Date.now()){
   const providerPercent=providerMeasured?Math.floor(progress.providerPercent):null;
   const bucket=providerMeasured?Math.floor(providerPercent/10)*10:percent===null?null:Math.floor(percent/20)*20;
   const done=Number(progress.completed)||0,count=Number(progress.total)||0;
-  const key=stage+':'+(stage==='transferring'||stage==='provider'?String(bucket)+':'+Boolean(progress.providerStale):stage==='uploading'?done:'');
+  const facts=stage==='provider'&&!providerMeasured?providerFactsKey(progress,now):'';
+  const masterPct=stage==='converting'&&Number.isFinite(Number(progress.percent))?Math.floor(Number(progress.percent)/10)*10:'';
+  const key=stage+':'+(stage==='transferring'||stage==='provider'?String(bucket)+':'+Boolean(progress.providerStale)+':'+facts:stage==='uploading'?done:stage==='converting'?masterPct:'');
   if(last.key===key&&now-last.at<35000)return null;
   // Avoid speaking every individual chunk or percentage change.
   if(last.stage===stage&&now-last.at<12000)return null;
@@ -18,14 +20,16 @@ export function progressAnnouncement(progress={},last={},now=Date.now()){
       if(providerMeasured){
         text=(progress.providerStale?'בדיווח האחרון מהמנוע הורדו ':'לפי הדיווח האחרון מהמנוע הורדו ')+providerPercent+' אחוז מקובץ המקור ביוטיוב. '+(progress.providerStale?'ממתין לעדכון חדש. ':'')+'הקובץ עדיין אינו מוכן להשמעה.';break;
       }
-      text='מנוע ההורדה מכין את קובץ השמע מיוטיוב. עדיין אין דיווח אחוזים מהמנוע. העבודה נמשכת, נא להמתין על הקו.';break;
+      text=providerFactsText(progress,now,last.stage!=='provider');break;
     case 'transferring':
       text=measured?'קובץ השמע מוכן במנוע וכעת מועבר לשרת. התקבלו '+percent+' אחוז מהקובץ. נא להמתין.'
         :'קובץ השמע מוכן במנוע וכעת מועבר לשרת. ההעברה נמשכת, נא להמתין.';break;
     case 'downloaded':
       text='הורדת קובץ השמע הושלמה במאה אחוז. כעת מכין אותו להשמעה בטלפון.';break;
     case 'converting':
-      text='הורדת קובץ השמע הושלמה במאה אחוז. כעת מכוונן את העוצמה והבהירות להשמעה נעימה בטלפון. נא להמתין.';break;
+      text=Number.isFinite(Number(progress.percent))
+        ?'מכוונן את העוצמה והבהירות להשמעה נעימה בטלפון. הושלמו '+Math.floor(Number(progress.percent))+' אחוז מהכוונון. נא להמתין.'
+        :'הורדת קובץ השמע הושלמה במאה אחוז. כעת מכוונן את העוצמה והבהירות להשמעה נעימה בטלפון. נא להמתין.';break;
     case 'preparing':
       text='כעת ממיר ומעלה את השמע במקביל. הושלמו ואומתו '+done+' חלקים. ההכנה נמשכת.';break;
     case 'uploading':
@@ -40,3 +44,29 @@ export function progressAnnouncement(progress={},last={},now=Date.now()){
   return {text,state:{key,stage,at:now}};
 }
 
+
+// Engine stage without a percentage (the native engine prints none while it
+// downloads): say only what is really known — how long the engine has been
+// working (from its own run start time) and which route attempt it is on.
+function minutesHebrew(n){return n===1?'דקה':n===2?'שתי דקות':n+' דקות';}
+const ORD=['','ראשון','שני','שלישי','רביעי','חמישי','שישי','שביעי','שמיני','תשיעי','עשירי'];
+function providerElapsedMin(progress,now){
+  const t=Date.parse(progress.providerStartedAt||'');
+  return Number.isFinite(t)&&now>=t?Math.floor((now-t)/60000):null;
+}
+export function providerFactsKey(progress,now){
+  const a=progress.providerAttempts;
+  return String(providerElapsedMin(progress,now))+':'+(a?a.current+'/'+a.blocked:'');
+}
+export function providerFactsText(progress,now=Date.now(),explain=true){
+  const parts=['מנוע ההורדה מוריד עכשיו את הסרטון מיוטיוב.'];
+  const min=providerElapsedMin(progress,now);
+  if(min!==null)parts.push(min<1?'ההורדה במנוע התחילה לפני פחות מדקה.':'ההורדה במנוע נמשכת כבר '+minutesHebrew(min)+'.');
+  const a=progress.providerAttempts;
+  if(a&&a.blocked>0&&a.last!=='ok'){
+    parts.push((a.blocked===1?'נתיב הורדה אחד נחסם':a.blocked+' נתיבי הורדה נחסמו')+' על ידי יוטיוב, והמנוע עבר לנתיב אחר.');
+    parts.push('זה הניסיון ה'+(ORD[a.current]||('מספר '+a.current))+(a.max?' מתוך '+a.max:'')+'.');
+  }
+  parts.push(explain?'המנוע הזה אינו מדווח אחוזים בזמן ההורדה, ולכן אדווח אחוזים אמיתיים מהרגע שהקובץ יגיע לשרת. נא להמתין על הקו.':'נא להמתין על הקו.');
+  return parts.join(' ');
+}

@@ -46,3 +46,14 @@ test('failed saved run does not announce an old percentage as ongoing download',
  await assert.rejects(resolve(id,{APIFY_TOKEN:'fixture'},{store:{read:async()=>({version:1,videoId:id,actorId:'memo23~youtube-video-downloader',runId:'saved',progress:{runId:'saved',percent:96}}),write:async()=>assert.fail()},onProgress:p=>seen.push(p)}));
  assert.equal(seen.length,0);
 });
+
+import { parseNativeAttempts } from './youtube-provider-progress.js';
+test('native engine attempts are read from its real log lines', () => {
+  const log = ['2026-11-02T23:26:43.565Z [apify] INFO  Result cache: inert',
+    '2026-11-02T23:26:44.753Z [apify] INFO  Fetch path: 9scnWAgV6us r0c1 attempt 1/6 status=blocked secs=1.2',
+    '2026-11-02T23:26:46.108Z [apify] INFO  Fetch path: 9scnWAgV6us r1c1 attempt 2/6 status=blocked secs=1.4'].join('\n');
+  assert.deepEqual(parseNativeAttempts(log), { finished: 2, max: 6, blocked: 2, last: 'blocked', deliveredMb: null, current: 3 });
+  const done = log + '\n2026-11-02T23:36:09.383Z [apify] INFO  Fetch path: 9scnWAgV6us r1c1 attempt 3/6 status=ok mb=21.9 secs=563.3 via=r1:21.9';
+  assert.deepEqual(parseNativeAttempts(done), { finished: 3, max: 6, blocked: 2, last: 'ok', deliveredMb: 21.9, current: 3 });
+  assert.equal(parseNativeAttempts('nothing here'), null);
+});

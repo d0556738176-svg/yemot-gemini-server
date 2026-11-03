@@ -29,3 +29,25 @@ export async function boundedLogText(response,maxBytes=2*1024*1024){
     return text+decoder.decode();
   }finally{reader.releaseLock();}
 }
+
+// The native engine (johnvc) prints no byte/percent progress while it
+// downloads. It does print one line when each download route attempt ends:
+//   "Fetch path: <id> r1c1 attempt 2/6 status=blocked secs=1.4"
+//   "Fetch path: <id> r1c1 attempt 3/6 status=ok mb=21.9 secs=563.3"
+// Those are real facts the caller can be told (never turned into a %).
+export function parseNativeAttempts(logText) {
+  let finished = 0, max = null, blocked = 0, last = null, deliveredMb = null;
+  for (const raw of String(logText || '').split(/\r?\n/)) {
+    const m = raw.match(/Fetch path:\s+\S+\s+\S+\s+attempt\s+(\d+)\/(\d+)\s+status=([a-z_]+)(?:.*?\bmb=(\d+(?:\.\d+)?))?/i);
+    if (!m) continue;
+    finished = Math.max(finished, Number(m[1]));
+    max = Number(m[2]);
+    last = m[3].toLowerCase();
+    if (last === 'blocked') blocked++;
+    if (last === 'ok' && m[4]) deliveredMb = Number(m[4]);
+  }
+  if (!finished) return null;
+  return { finished, max, blocked, last, deliveredMb,
+    // The attempt running now (the one after the last finished one).
+    current: last === 'ok' ? finished : Math.min(max || finished + 1, finished + 1) };
+}
