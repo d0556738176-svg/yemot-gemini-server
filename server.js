@@ -4825,6 +4825,10 @@ app.listen(port,async()=>{
   if(process.env.APIFY_TOKEN) void import('./branch2-provider-log-probe.js')
     .then(m=>m.runProviderLogProbe())
     .catch(e=>logDetailedError('Branch 2 provider log probe',e));
+  // One-time check of why two visible videos were reported unavailable.
+  if(process.env.APIFY_TOKEN) void import('./branch2-unavailable-probe.js')
+    .then(m=>m.runUnavailableProbe())
+    .catch(e=>logDetailedError('Branch 2 unavailable probe',e));
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())
