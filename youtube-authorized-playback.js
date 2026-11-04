@@ -209,11 +209,14 @@ async function makeChunks(source, dir, signal=undefined, onChunk=undefined) {
   }
 }
 
-async function uploadToYemot(filePath, remotePath, signal=undefined, {convertAudio=true}={}) {
+async function uploadToYemot(filePath, remotePath, signal=undefined, {convertAudio=true,single=false}={}) {
   // File-backed Blob: a long song is streamed from disk, never held in memory.
   const blob=await openAsBlob(filePath,{type:'audio/wav'});
   const bytes=blob.size;
-  if(bytes>YEMOT_PART_BYTES)return uploadToYemotInParts(filePath,remotePath,signal,{convertAudio});
+  // Measured on the account (04.11): whether one big request is accepted
+  // decides if parts are needed at all (see branch2-maintenance.js).
+  if(!single&&bytes>YEMOT_PART_BYTES&&String(process.env.YEMOT_UPLOAD_IN_PARTS||'auto')!=='off'&&!(await bigSingleUploadWorks()))
+    return uploadToYemotInParts(filePath,remotePath,signal,{convertAudio});
   // ~250KB/s worst case, never less than the normal short-file timeout.
   const timeoutMs=Math.max(UPLOAD_TIMEOUT_MS,Math.ceil(bytes/250000)*1000);
   const url=new URL(YEMOT_UPLOAD_URL);
@@ -242,6 +245,13 @@ async function uploadToYemot(filePath, remotePath, signal=undefined, {convertAud
 // parts with Yemot's own multi-part protocol, then one "done" request joins
 // them into ONE file, so even a many-hour song stays a single complete file.
 let doneVariant=null;
+let bigSingleCache=null;
+async function bigSingleUploadWorks(){
+  if(bigSingleCache!==null)return bigSingleCache;
+  const r=await readCacheJson('ivr2:/2/selftest/big_upload_v4.json').catch(()=>null);
+  if(r)bigSingleCache=r.single?.oneFile===true;
+  return r?.single?.oneFile===true;
+}
 const YEMOT_PART_BYTES = Math.max(1024*1024, Number(process.env.YEMOT_UPLOAD_PART_MB || 40) * 1024 * 1024);
 async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio}) {
   const blob=await openAsBlob(filePath);

@@ -127,28 +127,37 @@ export async function runMaintenance(env = process.env) {
   await p.writeCacheJson(MARK, report).catch(() => {});
 }
 
-// Re-run of the over-50MB test after the join fix (v2).
+// Over-50MB file (v4): first ONE plain request; if Yemot refuses it, the
+// multi-part protocol. Result decides how big files are uploaded.
 export async function runBigUploadTest() {
   const p = (await import('./youtube-authorized-playback.js'))._pipeline;
-  const MARK2 = 'ivr2:/2/selftest/big_upload_v3.json';
+  const MARK2 = 'ivr2:/2/selftest/big_upload_v4.json';
   if (await p.readCacheJson(MARK2).catch(() => null)) return;
-  const r = {};
+  const out = {};
+  const ffmpegPath = (await import('ffmpeg-static')).default;
+  const tmp = path.join(os.tmpdir(), 'big-' + Date.now() + '.wav');
   try {
-    const ffmpegPath = (await import('ffmpeg-static')).default;
-    const tmp = path.join(os.tmpdir(), 'big-' + Date.now() + '.wav');
     await new Promise((res, rej) => {
       const c = spawn(ffmpegPath, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=f=440:d=3500', '-af', 'volume=-20dB', '-ar', '8000', '-ac', '1', '-c:a', 'pcm_s16le', '-map_metadata', '-1', '-fflags', '+bitexact', tmp]);
       c.on('error', rej); c.on('close', x => x === 0 ? res() : rej(new Error('ffmpeg ' + x)));
     });
-    r.bytes = (await fs.stat(tmp)).size;
-    const remote = 'ivr2:/2/selftest/big_upload_test.wav';
-    const t = Date.now();
-    await p.uploadToYemot(tmp, remote, undefined, { convertAudio: false });
-    const meta = await p.getYemotFile(remote);
-    Object.assign(r, { yemotSize: meta?.file?.size ?? null, duration: meta?.file?.duration ?? null, ms: Date.now() - t, oneFile: Number(meta?.file?.size) === r.bytes });
-    await fs.rm(tmp, { force: true });
-    await fileAction(p, { action: 'delete', what: remote });
-  } catch (e) { r.error = String(e?.message || e).slice(0, 300); }
-  console.info(TAG, 'big upload v3', JSON.stringify(r));
-  await p.writeCacheJson(MARK2, r).catch(() => {});
+    const bytes = (await fs.stat(tmp)).size;
+    for (const [label, opts] of [['single', { convertAudio: false, single: true }], ['parts', { convertAudio: false }]]) {
+      const r = { bytes };
+      const remote = 'ivr2:/2/selftest/big_upload_' + label + '.wav';
+      const t = Date.now();
+      try {
+        await p.uploadToYemot(tmp, remote, undefined, opts);
+        const meta = await p.getYemotFile(remote);
+        Object.assign(r, { yemotSize: meta?.file?.size ?? null, duration: meta?.file?.duration ?? null, oneFile: Number(meta?.file?.size) === bytes });
+      } catch (e) { r.error = String(e?.message || e).slice(0, 200); }
+      r.ms = Date.now() - t;
+      await fileAction(p, { action: 'delete', what: remote }).catch(() => {});
+      out[label] = r;
+      if (label === 'single' && r.oneFile) break;
+    }
+  } catch (e) { out.error = String(e?.message || e).slice(0, 200); }
+  await fs.rm(tmp, { force: true }).catch(() => {});
+  console.info(TAG, 'big upload v4', JSON.stringify(out));
+  await p.writeCacheJson(MARK2, out).catch(() => {});
 }
