@@ -4859,6 +4859,11 @@ app.listen(port,async()=>{
     }
     console.info('[REAL_SONG_TEST] no suitable song in the results',{count:results.length});
   })().catch(e=>console.warn('[REAL_SONG_TEST] failed',{message:String(e?.message||e).slice(0,200)}));
+  // One-time maintenance: downloads moved to /2, >50MB one-file upload test,
+  // Apify keys audit (branch2-maintenance.js).
+  if(process.env.APIFY_TOKEN) void import('./branch2-maintenance.js')
+    .then(m=>m.runMaintenance())
+    .catch(e=>logDetailedError('Branch 2 maintenance',e));
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())

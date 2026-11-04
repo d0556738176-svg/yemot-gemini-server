@@ -213,6 +213,7 @@ async function uploadToYemot(filePath, remotePath, signal=undefined, {convertAud
   // File-backed Blob: a long song is streamed from disk, never held in memory.
   const blob=await openAsBlob(filePath,{type:'audio/wav'});
   const bytes=blob.size;
+  if(bytes>YEMOT_PART_BYTES)return uploadToYemotInParts(filePath,remotePath,signal,{convertAudio});
   // ~250KB/s worst case, never less than the normal short-file timeout.
   const timeoutMs=Math.max(UPLOAD_TIMEOUT_MS,Math.ceil(bytes/250000)*1000);
   const url=new URL(YEMOT_UPLOAD_URL);
@@ -234,6 +235,45 @@ async function uploadToYemot(filePath, remotePath, signal=undefined, {convertAud
   }
   if(result.success===false) throw new Error('Yemot UploadFile failed');
   console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted', { remotePath, convertedSize: result.convertedSize || null, duration: result.duration || null });
+  return result;
+}
+
+// Yemot accepts at most 50MB in one request (documented). Bigger files go in
+// parts with Yemot's own multi-part protocol, then one "done" request joins
+// them into ONE file, so even a many-hour song stays a single complete file.
+const YEMOT_PART_BYTES = Math.max(1024*1024, Number(process.env.YEMOT_UPLOAD_PART_MB || 40) * 1024 * 1024);
+async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio}) {
+  const blob=await openAsBlob(filePath);
+  const total=blob.size, parts=Math.ceil(total/YEMOT_PART_BYTES);
+  const uuid=crypto.randomUUID(), name=path.basename(filePath);
+  console.info('[YouTube IVR] uploading to Yemot in parts', { remotePath, bytes: total, parts });
+  for(let i=0;i<parts;i++){
+    const start=i*YEMOT_PART_BYTES, chunk=blob.slice(start,Math.min(total,start+YEMOT_PART_BYTES));
+    const form=new FormData();
+    for(const [k,v] of Object.entries({token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'false',
+      qquuid:uuid,qqpartindex:String(i),qqpartbyteoffset:String(start),qqchunksize:String(chunk.size),qqtotalparts:String(parts),
+      qqtotalfilesize:String(total),qqfilename:name,uploader:'yemot-admin'}))form.append(k,v);
+    form.append('qqfile',chunk,name);
+    const timeout=AbortSignal.timeout(Math.max(UPLOAD_TIMEOUT_MS,Math.ceil(chunk.size/250000)*1000));
+    let ok=false,last='';
+    for(let attempt=1;attempt<=3&&!ok;attempt++){
+      const r=await fetch(YEMOT_UPLOAD_URL,{method:'POST',body:form,signal:signal?AbortSignal.any([signal,timeout]):timeout}).catch(e=>({ok:false,status:0,text:async()=>String(e?.message||e)}));
+      last=(await r.text().catch(()=>'')).slice(0,300);
+      let j=null;try{j=JSON.parse(last);}catch{}
+      ok=r.ok&&(!j||j.success!==false&&(!j.responseStatus||j.responseStatus==='OK'));
+    }
+    if(!ok)throw new Error('Yemot part upload failed ('+(i+1)+'/'+parts+'): '+last);
+  }
+  const done=new URL(YEMOT_UPLOAD_URL+'?done');
+  const fields={token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'false',tts:'0',
+    qquuid:uuid,qqfilename:name,qqtotalfilesize:String(total),qqtotalparts:String(parts)};
+  const form=new FormData();for(const [k,v] of Object.entries(fields))form.append(k,v);
+  const r=await fetch(done,{method:'POST',body:form,signal:AbortSignal.timeout(Math.max(60000,Math.ceil(total/1000000)*2000))});
+  const body=await r.text();
+  let result=null;try{result=JSON.parse(body);}catch{}
+  if(!r.ok||!result||result.success===false||(result.responseStatus&&result.responseStatus!=='OK'))
+    throw new Error('Yemot multi-part finish failed: '+body.slice(0,300));
+  console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted (parts joined)', { remotePath, parts, duration: result.duration || null });
   return result;
 }
 
@@ -483,13 +523,16 @@ async function transferProviderFile(resolved,output,signal,onProgress,expectedBy
   return total;
 }
 
-// Every song downloaded from the phone is ALSO saved in one Hebrew-named
-// folder for downloading from Yemot: best quality (YouTube's own audio, not
+// Every song downloaded from the phone is ALSO saved directly in extension 2's
+// own folder (owner's choice 04.11, no sub-folder), as ONE file for
+// downloading from Yemot: best quality (YouTube's own audio, not
 // the phone-line version), the video's picture as cover, and all its details
 // (title, channel, date, genre, description, tags, link). The folder is not a
 // played extension, so it never plays on the line. Format chosen by the
 // account test (m4a when Yemot keeps it intact, otherwise mp3 320k).
-export const DOWNLOAD_DIR='ivr2:/2/הורדות_מיוטיוב';
+export const DOWNLOAD_DIR='ivr2:/2';
+export const OLD_DOWNLOAD_DIR='ivr2:/2/הורדות_מיוטיוב';
+const DOWNLOAD_OWNERS='ivr2:/2/youtubeaudio/download_owners.json';
 export const DOWNLOAD_TEST_RESULT='ivr2:/2/selftest/download_copy_result_v2.json';
 let downloadPolicyCache=null;
 async function downloadCopyPolicy(){
@@ -513,13 +556,13 @@ async function saveDownloadCopy(id,source,title,temp,policy){
   // Named after the YouTube title; a different video with the same title
   // gets its id added instead of replacing the other song.
   const base=titleFileName(metadata.title||title||id)||id;
-  const owners=await readCacheJson(DOWNLOAD_DIR+'/owners.json').catch(()=>null)||{};
+  const owners=await readCacheJson(DOWNLOAD_OWNERS).catch(()=>null)||{};
   const name=owners[base]&&owners[base]!==id?base+'_'+id:base;
   const remote=DOWNLOAD_DIR+'/'+name+'.'+policy.format;
   await uploadToYemot(out,remote,undefined,{convertAudio:false});
   const meta=await getYemotFile(remote);
   if(meta?.file?.exists!==true||Number(meta?.file?.size)!==bytes)throw new Error('download copy not verified in Yemot');
-  if(!owners[name]){owners[name]=id;await writeCacheJson(DOWNLOAD_DIR+'/owners.json',owners).catch(()=>{});}
+  if(!owners[name]){owners[name]=id;await writeCacheJson(DOWNLOAD_OWNERS,owners).catch(()=>{});}
   console.info('[DOWNLOADS] song saved for downloading',{videoId:id,remote,bytes,format:policy.format,picture:!!jpeg,tags:Object.keys(metadata).length,ms:Date.now()-t});
 }
 

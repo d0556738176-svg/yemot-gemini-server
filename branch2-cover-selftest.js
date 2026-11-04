@@ -102,11 +102,7 @@ export async function runCoverMp3Selftest(env = process.env) {
 // m4a (YouTube's own audio, untouched) or else mp3 320k.
 export async function runDownloadCopySelftest(env = process.env) {
   const p = (await import('./youtube-authorized-playback.js'))._pipeline;
-  const { DOWNLOAD_DIR, DOWNLOAD_TEST_RESULT } = await import('./youtube-authorized-playback.js');
-  // The folder: an (empty) owners list makes it appear in Yemot right away.
-  const owners = await p.readCacheJson(DOWNLOAD_DIR + '/owners.json').catch(() => undefined);
-  if (owners === null) await p.writeCacheJson(DOWNLOAD_DIR + '/owners.json', {}).then(() => console.info(TAG, 'downloads folder created', DOWNLOAD_DIR))
-    .catch(e => console.warn(TAG, 'downloads folder not created', String(e?.message || e).slice(0, 200)));
+  const { DOWNLOAD_TEST_RESULT } = await import('./youtube-authorized-playback.js');
   if (await p.readCacheJson(DOWNLOAD_TEST_RESULT).catch(() => null)) return;
   const ffmpegPath = (await import('ffmpeg-static')).default;
   const { fetchThumbnail, normalizeCover, makeDownloadCopy, downloadMetadata } = await import('./youtube-cover-art.js');
