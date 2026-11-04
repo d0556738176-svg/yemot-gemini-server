@@ -264,15 +264,23 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio}
     }
     if(!ok)throw new Error('Yemot part upload failed ('+(i+1)+'/'+parts+'): '+last);
   }
-  const done=new URL(YEMOT_UPLOAD_URL+'?done');
+  // The joining request: form-encoded body (how Yemot's own clients send it);
+  // if Yemot does not take that, the same fields in the query string.
   const fields={token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'false',tts:'0',
     qquuid:uuid,qqfilename:name,qqtotalfilesize:String(total),qqtotalparts:String(parts)};
-  const form=new FormData();for(const [k,v] of Object.entries(fields))form.append(k,v);
-  const r=await fetch(done,{method:'POST',body:form,signal:AbortSignal.timeout(Math.max(60000,Math.ceil(total/1000000)*2000))});
-  const body=await r.text();
-  let result=null;try{result=JSON.parse(body);}catch{}
-  if(!r.ok||!result||result.success===false||(result.responseStatus&&result.responseStatus!=='OK'))
-    throw new Error('Yemot multi-part finish failed: '+body.slice(0,300));
+  const finishMs=Math.max(60000,Math.ceil(total/1000000)*2000);
+  const tries=[
+    ()=>fetch(YEMOT_UPLOAD_URL+'?done',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams(fields).toString(),signal:AbortSignal.timeout(finishMs)}),
+    ()=>fetch(YEMOT_UPLOAD_URL+'?done&'+new URLSearchParams(fields).toString(),{method:'POST',signal:AbortSignal.timeout(finishMs)}),
+  ];
+  let result=null,body='';
+  for(const t of tries){
+    const r=await t().catch(e=>({ok:false,text:async()=>String(e?.message||e)}));
+    body=await r.text();result=null;try{result=JSON.parse(body);}catch{}
+    if(r.ok&&result&&result.success!==false&&(!result.responseStatus||result.responseStatus==='OK'))break;
+    result=null;
+  }
+  if(!result)throw new Error('Yemot multi-part finish failed: '+body.slice(0,300));
   console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted (parts joined)', { remotePath, parts, duration: result.duration || null });
   return result;
 }

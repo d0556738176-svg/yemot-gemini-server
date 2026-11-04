@@ -35,7 +35,7 @@ async function listDir(p, dir) {
 export async function runMaintenance(env = process.env) {
   const mod = await import('./youtube-authorized-playback.js');
   const p = mod._pipeline;
-  if (await p.readCacheJson(MARK).catch(() => null)) return;
+  if (await p.readCacheJson(MARK).catch(() => null)) return runBigUploadTest();
   const report = { at: new Date().toISOString() };
 
   // 1. Old downloads folder -> /2, then delete the folder.
@@ -125,4 +125,30 @@ export async function runMaintenance(env = process.env) {
     report.accounts.push(acc);
   }
   await p.writeCacheJson(MARK, report).catch(() => {});
+}
+
+// Re-run of the over-50MB test after the join fix (v2).
+export async function runBigUploadTest() {
+  const p = (await import('./youtube-authorized-playback.js'))._pipeline;
+  const MARK2 = 'ivr2:/2/selftest/big_upload_v2.json';
+  if (await p.readCacheJson(MARK2).catch(() => null)) return;
+  const r = {};
+  try {
+    const ffmpegPath = (await import('ffmpeg-static')).default;
+    const tmp = path.join(os.tmpdir(), 'big-' + Date.now() + '.wav');
+    await new Promise((res, rej) => {
+      const c = spawn(ffmpegPath, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=f=440:d=3500', '-af', 'volume=-20dB', '-ar', '8000', '-ac', '1', '-c:a', 'pcm_s16le', '-map_metadata', '-1', '-fflags', '+bitexact', tmp]);
+      c.on('error', rej); c.on('close', x => x === 0 ? res() : rej(new Error('ffmpeg ' + x)));
+    });
+    r.bytes = (await fs.stat(tmp)).size;
+    const remote = 'ivr2:/2/selftest/big_upload_test.wav';
+    const t = Date.now();
+    await p.uploadToYemot(tmp, remote, undefined, { convertAudio: false });
+    const meta = await p.getYemotFile(remote);
+    Object.assign(r, { yemotSize: meta?.file?.size ?? null, duration: meta?.file?.duration ?? null, ms: Date.now() - t, oneFile: Number(meta?.file?.size) === r.bytes });
+    await fs.rm(tmp, { force: true });
+    await fileAction(p, { action: 'delete', what: remote });
+  } catch (e) { r.error = String(e?.message || e).slice(0, 300); }
+  console.info(TAG, 'big upload v2', JSON.stringify(r));
+  await p.writeCacheJson(MARK2, r).catch(() => {});
 }
