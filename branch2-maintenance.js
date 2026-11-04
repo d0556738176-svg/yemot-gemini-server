@@ -130,7 +130,7 @@ export async function runMaintenance(env = process.env) {
 // Re-run of the over-50MB test after the join fix (v2).
 export async function runBigUploadTest() {
   const p = (await import('./youtube-authorized-playback.js'))._pipeline;
-  const MARK2 = 'ivr2:/2/selftest/big_upload_v2.json';
+  const MARK2 = 'ivr2:/2/selftest/big_upload_v3.json';
   if (await p.readCacheJson(MARK2).catch(() => null)) return;
   const r = {};
   try {
@@ -149,6 +149,6 @@ export async function runBigUploadTest() {
     await fs.rm(tmp, { force: true });
     await fileAction(p, { action: 'delete', what: remote });
   } catch (e) { r.error = String(e?.message || e).slice(0, 300); }
-  console.info(TAG, 'big upload v2', JSON.stringify(r));
+  console.info(TAG, 'big upload v3', JSON.stringify(r));
   await p.writeCacheJson(MARK2, r).catch(() => {});
 }

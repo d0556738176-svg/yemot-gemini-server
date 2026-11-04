@@ -241,6 +241,7 @@ async function uploadToYemot(filePath, remotePath, signal=undefined, {convertAud
 // Yemot accepts at most 50MB in one request (documented). Bigger files go in
 // parts with Yemot's own multi-part protocol, then one "done" request joins
 // them into ONE file, so even a many-hour song stays a single complete file.
+let doneVariant=null;
 const YEMOT_PART_BYTES = Math.max(1024*1024, Number(process.env.YEMOT_UPLOAD_PART_MB || 40) * 1024 * 1024);
 async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio}) {
   const blob=await openAsBlob(filePath);
@@ -269,19 +270,30 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio}
   const fields={token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'false',tts:'0',
     qquuid:uuid,qqfilename:name,qqtotalfilesize:String(total),qqtotalparts:String(parts)};
   const finishMs=Math.max(60000,Math.ceil(total/1000000)*2000);
+  const q=new URLSearchParams(fields).toString();
+  const mp=extra=>{const f=new FormData();for(const [k,v] of Object.entries({...fields,...extra}))f.append(k,v);return f;};
+  const sig=()=>AbortSignal.timeout(finishMs);
+  // Variants of the documented "UploadFile?done" request; the one that works
+  // is remembered for the rest of the process.
   const tries=[
-    ()=>fetch(YEMOT_UPLOAD_URL+'?done',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams(fields).toString(),signal:AbortSignal.timeout(finishMs)}),
-    ()=>fetch(YEMOT_UPLOAD_URL+'?done&'+new URLSearchParams(fields).toString(),{method:'POST',signal:AbortSignal.timeout(finishMs)}),
+    ['urlencoded',()=>fetch(YEMOT_UPLOAD_URL+'?done',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:q,signal:sig()})],
+    ['query',()=>fetch(YEMOT_UPLOAD_URL+'?done&'+q,{method:'POST',signal:sig()})],
+    ['done=1 query',()=>fetch(YEMOT_UPLOAD_URL+'?done=1&'+q,{method:'POST',signal:sig()})],
+    ['done field',()=>fetch(YEMOT_UPLOAD_URL+'?done',{method:'POST',body:mp({done:'1'}),signal:sig()})],
+    ['GET',()=>fetch(YEMOT_UPLOAD_URL+'?done&'+q,{signal:sig()})],
+    ['path done',()=>fetch(YEMOT_API_BASE+'/UploadFile/done?'+q,{method:'POST',signal:sig()})],
   ];
-  let result=null,body='';
-  for(const t of tries){
+  if(doneVariant)tries.sort((a,b)=>(b[0]===doneVariant)-(a[0]===doneVariant));
+  let result=null,body='';const seen=[];
+  for(const [label,t] of tries){
     const r=await t().catch(e=>({ok:false,text:async()=>String(e?.message||e)}));
     body=await r.text();result=null;try{result=JSON.parse(body);}catch{}
-    if(r.ok&&result&&result.success!==false&&(!result.responseStatus||result.responseStatus==='OK'))break;
-    result=null;
+    if(r.ok&&result&&result.success!==false&&(!result.responseStatus||result.responseStatus==='OK')){doneVariant=label;break;}
+    seen.push(label+': '+body.slice(0,90));result=null;
   }
+  if(!result)console.warn('[YouTube IVR] multi-part join answers',seen);
   if(!result)throw new Error('Yemot multi-part finish failed: '+body.slice(0,300));
-  console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted (parts joined)', { remotePath, parts, duration: result.duration || null });
+  console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted (parts joined)', { remotePath, parts, variant: doneVariant, duration: result.duration || null });
   return result;
 }
 
