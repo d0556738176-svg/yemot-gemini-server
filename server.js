@@ -3913,6 +3913,8 @@ function startYouTubeVideoJob(video) {
       getFile: r => p.getYemotFile(r), ffmpegPath,
       fetchThumbnail: cover.fetchThumbnail, normalizeCover: cover.normalizeCover, downloadMetadata: cover.downloadMetadata,
       fetchVideoFacts, titleFileName, log: console,
+      nextFolder: async () => (await import('./download-folders.js')).nextFolder('video', { readJson: x => p.readCacheJson(x) }),
+      countSaved: async () => (await import('./download-folders.js')).countSaved('video', { readJson: x => p.readCacheJson(x), writeJson: (x, d) => p.writeCacheJson(x, d) }),
     });
   })().then(r => { state.status = 'ready'; state.remote = r.remote; return videoPendingUpdate(l => l.filter(x => x !== id)); })
     .catch(e => {
@@ -4191,7 +4193,7 @@ async function youtubeCallHandler(call) {
           console.info('[VIDEO] requested by caller',{videoId:v.videoId,status:st.status});
           nextPrompt=st.status==='ready'
             ? 'הווידאו של הסרטון הזה כבר שמור בתיקיית וידאו. אמור חיפוש חדש, או מספר של תוצאה אחרת.'
-            : 'הורדת הווידאו התחילה, והסרטון יישמר בתיקיית וידאו בשלוחה 2 עם התמונה והפרטים שלו. אין צורך להמתין על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.';
+            : 'הורדת הווידאו התחילה, והסרטון יישמר בתיקיית וידאו עם התמונה והפרטים שלו. אין צורך להמתין על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.';
           continue;
         }
         if(isYesConfirm(transcript)) {
@@ -4746,7 +4748,9 @@ async function configureYemotStructure() {
         await updateExtension(EXT7_PATH, EXT7_SETTINGS);
         await updateExtension(EXT8_PATH, EXT8_SETTINGS);
         // The video folder exists from the start (visible in the file manager).
-        await updateExtension('ivr2:/2/וידאו', { title: 'וידאו' }).catch(e => console.warn('[Yemot automatic setup] video folder not created now; it is created with the first video', { message: String(e?.message || e).slice(0, 120) }));
+        // Download folders live at the top, outside every extension.
+        for (const [dir, title] of [['ivr2:/אודיו', 'אודיו'], ['ivr2:/וידאו', 'וידאו']])
+          await updateExtension(dir, { title }).catch(e => console.warn('[Yemot automatic setup] folder not created now; it is created with the first file', { dir, message: String(e?.message || e).slice(0, 120) }));
         // Remove keys of an older layout that UpdateExtension would keep.
         const { stripUnusedKeys } = await import('./branch2-ext7.js');
         for (const [extPath, settings] of [[EXT7_PATH, EXT7_SETTINGS], [EXT8_PATH, EXT8_SETTINGS]]) {
@@ -4939,7 +4943,7 @@ app.listen(port,async()=>{
   // One-time maintenance: downloads moved to /2, >50MB one-file upload test,
   // Apify keys audit (branch2-maintenance.js).
   if(process.env.APIFY_TOKEN) void import('./branch2-maintenance.js')
-    .then(m=>m.runMaintenance())
+    .then(async m=>{await m.runMaintenance();await m.runMaintenanceV2();})
     .catch(e=>logDetailedError('Branch 2 maintenance',e));
   // Video downloads that were running before a restart continue (same run).
   if(process.env.APIFY_TOKEN) void (async()=>{
@@ -4950,8 +4954,9 @@ app.listen(port,async()=>{
   // One-time real test of "כן לוידאו" on a short religious video (04.11).
   if(process.env.APIFY_TOKEN) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
-    const MARK='ivr2:/2/selftest/video_real_test_v1.json';
-    await new Promise(r=>setTimeout(r,45000));
+    const MARK='ivr2:/2/selftest/video_real_test_v2.json';
+    // Waits for the account's multi-part upload test (a video is over 50MB).
+    for(let i=0;i<40&&!(await _pipeline.readCacheJson('ivr2:/2/selftest/multipart_v1.json').catch(()=>null));i++)await new Promise(r=>setTimeout(r,15000));
     if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
     await _pipeline.writeCacheJson(MARK,{at:new Date().toISOString(),videoId:'_Je4NEIzupw'});
     console.info('[VIDEO] real test: as if the caller said "כן לוידאו"',{videoId:'_Je4NEIzupw'});

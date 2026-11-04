@@ -161,3 +161,56 @@ export async function runBigUploadTest() {
   console.info(TAG, 'big upload v4', JSON.stringify(out));
   await p.writeCacheJson(MARK2, out).catch(() => {});
 }
+
+// v2 (04.11 evening): which multi-part request style Yemot accepts, then move
+// the download copies from /2 to the top-level folder אודיו and remove the
+// earlier /2/וידאו folder.
+export async function runMaintenanceV2(env = process.env) {
+  const mod = await import('./youtube-authorized-playback.js');
+  const p = mod._pipeline;
+  const MARK2 = 'ivr2:/2/selftest/maintenance_v2.json';
+  if (await p.readCacheJson(MARK2).catch(() => null)) return;
+  const report = { at: new Date().toISOString(), tried: [] };
+  // a) multi-part protocol, 24MB file in 8MB parts
+  try {
+    const ffmpegPath = (await import('ffmpeg-static')).default;
+    const tmp = path.join(os.tmpdir(), 'mp-' + Date.now() + '.wav');
+    await new Promise((res, rej) => {
+      const c = spawn(ffmpegPath, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=f=440:d=1500', '-af', 'volume=-20dB', '-ar', '8000', '-ac', '1', '-c:a', 'pcm_s16le', '-map_metadata', '-1', '-fflags', '+bitexact', tmp]);
+      c.on('error', rej); c.on('close', x => x === 0 ? res() : rej(new Error('ffmpeg ' + x)));
+    });
+    const bytes = (await fs.stat(tmp)).size;
+    for (const style of ['nopath', 'query', 'full']) {
+      const remote = 'ivr2:/2/selftest/mp_' + style + '.wav';
+      const r = { style };
+      try {
+        await p.uploadToYemotInParts(tmp, remote, undefined, { convertAudio: false, style, partBytes: 8 * 1024 * 1024, log: (a, b) => { r.firstPart = b; } });
+        const meta = await p.getYemotFile(remote);
+        r.size = meta?.file?.size ?? null; r.oneFile = Number(r.size) === bytes; r.done = p.lastDoneVariant();
+      } catch (e) { r.error = String(e?.message || e).slice(0, 220); }
+      await fileAction(p, { action: 'delete', what: remote }).catch(() => {});
+      report.tried.push(r);
+      console.info(TAG, 'multipart', JSON.stringify(r));
+      if (r.oneFile) { report.works = { part: style, done: r.done }; break; }
+    }
+    await fs.rm(tmp, { force: true }).catch(() => {});
+  } catch (e) { report.multipartError = String(e?.message || e).slice(0, 200); }
+  await p.writeCacheJson('ivr2:/2/selftest/multipart_v1.json', { at: report.at, works: report.works || null, tried: report.tried }).catch(() => {});
+
+  // b) move download copies /2/*.m4a|*.flac -> /אודיו
+  try {
+    const listing = await listDir(p, 'ivr2:/2');
+    const files = (listing?.files || []).map(f => f.name).filter(n => /\.(m4a|flac|mp3)$/i.test(n));
+    report.moved = [];
+    for (const name of files) {
+      const res = await fileAction(p, { action: 'move', what: 'ivr2:/2/' + name, target: 'ivr2:/אודיו/' + name });
+      report.moved.push({ name, ok: res.ok });
+    }
+    const del = await fileAction(p, { action: 'delete', what: 'ivr2:/2/וידאו' });
+    report.oldVideoFolderDeleted = del.ok;
+    // count what is now in the audio folder
+    await p.writeCacheJson('ivr2:/2/youtubeaudio/download_folders.json', { audio: { n: 1, count: report.moved.filter(m => m.ok).length }, video: { n: 1, count: 0 } }).catch(() => {});
+  } catch (e) { report.moveError = String(e?.message || e).slice(0, 200); }
+  console.info(TAG, 'v2', JSON.stringify(report));
+  await p.writeCacheJson(MARK2, report).catch(() => {});
+}

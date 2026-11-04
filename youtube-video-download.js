@@ -1,5 +1,5 @@
-// "כן לוידאו": the video itself (picture + sound) saved to Yemot folder
-// /2/וידאו, with the YouTube picture as cover and all its details. Nothing is
+// "כן לוידאו": the video itself (picture + sound) saved to the top-level
+// Yemot folder וידאו, with the YouTube picture as cover and all its details. Nothing is
 // played on the phone and no audio copies are made for this request.
 //
 // Engine choice, from the engines' own price lists (read 04.11):
@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { apifyTokens } from './youtube-apify-source.js';
 
-export const VIDEO_DIR = 'ivr2:/2/וידאו';
+export const VIDEO_DIR = 'ivr2:/וידאו'; // folder chosen per save by download-folders.js
 const API = 'https://api.apify.com/v2';
 const JOHNVC = 'johnvc~youtube-download-api';
 const MEMO23 = 'memo23~youtube-video-downloader';
@@ -180,12 +180,14 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
     try { await ffmpeg(ffmpegPath, args); } catch (e) { log.warn?.('[VIDEO] picture/details not added; saving the video as delivered', { videoId, message: String(e.message).slice(0, 160) }); file = src; }
     await fs.rm(file === out ? src : out, { force: true }).catch(() => {});
     const size = (await fs.stat(file)).size;
-    const remote = VIDEO_DIR + '/' + (deps.titleFileName(meta.title || videoId) || videoId) + '.mp4';
+    const folder = deps.nextFolder ? await deps.nextFolder() : VIDEO_DIR;
+    const remote = folder + '/' + (deps.titleFileName(meta.title || videoId) || videoId) + '.mp4';
     const t = Date.now();
     await upload(file, remote);
     const m = await getFile(remote);
     if (m?.file?.exists !== true || Number(m?.file?.size) !== size) throw err('video_upload_unverified', 'Video not verified in Yemot');
     await store.write(receiptPath, { videoId, actor: got.actor, runId: got.runId, state: 'done', remote, bytes: size, quality, at: new Date().toISOString() });
+    await deps.countSaved?.().catch?.(() => {});
     log.info?.('[VIDEO] saved', { videoId, remote, bytes: size, quality, engine: got.actor, picture: !!jpeg && file === out, uploadMs: Date.now() - t });
     return { remote, bytes: size };
   } finally { await fs.rm(temp, { recursive: true, force: true }).catch(() => {}); }

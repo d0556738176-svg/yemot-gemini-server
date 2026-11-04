@@ -217,7 +217,10 @@ async function uploadToYemot(filePath, remotePath, signal=undefined, {convertAud
   const bytes=blob.size;
   // Measured on the account (04.11): whether one big request is accepted
   // decides if parts are needed at all (see branch2-maintenance.js).
-  if(!single&&bytes>YEMOT_PART_BYTES&&String(process.env.YEMOT_UPLOAD_IN_PARTS||'auto')!=='off'&&!(await bigSingleUploadWorks()))
+  // Measured 04.11: one request of 56MB is accepted, 85MB is refused (413).
+  // Above 50MB the file goes in parts (only once the part protocol is proven
+  // on the account; otherwise the single request is still tried).
+  if(!single&&bytes>YEMOT_SINGLE_MAX&&String(process.env.YEMOT_UPLOAD_IN_PARTS||'auto')!=='off'&&(await partStyle()))
     return uploadToYemotInParts(filePath,remotePath,signal,{convertAudio});
   // ~250KB/s worst case, never less than the normal short-file timeout.
   const timeoutMs=Math.max(UPLOAD_TIMEOUT_MS,Math.ceil(bytes/250000)*1000);
@@ -247,6 +250,7 @@ async function uploadToYemot(filePath, remotePath, signal=undefined, {convertAud
 // parts with Yemot's own multi-part protocol, then one "done" request joins
 // them into ONE file, so even a many-hour song stays a single complete file.
 let doneVariant=null;
+const YEMOT_SINGLE_MAX=Math.max(1,Number(process.env.YEMOT_SINGLE_UPLOAD_MB||50))*1024*1024;
 let bigSingleCache=null;
 async function bigSingleUploadWorks(){
   if(bigSingleCache!==null)return bigSingleCache;
@@ -255,26 +259,41 @@ async function bigSingleUploadWorks(){
   return r?.single?.oneFile===true;
 }
 const YEMOT_PART_BYTES = Math.max(1024*1024, Number(process.env.YEMOT_UPLOAD_PART_MB || 40) * 1024 * 1024);
-async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio}) {
+// partStyle: how each part request carries its fields (measured by the
+// account test, branch2-maintenance.js): 'full' = token+path+qq* in the form,
+// 'nopath' = token+qq* only, 'query' = token in the URL, qq* in the form.
+let partStyleCache=null;
+async function partStyle(){
+  if(partStyleCache)return partStyleCache;
+  const r=await readCacheJson('ivr2:/2/selftest/multipart_v1.json').catch(()=>null);
+  if(r?.works){partStyleCache=r.works;doneVariant=r.works.done||doneVariant;}
+  return partStyleCache;
+}
+async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,style=null,partBytes=YEMOT_PART_BYTES,log=null}={}) {
+  const st=style||(await partStyle())?.part||'full';
   const blob=await openAsBlob(filePath);
-  const total=blob.size, parts=Math.ceil(total/YEMOT_PART_BYTES);
+  const total=blob.size, parts=Math.ceil(total/partBytes);
   const uuid=crypto.randomUUID(), name=path.basename(filePath);
-  console.info('[YouTube IVR] uploading to Yemot in parts', { remotePath, bytes: total, parts });
+  console.info('[YouTube IVR] uploading to Yemot in parts', { remotePath, bytes: total, parts, style: st });
   for(let i=0;i<parts;i++){
-    const start=i*YEMOT_PART_BYTES, chunk=blob.slice(start,Math.min(total,start+YEMOT_PART_BYTES));
+    const start=i*partBytes, chunk=blob.slice(start,Math.min(total,start+partBytes));
     const form=new FormData();
-    for(const [k,v] of Object.entries({token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'false',
-      qquuid:uuid,qqpartindex:String(i),qqpartbyteoffset:String(start),qqchunksize:String(chunk.size),qqtotalparts:String(parts),
-      qqtotalfilesize:String(total),qqfilename:name,uploader:'yemot-admin'}))form.append(k,v);
+    const qq={qquuid:uuid,qqpartindex:String(i),qqpartbyteoffset:String(start),qqchunksize:String(chunk.size),qqtotalparts:String(parts),
+      qqtotalfilesize:String(total),qqfilename:name,uploader:'yemot-admin'};
+    const fields=st==='full'?{token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'false',...qq}
+      :st==='nopath'?{token:yemotApiKey(),...qq}:qq;
+    for(const [k,v] of Object.entries(fields))form.append(k,v);
     form.append('qqfile',chunk,name);
+    const url=st==='query'?YEMOT_UPLOAD_URL+'?token='+encodeURIComponent(yemotApiKey()):YEMOT_UPLOAD_URL;
     const timeout=AbortSignal.timeout(Math.max(UPLOAD_TIMEOUT_MS,Math.ceil(chunk.size/250000)*1000));
     let ok=false,last='';
     for(let attempt=1;attempt<=3&&!ok;attempt++){
-      const r=await fetch(YEMOT_UPLOAD_URL,{method:'POST',body:form,signal:signal?AbortSignal.any([signal,timeout]):timeout}).catch(e=>({ok:false,status:0,text:async()=>String(e?.message||e)}));
+      const r=await fetch(url,{method:'POST',body:form,signal:signal?AbortSignal.any([signal,timeout]):timeout}).catch(e=>({ok:false,status:0,text:async()=>String(e?.message||e)}));
       last=(await r.text().catch(()=>'')).slice(0,300);
       let j=null;try{j=JSON.parse(last);}catch{}
       ok=r.ok&&(!j||j.success!==false&&(!j.responseStatus||j.responseStatus==='OK'));
     }
+    if(i===0)log?.('first part answer',last.slice(0,200));
     if(!ok)throw new Error('Yemot part upload failed ('+(i+1)+'/'+parts+'): '+last);
   }
   // The joining request: form-encoded body (how Yemot's own clients send it);
@@ -562,7 +581,7 @@ async function transferProviderFile(resolved,output,signal,onProgress,expectedBy
 // (title, channel, date, genre, description, tags, link). The folder is not a
 // played extension, so it never plays on the line. Format chosen by the
 // account test (m4a when Yemot keeps it intact, otherwise mp3 320k).
-export const DOWNLOAD_DIR='ivr2:/2';
+export const DOWNLOAD_DIR='ivr2:/2'; // before 04.11 evening; now download-folders.js (ivr2:/אודיו)
 export const OLD_DOWNLOAD_DIR='ivr2:/2/הורדות_מיוטיוב';
 const DOWNLOAD_OWNERS='ivr2:/2/youtubeaudio/download_owners.json';
 export const DOWNLOAD_TEST_RESULT='ivr2:/2/selftest/download_copy_result_v3.json';
@@ -590,7 +609,8 @@ async function saveDownloadCopy(id,source,title,temp,policy){
   const base=titleFileName(metadata.title||title||id)||id;
   const owners=await readCacheJson(DOWNLOAD_OWNERS).catch(()=>null)||{};
   const name=owners[base]&&owners[base]!==id?base+'_'+id:base;
-  const remote=DOWNLOAD_DIR+'/'+name+'.'+policy.format;
+  const folders=await import('./download-folders.js');
+  const remote=(await folders.nextFolder('audio',{readJson:readCacheJson}))+'/'+name+'.'+policy.format;
   await uploadToYemot(out,remote,undefined,{convertAudio:false});
   const meta=await getYemotFile(remote);
   if(meta?.file?.exists!==true||Number(meta?.file?.size)!==bytes)throw new Error('download copy not verified in Yemot');
@@ -609,6 +629,7 @@ async function saveDownloadCopy(id,source,title,temp,policy){
   await fs.rm(back,{force:true}).catch(()=>{});
   if(!identical)throw new Error('download copy in Yemot differs from the file made');
   if(!owners[name]){owners[name]=id;await writeCacheJson(DOWNLOAD_OWNERS,owners).catch(()=>{});}
+  await folders.countSaved('audio',{readJson:readCacheJson,writeJson:writeCacheJson});
   console.info('[DOWNLOADS] song saved for downloading',{videoId:id,remote,bytes,format:policy.format,identicalInYemot:identical,
     picture:seen?.picture??!!jpeg,pictureSize:seen?.pictureSize||null,audio:seen?.audio||null,
     title:seen?.tags?.title||null,artist:seen?.tags?.artist||null,date:seen?.tags?.date||null,genre:seen?.tags?.genre||null,
@@ -758,7 +779,7 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
 // Narrow exports for the branch 2 self-test (branch2-selftest.js). They use
 // the same conversion and upload code as real playback, so a passing
 // self-test proves the production path, not a copy of it.
-export const _pipeline = { makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE, ensureUploadedAndVerified, getYemotFile, transferProviderFile, readCacheJson, writeCacheJson };
+export const _pipeline = { uploadToYemotInParts, lastDoneVariant: () => doneVariant, makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE, ensureUploadedAndVerified, getYemotFile, transferProviderFile, readCacheJson, writeCacheJson };
 
 
 
