@@ -168,9 +168,11 @@ export async function runBigUploadTest() {
 export async function runMaintenanceV2(env = process.env) {
   const mod = await import('./youtube-authorized-playback.js');
   const p = mod._pipeline;
-  const MARK2 = 'ivr2:/2/selftest/maintenance_v4.json';
+  const MARK2 = 'ivr2:/2/selftest/maintenance_v5.json';
   if (await p.readCacheJson(MARK2).catch(() => null)) return;
   const report = { at: new Date().toISOString(), tried: [] };
+  // leftovers of the earlier attempts (saved as folders)
+  for (const d of ['mp_full.wav', 'mp_nopath.wav', 'mp_query.wav']) await fileAction(p, { action: 'delete', what: 'ivr2:/2/selftest/' + d }).catch(() => {});
   // a) multi-part protocol, 24MB file in 8MB parts
   try {
     const ffmpegPath = (await import('ffmpeg-static')).default;

@@ -273,14 +273,18 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,
   const st=style||(await partStyle())?.part||'full';
   const blob=await openAsBlob(filePath);
   const total=blob.size, parts=Math.ceil(total/partBytes);
-  const uuid=crypto.randomUUID(), name=path.basename(filePath);
+  // The file name Yemot gives the joined file comes from qqfilename (measured:
+  // with a temp name it was saved as <path>/<temp name>/000.wav), so the parts
+  // carry the final name and numbering is off ("0"; the string "false" was
+  // taken as on).
+  const uuid=crypto.randomUUID(), name=path.posix.basename(String(remotePath).replace(/^ivr2:/,''));
   console.info('[YouTube IVR] uploading to Yemot in parts', { remotePath, bytes: total, parts, style: st });
   for(let i=0;i<parts;i++){
     const start=i*partBytes, chunk=blob.slice(start,Math.min(total,start+partBytes));
     const form=new FormData();
     const qq={qquuid:uuid,qqpartindex:String(i),qqpartbyteoffset:String(start),qqchunksize:String(chunk.size),qqtotalparts:String(parts),
       qqtotalfilesize:String(total),qqfilename:name,uploader:'yemot-admin'};
-    const fields=st==='full'?{token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'false',...qq}
+    const fields=st==='full'?{token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'0',...qq}
       :st==='nopath'?{token:yemotApiKey(),...qq}:qq;
     for(const [k,v] of Object.entries(fields))form.append(k,v);
     form.append('qqfile',chunk,name);
@@ -307,7 +311,7 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,
   }
   // The joining request: form-encoded body (how Yemot's own clients send it);
   // if Yemot does not take that, the same fields in the query string.
-  const fields={token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'false',tts:'0',
+  const fields={token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'0',tts:'0',
     qquuid:uuid,qqfilename:name,qqtotalfilesize:String(total),qqtotalparts:String(parts),uploader:'yemot-admin'};
   const finishMs=Math.max(60000,Math.ceil(total/1000000)*2000);
   const q=new URLSearchParams(fields).toString();
