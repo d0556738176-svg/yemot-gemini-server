@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
+import { addCoverArt } from './youtube-cover-art.js';
 import { downloadVisionAudio } from './vision-audio.mjs';
 import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID } from './youtube-apify-source.js';
 import { pickApifyActor } from './youtube-engine-select.js';
@@ -482,6 +483,16 @@ async function transferProviderFile(resolved,output,signal,onProgress,expectedBy
   return total;
 }
 
+// Result of the one-time account test (branch2-cover-selftest.js); read once.
+let coverPolicyCache=null;
+async function coverPolicy(){
+  if(String(process.env.BRANCH2_COVER_ART||'on').toLowerCase()==='off')return {stored:false,convert:false};
+  if(coverPolicyCache)return coverPolicyCache;
+  const r=await readCacheJson('ivr2:/2/selftest/cover_result_v1.json').catch(()=>null);
+  const policy={stored:r?.safeStored===true,convert:r?.safeConvert===true};
+  if(r)coverPolicyCache=policy; // not tested yet: ask again next song
+  return policy;
+}
 async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=>{}, consent=false) {
   const id=String(videoId||'').trim();
   if(!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
@@ -531,6 +542,15 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     const phone=path.join(temp,'phone.wav');
     const mastered=await preparePhoneAudio(source,phone,{signal,onPercent:percent=>onProgress({stage:'converting',percent})});
     await fs.rm(source,{force:true}).catch(()=>{}); // free disk before upload
+    // The video's YouTube picture inside the file (shown when the file is
+    // downloaded from Yemot), only once the account test proved Yemot keeps
+    // it and still reports the right length. Never delays or fails a song.
+    const cover=await coverPolicy();
+    let covered=false;
+    if(cover.stored){
+      onProgress({stage:'converting',percent:100});
+      covered=await addCoverArt(phone,{videoId:id,title:sourceTitle,ffmpegPath});
+    }
     const dir='/2/youtubeaudio/'+Buffer.from(id,'utf8').toString('hex');
     // The file is named after the original YouTube title (measured 03.11:
     // Yemot stores English and Hebrew names). The video's own folder keeps it
@@ -567,7 +587,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     // background, AFTER it is ready here, so playback is never delayed.
     if(single&&String(process.env.BRANCH2_EXT7||'on').toLowerCase()!=='off'){
       ext7Job=publishToExt7(id,phone,sourceTitle,{readJson:readCacheJson,writeJson:writeCacheJson,
-        upload:(file,remote)=>uploadToYemot(file,remote),log:console})
+        upload:(file,remote)=>uploadToYemot(file,remote,undefined,{convertAudio:!(covered&&!cover.convert)}),log:console})
         .catch(e=>console.warn('[EXT7] song not added',{videoId:id,message:String(e?.message||e).slice(0,200)}));
     }
     return {playbackPaths:paths,chunkCount:paths.length};

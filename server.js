@@ -4835,10 +4835,10 @@ app.listen(port,async()=>{
   if(process.env.APIFY_TOKEN) void import('./branch2-provider-log-probe.js')
     .then(m=>m.runProviderLogProbe())
     .catch(e=>logDetailedError('Branch 2 provider log probe',e));
-  // One-time trial: download an Israel-only video through an Israeli address.
-  if(process.env.APIFY_TOKEN) void import('./branch2-geo-probe.js')
-    .then(m=>m.runGeoProbe())
-    .catch(e=>logDetailedError('Branch 2 geo probe',e));
+  // One-time account test: YouTube picture embedded in the saved songs.
+  if(process.env.APIFY_TOKEN) void import('./branch2-cover-selftest.js')
+    .then(m=>m.runCoverSelftest())
+    .catch(e=>logDetailedError('Branch 2 cover selftest',e));
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())
