@@ -35,8 +35,8 @@ test('a failed upload leaves a gap, never two songs on one number', async () => 
 
 test('keys match the requested layout', () => {
   assert.equal(EXT7_SETTINGS.type, 'playfile');
-  assert.equal(EXT7_SETTINGS.control_play6, 'minus');
-  assert.equal(EXT7_SETTINGS.control_play4, 'plus');
+  assert.equal(EXT7_SETTINGS.control_play4, 'minus');
+  assert.equal(EXT7_SETTINGS.control_play6, 'plus');
   assert.equal(EXT7_SETTINGS.control_play5, 'wait');
   assert.equal(EXT7_SETTINGS.control_play1, 'seconds_plus');
   assert.equal(EXT7_SETTINGS.control_play3, 'seconds_minus');

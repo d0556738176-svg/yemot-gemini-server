@@ -9,15 +9,15 @@
 //   5 = wait                  -> pause; press 5 again to continue
 //   1 = seconds_plus          -> 10 seconds forward
 //   3 = seconds_minus         -> 10 seconds back
-//   6 = minus                 -> the file uploaded before (older)
-//   4 = plus                  -> the newer file
+//   4 = minus                 -> the file uploaded before (older)
+//   6 = plus                  -> the newer file
 //   7 = minut_plus_amount1    -> 4 minutes forward (minut_plus_amount1=240000 ms)
 export const PLAY_KEYS = {
   control_play1: 'seconds_plus',
   control_play3: 'seconds_minus',
-  control_play4: 'plus',
+  control_play4: 'minus',
   control_play5: 'wait',
-  control_play6: 'minus',
+  control_play6: 'plus',
   control_play7: 'minut_plus_amount1',
   minut_plus_amount1: '240000',
 };
