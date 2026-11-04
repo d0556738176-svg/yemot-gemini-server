@@ -4839,6 +4839,26 @@ app.listen(port,async()=>{
   if(process.env.APIFY_TOKEN) void import('./branch2-cover-selftest.js')
     .then(m=>m.runCoverSelftest())
     .catch(e=>logDetailedError('Branch 2 cover selftest',e));
+  // One-time real-song test of the whole chain (owner's request 04.11): one
+  // religious song, downloaded exactly as from the phone, so the downloads
+  // folder gets a real file with picture and details.
+  if(process.env.APIFY_TOKEN&&process.env.YOUTUBE_API_KEY) void (async()=>{
+    const { _pipeline } = await import('./youtube-authorized-playback.js');
+    const MARK='ivr2:/2/selftest/real_song_test_v1.json';
+    await new Promise(r=>setTimeout(r,60000)); // after the account tests
+    if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
+    const results=await searchYouTubeVideos(String(process.env.BRANCH2_REAL_SONG_QUERY||'מרדכי בן דוד שיר'),{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
+    for(const v of results.slice(0,8)){
+      const facts=await fetchVideoFacts(v.videoId,process.env).catch(()=>null);
+      if(!facts||!(facts.durationSeconds>60&&facts.durationSeconds<=600)||engineCannotReach(facts,process.env))continue;
+      if(await lookupCachedYouTubeAudio(v.videoId).catch(()=>null))continue;
+      await _pipeline.writeCacheJson(MARK,{at:new Date().toISOString(),videoId:v.videoId,title:v.title});
+      console.info('[REAL_SONG_TEST] downloading as from the phone',{videoId:v.videoId,title:v.title,durationSec:facts.durationSeconds,publishedAt:facts.publishedAt});
+      startYouTubePlaybackJob({videoId:v.videoId,title:v.title,durationSeconds:facts.durationSeconds});
+      return;
+    }
+    console.info('[REAL_SONG_TEST] no suitable song in the results',{count:results.length});
+  })().catch(e=>console.warn('[REAL_SONG_TEST] failed',{message:String(e?.message||e).slice(0,200)}));
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())

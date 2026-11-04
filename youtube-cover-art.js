@@ -138,17 +138,27 @@ export async function makeMp3WithCover(source, out, { jpeg, title, ffmpegPath, b
 // YouTube category numbers -> genre names (the common ones).
 const GENRES = { 1: 'Film & Animation', 2: 'Autos & Vehicles', 10: 'Music', 15: 'Pets & Animals', 17: 'Sports', 19: 'Travel & Events', 20: 'Gaming', 22: 'People & Blogs', 23: 'Comedy', 24: 'Entertainment', 25: 'News & Politics', 26: 'Howto & Style', 27: 'Education', 28: 'Science & Technology', 29: 'Nonprofits & Activism' };
 
+export function publishedText(t) {
+  const f = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  const p = Object.fromEntries(f.formatToParts(new Date(t)).map(x => [x.type, x.value]));
+  return 'פורסם ביוטיוב ב ' + p.day + '.' + p.month + '.' + p.year + ' בשעה ' + p.hour + ':' + p.minute + ' (שעון ישראל)';
+}
+
 // Every tag a player shows, from the YouTube video's own details.
 export function downloadMetadata(videoId, facts = {}, fallbackTitle = null) {
   const url = 'https://www.youtube.com/watch?v=' + videoId;
-  const date = String(facts.publishedAt || '').slice(0, 10);
-  const desc = String(facts.description || '').replace(/\r/g, '').slice(0, 2000);
+  // The exact moment YouTube shows as the publish time, in Israel time.
+  const t = Date.parse(facts.publishedAt || '');
+  const published = Number.isFinite(t) ? publishedText(t) : '';
+  const date = Number.isFinite(t) ? new Date(t).toISOString().replace('.000Z', 'Z') : '';
+  const body = String(facts.description || '').replace(/\r/g, '').slice(0, 2000);
+  const desc = [published, body].filter(Boolean).join('\n\n');
   const m = {
     title: facts.title || fallbackTitle || videoId,
     artist: facts.channel, album_artist: facts.channel, album: facts.channel,
     date: date || null,
     genre: GENRES[Number(facts.categoryId)] || null,
-    comment: url, description: desc || null, synopsis: desc || null,
+    comment: [published, url].filter(Boolean).join(' | '), description: desc || null, synopsis: desc || null,
     keywords: Array.isArray(facts.tags) && facts.tags.length ? facts.tags.join(', ').slice(0, 500) : null,
     copyright: facts.channel ? '© ' + facts.channel : null,
     publisher: 'YouTube', website: url, encoded_by: 'Yemot branch 2',
