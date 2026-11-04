@@ -9,7 +9,7 @@ import { searchYouTubeVideos } from './youtube-ivr.js';
 import { selectedResultIndex, isMoreResultsRequest, isFreshYouTubeSearch } from './youtube-selection.js';
 import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
-import { fetchVideoFacts, publishedAgoHebrew, viewsHebrew } from './youtube-video-facts.js';
+import { fetchVideoFacts, publishedAgoHebrew, viewsHebrew, engineCannotReach } from './youtube-video-facts.js';
 import { downloadAuthorizedAudioToYemot, lookupCachedYouTubeAudio, saveCachedYouTubeAudio, addPendingPlaybackJob, removePendingPlaybackJob, listPendingPlaybackJobs } from './youtube-authorized-playback.js';
 import { apifyTokens, apifyWebhookQuery } from './youtube-apify-source.js';
 import { fetchVideoDurationSeconds } from './youtube-engine-select.js';
@@ -3818,6 +3818,7 @@ function formatAudioLengthHebrew(seconds) {
 // video was published and how many views it has. One YouTube Data API call,
 // cached on the video object so it is fetched at most once. Any lookup failure
 // just omits that fact; it must never block or delay the confirmation prompt.
+const GEO_LIMITED_TEXT = ' בעל הסרטון הגביל אותו ביוטיוב לצפייה בישראל בלבד, ושרתי מנוע ההורדה נמצאים מחוץ לישראל, ולכן יוטיוב לא מאפשר להם להוריד אותו. לא בוצעה הורדה ולא בוצע חיוב. אפשר לבחור תוצאה אחרת או לומר חיפוש חדש.';
 async function confirmPlaybackPrompt(video) {
   let suffix = '';
   try {
@@ -3828,6 +3829,8 @@ async function confirmPlaybackPrompt(video) {
         if (video.durationSeconds == null) video.durationSeconds = facts.durationSeconds;
         video.publishedAt = facts.publishedAt || video.publishedAt || null;
         video.viewCount = facts.viewCount;
+        video.geoLimited = engineCannotReach(facts, process.env);
+        if (video.geoLimited) console.info('[YouTube IVR] video limited to countries the engine cannot reach; no download attempted', { videoId: video.videoId, allowed: facts.regionAllowed, blocked: facts.regionBlocked });
       } else if (video.durationSeconds == null) {
         video.durationSeconds = await fetchVideoDurationSeconds(video.videoId, process.env);
       }
@@ -3839,6 +3842,12 @@ async function confirmPlaybackPrompt(video) {
     const views = viewsHebrew(video?.viewCount);
     if (views) suffix += ' ' + views + '.';
   } catch { /* facts are optional */ }
+  if (video?.geoLimited) {
+    const cached = await Promise.race([lookupCachedYouTubeAudio(String(video.videoId)).catch(() => null), new Promise(r => setTimeout(() => r(null), 2500))]);
+    if (!cached?.playbackPaths?.length)
+      return 'בחרת את ' + sanitizeForYemot(video.title) + '.' + GEO_LIMITED_TEXT;
+    video.geoLimited = false; // already saved: it plays without downloading
+  }
   const status = await existingPreparationStatus(video);
   return 'בחרת את ' + sanitizeForYemot(video.title) + '.' + suffix + (status ? ' ' + status : '') + ' האם להשמיע את הסרטון הזה? אמור כן או לא.';
 }
@@ -4163,6 +4172,7 @@ async function youtubeCallHandler(call) {
       if(selectedIndex>=0) {
         pendingVideo=results[selectedIndex];
         nextPrompt=await confirmPlaybackPrompt(pendingVideo);
+        if(pendingVideo?.geoLimited) pendingVideo=null; // nothing to confirm
         continue;
       }
 
@@ -4825,10 +4835,6 @@ app.listen(port,async()=>{
   if(process.env.APIFY_TOKEN) void import('./branch2-provider-log-probe.js')
     .then(m=>m.runProviderLogProbe())
     .catch(e=>logDetailedError('Branch 2 provider log probe',e));
-  // One-time check of why two visible videos were reported unavailable.
-  if(process.env.APIFY_TOKEN) void import('./branch2-unavailable-probe.js')
-    .then(m=>m.runUnavailableProbe())
-    .catch(e=>logDetailedError('Branch 2 unavailable probe',e));
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())

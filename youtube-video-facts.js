@@ -20,7 +20,22 @@ export async function fetchVideoFacts(videoId, env = process.env, fetchImpl = fe
     publishedAt: item.snippet?.publishedAt || null,
     // A channel can hide its view count; then nothing is said about views.
     viewCount: Number.isFinite(views) && views >= 0 ? views : null,
+    regionAllowed: Array.isArray(item.contentDetails?.regionRestriction?.allowed) ? item.contentDetails.regionRestriction.allowed : null,
+    regionBlocked: Array.isArray(item.contentDetails?.regionRestriction?.blocked) ? item.contentDetails.regionRestriction.blocked : null,
   };
+}
+
+// The download engine fetches from servers outside Israel and has no way to
+// choose a country. A video its owner limited to certain countries (e.g. only
+// IL) is answered "This video is unavailable" there; verified 04.11 on two such
+// videos (regionRestriction.allowed = [IL, PS]). Knowing this in advance lets
+// the caller hear the real reason instead of a failed attempt.
+export function engineCannotReach(facts, env = process.env) {
+  const countries = String(env.BRANCH2_ENGINE_COUNTRIES || 'US').split(',').map(c => c.trim().toUpperCase()).filter(Boolean);
+  if (!facts || !countries.length) return false;
+  if (Array.isArray(facts.regionAllowed) && !facts.regionAllowed.some(c => countries.includes(String(c).toUpperCase()))) return true;
+  if (Array.isArray(facts.regionBlocked) && countries.every(c => facts.regionBlocked.map(x => String(x).toUpperCase()).includes(c))) return true;
+  return false;
 }
 
 // "לפני 3 שנים", "לפני חודשיים", "אתמול", "היום" — natural spoken Hebrew.

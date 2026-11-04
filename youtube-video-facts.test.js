@@ -40,9 +40,25 @@ test('one API call returns length, publish date and views', async () => {
     calls++; assert.match(String(url), /part=contentDetails%2Csnippet%2Cstatistics/);
     return Response.json({ items: [{ contentDetails: { duration: 'PT4M13S' }, snippet: { publishedAt: '2020-01-01T00:00:00Z' }, statistics: { viewCount: '12345' } }] });
   });
-  assert.deepEqual(facts, { durationSeconds: 253, publishedAt: '2020-01-01T00:00:00Z', viewCount: 12345 });
+  assert.deepEqual(facts, { durationSeconds: 253, publishedAt: '2020-01-01T00:00:00Z', viewCount: 12345, regionAllowed: null, regionBlocked: null });
   assert.equal(calls, 1);
   const hidden = await fetchVideoFacts('abcdefghijk', { YOUTUBE_API_KEY: 'k' }, async () =>
     Response.json({ items: [{ contentDetails: { duration: 'PT1M' }, snippet: {}, statistics: {} }] }));
   assert.equal(hidden.viewCount, null);
+});
+
+import { engineCannotReach } from './youtube-video-facts.js';
+test('a video limited to Israel is recognised as out of the engine\'s reach', () => {
+  assert.equal(engineCannotReach({ regionAllowed: ['IL', 'PS'] }, {}), true);
+  assert.equal(engineCannotReach({ regionAllowed: ['IL', 'US'] }, {}), false);
+  assert.equal(engineCannotReach({ regionBlocked: ['US', 'CA'] }, {}), true);
+  assert.equal(engineCannotReach({ regionBlocked: ['DE'] }, {}), false);
+  assert.equal(engineCannotReach({ regionAllowed: null, regionBlocked: null }, {}), false);
+  assert.equal(engineCannotReach(null, {}), false);
+});
+test('video facts carry the region restriction', async () => {
+  const { fetchVideoFacts } = await import('./youtube-video-facts.js');
+  const f = await fetchVideoFacts('7De3QZfnUao', { YOUTUBE_API_KEY: 'k' }, async () => ({ ok: true, json: async () => ({ items: [{ contentDetails: { duration: 'PT20M40S', regionRestriction: { allowed: ['IL', 'PS'] } }, snippet: {}, statistics: {} }] }) }));
+  assert.deepEqual(f.regionAllowed, ['IL', 'PS']);
+  assert.equal(engineCannotReach(f, {}), true);
 });
