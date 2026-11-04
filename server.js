@@ -4954,7 +4954,7 @@ app.listen(port,async()=>{
   // One-time real test of "כן לוידאו" on a short religious video (04.11).
   if(process.env.APIFY_TOKEN) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
-    const MARK='ivr2:/2/selftest/video_real_test_v5.json';
+    const MARK='ivr2:/2/selftest/video_real_test_v6.json';
     // Waits for the account's multi-part upload test (a video is over 50MB).
     for(let i=0;i<40&&!(await _pipeline.readCacheJson('ivr2:/2/selftest/multipart_v1.json').catch(()=>null));i++)await new Promise(r=>setTimeout(r,15000));
     if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;

@@ -168,7 +168,7 @@ export async function runBigUploadTest() {
 export async function runMaintenanceV2(env = process.env) {
   const mod = await import('./youtube-authorized-playback.js');
   const p = mod._pipeline;
-  const MARK2 = 'ivr2:/2/selftest/maintenance_v5.json';
+  const MARK2 = 'ivr2:/2/selftest/maintenance_v6.json';
   if (await p.readCacheJson(MARK2).catch(() => null)) return;
   const report = { at: new Date().toISOString(), tried: [] };
   // leftovers of the earlier attempts (saved as folders)

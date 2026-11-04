@@ -278,6 +278,11 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,
   // carry the final name and numbering is off ("0"; the string "false" was
   // taken as on).
   const uuid=crypto.randomUUID(), name=path.posix.basename(String(remotePath).replace(/^ivr2:/,''));
+  // Measured 04.11: the joining request treats "path" as a FOLDER and saves
+  // the file inside it as <name>/000.<ext>, reporting where. So the parts go
+  // to a temporary folder, and the joined file is then moved to its real name.
+  const finalPath=remotePath;
+  remotePath='ivr2:/2/youtubejobs/upload_'+uuid.slice(0,8);
   console.info('[YouTube IVR] uploading to Yemot in parts', { remotePath, bytes: total, parts, style: st });
   for(let i=0;i<parts;i++){
     const start=i*partBytes, chunk=blob.slice(start,Math.min(total,start+partBytes));
@@ -301,14 +306,7 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,
     if(i===parts-1)log?.('last part answer',last.slice(0,300));
     if(!ok)throw new Error('Yemot part upload failed ('+(i+1)+'/'+parts+'): '+last);
   }
-  // Some servers join the file when the last part arrives: if it is already
-  // there in full, the joining request is not needed.
-  const already=await getYemotFile(remotePath).catch(()=>null);
-  if(already?.file?.exists===true&&Number(already?.file?.size)===total){
-    console.info('[YouTube IVR] playback step 7: Yemot joined the parts itself', { remotePath, parts });
-    doneVariant=doneVariant||'auto';
-    return {responseStatus:'OK',joined:'auto'};
-  }
+
   // The joining request: form-encoded body (how Yemot's own clients send it);
   // if Yemot does not take that, the same fields in the query string.
   const fields={token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'0',tts:'0',
@@ -337,13 +335,17 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,
   }
   if(!result)console.warn('[YouTube IVR] multi-part join answers',seen);
   if(!result)throw new Error('Yemot multi-part finish failed: '+body.slice(0,300));
-  console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted (parts joined)', { remotePath, parts, variant: doneVariant, answer: body.slice(0, 300) });
-  // The join may finish a moment after the answer: wait until the whole file is there.
-  for(let i=0;i<20;i++){
-    const m=await getYemotFile(remotePath).catch(()=>null);
-    if(m?.file?.exists===true&&Number(m?.file?.size)===total)break;
-    await new Promise(r=>setTimeout(r,3000));
-  }
+  // Move the joined file from where Yemot put it to its real name.
+  const joined='ivr2:/'+String(result.path||'').replace(/^ivr2?:?\/?/,'').replace(/^\/+/,'');
+  const fa=async params=>{const u=new URL(YEMOT_API_BASE+'/FileAction');u.searchParams.set('token',yemotApiKey());for(const [k,v] of Object.entries(params))u.searchParams.set(k,v);
+    const r=await fetch(u,{signal:AbortSignal.timeout(60000)});return r.json().catch(()=>null);};
+  await fa({action:'delete',what:finalPath}).catch(()=>null); // replace an older copy
+  const mv=await fa({action:'move',what:joined,target:finalPath});
+  await fa({action:'delete',what:remotePath}).catch(()=>null);
+  const m=await getYemotFile(finalPath).catch(()=>null);
+  if(m?.file?.exists!==true||Number(m?.file?.size)!==total)
+    throw new Error('Yemot multi-part file not in place: '+JSON.stringify({joined,move:mv?.responseStatus||null,size:m?.file?.size??null}).slice(0,240));
+  console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted (parts joined)', { remotePath: finalPath, parts, variant: doneVariant, bytes: total });
   return result;
 }
 
