@@ -269,7 +269,7 @@ async function partStyle(){
   if(r?.works){partStyleCache=r.works;doneVariant=r.works.done||doneVariant;}
   return partStyleCache;
 }
-async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,style=null,partBytes=YEMOT_PART_BYTES,log=null}={}) {
+async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,style=null,partBytes=YEMOT_PART_BYTES,log=null,doneConvert=undefined}={}) {
   const st=style||(await partStyle())?.part||'full';
   const blob=await openAsBlob(filePath);
   const total=blob.size, parts=Math.ceil(total/partBytes);
@@ -311,6 +311,10 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,
   // if Yemot does not take that, the same fields in the query string.
   const fields={token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'0',tts:'0',
     qquuid:uuid,qqfilename:name,qqtotalfilesize:String(total),qqtotalparts:String(parts),uploader:'yemot-admin'};
+  // How "no conversion" must be written in the joining request (measured by
+  // the account test; '0' was still converted).
+  const dc=doneConvert!==undefined?doneConvert:(await partStyle())?.convert;
+  if(!convertAudio&&dc!==undefined){ if(dc===null)delete fields.convertAudio; else fields.convertAudio=dc; }
   const finishMs=Math.max(60000,Math.ceil(total/1000000)*2000);
   const q=new URLSearchParams(fields).toString();
   const mp=extra=>{const f=new FormData();for(const [k,v] of Object.entries({...fields,...extra}))f.append(k,v);return f;};

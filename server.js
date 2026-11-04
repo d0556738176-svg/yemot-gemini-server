@@ -4943,7 +4943,7 @@ app.listen(port,async()=>{
   // One-time maintenance: downloads moved to /2, >50MB one-file upload test,
   // Apify keys audit (branch2-maintenance.js).
   if(process.env.APIFY_TOKEN) void import('./branch2-maintenance.js')
-    .then(async m=>{await m.runMaintenance();await m.runMaintenanceV2();})
+    .then(async m=>{await m.runMaintenance();await m.runMaintenanceV2();await m.runMultipartConvertTest();})
     .catch(e=>logDetailedError('Branch 2 maintenance',e));
   // Video downloads that were running before a restart continue (same run).
   if(process.env.APIFY_TOKEN) void (async()=>{
@@ -4954,9 +4954,9 @@ app.listen(port,async()=>{
   // One-time real test of "כן לוידאו" on a short religious video (04.11).
   if(process.env.APIFY_TOKEN) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
-    const MARK='ivr2:/2/selftest/video_real_test_v6.json';
+    const MARK='ivr2:/2/selftest/video_real_test_v7.json';
     // Waits for the account's multi-part upload test (a video is over 50MB).
-    for(let i=0;i<40&&!(await _pipeline.readCacheJson('ivr2:/2/selftest/multipart_v1.json').catch(()=>null));i++)await new Promise(r=>setTimeout(r,15000));
+    for(let i=0;i<40&&!(await _pipeline.readCacheJson('ivr2:/2/selftest/multipart_v2.json').catch(()=>null));i++)await new Promise(r=>setTimeout(r,15000));
     if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
     await _pipeline.writeCacheJson(MARK,{at:new Date().toISOString(),videoId:'_Je4NEIzupw'});
     console.info('[VIDEO] real test: as if the caller said "כן לוידאו"',{videoId:'_Je4NEIzupw'});

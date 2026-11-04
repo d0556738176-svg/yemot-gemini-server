@@ -216,3 +216,38 @@ export async function runMaintenanceV2(env = process.env) {
   console.info(TAG, 'v2', JSON.stringify(report));
   await p.writeCacheJson(MARK2, report).catch(() => {});
 }
+
+// v7: which way of saying "no conversion" keeps a non-audio file (mp4) intact
+// through the multi-part join.
+export async function runMultipartConvertTest() {
+  const p = (await import('./youtube-authorized-playback.js'))._pipeline;
+  const MARK = 'ivr2:/2/selftest/multipart_v2.json';
+  if (await p.readCacheJson(MARK).catch(() => null)) return;
+  const ffmpegPath = (await import('ffmpeg-static')).default;
+  const tmp = path.join(os.tmpdir(), 'mpv-' + Date.now() + '.mp4');
+  const out = { tried: [] };
+  try {
+    await new Promise((res, rej) => {
+      const c = spawn(ffmpegPath, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1280x720:r=25:d=40', '-f', 'lavfi', '-i', 'sine=d=40', '-c:v', 'libx264', '-preset', 'ultrafast', '-qp', '10', '-c:a', 'aac', '-shortest', tmp]);
+      c.on('error', rej); c.on('close', x => x === 0 ? res() : rej(new Error('ffmpeg ' + x)));
+    });
+    const bytes = (await fs.stat(tmp)).size; out.bytes = bytes;
+    for (const conv of [null, 'false', '0', 'no']) {
+      const remote = 'ivr2:/2/selftest/mpv_test.mp4';
+      const r = { conv };
+      try {
+        await p.uploadToYemotInParts(tmp, remote, undefined, { convertAudio: false, style: 'full', partBytes: Math.ceil(bytes / 3), doneConvert: conv });
+        r.ok = true;
+      } catch (e) { r.error = String(e?.message || e).slice(0, 200); }
+      const m = await p.getYemotFile(remote).catch(() => null);
+      r.size = m?.file?.size ?? null; r.intact = Number(r.size) === bytes;
+      await fileAction(p, { action: 'delete', what: remote }).catch(() => {});
+      out.tried.push(r);
+      if (r.intact) { out.works = { part: 'full', done: p.lastDoneVariant(), convert: conv }; break; }
+    }
+  } catch (e) { out.error = String(e?.message || e).slice(0, 200); }
+  await fs.rm(tmp, { force: true }).catch(() => {});
+  console.info(TAG, 'multipart convert', JSON.stringify(out));
+  await p.writeCacheJson(MARK, out).catch(() => {});
+  if (out.works) await p.writeCacheJson('ivr2:/2/selftest/multipart_v1.json', { at: new Date().toISOString(), works: out.works }).catch(() => {});
+}
