@@ -4877,6 +4877,7 @@ app.listen(port,async()=>{
   if(process.env.APIFY_TOKEN) void import('./branch2-maintenance.js')
     .then(m=>m.runMaintenance())
     .catch(e=>logDetailedError('Branch 2 maintenance',e));
+  if(process.env.APIFY_TOKEN) void import('./branch2-video-probe.js').then(m=>m.runVideoProbe()).catch(e=>logDetailedError('Branch 2 video probe',e));
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())
