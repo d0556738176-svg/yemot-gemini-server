@@ -168,27 +168,52 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
     // Picture + all details, streams copied untouched (no quality lost).
     const thumb = await deps.fetchThumbnail(videoId).catch(() => null);
     const jpeg = thumb ? await deps.normalizeCover(thumb.jpeg, { ffmpegPath, maxWidth: 1280, quality: 2 }) : null;
+    if (jpeg) await fs.writeFile(path.join(temp, 'cover.jpg'), jpeg);
     const meta = deps.downloadMetadata(videoId, facts || {}, video.title || got.item?.title);
-    const args = ['-hide_banner', '-loglevel', 'error', '-y', '-i', src];
-    if (jpeg) { await fs.writeFile(path.join(temp, 'cover.jpg'), jpeg); args.push('-i', path.join(temp, 'cover.jpg')); }
-    args.push('-map', '0:v:0', '-map', '0:a:0?');
-    if (jpeg) args.push('-map', '1:v:0', '-disposition:v:1', 'attached_pic');
-    args.push('-c', 'copy', '-map_metadata', '-1');
-    for (const [k, v] of Object.entries(meta)) args.push('-metadata', k + '=' + String(v));
-    args.push('-movflags', '+faststart', out);
-    let file = out;
-    try { await ffmpeg(ffmpegPath, args); } catch (e) { log.warn?.('[VIDEO] picture/details not added; saving the video as delivered', { videoId, message: String(e.message).slice(0, 160) }); file = src; }
-    await fs.rm(file === out ? src : out, { force: true }).catch(() => {});
-    const size = (await fs.stat(file)).size;
-    const folder = deps.nextFolder ? await deps.nextFolder() : VIDEO_DIR;
-    const remote = folder + '/' + (deps.titleFileName(meta.title || videoId) || videoId) + '.mp4';
+    const dress = async (inFile, outFile, tags) => {
+      const args = ['-hide_banner', '-loglevel', 'error', '-y', '-i', inFile];
+      if (jpeg) args.push('-i', path.join(temp, 'cover.jpg'));
+      args.push('-map', '0:v:0', '-map', '0:a:0?');
+      if (jpeg) args.push('-map', '1:v:0', '-disposition:v:1', 'attached_pic');
+      args.push('-c', 'copy', '-map_metadata', '-1');
+      for (const [k, v] of Object.entries(tags)) args.push('-metadata', k + '=' + String(v));
+      args.push('-movflags', '+faststart', outFile);
+      try { await ffmpeg(ffmpegPath, args); return outFile; }
+      catch (e) { log.warn?.('[VIDEO] picture/details not added; saving the video as delivered', { videoId, message: String(e.message).slice(0, 160) }); return inFile; }
+    };
+    // One Yemot upload has a size limit (measured on the account); a bigger
+    // video is cut (without re-encoding) into numbered complete parts.
+    const cap = deps.uploadCap ? await deps.uploadCap() : Infinity;
+    const pieces = [];
+    if (bytes <= cap * 0.97) pieces.push({ file: await dress(src, path.join(temp, 'video.mp4'), meta), suffix: '' });
+    else {
+      const dur = Number(durationSec) || Number(got.item?.durationSeconds) || 0;
+      const n = Math.ceil(bytes / (cap * 0.8)), seg = Math.max(30, Math.floor(dur / n) || 600);
+      await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-map', '0', '-c', 'copy', '-f', 'segment', '-segment_time', String(seg), '-reset_timestamps', '1', '-segment_format', 'mp4', path.join(temp, 'seg%03d.mp4')]);
+      const segs = (await fs.readdir(temp)).filter(f => /^seg\d{3}\.mp4$/.test(f)).sort();
+      for (const [k, f] of segs.entries()) {
+        const tags = { ...meta, title: meta.title + ' (חלק ' + (k + 1) + ' מתוך ' + segs.length + ')', track: (k + 1) + '/' + segs.length };
+        pieces.push({ file: await dress(path.join(temp, f), path.join(temp, 'part' + (k + 1) + '.mp4'), tags), suffix: '_חלק_' + (k + 1) });
+      }
+      log.info?.('[VIDEO] video larger than one upload; cut into parts', { videoId, bytes, cap, parts: pieces.length });
+    }
+    const name = deps.titleFileName(meta.title || videoId) || videoId;
+    const saved = [];
     const t = Date.now();
-    await upload(file, remote);
-    const m = await getFile(remote);
-    if (m?.file?.exists !== true || Number(m?.file?.size) !== size) throw err('video_upload_unverified', 'Video not verified in Yemot');
-    await store.write(receiptPath, { videoId, actor: got.actor, runId: got.runId, state: 'done', remote, bytes: size, quality, at: new Date().toISOString() });
-    await deps.countSaved?.().catch?.(() => {});
-    log.info?.('[VIDEO] saved', { videoId, remote, bytes: size, quality, engine: got.actor, picture: !!jpeg && file === out, uploadMs: Date.now() - t });
+    for (const pc of pieces) {
+      const size = (await fs.stat(pc.file)).size;
+      if (size > cap) throw err('video_too_large', 'A video part is still larger than one upload');
+      const folder = deps.nextFolder ? await deps.nextFolder() : VIDEO_DIR;
+      const remote = folder + '/' + name + pc.suffix + '.mp4';
+      await upload(pc.file, remote);
+      const m = await getFile(remote);
+      if (m?.file?.exists !== true || Number(m?.file?.size) !== size) throw err('video_upload_unverified', 'Video not verified in Yemot');
+      await deps.countSaved?.().catch?.(() => {});
+      saved.push({ remote, bytes: size });
+    }
+    const remote = saved[0].remote, size = saved.reduce((a, x) => a + x.bytes, 0);
+    await store.write(receiptPath, { videoId, actor: got.actor, runId: got.runId, state: 'done', remote, files: saved, bytes: size, quality, at: new Date().toISOString() });
+    log.info?.('[VIDEO] saved', { videoId, files: saved, quality, engine: got.actor, picture: !!jpeg, uploadMs: Date.now() - t });
     return { remote, bytes: size };
   } finally { await fs.rm(temp, { recursive: true, force: true }).catch(() => {}); }
 }

@@ -183,9 +183,9 @@ function runFfmpeg(ffmpegPath, args, { timeoutMs = 3 * 3600 * 1000, signal } = {
 // re-encoding = no quality lost) with the picture and all tags; if the audio
 // is not AAC it is encoded once at 256k. mp3: 320k (used only if Yemot would
 // not keep an m4a intact).
-export async function makeDownloadCopy(source, out, { format = 'm4a', jpeg, metadata = {}, ffmpegPath, signal } = {}) {
-  const jpg = path.join(path.dirname(out), 'cover.jpg');
-  const input = ['-hide_banner', '-loglevel', 'error', '-y', '-i', source];
+export async function makeDownloadCopy(source, out, { format = 'm4a', jpeg, metadata = {}, ffmpegPath, signal, start = null, length = null } = {}) {
+  const jpg = path.join(path.dirname(out), 'cover-' + path.basename(out) + '.jpg');
+  const input = ['-hide_banner', '-loglevel', 'error', '-y', ...(start != null ? ['-ss', String(start)] : []), ...(length ? ['-t', String(length)] : []), '-i', source];
   const pic = [];
   if (jpeg) { await fs.writeFile(jpg, jpeg); input.push('-i', jpg); pic.push('-map', '1:v:0', '-disposition:v:0', 'attached_pic'); }
   const tags = ['-map_metadata', '-1'];

@@ -217,11 +217,15 @@ async function uploadToYemot(filePath, remotePath, signal=undefined, {convertAud
   const bytes=blob.size;
   // Measured on the account (04.11): whether one big request is accepted
   // decides if parts are needed at all (see branch2-maintenance.js).
-  // Measured 04.11: one request of 56MB is accepted, 85MB is refused (413).
-  // Above 50MB the file goes in parts (only once the part protocol is proven
-  // on the account; otherwise the single request is still tried).
-  if(!single&&bytes>YEMOT_SINGLE_MAX&&String(process.env.YEMOT_UPLOAD_IN_PARTS||'auto')!=='off'&&(await partStyle()))
-    return uploadToYemotInParts(filePath,remotePath,signal,{convertAudio});
+  // Measured 04.11: one request of 56MB is accepted, 85MB is refused (413);
+  // the exact limit is measured once (upload_cap_v1.json). Yemot's multi-part
+  // protocol always converts the joined file to its 8kHz WAV, so it is used
+  // only for phone WAV files; other files above the limit are split by the
+  // caller (uploadCapBytes()).
+  if(!single&&bytes>await uploadCapBytes()){
+    if(/\.wav$/i.test(remotePath))return uploadToYemotInParts(filePath,remotePath,signal,{convertAudio,style:'full'});
+    throw Object.assign(new Error('File is larger than one Yemot upload allows'),{code:'too_large_for_yemot'});
+  }
   // ~250KB/s worst case, never less than the normal short-file timeout.
   const timeoutMs=Math.max(UPLOAD_TIMEOUT_MS,Math.ceil(bytes/250000)*1000);
   const url=new URL(YEMOT_UPLOAD_URL);
@@ -252,6 +256,15 @@ async function uploadToYemot(filePath, remotePath, signal=undefined, {convertAud
 let doneVariant=null;
 const YEMOT_SINGLE_MAX=Math.max(1,Number(process.env.YEMOT_SINGLE_UPLOAD_MB||50))*1024*1024;
 let bigSingleCache=null;
+let capCache=null;
+export async function uploadCapBytes(){
+  if(capCache)return capCache;
+  const r=await readCacheJson('ivr2:/2/selftest/upload_cap_v1.json').catch(()=>null);
+  const mb=Number(r?.maxOkMb)||56;
+  const cap=Math.floor((mb-1)*1024*1024);
+  if(r)capCache=cap;
+  return cap;
+}
 async function bigSingleUploadWorks(){
   if(bigSingleCache!==null)return bigSingleCache;
   const r=await readCacheJson('ivr2:/2/selftest/big_upload_v4.json').catch(()=>null);
@@ -347,7 +360,8 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,
   const mv=await fa({action:'move',what:joined,target:finalPath});
   await fa({action:'delete',what:remotePath}).catch(()=>null);
   const m=await getYemotFile(finalPath).catch(()=>null);
-  if(m?.file?.exists!==true||Number(m?.file?.size)!==total)
+  const sizeOk=Number(m?.file?.size)===total||(/\.wav$/i.test(finalPath)&&Math.abs(Number(m?.file?.size)-total)<=4096);
+  if(m?.file?.exists!==true||!sizeOk)
     throw new Error('Yemot multi-part file not in place: '+JSON.stringify({joined,move:mv?.responseStatus||null,size:m?.file?.size??null}).slice(0,240));
   console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted (parts joined)', { remotePath: finalPath, parts, variant: doneVariant, bytes: total });
   return result;
@@ -619,46 +633,77 @@ async function downloadCopyPolicy(){
   downloadPolicyCache={format:r.format||null};
   return downloadPolicyCache.format?downloadPolicyCache:null;
 }
-async function saveDownloadCopy(id,source,title,temp,policy){
+// Uploads one finished file, reads it back from Yemot (streamed) and checks it
+// is byte-for-byte what was made; returns what a player sees in it.
+async function uploadDownloadVerified(file,remote,temp){
+  const bytes=(await fs.stat(file)).size;
+  await uploadToYemot(file,remote,undefined,{convertAudio:false});
+  const meta=await getYemotFile(remote);
+  if(meta?.file?.exists!==true||Number(meta?.file?.size)!==bytes)throw new Error('download copy not verified in Yemot');
+  const back=path.join(temp,'readback'+path.extname(file));
+  const u=new URL(YEMOT_API_BASE+'/DownloadFile');u.searchParams.set('token',yemotApiKey());u.searchParams.set('path',remote);
+  const rb=await fetch(u,{signal:AbortSignal.timeout(Math.ceil(Math.max(120000,bytes/50)))});
+  if(!rb.ok)throw new Error('download copy read-back failed HTTP '+rb.status);
+  await streamPipeline(Readable.fromWeb(rb.body),createWriteStream(back));
+  const sha=f=>new Promise((res,rej)=>{const h=createHash('sha256');createReadStream(f).on('data',d=>h.update(d)).on('end',()=>res(h.digest('hex'))).on('error',rej);});
+  const identical=(await sha(back))===(await sha(file));
+  const seen=await inspectMedia(back,ffmpegPath).catch(()=>null);
+  await fs.rm(back,{force:true}).catch(()=>{});
+  if(!identical)throw new Error('download copy in Yemot differs from the file made');
+  return {bytes,seen};
+}
+
+// The downloadable copy. Best quality that fits ONE Yemot upload (the
+// account's measured request limit): lossless FLAC; if too big, M4A (AAC
+// 256k, or YouTube's own AAC untouched); if even that is too big (very long
+// recordings), M4A in numbered parts, each a complete file with the picture.
+async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
   const t=Date.now();
   const { fetchVideoFacts } = await import('./youtube-video-facts.js');
   const [facts,thumb]=await Promise.all([fetchVideoFacts(id,process.env).catch(()=>null),fetchThumbnail(id).catch(()=>null)]);
-  // Full-size picture (up to 1280 wide), black bars of 4:3 sizes removed.
   const jpeg=thumb?await normalizeCover(thumb.jpeg,{ffmpegPath,maxWidth:1280,quality:2}):null;
   const metadata=downloadMetadata(id,facts||{},title);
-  const out=path.join(temp,'download.'+policy.format);
-  const bytes=await makeDownloadCopy(source,out,{format:policy.format,jpeg,metadata,ffmpegPath});
+  const cap=await uploadCapBytes();
+  let format=policy.format;
+  let out=path.join(temp,'download.'+format);
+  let bytes=await makeDownloadCopy(source,out,{format,jpeg,metadata,ffmpegPath});
+  if(bytes>cap&&format==='flac'){
+    await fs.rm(out,{force:true}).catch(()=>{});
+    format='m4a';out=path.join(temp,'download.m4a');
+    bytes=await makeDownloadCopy(source,out,{format,jpeg,metadata,ffmpegPath});
+  }
+  const files=[];
+  if(bytes<=cap)files.push({file:out,suffix:'',tags:metadata});
+  else{
+    await fs.rm(out,{force:true}).catch(()=>{});
+    const dur=Number(durationSec)||Number(facts?.durationSeconds)||0;
+    if(!dur)throw new Error('download copy too large and length unknown');
+    const n=Math.ceil(bytes/(cap*0.9)),seg=Math.ceil(dur/n);
+    for(let k=0;k<n;k++){
+      const f=path.join(temp,'part'+(k+1)+'.m4a');
+      const tags={...metadata,title:metadata.title+' (חלק '+(k+1)+' מתוך '+n+')',track:(k+1)+'/'+n};
+      await makeDownloadCopy(source,f,{format:'m4a',jpeg,metadata:tags,ffmpegPath,start:k*seg,length:seg});
+      files.push({file:f,suffix:'_חלק_'+(k+1),tags});
+    }
+  }
   await fs.rm(source,{force:true}).catch(()=>{});
-  // Named after the YouTube title; a different video with the same title
-  // gets its id added instead of replacing the other song.
   const base=titleFileName(metadata.title||title||id)||id;
   const owners=await readCacheJson(DOWNLOAD_OWNERS).catch(()=>null)||{};
   const name=owners[base]&&owners[base]!==id?base+'_'+id:base;
   const folders=await import('./download-folders.js');
-  const remote=(await folders.nextFolder('audio',{readJson:readCacheJson}))+'/'+name+'.'+policy.format;
-  await uploadToYemot(out,remote,undefined,{convertAudio:false});
-  const meta=await getYemotFile(remote);
-  if(meta?.file?.exists!==true||Number(meta?.file?.size)!==bytes)throw new Error('download copy not verified in Yemot');
-  // Read the file BACK from Yemot and check it is byte-for-byte what was made,
-  // then report what a player will see in it (picture, tags, audio quality).
-  const back=path.join(temp,'readback.'+policy.format);
-  const u=new URL(YEMOT_API_BASE+'/DownloadFile');u.searchParams.set('token',yemotApiKey());u.searchParams.set('path',remote);
-  const rb=await fetch(u,{signal:AbortSignal.timeout(Math.ceil(Math.max(120000,bytes/50)))});
-  if(!rb.ok)throw new Error('download copy read-back failed HTTP '+rb.status);
-  // Streamed to disk and hashed in pieces: a long lossless file never sits
-  // whole in the small server's memory.
-  await streamPipeline(Readable.fromWeb(rb.body),createWriteStream(back));
-  const sha=f=>new Promise((res,rej)=>{const h=createHash('sha256');createReadStream(f).on('data',d=>h.update(d)).on('end',()=>res(h.digest('hex'))).on('error',rej);});
-  const identical=(await sha(back))===(await sha(out));
-  const seen=await inspectMedia(back,ffmpegPath).catch(()=>null);
-  await fs.rm(back,{force:true}).catch(()=>{});
-  if(!identical)throw new Error('download copy in Yemot differs from the file made');
+  const saved=[];let seen=null;
+  for(const x of files){
+    const remote=(await folders.nextFolder('audio',{readJson:readCacheJson}))+'/'+name+x.suffix+'.'+format;
+    const r=await uploadDownloadVerified(x.file,remote,temp);
+    await fs.rm(x.file,{force:true}).catch(()=>{});
+    await folders.countSaved('audio',{readJson:readCacheJson,writeJson:writeCacheJson});
+    saved.push({remote,bytes:r.bytes});seen=seen||r.seen;
+  }
   if(!owners[name]){owners[name]=id;await writeCacheJson(DOWNLOAD_OWNERS,owners).catch(()=>{});}
-  await folders.countSaved('audio',{readJson:readCacheJson,writeJson:writeCacheJson});
-  console.info('[DOWNLOADS] song saved for downloading',{videoId:id,remote,bytes,format:policy.format,identicalInYemot:identical,
+  console.info('[DOWNLOADS] song saved for downloading',{videoId:id,files:saved,format,identicalInYemot:true,
     picture:seen?.picture??!!jpeg,pictureSize:seen?.pictureSize||null,audio:seen?.audio||null,
     title:seen?.tags?.title||null,artist:seen?.tags?.artist||null,date:seen?.tags?.date||null,genre:seen?.tags?.genre||null,
-    published:String(seen?.tags?.comment||'').split(' | ')[0]||null,tagCount:seen?Object.keys(seen.tags).length:null,ms:Date.now()-t});
+    tagCount:seen?Object.keys(seen.tags).length:null,ms:Date.now()-t});
 }
 
 // Result of the one-time account test (branch2-cover-selftest.js); read once.
@@ -772,7 +817,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
         .catch(e=>console.warn('[EXT7] song not added',{videoId:id,message:String(e?.message||e).slice(0,200)}));
     }
     // Downloadable copy with the video's picture, in the background.
-    if(mp3Policy)mp3Job=saveDownloadCopy(id,source,sourceTitle,temp,mp3Policy)
+    if(mp3Policy)mp3Job=saveDownloadCopy(id,source,sourceTitle,temp,mp3Policy,mastered.durationSec)
       .catch(e=>console.warn('[DOWNLOADS] song not saved for downloading',{videoId:id,message:String(e?.message||e).slice(0,200)}));
     return {playbackPaths:paths,chunkCount:paths.length};
   } finally {

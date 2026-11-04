@@ -3914,6 +3914,7 @@ function startYouTubeVideoJob(video) {
       fetchThumbnail: cover.fetchThumbnail, normalizeCover: cover.normalizeCover, downloadMetadata: cover.downloadMetadata,
       fetchVideoFacts, titleFileName, log: console,
       nextFolder: async () => (await import('./download-folders.js')).nextFolder('video', { readJson: x => p.readCacheJson(x) }),
+      uploadCap: async () => (await import('./youtube-authorized-playback.js')).uploadCapBytes(),
       countSaved: async () => (await import('./download-folders.js')).countSaved('video', { readJson: x => p.readCacheJson(x), writeJson: (x, d) => p.writeCacheJson(x, d) }),
     });
   })().then(r => { state.status = 'ready'; state.remote = r.remote; return videoPendingUpdate(l => l.filter(x => x !== id)); })
@@ -4954,9 +4955,9 @@ app.listen(port,async()=>{
   // One-time real test of "כן לוידאו" on a short religious video (04.11).
   if(process.env.APIFY_TOKEN) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
-    const MARK='ivr2:/2/selftest/video_real_test_v7.json';
+    const MARK='ivr2:/2/selftest/video_real_test_v8.json';
     // Waits for the account's multi-part upload test (a video is over 50MB).
-    for(let i=0;i<40&&!(await _pipeline.readCacheJson('ivr2:/2/selftest/multipart_v2.json').catch(()=>null));i++)await new Promise(r=>setTimeout(r,15000));
+    for(let i=0;i<40&&!(await _pipeline.readCacheJson('ivr2:/2/selftest/upload_cap_v1.json').catch(()=>null));i++)await new Promise(r=>setTimeout(r,15000));
     if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
     await _pipeline.writeCacheJson(MARK,{at:new Date().toISOString(),videoId:'_Je4NEIzupw'});
     console.info('[VIDEO] real test: as if the caller said "כן לוידאו"',{videoId:'_Je4NEIzupw'});
