@@ -16,7 +16,7 @@ export const COVER_RESULT = 'ivr2:/2/selftest/cover_result_v1.json';
 export async function runCoverSelftest(env = process.env) {
   if (String(env.BRANCH2_COVER_ART || 'on').toLowerCase() === 'off') return;
   const p = (await import('./youtube-authorized-playback.js'))._pipeline;
-  if (await p.readCacheJson(COVER_RESULT).catch(() => null)) return;
+  if (await p.readCacheJson(COVER_RESULT).catch(() => null)) return runCoverMp3Selftest(env);
   const ffmpegPath = (await import('ffmpeg-static')).default;
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'covertest-'));
   try {
@@ -52,5 +52,47 @@ export async function runCoverSelftest(env = process.env) {
     await p.writeCacheJson(COVER_RESULT, result);
   } catch (e) {
     console.warn(TAG, 'failed', String(e?.message || e).slice(0, 200));
+  } finally { await fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
+
+// Second check (the WAV test showed Yemot counts a tag after the audio as
+// sound: 20 s became 23 s). Can Yemot keep a downloadable MP3 with the
+// picture, byte for byte, outside the played folders?
+export const COVER_MP3_RESULT = 'ivr2:/2/selftest/cover_mp3_result_v1.json';
+export async function runCoverMp3Selftest(env = process.env) {
+  const p = (await import('./youtube-authorized-playback.js'))._pipeline;
+  if (await p.readCacheJson(COVER_MP3_RESULT).catch(() => null)) return;
+  const ffmpegPath = (await import('ffmpeg-static')).default;
+  const { fetchThumbnail, normalizeCover } = await import('./youtube-cover-art.js');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'covermp3-'));
+  try {
+    const thumb = await fetchThumbnail(env.BRANCH2_AB_VIDEO || '86eLl-ZYt4A');
+    const jpg = path.join(dir, 'c.jpg'), mp3 = path.join(dir, 't.mp3');
+    await fs.writeFile(jpg, await normalizeCover(thumb.jpeg, { ffmpegPath }));
+    await new Promise((res, rej) => {
+      const c = spawn(ffmpegPath, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=f=440:d=20', '-i', jpg, '-map', '0:a', '-map', '1:v',
+        '-c:a', 'libmp3lame', '-b:a', '128k', '-c:v', 'copy', '-id3v2_version', '3', '-metadata', 'title=בדיקת תמונה',
+        '-metadata:s:v', 'title=Album cover', '-metadata:s:v', 'comment=Cover (front)', '-disposition:v', 'attached_pic', mp3]);
+      c.on('error', rej); c.on('close', x => x === 0 ? res() : rej(new Error('ffmpeg ' + x)));
+    });
+    const local = await fs.readFile(mp3);
+    const remote = 'ivr2:/2/selftest/cover_test.mp3';
+    const r = { at: new Date().toISOString(), localBytes: local.length };
+    try {
+      const up = await p.uploadToYemot(mp3, remote, undefined, { convertAudio: false });
+      r.upload = { duration: up?.duration ?? null, convertedSize: up?.convertedSize ?? null };
+      const meta = await p.getYemotFile(remote);
+      r.size = meta?.file?.size ?? null; r.duration = meta?.file?.duration ?? null; r.exists = meta?.file?.exists ?? null;
+      const url = new URL(p.YEMOT_API_BASE + '/DownloadFile');
+      url.searchParams.set('token', p.yemotApiKey()); url.searchParams.set('path', remote);
+      const back = Buffer.from(await (await fetch(url, { signal: AbortSignal.timeout(30000) })).arrayBuffer());
+      r.downloadedBytes = back.length; r.identical = Buffer.compare(back, local) === 0;
+      r.hasPicture = back.includes(Buffer.from('APIC', 'latin1'));
+    } catch (e) { r.error = String(e?.message || e).slice(0, 200); }
+    r.safe = r.identical === true && r.hasPicture === true;
+    console.info(TAG, 'mp3', JSON.stringify(r));
+    await p.writeCacheJson(COVER_MP3_RESULT, r);
+  } catch (e) {
+    console.warn(TAG, 'mp3 failed', String(e?.message || e).slice(0, 200));
   } finally { await fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
