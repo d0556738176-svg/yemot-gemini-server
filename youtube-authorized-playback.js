@@ -596,7 +596,7 @@ async function saveDownloadCopy(id,source,title,temp,policy){
   // then report what a player will see in it (picture, tags, audio quality).
   const back=path.join(temp,'readback.'+policy.format);
   const u=new URL(YEMOT_API_BASE+'/DownloadFile');u.searchParams.set('token',yemotApiKey());u.searchParams.set('path',remote);
-  const rb=await fetch(u,{signal:AbortSignal.timeout(Math.max(60000,bytes/100))});
+  const rb=await fetch(u,{signal:AbortSignal.timeout(Math.ceil(Math.max(60000,bytes/100)))});
   if(!rb.ok)throw new Error('download copy read-back failed HTTP '+rb.status);
   await fs.writeFile(back,Buffer.from(await rb.arrayBuffer()));
   const sha=f=>fs.readFile(f).then(b=>createHash('sha256').update(b).digest('hex'));
