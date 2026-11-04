@@ -168,7 +168,7 @@ export async function runBigUploadTest() {
 export async function runMaintenanceV2(env = process.env) {
   const mod = await import('./youtube-authorized-playback.js');
   const p = mod._pipeline;
-  const MARK2 = 'ivr2:/2/selftest/maintenance_v2.json';
+  const MARK2 = 'ivr2:/2/selftest/maintenance_v3.json';
   if (await p.readCacheJson(MARK2).catch(() => null)) return;
   const report = { at: new Date().toISOString(), tried: [] };
   // a) multi-part protocol, 24MB file in 8MB parts
@@ -180,11 +180,11 @@ export async function runMaintenanceV2(env = process.env) {
       c.on('error', rej); c.on('close', x => x === 0 ? res() : rej(new Error('ffmpeg ' + x)));
     });
     const bytes = (await fs.stat(tmp)).size;
-    for (const style of ['nopath', 'query', 'full']) {
+    for (const style of ['full', 'nopath', 'query']) {
       const remote = 'ivr2:/2/selftest/mp_' + style + '.wav';
       const r = { style };
       try {
-        await p.uploadToYemotInParts(tmp, remote, undefined, { convertAudio: false, style, partBytes: 8 * 1024 * 1024, log: (a, b) => { r.firstPart = b; } });
+        await p.uploadToYemotInParts(tmp, remote, undefined, { convertAudio: false, style, partBytes: 8 * 1024 * 1024, log: (a, b) => { r[a === 'first part answer' ? 'firstPart' : 'lastPart'] = b; } });
         const meta = await p.getYemotFile(remote);
         r.size = meta?.file?.size ?? null; r.oneFile = Number(r.size) === bytes; r.done = p.lastDoneVariant();
       } catch (e) { r.error = String(e?.message || e).slice(0, 220); }
@@ -197,8 +197,8 @@ export async function runMaintenanceV2(env = process.env) {
   } catch (e) { report.multipartError = String(e?.message || e).slice(0, 200); }
   await p.writeCacheJson('ivr2:/2/selftest/multipart_v1.json', { at: report.at, works: report.works || null, tried: report.tried }).catch(() => {});
 
-  // b) move download copies /2/*.m4a|*.flac -> /אודיו
-  try {
+  // b) move download copies /2/*.m4a|*.flac -> /אודיו (once)
+  if (!(await p.readCacheJson('ivr2:/2/selftest/maintenance_v2.json').catch(() => null))) try {
     const listing = await listDir(p, 'ivr2:/2');
     const files = (listing?.files || []).map(f => f.name).filter(n => /\.(m4a|flac|mp3)$/i.test(n));
     report.moved = [];

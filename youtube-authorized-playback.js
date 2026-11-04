@@ -294,12 +294,21 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,
       ok=r.ok&&(!j||j.success!==false&&(!j.responseStatus||j.responseStatus==='OK'));
     }
     if(i===0)log?.('first part answer',last.slice(0,200));
+    if(i===parts-1)log?.('last part answer',last.slice(0,300));
     if(!ok)throw new Error('Yemot part upload failed ('+(i+1)+'/'+parts+'): '+last);
+  }
+  // Some servers join the file when the last part arrives: if it is already
+  // there in full, the joining request is not needed.
+  const already=await getYemotFile(remotePath).catch(()=>null);
+  if(already?.file?.exists===true&&Number(already?.file?.size)===total){
+    console.info('[YouTube IVR] playback step 7: Yemot joined the parts itself', { remotePath, parts });
+    doneVariant=doneVariant||'auto';
+    return {responseStatus:'OK',joined:'auto'};
   }
   // The joining request: form-encoded body (how Yemot's own clients send it);
   // if Yemot does not take that, the same fields in the query string.
   const fields={token:yemotApiKey(),path:remotePath,convertAudio:convertAudio?'1':'0',autoNumbering:'false',tts:'0',
-    qquuid:uuid,qqfilename:name,qqtotalfilesize:String(total),qqtotalparts:String(parts)};
+    qquuid:uuid,qqfilename:name,qqtotalfilesize:String(total),qqtotalparts:String(parts),uploader:'yemot-admin'};
   const finishMs=Math.max(60000,Math.ceil(total/1000000)*2000);
   const q=new URLSearchParams(fields).toString();
   const mp=extra=>{const f=new FormData();for(const [k,v] of Object.entries({...fields,...extra}))f.append(k,v);return f;};
