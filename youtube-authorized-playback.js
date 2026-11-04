@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
-import { addCoverArt, fetchThumbnail, normalizeCover, makeDownloadCopy, downloadMetadata } from './youtube-cover-art.js';
+import { addCoverArt, fetchThumbnail, normalizeCover, makeDownloadCopy, downloadMetadata, inspectMedia } from './youtube-cover-art.js';
 import { downloadVisionAudio } from './vision-audio.mjs';
 import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID } from './youtube-apify-source.js';
 import { pickApifyActor } from './youtube-engine-select.js';
@@ -592,8 +592,23 @@ async function saveDownloadCopy(id,source,title,temp,policy){
   await uploadToYemot(out,remote,undefined,{convertAudio:false});
   const meta=await getYemotFile(remote);
   if(meta?.file?.exists!==true||Number(meta?.file?.size)!==bytes)throw new Error('download copy not verified in Yemot');
+  // Read the file BACK from Yemot and check it is byte-for-byte what was made,
+  // then report what a player will see in it (picture, tags, audio quality).
+  const back=path.join(temp,'readback.'+policy.format);
+  const u=new URL(YEMOT_API_BASE+'/DownloadFile');u.searchParams.set('token',yemotApiKey());u.searchParams.set('path',remote);
+  const rb=await fetch(u,{signal:AbortSignal.timeout(Math.max(60000,bytes/100))});
+  if(!rb.ok)throw new Error('download copy read-back failed HTTP '+rb.status);
+  await fs.writeFile(back,Buffer.from(await rb.arrayBuffer()));
+  const sha=f=>fs.readFile(f).then(b=>createHash('sha256').update(b).digest('hex'));
+  const identical=(await sha(back))===(await sha(out));
+  const seen=await inspectMedia(back,ffmpegPath).catch(()=>null);
+  await fs.rm(back,{force:true}).catch(()=>{});
+  if(!identical)throw new Error('download copy in Yemot differs from the file made');
   if(!owners[name]){owners[name]=id;await writeCacheJson(DOWNLOAD_OWNERS,owners).catch(()=>{});}
-  console.info('[DOWNLOADS] song saved for downloading',{videoId:id,remote,bytes,format:policy.format,picture:!!jpeg,tags:Object.keys(metadata).length,ms:Date.now()-t});
+  console.info('[DOWNLOADS] song saved for downloading',{videoId:id,remote,bytes,format:policy.format,identicalInYemot:identical,
+    picture:seen?.picture??!!jpeg,pictureSize:seen?.pictureSize||null,audio:seen?.audio||null,
+    title:seen?.tags?.title||null,artist:seen?.tags?.artist||null,date:seen?.tags?.date||null,genre:seen?.tags?.genre||null,
+    published:String(seen?.tags?.comment||'').split(' | ')[0]||null,tagCount:seen?Object.keys(seen.tags).length:null,ms:Date.now()-t});
 }
 
 // Result of the one-time account test (branch2-cover-selftest.js); read once.

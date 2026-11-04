@@ -202,3 +202,20 @@ export async function makeDownloadCopy(source, out, { format = 'm4a', jpeg, meta
   } finally { await fs.rm(jpg, { force: true }).catch(() => {}); }
   return (await fs.stat(out)).size;
 }
+
+// What a player will see in a file: its tags and whether it carries a picture
+// (read with ffmpeg from the file itself, e.g. the copy read back from Yemot).
+export async function inspectMedia(file, ffmpegPath) {
+  const text = await new Promise(resolve => {
+    const p = spawn(ffmpegPath, ['-hide_banner', '-i', file, '-f', 'ffmetadata', '-'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    p.stdout.on('data', d => { out += d; }); p.stderr.on('data', d => { err += d; });
+    p.on('close', () => resolve({ out, err })); p.on('error', () => resolve({ out: '', err: '' }));
+  });
+  const tags = {};
+  for (const line of text.out.split('\n')) { const m = /^([a-z_]+)=(.*)$/i.exec(line); if (m) tags[m[1].toLowerCase()] = m[2]; }
+  const picture = /Video: mjpeg[^\n]*\(attached pic\)|attached pic/.test(text.err);
+  const pm = /Video: mjpeg[^\n]*?(\d{2,5})x(\d{2,5})/.exec(text.err);
+  const am = /Audio: ([a-z0-9]+)[^\n]*?(\d+) Hz[^\n]*?(\d+) kb\/s/.exec(text.err);
+  return { tags, picture, pictureSize: pm ? pm[1] + 'x' + pm[2] : null, audio: am ? { codec: am[1], hz: Number(am[2]), kbps: Number(am[3]) } : null };
+}
