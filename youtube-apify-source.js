@@ -38,6 +38,7 @@ export function tokenFingerprint(token){return createHash('sha256').update(Strin
 const ACCOUNT_REFUSAL=new Set([401,402,403,429]);
 // The video itself cannot be delivered; no engine or key will change that.
 const PERMANENT_CODES=new Set(['too_large','youtube_unavailable']);
+const FINAL_TTL_MS=24*60*60*1000;
 // Map a native error/skipped row to a precise code so the caller hears the
 // real reason and only recoverable failures reach the backup engine.
 export function classifyNativeRow(item){
@@ -238,6 +239,13 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
       }
       let receipt=await store.read(path);
       if(receipt&&(receipt.version!==1||receipt.videoId!==id))throw err('cache_invalid','Invalid provider receipt');
+      if(receipt?.state==='final'){
+        const age=now()-(Date.parse(receipt.finalAt)||0);
+        if(age<FINAL_TTL_MS)throw err(receipt.finalCode||'youtube_unavailable','Video was reported unavailable recently; no new attempt');
+        // Old enough: the video may have become available; try fresh once.
+        await store.write(path,null).catch(()=>{});
+        receipt=null;
+      }
       // Resume with the SAME account that started the run (so the run id is valid).
       if(receipt){
         const byFp=receipt.tokenFp?tokens.findIndex(t=>tokenFingerprint(t)===receipt.tokenFp):-1;
@@ -362,7 +370,14 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
             const code=rowError.code||'apify_actor_failed';
             log.warn?.('[YouTube IVR] provider run finished without audio',{videoId:id,runId:receipt.runId,actorId:receipt.actorId,code,
               rowType:Array.isArray(rows)?String(rows[0]?.resultType||''):'',detail:redactProviderDiagnostic(Array.isArray(rows)?(rows[0]?.errorMessage||rows[0]?.error||''):'',token)});
-            if(PERMANENT_CODES.has(code))throw rowError;
+            if(PERMANENT_CODES.has(code)){
+              // Final answer for this video (e.g. "This video is unavailable"):
+              // remember it so a repeat request or the completion webhook does
+              // not start another attempt; retried fresh after FINAL_TTL_MS.
+              const final={...receipt,state:'final',finalCode:code,finalAt:new Date(now()).toISOString()};
+              await store.write(path,final).catch(()=>{});
+              throw rowError;
+            }
             const attempts=Number.isFinite(receipt.attemptCount)?receipt.attemptCount:1;
             const tried=Array.isArray(receipt.triedActors)?receipt.triedActors:[receipt.actorId];
             if(actorId===NATIVE_ACTOR_ID&&receipt.actorId!==NATIVE_ACTOR_ID&&!tried.includes(NATIVE_ACTOR_ID)&&code!=='youtube_unavailable'){

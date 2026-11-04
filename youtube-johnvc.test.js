@@ -186,3 +186,18 @@ test('a receipt stuck in "starting" heals itself: adopt the matching run, or sta
     assert.equal(calls.starts.length, 0); assert.equal(receipt.runId, 'Run1');
   }
 });
+
+test('an unavailable video is final for 24h: no new attempt, then one fresh try', async () => {
+  let t = Date.parse('2026-11-03T22:32:00Z');
+  const { fetchImpl, calls } = fakeApify({ rowFor: () => ({ resultType: 'error', videoId: id, error: 'UNAVAILABLE', errorMessage: 'This video is unavailable' }) });
+  const { store, get } = memStore();
+  const resolver = createApifyResolver({ fetchImpl, log: quiet, sleep: async () => {}, now: () => t });
+  await assert.rejects(resolver(id, { APIFY_TOKEN: 'k' }, { actor: 'johnvc/youtube-download-api', store }), { code: 'youtube_unavailable' });
+  assert.equal(calls.starts.length, 1); assert.equal(get().state, 'final');
+  t += 60 * 60 * 1000; // an hour later: answered at once, nothing started
+  await assert.rejects(resolver(id, { APIFY_TOKEN: 'k' }, { actor: 'johnvc/youtube-download-api', store }), { code: 'youtube_unavailable' });
+  assert.equal(calls.starts.length, 1);
+  t += 24 * 60 * 60 * 1000; // a day later: one fresh attempt
+  await assert.rejects(resolver(id, { APIFY_TOKEN: 'k' }, { actor: 'johnvc/youtube-download-api', store }), { code: 'youtube_unavailable' });
+  assert.equal(calls.starts.length, 2);
+});

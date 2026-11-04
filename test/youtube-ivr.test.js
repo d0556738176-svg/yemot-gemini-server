@@ -87,3 +87,34 @@ test('formats numbered choices and returns the selected video safely', () => {
   assert.equal(getSelectedYouTubeVideo(videos, '3'), null);
   assert.equal(getSelectedYouTubeVideo(videos, 'abc'), null);
 });
+
+test('newest search falls back to date-sorted search when the uploads list answers 404', async () => {
+  const calls = [];
+  const fetchImpl = async url => {
+    const u = new URL(url); calls.push(u.pathname + '?type=' + (u.searchParams.get('type') || '') + '&order=' + (u.searchParams.get('order') || ''));
+    if (u.pathname.endsWith('/search') && u.searchParams.get('type') === 'channel')
+      return Response.json({ items: [{ id: { channelId: 'UC1' }, snippet: { title: 'בר צברי' } }] });
+    if (u.pathname.endsWith('/channels')) return Response.json({ items: [{ contentDetails: { relatedPlaylists: { uploads: 'UU1' } }, snippet: { title: 'בר צברי' } }] });
+    if (u.pathname.endsWith('/playlistItems')) return Response.json({ error: { code: 404, message: 'playlistNotFound' } }, { status: 404 });
+    if (u.pathname.endsWith('/search')) return Response.json({ items: [{ id: { videoId: 'abcdefghijk' }, snippet: { title: 'שיר חדש', channelTitle: 'בר צברי', publishedAt: '2026-11-01T00:00:00Z' } }] });
+    throw Error('unexpected ' + url);
+  };
+  const videos = await searchYouTubeVideos('בר צברי הסרטון הכי חדש', { apiKey: 'k', fetchImpl });
+  assert.equal(videos.length, 1);
+  assert.equal(videos[0].videoId, 'abcdefghijk');
+  assert.ok(calls.some(c => c.includes('type=video&order=date')), 'fell back to the date-sorted video search');
+});
+
+test('newest search ignores a channel whose name does not match the request', async () => {
+  let usedChannel = false;
+  const fetchImpl = async url => {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/search') && u.searchParams.get('type') === 'channel')
+      return Response.json({ items: [{ id: { channelId: 'UCx' }, snippet: { title: 'ערוץ אחר לגמרי' } }] });
+    if (u.pathname.endsWith('/channels') || u.pathname.endsWith('/playlistItems')) { usedChannel = true; return Response.json({ items: [] }); }
+    return Response.json({ items: [{ id: { videoId: 'zzzzzzzzzzz' }, snippet: { title: 'x', channelTitle: 'y' } }] });
+  };
+  const videos = await searchYouTubeVideos('קופה ראשית הכי חדש', { apiKey: 'k', fetchImpl });
+  assert.equal(usedChannel, false);
+  assert.equal(videos[0].videoId, 'zzzzzzzzzzz');
+});

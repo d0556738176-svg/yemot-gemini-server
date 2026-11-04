@@ -4174,11 +4174,26 @@ async function youtubeCallHandler(call) {
         currentQuery=transcript;
       }
 
-      results=await searchYouTubeVideos(currentQuery,{
-        apiKey:process.env.YOUTUBE_API_KEY,
-        regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
-        timeoutMs:REQUEST_TIMEOUT_MS
-      });
+      // A failed search must never drop the caller out of the extension
+      // (live 03.11: a 404 ended the call with "תקלה זמנית בחיפוש"). Say what
+      // happened, keep the previous results, and let the caller try again.
+      let found;
+      try {
+        found=await searchYouTubeVideos(currentQuery,{
+          apiKey:process.env.YOUTUBE_API_KEY,
+          regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
+          timeoutMs:REQUEST_TIMEOUT_MS
+        });
+      } catch(searchError) {
+        if(searchError instanceof ExitError||isCallerHangupError(searchError)) throw searchError;
+        const status=Number(searchError?.status)||0;
+        console.warn('[YouTube IVR] search failed; caller stays in the extension',{status,message:String(searchError?.message||searchError).slice(0,160)});
+        nextPrompt=status===429||status===502
+          ?'החיפוש ביוטיוב עמוס כרגע או שהמכסה היומית של החיפוש הסתיימה. נסה שוב בעוד כמה דקות, או אמור חיפוש אחר.'
+          :'החיפוש ביוטיוב לא הצליח הפעם. אמור שוב את מה שתרצה לחפש, אפשר גם בניסוח אחר.';
+        continue;
+      }
+      results=found;
       resultOffset=0;
       nextPrompt=results.length
         ? formatResultsPage()
@@ -4441,7 +4456,19 @@ router.get('/yemot-youtube', youtubeCallHandler);
 // secret (kept only in a Render env var, never logged), then run the normal
 // resume path: resolve() fetches the saved run state, diagnoses a failure or
 // retrieves a successful file for conversion, upload, verification and cache. Registered before app.use(router) so the IVR router cannot swallow it.
-app.post('/apify-webhook', (req, res) => {
+// Resume only a download that is really still pending. A video whose run
+// already ended with a final answer (e.g. "unavailable") or was already saved
+// (receipt removed) must not start another attempt (live 03.11: a duplicate
+// retry). If storage cannot be read, resuming is the safe choice: the durable
+// receipt still prevents any duplicate paid run.
+async function webhookShouldResume(videoId) {
+  const { _pipeline } = await import('./youtube-authorized-playback.js');
+  const { apifyReceiptPath } = await import('./youtube-apify-source.js');
+  const receipt = await _pipeline.readCacheJson('ivr2:' + apifyReceiptPath(videoId)).catch(() => undefined);
+  if (receipt === undefined) return true;
+  return !!(receipt && receipt.runId && receipt.state !== 'final');
+}
+app.post('/apify-webhook', async (req, res) => {
   const secret = String(process.env.BRANCH2_WEBHOOK_SECRET || '').trim();
   if (!secret || String(req.query.secret || '') !== secret) { res.status(403).json({ ok: false }); return; }
   const videoId = String(req.query.videoId || '').trim();
@@ -4454,9 +4481,14 @@ app.post('/apify-webhook', (req, res) => {
   // valid file and never grants consent to the costlier engine.
   // If a job for this video is already running (a caller is on the line), the
   // existing job is reused — no duplicate work or charge.
-  try { startYouTubePlaybackJob({ videoId }); }
-  catch (e) { console.warn('[YouTube IVR] webhook resume failed to start', { videoId, code: e?.code || 'unknown' }); }
   res.status(200).json({ ok: true });
+  try {
+    if (!(await webhookShouldResume(videoId))) {
+      console.info('[YouTube IVR] webhook: nothing pending for this video; no new attempt', { videoId });
+      return;
+    }
+    startYouTubePlaybackJob({ videoId });
+  } catch (e) { console.warn('[YouTube IVR] webhook resume failed to start', { videoId, code: e?.code || 'unknown' }); }
 });
 
 app.use(router);
@@ -4727,9 +4759,9 @@ app.listen(port,async()=>{
   // so multi-account fallback can be verified in the logs.
   console.info('[YouTube IVR] apify accounts configured',{count:apifyTokens().length});
   console.info('[YouTube IVR] apify completion webhook',{configured:!!apifyWebhookQuery(process.env,'abcdefghijk')});
-  // Recover the known timed-out synchronous run with GETs only. The resolver
-  // explicitly forbids a new paid run for this ID if no history can be found.
-  if(process.env.APIFY_TOKEN) for(const videoId of ['Nb9xE8J6pgA','EZeWxl7N2DI']) startYouTubePlaybackJob({videoId,title:'הורדה קודמת'});
+  // (One-time recoveries of three October 2026 videos were removed on 04.11:
+  // all three are fully saved, and re-checking them on every wake-up only
+  // delayed the first caller.)
   // Resume any download that was in-flight when the instance last stopped, so a
   // long download finishes and is saved on its own with no second phone call.
   // The durable run receipt makes each resume reuse the same paid run; a video
@@ -4741,18 +4773,6 @@ app.listen(port,async()=>{
       for(const videoId of pending) startYouTubePlaybackJob({videoId,title:'המשך הורדה'});
     }catch(e){ console.warn('[YouTube IVR] could not list pending downloads',{message:String(e?.message||e).slice(0,120)}); }
   })();
-  // Recover the already verified legacy download using Yemot storage only.
-  // This path never calls a download provider, even if recovery fails.
-  void (async()=>{
-    const saved=await lookupCachedYouTubeAudio('0D2MvNWOVk0');
-    if(!saved) return;
-    const replay=await lookupCachedYouTubeAudio('0D2MvNWOVk0');
-    console.info('[YouTube IVR] saved audio replay verified',{
-      videoId:'0D2MvNWOVk0',chunks:replay.playbackPaths.length,downloadSkipped:true,phonePlaybackVerified:false
-    });
-  })().catch(error=>console.warn('[YouTube IVR] saved audio recovery unavailable',{
-    videoId:'0D2MvNWOVk0',code:error?.code||'cache_unavailable',downloadAttempted:false
-  }));
   await loadConversationLog();
   try { await configureYemotStructure(); }
   catch (e) { logDetailedError('Yemot automatic setup', e); }

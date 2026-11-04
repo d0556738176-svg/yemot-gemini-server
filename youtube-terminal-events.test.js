@@ -27,14 +27,17 @@ test('the observed slow failure stays terminal across repeated callbacks and res
 test('actual webhook handler accepts every terminal event and rejects bad auth or nonterminal events',async()=>{
  const source=await fs.readFile(new URL('./server.js',import.meta.url),'utf8');
  const start=source.indexOf("app.post('/apify-webhook'");const end=source.indexOf('\n\napp.use(router)',start);
- let handler;const resumed=[];
- vm.runInNewContext(source.slice(start,end),{app:{post:(p,h)=>handler=h},process:{env:{BRANCH2_WEBHOOK_SECRET:'fixture'}},console:{info(){},warn(){}},startYouTubePlaybackJob:v=>resumed.push(v)});
- const invoke=(eventType,secret='fixture')=>{
-  let code;handler({query:{videoId:'EF8C4v7JIbA',secret},body:{eventType}},{status:c=>{code=c;return {json(){}};}});return code;
+ let handler;const resumed=[];let pending=true;
+ vm.runInNewContext(source.slice(start,end),{app:{post:(p,h)=>handler=h},process:{env:{BRANCH2_WEBHOOK_SECRET:'fixture'}},console:{info(){},warn(){}},
+  startYouTubePlaybackJob:v=>resumed.push(v),webhookShouldResume:async()=>pending});
+ const invoke=async(eventType,secret='fixture')=>{
+  let code;await handler({query:{videoId:'EF8C4v7JIbA',secret},body:{eventType}},{status:c=>{code=c;return {json(){}};}});return code;
  };
- for(const event of ['ACTOR.RUN.SUCCEEDED','ACTOR.RUN.FAILED','ACTOR.RUN.ABORTED','ACTOR.RUN.TIMED_OUT'])assert.equal(invoke(event),200);
+ for(const event of ['ACTOR.RUN.SUCCEEDED','ACTOR.RUN.FAILED','ACTOR.RUN.ABORTED','ACTOR.RUN.TIMED_OUT'])assert.equal(await invoke(event),200);
  assert.equal(resumed.length,4);assert.ok(resumed.every(v=>v.videoId==='EF8C4v7JIbA'&&!v.consentToFallback));
- assert.equal(invoke('ACTOR.RUN.CREATED'),400);assert.equal(invoke('ACTOR.RUN.SUCCEEDED','bad'),403);assert.equal(resumed.length,4);
+ assert.equal(await invoke('ACTOR.RUN.CREATED'),400);assert.equal(await invoke('ACTOR.RUN.SUCCEEDED','bad'),403);assert.equal(resumed.length,4);
+ // A video with nothing pending (final answer already given, or already saved) is not restarted.
+ pending=false;assert.equal(await invoke('ACTOR.RUN.SUCCEEDED'),200);assert.equal(resumed.length,4);
 });
 test('actual phone message distinguishes a supplier stall from bot rejection',async()=>{
  const source=await fs.readFile(new URL('./youtube-playback-prepare.js',import.meta.url),'utf8');

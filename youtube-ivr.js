@@ -64,54 +64,15 @@ export async function searchYouTubeVideos(query, {
   // dedicated uploads playlist. This is more precise than a generic video
   // search because YouTube exposes the uploads playlist on the channel.
   if (wantsNewest) {
-    const channelUrl = new URL('https://www.googleapis.com/youtube/v3/search');
-    channelUrl.searchParams.set('part', 'snippet');
-    channelUrl.searchParams.set('q', q);
-    channelUrl.searchParams.set('type', 'channel');
-    channelUrl.searchParams.set('maxResults', '10');
-    channelUrl.searchParams.set('regionCode', regionCode);
-    channelUrl.searchParams.set('key', key);
-
-    const channelData = await fetchJson(channelUrl, fetchImpl, timeoutMs);
-    const channels = (channelData.items || []).filter(x => x.id?.channelId);
-
-    if (channels.length) {
-      const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-      const ranked = channels.map((channel, index) => {
-        const title = String(channel.snippet?.title || channel.snippet?.channelTitle || '').toLowerCase();
-        const score = words.reduce((sum, word) => sum + (title.includes(word) ? 1 : 0), 0);
-        return { channel, score, index };
-      }).sort((a, b) => b.score - a.score || a.index - b.index);
-
-      const channelId = ranked[0].channel.id.channelId;
-
-      const channelDetailsUrl = new URL('https://www.googleapis.com/youtube/v3/channels');
-      channelDetailsUrl.searchParams.set('part', 'contentDetails,snippet');
-      channelDetailsUrl.searchParams.set('id', channelId);
-      channelDetailsUrl.searchParams.set('key', key);
-      const channelDetails = await fetchJson(channelDetailsUrl, fetchImpl, timeoutMs);
-      const uploadsPlaylistId = channelDetails.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
-
-      if (uploadsPlaylistId) {
-        const uploadsUrl = new URL('https://www.googleapis.com/youtube/v3/playlistItems');
-        uploadsUrl.searchParams.set('part', 'snippet,contentDetails');
-        uploadsUrl.searchParams.set('playlistId', uploadsPlaylistId);
-        uploadsUrl.searchParams.set('maxResults', '10');
-        uploadsUrl.searchParams.set('key', key);
-        const uploadsData = await fetchJson(uploadsUrl, fetchImpl, timeoutMs);
-
-        const channelVideos = (uploadsData.items || [])
-          .filter(item => item.contentDetails?.videoId)
-          .map(item => ({
-            videoId: item.contentDetails.videoId,
-            title: String(item.snippet?.title || 'ללא כותרת'),
-            channelTitle: String(item.snippet?.channelTitle || channelDetails.items?.[0]?.snippet?.title || 'ערוץ לא ידוע'),
-            publishedAt: item.contentDetails?.videoPublishedAt || item.snippet?.publishedAt || null,
-            description: String(item.snippet?.description || '')
-          }));
-
-        if (channelVideos.length) return channelVideos;
-      }
+    // Optional precision step. Any failure here (YouTube answers 404 for some
+    // channels' uploads list, live 03.11) or no channel whose name matches
+    // the request falls back to the normal search sorted by date below —
+    // a "newest" request must never fail the whole search.
+    try {
+      const channelVideos = await newestFromMatchingChannel(q, { key, regionCode, fetchImpl, timeoutMs });
+      if (channelVideos.length) return channelVideos;
+    } catch (error) {
+      console.warn('[YouTube IVR] newest-video channel lookup failed; using date-sorted search', { status: error?.status || null, message: String(error?.message || error).slice(0, 120) });
     }
   }
 
@@ -151,6 +112,51 @@ export async function searchYouTubeVideos(query, {
   }
 
   return results;
+}
+
+async function newestFromMatchingChannel(q, { key, regionCode, fetchImpl, timeoutMs }) {
+  const channelUrl = new URL('https://www.googleapis.com/youtube/v3/search');
+  channelUrl.searchParams.set('part', 'snippet');
+  channelUrl.searchParams.set('q', q);
+  channelUrl.searchParams.set('type', 'channel');
+  channelUrl.searchParams.set('maxResults', '10');
+  channelUrl.searchParams.set('regionCode', regionCode);
+  channelUrl.searchParams.set('key', key);
+  const channelData = await fetchJson(channelUrl, fetchImpl, timeoutMs);
+  const channels = (channelData.items || []).filter(x => x.id?.channelId);
+  if (!channels.length) return [];
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const ranked = channels.map((channel, index) => {
+    const title = String(channel.snippet?.title || channel.snippet?.channelTitle || '').toLowerCase();
+    const score = words.reduce((sum, word) => sum + (title.includes(word) ? 1 : 0), 0);
+    return { channel, score, index };
+  }).sort((a, b) => b.score - a.score || a.index - b.index);
+  // Only a channel whose name really matches the request; otherwise the
+  // date-sorted search is more accurate than an unrelated channel.
+  if (!(ranked[0].score > 0)) return [];
+  const channelId = ranked[0].channel.id.channelId;
+  const channelDetailsUrl = new URL('https://www.googleapis.com/youtube/v3/channels');
+  channelDetailsUrl.searchParams.set('part', 'contentDetails,snippet');
+  channelDetailsUrl.searchParams.set('id', channelId);
+  channelDetailsUrl.searchParams.set('key', key);
+  const channelDetails = await fetchJson(channelDetailsUrl, fetchImpl, timeoutMs);
+  const uploadsPlaylistId = channelDetails.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploadsPlaylistId) return [];
+  const uploadsUrl = new URL('https://www.googleapis.com/youtube/v3/playlistItems');
+  uploadsUrl.searchParams.set('part', 'snippet,contentDetails');
+  uploadsUrl.searchParams.set('playlistId', uploadsPlaylistId);
+  uploadsUrl.searchParams.set('maxResults', '10');
+  uploadsUrl.searchParams.set('key', key);
+  const uploadsData = await fetchJson(uploadsUrl, fetchImpl, timeoutMs);
+  return (uploadsData.items || [])
+    .filter(item => item.contentDetails?.videoId)
+    .map(item => ({
+      videoId: item.contentDetails.videoId,
+      title: String(item.snippet?.title || 'ללא כותרת'),
+      channelTitle: String(item.snippet?.channelTitle || channelDetails.items?.[0]?.snippet?.title || 'ערוץ לא ידוע'),
+      publishedAt: item.contentDetails?.videoPublishedAt || item.snippet?.publishedAt || null,
+      description: String(item.snippet?.description || '')
+    }));
 }
 
 export function formatYouTubeChoices(videos) {

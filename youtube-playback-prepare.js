@@ -193,7 +193,7 @@ export function playbackFailureMessage(code) {
   if (YOUTUBE_REFUSAL_CODES.has(code) || code === 'youtube_source_refused')
     return 'יוטיוב לא מאפשר כרגע לשרת שלנו להוריד את הסרטון הזה, ולכן אי אפשר להשמיע אותו. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
   if (code === 'youtube_unplayable' || code === 'youtube_unavailable' || code === 'no_audio_format')
-    return 'הסרטון הזה אינו זמין להשמעה. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
+    return 'יוטיוב מסמן את הסרטון הזה כלא זמין להורדה, למשל סרטון שחסום מחוץ לישראל, פרטי או שהוסר. לא בוצע חיוב. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
   if (code === 'too_large')
     return 'הסרטון הזה ארוך מדי להשמעה בטלפון. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
   if (code === 'timeout' || code === 'worker_timeout')
