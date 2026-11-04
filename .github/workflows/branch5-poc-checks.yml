@@ -1,0 +1,30 @@
+name: Branch 5 isolated PoC checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'branch5/**'
+      - '.github/workflows/branch5-poc-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-api-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check isolated server syntax
+        run: node --check branch5/server.js
+      - name: Install branch 5 dependencies only
+        run: npm --prefix branch5 install
+      - name: Run branch 5 security tests only
+        run: npm --prefix branch5 test
