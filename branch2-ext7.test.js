@@ -35,11 +35,14 @@ test('a failed upload leaves a gap, never two songs on one number', async () => 
 
 test('keys match the requested layout', () => {
   assert.equal(EXT7_SETTINGS.type, 'playfile');
-  assert.equal(EXT7_SETTINGS.control_play4, 'minus');
-  assert.equal(EXT7_SETTINGS.control_play6, 'plus');
+  assert.equal(EXT7_SETTINGS.control_play6, 'minus');
+  assert.equal(EXT7_SETTINGS.control_play4, 'plus');
   assert.equal(EXT7_SETTINGS.control_play5, 'wait');
   assert.equal(EXT7_SETTINGS.control_play1, 'seconds_plus');
-  assert.equal(EXT7_SETTINGS.control_play2, 'seconds_minus');
+  assert.equal(EXT7_SETTINGS.control_play3, 'seconds_minus');
+  assert.equal(EXT7_SETTINGS.control_play7, 'minut_plus_amount1');
+  assert.equal(EXT7_SETTINGS.minut_plus_amount1, '240000');
+  assert.equal(EXT7_SETTINGS.control_play2, undefined);
 });
 
 import { backfillExt7 } from './branch2-ext7.js';
@@ -66,4 +69,10 @@ test('an empty listing is not marked done', async () => {
 test('extension 8 returns to the last place; extension 7 saves that place', () => {
   assert.equal(EXT8_SETTINGS.type, 'last_play');
   assert.equal(EXT7_SETTINGS.save_last_play, 'yes');
+});
+
+import { stripUnusedKeys } from './branch2-ext7.js';
+test('a key the layout no longer uses is removed from ext.ini', () => {
+  const out = stripUnusedKeys('type=playfile\ncontrol_play2=seconds_minus\ncontrol_play1=seconds_plus\ntitle=x', EXT7_SETTINGS);
+  assert.equal(out, 'type=playfile\ncontrol_play1=seconds_plus\ntitle=x');
 });

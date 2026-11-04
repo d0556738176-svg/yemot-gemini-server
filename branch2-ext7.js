@@ -5,31 +5,47 @@
 // every newly prepared song is copied to /7 under the NEXT number and the
 // order is automatically newest -> oldest, to the end.
 //
-// Keys (Yemot playfile control values, documented):
-//   4 = minus         -> the file uploaded before (older)
-//   6 = plus          -> the newer file
-//   5 = wait          -> pause; press 5 again to continue
-//   1 = seconds_plus  -> 10 seconds forward
-//   2 = seconds_minus -> 10 seconds back
+// Keys (owner's layout 04.11; Yemot playfile control values, documented):
+//   5 = wait                  -> pause; press 5 again to continue
+//   1 = seconds_plus          -> 10 seconds forward
+//   3 = seconds_minus         -> 10 seconds back
+//   6 = minus                 -> the file uploaded before (older)
+//   4 = plus                  -> the newer file
+//   7 = minut_plus_amount1    -> 4 minutes forward (minut_plus_amount1=240000 ms)
+export const PLAY_KEYS = {
+  control_play1: 'seconds_plus',
+  control_play3: 'seconds_minus',
+  control_play4: 'plus',
+  control_play5: 'wait',
+  control_play6: 'minus',
+  control_play7: 'minut_plus_amount1',
+  minut_plus_amount1: '240000',
+};
 export const EXT7_PATH = 'ivr2:/7';
 export const EXT7_SETTINGS = {
   type: 'playfile',
   title: 'השירים החדשים',
   start: 'max',
-  control_play1: 'seconds_plus',
-  control_play2: 'seconds_minus',
-  control_play4: 'minus',
-  control_play5: 'wait',
-  control_play6: 'plus',
+  ...PLAY_KEYS,
   // Remember where the caller stopped, so extension 8 can return there.
   save_last_play: 'yes',
 };
+
+// Lines of an ext.ini that set a key this layout does not use (e.g. an older
+// "control_play2=seconds_minus") are removed so no stale key stays active.
+export function stripUnusedKeys(iniText, settings) {
+  return String(iniText || '').split(/\r?\n/).filter(line => {
+    const m = /^\s*(control_play[0-9*#])\s*=/.exec(line);
+    return !m || m[1] in settings;
+  }).join('\n');
+}
 
 // Extension 8: return to the exact place the caller last stopped listening
 // (Yemot's built-in "last_play" module; positions are saved by extension 7).
 export const EXT8_PATH = 'ivr2:/8';
 export const EXT8_SETTINGS = {
   type: 'last_play',
+  ...PLAY_KEYS,
   title: 'חזרה למקום האחרון',
 };
 

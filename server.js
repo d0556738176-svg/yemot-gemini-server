@@ -4683,6 +4683,19 @@ async function configureYemotStructure() {
         const { EXT7_PATH, EXT7_SETTINGS, EXT8_PATH, EXT8_SETTINGS } = await import('./branch2-ext7.js');
         await updateExtension(EXT7_PATH, EXT7_SETTINGS);
         await updateExtension(EXT8_PATH, EXT8_SETTINGS);
+        // Remove keys of an older layout that UpdateExtension would keep.
+        const { stripUnusedKeys } = await import('./branch2-ext7.js');
+        for (const [extPath, settings] of [[EXT7_PATH, EXT7_SETTINGS], [EXT8_PATH, EXT8_SETTINGS]]) {
+          try {
+            const g = await (await fetch(base + '/GetTextFile?' + new URLSearchParams({ token, what: extPath + '/ext.ini' }))).json();
+            const text = String(g?.contents ?? '');
+            const clean = stripUnusedKeys(text, settings);
+            if (text && clean !== text) {
+              const u = await (await fetch(base + '/UploadTextFile', { method: 'POST', body: new URLSearchParams({ token, what: extPath + '/ext.ini', contents: clean }) })).json();
+              console.log('[Yemot automatic setup] stale keys removed', { path: extPath, ok: u?.responseStatus === 'OK' });
+            }
+          } catch (e) { console.warn('[Yemot automatic setup] key cleanup skipped', { path: extPath, message: String(e?.message || e).slice(0, 120) }); }
+        }
       } catch (e) { console.warn('[Yemot automatic setup] extension 7 not configured', { message: String(e?.message || e).slice(0, 200) }); }
     }
     console.log('[Yemot automatic setup] branch-2-only mode; extensions 1 and 3 were left untouched');
