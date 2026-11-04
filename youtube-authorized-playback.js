@@ -333,7 +333,13 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,
   }
   if(!result)console.warn('[YouTube IVR] multi-part join answers',seen);
   if(!result)throw new Error('Yemot multi-part finish failed: '+body.slice(0,300));
-  console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted (parts joined)', { remotePath, parts, variant: doneVariant, duration: result.duration || null });
+  console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted (parts joined)', { remotePath, parts, variant: doneVariant, answer: body.slice(0, 300) });
+  // The join may finish a moment after the answer: wait until the whole file is there.
+  for(let i=0;i<20;i++){
+    const m=await getYemotFile(remotePath).catch(()=>null);
+    if(m?.file?.exists===true&&Number(m?.file?.size)===total)break;
+    await new Promise(r=>setTimeout(r,3000));
+  }
   return result;
 }
 

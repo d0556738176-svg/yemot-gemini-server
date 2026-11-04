@@ -168,7 +168,7 @@ export async function runBigUploadTest() {
 export async function runMaintenanceV2(env = process.env) {
   const mod = await import('./youtube-authorized-playback.js');
   const p = mod._pipeline;
-  const MARK2 = 'ivr2:/2/selftest/maintenance_v3.json';
+  const MARK2 = 'ivr2:/2/selftest/maintenance_v4.json';
   if (await p.readCacheJson(MARK2).catch(() => null)) return;
   const report = { at: new Date().toISOString(), tried: [] };
   // a) multi-part protocol, 24MB file in 8MB parts
@@ -180,13 +180,13 @@ export async function runMaintenanceV2(env = process.env) {
       c.on('error', rej); c.on('close', x => x === 0 ? res() : rej(new Error('ffmpeg ' + x)));
     });
     const bytes = (await fs.stat(tmp)).size;
-    for (const style of ['full', 'nopath', 'query']) {
+    for (const style of ['full']) {
       const remote = 'ivr2:/2/selftest/mp_' + style + '.wav';
       const r = { style };
       try {
         await p.uploadToYemotInParts(tmp, remote, undefined, { convertAudio: false, style, partBytes: 8 * 1024 * 1024, log: (a, b) => { r[a === 'first part answer' ? 'firstPart' : 'lastPart'] = b; } });
         const meta = await p.getYemotFile(remote);
-        r.size = meta?.file?.size ?? null; r.oneFile = Number(r.size) === bytes; r.done = p.lastDoneVariant();
+        r.size = meta?.file?.size ?? null; r.meta = JSON.stringify(meta).slice(0, 300); r.oneFile = Number(r.size) === bytes; r.done = p.lastDoneVariant();
       } catch (e) { r.error = String(e?.message || e).slice(0, 220); }
       await fileAction(p, { action: 'delete', what: remote }).catch(() => {});
       report.tried.push(r);
