@@ -184,10 +184,10 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
         const route=startRun.minimal
           ? '/acts/'+useActor+'/runs?maxTotalChargeUsd='+maxCharge
           : '/acts/'+useActor+'/runs?restartOnError=false&timeout='+runTimeoutSec+'&maxTotalChargeUsd='+maxCharge+apifyWebhookQuery(env,id);
-        // Native m4a is YouTube's own audio track (no re-encode, fastest). The
-        // phone line is 8kHz mono, so 'standard' loses nothing audible and keeps
-        // long files small enough for the free server's disk.
-        const nativeQuality=String(env.BRANCH2_NATIVE_AUDIO_QUALITY||'standard').trim()==='high'?'high':'standard';
+        // Native m4a is YouTube's own audio track (no re-encode, fastest).
+        // 'high' (YouTube's best audio, same per-minute price) since 04.11: the
+        // same file also becomes the best-quality copy in the downloads folder.
+        const nativeQuality=String(env.BRANCH2_NATIVE_AUDIO_QUALITY||'high').trim()==='standard'?'standard':'high';
         // After a rejection the retry sends only the required fields, so an
         // optional limit the engine dislikes can never stop a download.
         const payload=JSON.stringify(native?(startRun.minimal

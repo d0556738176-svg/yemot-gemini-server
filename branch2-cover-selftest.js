@@ -16,7 +16,7 @@ export const COVER_RESULT = 'ivr2:/2/selftest/cover_result_v1.json';
 export async function runCoverSelftest(env = process.env) {
   if (String(env.BRANCH2_COVER_ART || 'on').toLowerCase() === 'off') return;
   const p = (await import('./youtube-authorized-playback.js'))._pipeline;
-  if (await p.readCacheJson(COVER_RESULT).catch(() => null)) return runCoverMp3Selftest(env);
+  if (await p.readCacheJson(COVER_RESULT).catch(() => null)) return runDownloadCopySelftest(env);
   const ffmpegPath = (await import('ffmpeg-static')).default;
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'covertest-'));
   try {
@@ -94,5 +94,52 @@ export async function runCoverMp3Selftest(env = process.env) {
     await p.writeCacheJson(COVER_MP3_RESULT, r);
   } catch (e) {
     console.warn(TAG, 'mp3 failed', String(e?.message || e).slice(0, 200));
+  } finally { await fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
+
+// Downloads folder (04.11, owner's request): create the Hebrew-named folder now
+// so it is visible, and pick the best format Yemot keeps byte for byte:
+// m4a (YouTube's own audio, untouched) or else mp3 320k.
+export async function runDownloadCopySelftest(env = process.env) {
+  const p = (await import('./youtube-authorized-playback.js'))._pipeline;
+  const { DOWNLOAD_DIR, DOWNLOAD_TEST_RESULT } = await import('./youtube-authorized-playback.js');
+  // The folder: an (empty) owners list makes it appear in Yemot right away.
+  const owners = await p.readCacheJson(DOWNLOAD_DIR + '/owners.json').catch(() => undefined);
+  if (owners === null) await p.writeCacheJson(DOWNLOAD_DIR + '/owners.json', {}).then(() => console.info(TAG, 'downloads folder created', DOWNLOAD_DIR))
+    .catch(e => console.warn(TAG, 'downloads folder not created', String(e?.message || e).slice(0, 200)));
+  if (await p.readCacheJson(DOWNLOAD_TEST_RESULT).catch(() => null)) return;
+  const ffmpegPath = (await import('ffmpeg-static')).default;
+  const { fetchThumbnail, normalizeCover, makeDownloadCopy, downloadMetadata } = await import('./youtube-cover-art.js');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dltest-'));
+  const result = { at: new Date().toISOString(), tried: {} };
+  try {
+    const src = path.join(dir, 'src.m4a');
+    await new Promise((res, rej) => {
+      const c = spawn(ffmpegPath, ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=f=440:d=15', '-ac', '2', '-c:a', 'aac', '-b:a', '128k', src]);
+      c.on('error', rej); c.on('close', x => x === 0 ? res() : rej(new Error('ffmpeg ' + x)));
+    });
+    const vid = env.BRANCH2_AB_VIDEO || '86eLl-ZYt4A';
+    const thumb = await fetchThumbnail(vid);
+    const jpeg = thumb ? await normalizeCover(thumb.jpeg, { ffmpegPath, maxWidth: 1280, quality: 2 }) : null;
+    const metadata = downloadMetadata(vid, { title: 'בדיקת מערכת', channel: 'בדיקה', publishedAt: '2026-11-04T00:00:00Z', description: 'בדיקה', tags: ['בדיקה'], categoryId: '10' });
+    for (const format of ['m4a', 'mp3']) {
+      const out = path.join(dir, 't.' + format), r = {};
+      try {
+        r.bytes = await makeDownloadCopy(src, out, { format, jpeg, metadata, ffmpegPath });
+        const local = await fs.readFile(out);
+        const remote = 'ivr2:/2/selftest/download_test.' + format;
+        await p.uploadToYemot(out, remote, undefined, { convertAudio: false });
+        const url = new URL(p.YEMOT_API_BASE + '/DownloadFile');
+        url.searchParams.set('token', p.yemotApiKey()); url.searchParams.set('path', remote);
+        const back = Buffer.from(await (await fetch(url, { signal: AbortSignal.timeout(30000) })).arrayBuffer());
+        r.identical = Buffer.compare(back, local) === 0;
+      } catch (e) { r.error = String(e?.message || e).slice(0, 200); }
+      result.tried[format] = r;
+      if (r.identical) { result.format = format; break; }
+    }
+    console.info(TAG, 'download copy', JSON.stringify(result));
+    await p.writeCacheJson(DOWNLOAD_TEST_RESULT, result);
+  } catch (e) {
+    console.warn(TAG, 'download copy test failed', String(e?.message || e).slice(0, 200));
   } finally { await fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }

@@ -40,7 +40,7 @@ test('one API call returns length, publish date and views', async () => {
     calls++; assert.match(String(url), /part=contentDetails%2Csnippet%2Cstatistics/);
     return Response.json({ items: [{ contentDetails: { duration: 'PT4M13S' }, snippet: { publishedAt: '2020-01-01T00:00:00Z' }, statistics: { viewCount: '12345' } }] });
   });
-  assert.deepEqual(facts, { durationSeconds: 253, publishedAt: '2020-01-01T00:00:00Z', viewCount: 12345, regionAllowed: null, regionBlocked: null });
+  assert.deepEqual(facts, { durationSeconds: 253, publishedAt: '2020-01-01T00:00:00Z', viewCount: 12345, title: null, channel: null, description: null, tags: null, categoryId: null, regionAllowed: null, regionBlocked: null });
   assert.equal(calls, 1);
   const hidden = await fetchVideoFacts('abcdefghijk', { YOUTUBE_API_KEY: 'k' }, async () =>
     Response.json({ items: [{ contentDetails: { duration: 'PT1M' }, snippet: {}, statistics: {} }] }));

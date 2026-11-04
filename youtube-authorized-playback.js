@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
-import { addCoverArt, fetchThumbnail, normalizeCover, makeMp3WithCover } from './youtube-cover-art.js';
+import { addCoverArt, fetchThumbnail, normalizeCover, makeDownloadCopy, downloadMetadata } from './youtube-cover-art.js';
 import { downloadVisionAudio } from './vision-audio.mjs';
 import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID } from './youtube-apify-source.js';
 import { pickApifyActor } from './youtube-engine-select.js';
@@ -483,38 +483,44 @@ async function transferProviderFile(resolved,output,signal,onProgress,expectedBy
   return total;
 }
 
-// Every saved song also gets an MP3 copy in its original quality with the
-// video's YouTube picture as cover, in one folder, for downloading from Yemot.
-// Not inside any played extension, so it never plays on the line. Turned on
-// only after the account test proved Yemot keeps such a file intact.
-export const DOWNLOAD_DIR='ivr2:/2/youtubedownloads';
-let mp3PolicyCache=null;
+// Every song downloaded from the phone is ALSO saved in one Hebrew-named
+// folder for downloading from Yemot: best quality (YouTube's own audio, not
+// the phone-line version), the video's picture as cover, and all its details
+// (title, channel, date, genre, description, tags, link). The folder is not a
+// played extension, so it never plays on the line. Format chosen by the
+// account test (m4a when Yemot keeps it intact, otherwise mp3 320k).
+export const DOWNLOAD_DIR='ivr2:/2/הורדות_מיוטיוב';
+export const DOWNLOAD_TEST_RESULT='ivr2:/2/selftest/download_copy_result_v2.json';
+let downloadPolicyCache=null;
 async function downloadCopyPolicy(){
-  if(String(process.env.BRANCH2_DOWNLOAD_COPY||'on').toLowerCase()==='off')return false;
-  if(mp3PolicyCache!==null)return mp3PolicyCache;
-  const r=await readCacheJson('ivr2:/2/selftest/cover_mp3_result_v1.json').catch(()=>null);
-  if(r)mp3PolicyCache=r.safe===true;
-  return r?.safe===true;
+  if(String(process.env.BRANCH2_DOWNLOAD_COPY||'on').toLowerCase()==='off')return null;
+  if(downloadPolicyCache)return downloadPolicyCache.format?downloadPolicyCache:null;
+  const r=await readCacheJson(DOWNLOAD_TEST_RESULT).catch(()=>null);
+  if(!r)return null; // not tested yet: plain behaviour, ask again next song
+  downloadPolicyCache={format:r.format||null};
+  return downloadPolicyCache.format?downloadPolicyCache:null;
 }
-async function saveDownloadCopy(id,source,title,temp){
+async function saveDownloadCopy(id,source,title,temp,policy){
   const t=Date.now();
-  const thumb=await fetchThumbnail(id).catch(()=>null);
-  const jpeg=thumb?await normalizeCover(thumb.jpeg,{ffmpegPath}):null;
-  const out=path.join(temp,'download.mp3');
-  const bytes=await makeMp3WithCover(source,out,{jpeg,title,ffmpegPath,bitrate:String(process.env.BRANCH2_DOWNLOAD_BITRATE||'128k')});
+  const { fetchVideoFacts } = await import('./youtube-video-facts.js');
+  const [facts,thumb]=await Promise.all([fetchVideoFacts(id,process.env).catch(()=>null),fetchThumbnail(id).catch(()=>null)]);
+  // Full-size picture (up to 1280 wide), black bars of 4:3 sizes removed.
+  const jpeg=thumb?await normalizeCover(thumb.jpeg,{ffmpegPath,maxWidth:1280,quality:2}):null;
+  const metadata=downloadMetadata(id,facts||{},title);
+  const out=path.join(temp,'download.'+policy.format);
+  const bytes=await makeDownloadCopy(source,out,{format:policy.format,jpeg,metadata,ffmpegPath});
   await fs.rm(source,{force:true}).catch(()=>{});
   // Named after the YouTube title; a different video with the same title
   // gets its id added instead of replacing the other song.
-  const base=title?titleFileName(title):id;
-  let remote=DOWNLOAD_DIR+'/'+base+'.mp3';
-  const existing=await getYemotFile(remote).catch(()=>null);
-  const owner=await readCacheJson(DOWNLOAD_DIR+'/owners.json').catch(()=>null)||{};
-  if(existing?.file?.exists===true&&owner[base]&&owner[base]!==id)remote=DOWNLOAD_DIR+'/'+base+'_'+id+'.mp3';
+  const base=titleFileName(metadata.title||title||id)||id;
+  const owners=await readCacheJson(DOWNLOAD_DIR+'/owners.json').catch(()=>null)||{};
+  const name=owners[base]&&owners[base]!==id?base+'_'+id:base;
+  const remote=DOWNLOAD_DIR+'/'+name+'.'+policy.format;
   await uploadToYemot(out,remote,undefined,{convertAudio:false});
   const meta=await getYemotFile(remote);
   if(meta?.file?.exists!==true||Number(meta?.file?.size)!==bytes)throw new Error('download copy not verified in Yemot');
-  if(!owner[base]){owner[base]=id;await writeCacheJson(DOWNLOAD_DIR+'/owners.json',owner).catch(()=>{});}
-  console.info('[COVER] downloadable copy with picture saved',{videoId:id,remote,bytes,picture:!!jpeg,ms:Date.now()-t});
+  if(!owners[name]){owners[name]=id;await writeCacheJson(DOWNLOAD_DIR+'/owners.json',owners).catch(()=>{});}
+  console.info('[DOWNLOADS] song saved for downloading',{videoId:id,remote,bytes,format:policy.format,picture:!!jpeg,tags:Object.keys(metadata).length,ms:Date.now()-t});
 }
 
 // Result of the one-time account test (branch2-cover-selftest.js); read once.
@@ -628,8 +634,8 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
         .catch(e=>console.warn('[EXT7] song not added',{videoId:id,message:String(e?.message||e).slice(0,200)}));
     }
     // Downloadable copy with the video's picture, in the background.
-    if(mp3Policy)mp3Job=saveDownloadCopy(id,source,sourceTitle,temp)
-      .catch(e=>console.warn('[COVER] downloadable copy not saved',{videoId:id,message:String(e?.message||e).slice(0,200)}));
+    if(mp3Policy)mp3Job=saveDownloadCopy(id,source,sourceTitle,temp,mp3Policy)
+      .catch(e=>console.warn('[DOWNLOADS] song not saved for downloading',{videoId:id,message:String(e?.message||e).slice(0,200)}));
     return {playbackPaths:paths,chunkCount:paths.length};
   } finally {
     // The temporary copy is removed only after the background copies finish.

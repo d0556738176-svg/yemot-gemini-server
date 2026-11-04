@@ -20,6 +20,11 @@ export async function fetchVideoFacts(videoId, env = process.env, fetchImpl = fe
     publishedAt: item.snippet?.publishedAt || null,
     // A channel can hide its view count; then nothing is said about views.
     viewCount: Number.isFinite(views) && views >= 0 ? views : null,
+    title: item.snippet?.title || null,
+    channel: item.snippet?.channelTitle || null,
+    description: item.snippet?.description || null,
+    tags: Array.isArray(item.snippet?.tags) ? item.snippet.tags : null,
+    categoryId: item.snippet?.categoryId || null,
     regionAllowed: Array.isArray(item.contentDetails?.regionRestriction?.allowed) ? item.contentDetails.regionRestriction.allowed : null,
     regionBlocked: Array.isArray(item.contentDetails?.regionRestriction?.blocked) ? item.contentDetails.regionRestriction.blocked : null,
   };

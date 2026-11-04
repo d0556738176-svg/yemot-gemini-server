@@ -31,14 +31,14 @@ export async function fetchThumbnail(videoId, { fetchImpl = fetch, timeoutMs = 1
 
 // 16:9 picture, at most 640x360, JPEG: the 4:3 sizes carry black bars, which
 // are cropped away. Keeps the tag small (tens of KB).
-export async function normalizeCover(jpeg, { ffmpegPath, timeoutMs = 30000 } = {}) {
+export async function normalizeCover(jpeg, { ffmpegPath, timeoutMs = 30000, maxWidth = 640, quality = 4 } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cover-'));
   try {
     const src = path.join(dir, 'in.jpg'), out = path.join(dir, 'out.jpg');
     await fs.writeFile(src, jpeg);
-    const vf = "crop='if(gt(iw/ih,16/9),ih*16/9,iw)':'if(gt(iw/ih,16/9),ih,iw*9/16)',scale='min(640,iw)':-2";
+    const vf = "crop='if(gt(iw/ih,16/9),ih*16/9,iw)':'if(gt(iw/ih,16/9),ih,iw*9/16)',scale='min(" + Number(maxWidth) + ",iw)':-2";
     await new Promise((resolve, reject) => {
-      const p = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-vf', vf, '-q:v', '4', '-frames:v', '1', out]);
+      const p = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-vf', vf, '-q:v', String(quality), '-frames:v', '1', out]);
       const t = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
       p.on('error', reject);
       p.on('close', c => { clearTimeout(t); c === 0 ? resolve() : reject(new Error('cover ffmpeg failed (' + c + ')')); });
@@ -132,5 +132,63 @@ export async function makeMp3WithCover(source, out, { jpeg, title, ffmpegPath, b
     p.on('close', c => { clearTimeout(t); signal?.removeEventListener?.('abort', onAbort); c === 0 ? resolve() : reject(new Error('mp3 ffmpeg failed (' + c + '): ' + err.trim())); });
   });
   await fs.rm(jpg, { force: true }).catch(() => {});
+  return (await fs.stat(out)).size;
+}
+
+// YouTube category numbers -> genre names (the common ones).
+const GENRES = { 1: 'Film & Animation', 2: 'Autos & Vehicles', 10: 'Music', 15: 'Pets & Animals', 17: 'Sports', 19: 'Travel & Events', 20: 'Gaming', 22: 'People & Blogs', 23: 'Comedy', 24: 'Entertainment', 25: 'News & Politics', 26: 'Howto & Style', 27: 'Education', 28: 'Science & Technology', 29: 'Nonprofits & Activism' };
+
+// Every tag a player shows, from the YouTube video's own details.
+export function downloadMetadata(videoId, facts = {}, fallbackTitle = null) {
+  const url = 'https://www.youtube.com/watch?v=' + videoId;
+  const date = String(facts.publishedAt || '').slice(0, 10);
+  const desc = String(facts.description || '').replace(/\r/g, '').slice(0, 2000);
+  const m = {
+    title: facts.title || fallbackTitle || videoId,
+    artist: facts.channel, album_artist: facts.channel, album: facts.channel,
+    date: date || null,
+    genre: GENRES[Number(facts.categoryId)] || null,
+    comment: url, description: desc || null, synopsis: desc || null,
+    keywords: Array.isArray(facts.tags) && facts.tags.length ? facts.tags.join(', ').slice(0, 500) : null,
+    copyright: facts.channel ? '© ' + facts.channel : null,
+    publisher: 'YouTube', website: url, encoded_by: 'Yemot branch 2',
+  };
+  return Object.fromEntries(Object.entries(m).filter(([, v]) => v !== null && v !== undefined && v !== ''));
+}
+
+function runFfmpeg(ffmpegPath, args, { timeoutMs = 3 * 3600 * 1000, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '';
+    p.stderr.on('data', d => { err = (err + d).slice(-400); });
+    const t = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
+    const onAbort = () => p.kill('SIGKILL');
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    p.on('error', reject);
+    p.on('close', c => { clearTimeout(t); signal?.removeEventListener?.('abort', onAbort); c === 0 ? resolve() : reject(new Error('ffmpeg failed (' + c + '): ' + err.trim())); });
+  });
+}
+
+// The downloadable song. m4a: YouTube's own AAC audio copied untouched (no
+// re-encoding = no quality lost) with the picture and all tags; if the audio
+// is not AAC it is encoded once at 256k. mp3: 320k (used only if Yemot would
+// not keep an m4a intact).
+export async function makeDownloadCopy(source, out, { format = 'm4a', jpeg, metadata = {}, ffmpegPath, signal } = {}) {
+  const jpg = path.join(path.dirname(out), 'cover.jpg');
+  const input = ['-hide_banner', '-loglevel', 'error', '-y', '-i', source];
+  const pic = [];
+  if (jpeg) { await fs.writeFile(jpg, jpeg); input.push('-i', jpg); pic.push('-map', '1:v:0', '-disposition:v:0', 'attached_pic'); }
+  const tags = ['-map_metadata', '-1'];
+  for (const [k, v] of Object.entries(metadata)) tags.push('-metadata', k + '=' + String(v));
+  try {
+    if (format === 'm4a') {
+      const base = [...input, '-map', '0:a:0', ...pic, '-c:v', 'copy', ...tags, '-movflags', '+faststart', '-f', 'ipod'];
+      try { await runFfmpeg(ffmpegPath, [...base, '-c:a', 'copy', out], { signal }); }
+      catch { await runFfmpeg(ffmpegPath, [...base, '-c:a', 'aac', '-b:a', '256k', out], { signal }); }
+    } else {
+      await runFfmpeg(ffmpegPath, [...input, '-map', '0:a:0', ...pic, '-c:v', 'copy', ...(jpeg ? ['-metadata:s:v', 'title=Album cover', '-metadata:s:v', 'comment=Cover (front)'] : []),
+        ...tags, '-c:a', 'libmp3lame', '-b:a', '320k', '-id3v2_version', '3', out], { signal });
+    }
+  } finally { await fs.rm(jpg, { force: true }).catch(() => {}); }
   return (await fs.stat(out)).size;
 }
