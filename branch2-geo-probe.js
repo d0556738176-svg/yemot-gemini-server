@@ -5,13 +5,17 @@
 import { apifyTokens, redactProviderDiagnostic } from './youtube-apify-source.js';
 
 const TAG = '[BRANCH2_GEO_PROBE]';
-const MARKER = 'ivr2:/2/selftest/geo_probe_v2.json';
+const MARKER = 'ivr2:/2/selftest/geo_probe_v3.json';
 const VIDEO = '7De3QZfnUao'; // allowed only in IL/PS (verified via YouTube API)
 const IL = { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'], apifyProxyCountry: 'IL' };
-// memo23 ignores Apify proxy settings but accepts our own proxy URLs; the
-// account's Apify residential proxy pinned to Israel is such a URL.
+// On the free plan the Apify proxy works only through an actor's own proxy
+// settings (a raw proxy URL handed to an actor counts as external: 403). So
+// these candidates take proxyConfiguration with country IL.
 const CANDIDATES = [
-  { actor: 'memo23~youtube-video-downloader', input: (w, proxyUrl) => ({ urls: [w], videoUrls: [w], format: 'mp3', proxy: { proxyUrls: [proxyUrl] } }) },
+  { actor: 'utils~youtube-link', input: w => ({ url: w, audioQuality: 'medium', proxyConfiguration: IL }) },
+  { actor: 'khadinakbar~youtube-video-downloader', input: w => ({ videoUrls: [{ url: w }], downloadMode: 'audio', audioFormat: 'm4a', maxDurationMinutes: 720, proxyConfiguration: IL }) },
+  { actor: 'confidential_gnat~youtube-video-downloader', input: w => ({ startUrls: [{ url: w }], format: 'm4a', maxDurationMinutes: 720, maxFileSizeMb: 2000, maxConcurrency: 1, proxyConfiguration: IL }) },
+  { actor: 'dc_solutions~youtube-downloader-pro', input: w => ({ url: w, quality: 480, proxyConfiguration: { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] } }) },
 ];
 
 const clean = (o, t) => {
@@ -43,8 +47,9 @@ export async function runGeoProbe(env = process.env) {
       const pr = (a.pricingInfos || []).slice(-1)[0] || null;
       console.info(TAG, 'price list', c.actor, JSON.stringify(pr).slice(0, 1200));
       const r = await api('/acts/' + c.actor + '/runs?waitForFinish=240&timeout=900&maxTotalChargeUsd=0.6', { method: 'POST', body: JSON.stringify(c.input(watch, proxyUrl)) }, 260000);
-      let run = (await r.json().catch(() => null))?.data;
-      if (!run?.id) { console.info(TAG, 'start refused', c.actor, r.status); summary.push({ actor: c.actor, refused: r.status }); continue; }
+      const bodyText = await r.text().catch(() => '');
+      let run = (() => { try { return JSON.parse(bodyText)?.data; } catch { return null; } })();
+      if (!run?.id) { console.info(TAG, 'start refused', c.actor, r.status, bodyText.slice(0, 400)); summary.push({ actor: c.actor, refused: r.status }); continue; }
       for (let i = 0; i < 40 && !/SUCCEEDED|FAILED|ABORTED|TIMED-OUT/.test(run.status); i++) {
         await new Promise(res => setTimeout(res, 15000));
         run = (await (await api('/actor-runs/' + run.id)).json())?.data || run;
@@ -59,6 +64,7 @@ export async function runGeoProbe(env = process.env) {
       const info = { actor: c.actor, status: run.status, secs: run.stats?.runTimeSecs, usd: run.usageTotalUsd, charged: run.chargedEventCounts || null, usage: run.usageUsd ? Object.fromEntries(Object.entries(run.usageUsd).filter(([, v]) => v > 0)) : null };
       console.info(TAG, 'result', JSON.stringify(info));
       summary.push(info);
+      if (info.status === 'SUCCEEDED' && Array.isArray(items) && items.some(it => !it.error && (it.downloadUrl || it.fileUrl || it.audioUrl || it.url))) break;
     } catch (e) {
       console.warn(TAG, 'candidate failed', c.actor, String(e?.message || e).slice(0, 200));
     }
