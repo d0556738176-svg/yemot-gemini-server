@@ -4943,7 +4943,7 @@ app.listen(port,async()=>{
   // One-time maintenance: downloads moved to /2, >50MB one-file upload test,
   // Apify keys audit (branch2-maintenance.js).
   if(process.env.APIFY_TOKEN) void import('./branch2-maintenance.js')
-    .then(async m=>{await m.runMaintenance();await m.runMaintenanceV2();await m.runMultipartConvertTest();})
+    .then(async m=>{await m.runMaintenance();await m.runMaintenanceV2();await m.runMultipartConvertTest();await m.runUploadCapTest();})
     .catch(e=>logDetailedError('Branch 2 maintenance',e));
   // Video downloads that were running before a restart continue (same run).
   if(process.env.APIFY_TOKEN) void (async()=>{

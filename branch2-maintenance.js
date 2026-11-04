@@ -251,3 +251,33 @@ export async function runMultipartConvertTest() {
   await p.writeCacheJson(MARK, out).catch(() => {});
   if (out.works) await p.writeCacheJson('ivr2:/2/selftest/multipart_v1.json', { at: new Date().toISOString(), works: out.works }).catch(() => {});
 }
+
+// v8: the real size limit of ONE upload request on this account (non-audio
+// files are never converted only on the single-request path).
+export async function runUploadCapTest() {
+  const p = (await import('./youtube-authorized-playback.js'))._pipeline;
+  const MARK = 'ivr2:/2/selftest/upload_cap_v1.json';
+  if (await p.readCacheJson(MARK).catch(() => null)) return;
+  const out = { tried: [] };
+  for (const mb of [60, 64, 70, 75, 80]) {
+    const tmp = path.join(os.tmpdir(), 'cap-' + mb + '.mp4');
+    const r = { mb };
+    try {
+      const fh = await fs.open(tmp, 'w');
+      const block = Buffer.alloc(1024 * 1024, 7);
+      for (let i = 0; i < mb; i++) await fh.write(block);
+      await fh.close();
+      const remote = 'ivr2:/2/selftest/cap_test.mp4';
+      await p.uploadToYemot(tmp, remote, undefined, { convertAudio: false, single: true });
+      const m = await p.getYemotFile(remote).catch(() => null);
+      r.ok = Number(m?.file?.size) === mb * 1024 * 1024;
+      await fileAction(p, { action: 'delete', what: remote }).catch(() => {});
+    } catch (e) { r.ok = false; r.error = String(e?.message || e).slice(0, 80); }
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    out.tried.push(r);
+    if (!r.ok) break;
+  }
+  out.maxOkMb = Math.max(56, ...out.tried.filter(t => t.ok).map(t => t.mb));
+  console.info(TAG, 'upload cap', JSON.stringify(out));
+  await p.writeCacheJson(MARK, out).catch(() => {});
+}
