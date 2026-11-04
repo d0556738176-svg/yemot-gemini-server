@@ -4857,10 +4857,10 @@ app.listen(port,async()=>{
   // folder gets a real file with picture and details.
   if(process.env.APIFY_TOKEN&&process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
-    const MARK='ivr2:/2/selftest/real_song_test_v3.json';
+    const MARK='ivr2:/2/selftest/real_song_test_v4.json';
     await new Promise(r=>setTimeout(r,60000)); // after the account tests
     if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
-    const results=await searchYouTubeVideos(String(process.env.BRANCH2_REAL_SONG_QUERY||'יעקב שוואקי שיר'),{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
+    const results=await searchYouTubeVideos(String(process.env.BRANCH2_REAL_SONG_QUERY||'מוטי שטיינמץ שיר'),{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
     for(const v of results.slice(0,8)){
       const facts=await fetchVideoFacts(v.videoId,process.env).catch(()=>null);
       if(!facts||!(facts.durationSeconds>60&&facts.durationSeconds<=600)||engineCannotReach(facts,process.env))continue;

@@ -191,7 +191,12 @@ export async function makeDownloadCopy(source, out, { format = 'm4a', jpeg, meta
   const tags = ['-map_metadata', '-1'];
   for (const [k, v] of Object.entries(metadata)) tags.push('-metadata', k + '=' + String(v));
   try {
-    if (format === 'm4a') {
+    if (format === 'flac') {
+      // Lossless copy of the best stream: decoded once, kept bit-exact from
+      // here on, 16-bit with triangular dither; picture and all tags.
+      await runFfmpeg(ffmpegPath, [...input, '-map', '0:a:0', ...pic, '-c:v', 'copy', ...tags,
+        '-af', 'aresample=osf=s16:dither_method=triangular', '-c:a', 'flac', '-compression_level', '8', out], { signal });
+    } else if (format === 'm4a') {
       const base = [...input, '-map', '0:a:0', ...pic, '-c:v', 'copy', ...tags, '-movflags', '+faststart', '-f', 'ipod'];
       try { await runFfmpeg(ffmpegPath, [...base, '-c:a', 'copy', out], { signal }); }
       catch { await runFfmpeg(ffmpegPath, [...base, '-c:a', 'aac', '-b:a', '256k', out], { signal }); }
@@ -216,6 +221,7 @@ export async function inspectMedia(file, ffmpegPath) {
   for (const line of text.out.split('\n')) { const m = /^([a-z_]+)=(.*)$/i.exec(line); if (m) tags[m[1].toLowerCase()] = m[2]; }
   const picture = /Video: mjpeg[^\n]*\(attached pic\)|attached pic/.test(text.err);
   const pm = /Video: mjpeg[^\n]*?(\d{2,5})x(\d{2,5})/.exec(text.err);
-  const am = /Audio: ([a-z0-9]+)[^\n]*?(\d+) Hz[^\n]*?(\d+) kb\/s/.exec(text.err);
-  return { tags, picture, pictureSize: pm ? pm[1] + 'x' + pm[2] : null, audio: am ? { codec: am[1], hz: Number(am[2]), kbps: Number(am[3]) } : null };
+  const am = /Audio: ([a-z0-9]+)[^\n]*?(\d+) Hz, ([a-z0-9.]+)(?:, ([a-z0-9]+))?(?:[^\n]*?(\d+) kb\/s)?/.exec(text.err);
+  return { tags, picture, pictureSize: pm ? pm[1] + 'x' + pm[2] : null,
+    audio: am ? { codec: am[1], hz: Number(am[2]), channels: am[3], sample: am[4] || null, kbps: am[5] ? Number(am[5]) : null } : null };
 }

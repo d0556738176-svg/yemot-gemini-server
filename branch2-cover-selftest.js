@@ -118,7 +118,7 @@ export async function runDownloadCopySelftest(env = process.env) {
     const thumb = await fetchThumbnail(vid);
     const jpeg = thumb ? await normalizeCover(thumb.jpeg, { ffmpegPath, maxWidth: 1280, quality: 2 }) : null;
     const metadata = downloadMetadata(vid, { title: 'בדיקת מערכת', channel: 'בדיקה', publishedAt: '2026-11-04T00:00:00Z', description: 'בדיקה', tags: ['בדיקה'], categoryId: '10' });
-    for (const format of ['m4a', 'mp3']) {
+    for (const format of ['flac', 'm4a', 'mp3']) {
       const out = path.join(dir, 't.' + format), r = {};
       try {
         r.bytes = await makeDownloadCopy(src, out, { format, jpeg, metadata, ffmpegPath });

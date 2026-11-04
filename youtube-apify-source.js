@@ -188,11 +188,14 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
         // 'high' (YouTube's best audio, same per-minute price) since 04.11: the
         // same file also becomes the best-quality copy in the downloads folder.
         const nativeQuality=String(env.BRANCH2_NATIVE_AUDIO_QUALITY||'high').trim()==='standard'?'standard':'high';
+        // Opus (since 04.11, owner's choice): YouTube's best audio stream,
+        // delivered untouched; it feeds both the phone file and the FLAC copy.
+        const nativeFormat=['opus','m4a','mp3'].includes(String(env.BRANCH2_NATIVE_AUDIO_FORMAT||'opus').trim())?String(env.BRANCH2_NATIVE_AUDIO_FORMAT||'opus').trim():'opus';
         // After a rejection the retry sends only the required fields, so an
         // optional limit the engine dislikes can never stop a download.
         const payload=JSON.stringify(native?(startRun.minimal
-          ?{videoUrls:[watch],format:'audio',audioFormat:'m4a',audioQuality:nativeQuality}
-          :{videoUrls:[watch],format:'audio',audioFormat:'m4a',audioQuality:nativeQuality,storageProvider:'apify',metadataOnly:false,maxMinutes:limits.maxMinutes,maxMegabytes:limits.maxMegabytes}):{urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
+          ?{videoUrls:[watch],format:'audio',audioFormat:nativeFormat,audioQuality:nativeQuality}
+          :{videoUrls:[watch],format:'audio',audioFormat:nativeFormat,audioQuality:nativeQuality,storageProvider:'apify',metadataOnly:false,maxMinutes:limits.maxMinutes,maxMegabytes:limits.maxMegabytes}):{urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
           format:'mp3',audioQuality,quality:'best',downloadSubtitles:false,metadataOnly:false,
           ...(isLongEngine?{perVideoTimeoutSecs,maxConcurrency:1}:{})});
         // Start on the account that owns the current run when it still works,

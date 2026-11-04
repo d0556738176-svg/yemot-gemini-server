@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { playbackAwake } from './playback-awake.js';
 import fs from 'node:fs/promises';
-import { openAsBlob } from 'node:fs';
+import { openAsBlob, createWriteStream, createReadStream } from 'node:fs';
+import { pipeline as streamPipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -563,7 +565,7 @@ async function transferProviderFile(resolved,output,signal,onProgress,expectedBy
 export const DOWNLOAD_DIR='ivr2:/2';
 export const OLD_DOWNLOAD_DIR='ivr2:/2/הורדות_מיוטיוב';
 const DOWNLOAD_OWNERS='ivr2:/2/youtubeaudio/download_owners.json';
-export const DOWNLOAD_TEST_RESULT='ivr2:/2/selftest/download_copy_result_v2.json';
+export const DOWNLOAD_TEST_RESULT='ivr2:/2/selftest/download_copy_result_v3.json';
 let downloadPolicyCache=null;
 async function downloadCopyPolicy(){
   if(String(process.env.BRANCH2_DOWNLOAD_COPY||'on').toLowerCase()==='off')return null;
@@ -596,10 +598,12 @@ async function saveDownloadCopy(id,source,title,temp,policy){
   // then report what a player will see in it (picture, tags, audio quality).
   const back=path.join(temp,'readback.'+policy.format);
   const u=new URL(YEMOT_API_BASE+'/DownloadFile');u.searchParams.set('token',yemotApiKey());u.searchParams.set('path',remote);
-  const rb=await fetch(u,{signal:AbortSignal.timeout(Math.ceil(Math.max(60000,bytes/100)))});
+  const rb=await fetch(u,{signal:AbortSignal.timeout(Math.ceil(Math.max(120000,bytes/50)))});
   if(!rb.ok)throw new Error('download copy read-back failed HTTP '+rb.status);
-  await fs.writeFile(back,Buffer.from(await rb.arrayBuffer()));
-  const sha=f=>fs.readFile(f).then(b=>createHash('sha256').update(b).digest('hex'));
+  // Streamed to disk and hashed in pieces: a long lossless file never sits
+  // whole in the small server's memory.
+  await streamPipeline(Readable.fromWeb(rb.body),createWriteStream(back));
+  const sha=f=>new Promise((res,rej)=>{const h=createHash('sha256');createReadStream(f).on('data',d=>h.update(d)).on('end',()=>res(h.digest('hex'))).on('error',rej);});
   const identical=(await sha(back))===(await sha(out));
   const seen=await inspectMedia(back,ffmpegPath).catch(()=>null);
   await fs.rm(back,{force:true}).catch(()=>{});
