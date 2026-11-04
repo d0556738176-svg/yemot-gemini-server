@@ -40,7 +40,7 @@ test('every configured key is collected, deduplicated and in priority order',()=
   assert.deepEqual(keys,['a','b','c','d','e']);
 });
 
-test('native run uses YouTube's best m4a (high), size/length caps and a cost cap that covers the longest YouTube video',async()=>{
+test('native run uses YouTube best m4a (high), size/length caps and a cost cap that covers the longest YouTube video',async()=>{
   const {fetchImpl,calls}=fakeApify();const {store}=memStore();
   const result=await createApifyResolver({fetchImpl,log:quiet,sleep:async()=>{}})(id,{APIFY_TOKEN:'k1'},{actor:'johnvc/youtube-download-api',store});
   const b=calls.starts[0].body;
