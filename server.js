@@ -1,4 +1,5 @@
 import { progressAnnouncement } from './youtube-playback-progress.js';
+import { playbackAwake } from './playback-awake.js';
 import express from 'express';
 import crypto from 'node:crypto';
 import { YemotRouter, ExitError } from 'yemot-router2';
@@ -3849,7 +3850,8 @@ async function confirmPlaybackPrompt(video) {
     video.geoLimited = false; // already saved: it plays without downloading
   }
   const status = await existingPreparationStatus(video);
-  return 'בחרת את ' + sanitizeForYemot(video.title) + '.' + suffix + (status ? ' ' + status : '') + ' האם להשמיע את הסרטון הזה? אמור כן או לא.';
+  const vstatus = videoJobStatusText(video?.videoId);
+  return 'בחרת את ' + sanitizeForYemot(video.title) + '.' + suffix + (status ? ' ' + status : '') + (vstatus ? ' ' + vstatus : '') + ' האם להשמיע את הסרטון הזה? אמור כן או לא. להורדת הסרטון עצמו לתיקיית וידאו, אמור כן לוידאו.';
 }
 
 // When the caller comes back to a video that is already being prepared (for
@@ -3877,6 +3879,55 @@ async function existingPreparationStatus(video) {
     if (receipt?.runId && receipt.state === 'running')
       return 'ההורדה של הסרטון הזה כבר רצה במנוע מהבקשה הקודמת שלך. אם תאשר, אמשיך מאותה הורדה בלי להתחיל מחדש.';
   } catch { /* status is optional */ }
+  return '';
+}
+
+// "כן לוידאו": the video file saved to /2/וידאו (youtube-video-download.js).
+// One job per video; a second request joins it. Survives restarts through
+// the receipt in Yemot and a small pending list.
+const youtubeVideoJobs = new Map();
+const VIDEO_PENDING = 'ivr2:/2/youtubejobs/video_pending.json';
+async function videoPendingUpdate(fn) {
+  const { _pipeline } = await import('./youtube-authorized-playback.js');
+  const list = (await _pipeline.readCacheJson(VIDEO_PENDING).catch(() => null)) || [];
+  await _pipeline.writeCacheJson(VIDEO_PENDING, fn(Array.isArray(list) ? list : [])).catch(() => {});
+}
+function startYouTubeVideoJob(video) {
+  const id = String(video?.videoId || '');
+  const existing = youtubeVideoJobs.get(id);
+  if (existing && existing.status === 'running') return existing;
+  const state = { status: 'running', startedAt: Date.now(), error: null, remote: null };
+  youtubeVideoJobs.set(id, state);
+  const release = playbackAwake.acquire();
+  (async () => {
+    await videoPendingUpdate(l => [...new Set([...l, id])]);
+    const pb = await import('./youtube-authorized-playback.js');
+    const cover = await import('./youtube-cover-art.js');
+    const { titleFileName } = await import('./youtube-audio-cache.js');
+    const { downloadVideoToYemot } = await import('./youtube-video-download.js');
+    const p = pb._pipeline;
+    const ffmpegPath = (await import('ffmpeg-static')).default;
+    return downloadVideoToYemot(video, {
+      store: { read: x => p.readCacheJson(x), write: (x, d) => p.writeCacheJson(x, d) },
+      upload: (f, r) => p.uploadToYemot(f, r, undefined, { convertAudio: false }),
+      getFile: r => p.getYemotFile(r), ffmpegPath,
+      fetchThumbnail: cover.fetchThumbnail, normalizeCover: cover.normalizeCover, downloadMetadata: cover.downloadMetadata,
+      fetchVideoFacts, titleFileName, log: console,
+    });
+  })().then(r => { state.status = 'ready'; state.remote = r.remote; return videoPendingUpdate(l => l.filter(x => x !== id)); })
+    .catch(e => {
+      state.status = 'failed'; state.error = e?.code || 'video_failed';
+      console.warn('[VIDEO] job failed', { videoId: id, code: state.error, message: String(e?.message || e).slice(0, 200) });
+      if (state.error !== 'video_pending') return videoPendingUpdate(l => l.filter(x => x !== id));
+    })
+    .finally(() => { try { release(); } catch {} });
+  return state;
+}
+function videoJobStatusText(id) {
+  const st = youtubeVideoJobs.get(String(id || ''));
+  if (!st) return '';
+  if (st.status === 'running') return 'הורדת הווידאו של הסרטון הזה כבר בתהליך, ותישמר בתיקיית וידאו.';
+  if (st.status === 'ready') return 'הווידאו של הסרטון הזה כבר שמור בתיקיית וידאו.';
   return '';
 }
 
@@ -3941,6 +3992,8 @@ async function youtubeCallHandler(call) {
   const normalizeConfirm=(text)=>String(text||'').normalize('NFKC').toLowerCase()
     .replace(/[.,!?;:״"'׳]/g,' ').replace(/\s+/g,' ').trim();
   const isYesConfirm=(text)=>/^(?:כן|כן כן|כן בבקשה|כן תשמיע|כן תפעיל|כן אני רוצה|בטח|בוודאי|אכן)(?:\s|$)/u.test(normalizeConfirm(text));
+  // "כן לוידאו" / "כן וידאו" / "וידאו": save the video itself, not play it.
+  const isVideoConfirm=(text)=>/(?:^|\s)(?:ל|ב|ה)?(?:ה)?(?:וידאו|וידיאו|וידא|ווידאו|ווידיאו|סרטון מלא)(?:\s|$)/u.test(normalizeConfirm(text));
   const isNoConfirm=(text)=>/^(?:לא|לא תודה|לא רוצה|לא זה|אחר|אחרת)(?:\s|$)/u.test(normalizeConfirm(text));
 
   function formatResultsPage() {
@@ -4132,6 +4185,15 @@ async function youtubeCallHandler(call) {
       }
 
       if(pendingVideo) {
+        if(isVideoConfirm(transcript)) {
+          const v=pendingVideo; pendingVideo=null;
+          const st=startYouTubeVideoJob(v);
+          console.info('[VIDEO] requested by caller',{videoId:v.videoId,status:st.status});
+          nextPrompt=st.status==='ready'
+            ? 'הווידאו של הסרטון הזה כבר שמור בתיקיית וידאו. אמור חיפוש חדש, או מספר של תוצאה אחרת.'
+            : 'הורדת הווידאו התחילה, והסרטון יישמר בתיקיית וידאו בשלוחה 2 עם התמונה והפרטים שלו. אין צורך להמתין על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.';
+          continue;
+        }
         if(isYesConfirm(transcript)) {
           const selectedVideo=pendingVideo;
           pendingVideo=null;
@@ -4683,6 +4745,8 @@ async function configureYemotStructure() {
         const { EXT7_PATH, EXT7_SETTINGS, EXT8_PATH, EXT8_SETTINGS } = await import('./branch2-ext7.js');
         await updateExtension(EXT7_PATH, EXT7_SETTINGS);
         await updateExtension(EXT8_PATH, EXT8_SETTINGS);
+        // The video folder exists from the start (visible in the file manager).
+        await updateExtension('ivr2:/2/וידאו', { title: 'וידאו' }).catch(e => console.warn('[Yemot automatic setup] video folder not created now; it is created with the first video', { message: String(e?.message || e).slice(0, 120) }));
         // Remove keys of an older layout that UpdateExtension would keep.
         const { stripUnusedKeys } = await import('./branch2-ext7.js');
         for (const [extPath, settings] of [[EXT7_PATH, EXT7_SETTINGS], [EXT8_PATH, EXT8_SETTINGS]]) {
@@ -4877,7 +4941,22 @@ app.listen(port,async()=>{
   if(process.env.APIFY_TOKEN) void import('./branch2-maintenance.js')
     .then(m=>m.runMaintenance())
     .catch(e=>logDetailedError('Branch 2 maintenance',e));
-  if(process.env.APIFY_TOKEN) void import('./branch2-video-probe.js').then(m=>m.runVideoProbe()).catch(e=>logDetailedError('Branch 2 video probe',e));
+  // Video downloads that were running before a restart continue (same run).
+  if(process.env.APIFY_TOKEN) void (async()=>{
+    const { _pipeline } = await import('./youtube-authorized-playback.js');
+    const list=(await _pipeline.readCacheJson(VIDEO_PENDING).catch(()=>null))||[];
+    for(const videoId of (Array.isArray(list)?list:[])) startYouTubeVideoJob({videoId,title:''});
+  })().catch(e=>console.warn('[VIDEO] resume skipped',{message:String(e?.message||e).slice(0,160)}));
+  // One-time real test of "כן לוידאו" on a short religious video (04.11).
+  if(process.env.APIFY_TOKEN) void (async()=>{
+    const { _pipeline } = await import('./youtube-authorized-playback.js');
+    const MARK='ivr2:/2/selftest/video_real_test_v1.json';
+    await new Promise(r=>setTimeout(r,45000));
+    if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
+    await _pipeline.writeCacheJson(MARK,{at:new Date().toISOString(),videoId:'_Je4NEIzupw'});
+    console.info('[VIDEO] real test: as if the caller said "כן לוידאו"',{videoId:'_Je4NEIzupw'});
+    startYouTubeVideoJob({videoId:'_Je4NEIzupw',title:'SHWEKEY - Your Time'});
+  })().catch(()=>{});
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())
