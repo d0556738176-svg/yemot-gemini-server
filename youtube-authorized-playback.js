@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
-import { addCoverArt } from './youtube-cover-art.js';
+import { addCoverArt, fetchThumbnail, normalizeCover, makeMp3WithCover } from './youtube-cover-art.js';
 import { downloadVisionAudio } from './vision-audio.mjs';
 import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID } from './youtube-apify-source.js';
 import { pickApifyActor } from './youtube-engine-select.js';
@@ -483,6 +483,40 @@ async function transferProviderFile(resolved,output,signal,onProgress,expectedBy
   return total;
 }
 
+// Every saved song also gets an MP3 copy in its original quality with the
+// video's YouTube picture as cover, in one folder, for downloading from Yemot.
+// Not inside any played extension, so it never plays on the line. Turned on
+// only after the account test proved Yemot keeps such a file intact.
+export const DOWNLOAD_DIR='ivr2:/2/youtubedownloads';
+let mp3PolicyCache=null;
+async function downloadCopyPolicy(){
+  if(String(process.env.BRANCH2_DOWNLOAD_COPY||'on').toLowerCase()==='off')return false;
+  if(mp3PolicyCache!==null)return mp3PolicyCache;
+  const r=await readCacheJson('ivr2:/2/selftest/cover_mp3_result_v1.json').catch(()=>null);
+  if(r)mp3PolicyCache=r.safe===true;
+  return r?.safe===true;
+}
+async function saveDownloadCopy(id,source,title,temp){
+  const t=Date.now();
+  const thumb=await fetchThumbnail(id).catch(()=>null);
+  const jpeg=thumb?await normalizeCover(thumb.jpeg,{ffmpegPath}):null;
+  const out=path.join(temp,'download.mp3');
+  const bytes=await makeMp3WithCover(source,out,{jpeg,title,ffmpegPath,bitrate:String(process.env.BRANCH2_DOWNLOAD_BITRATE||'128k')});
+  await fs.rm(source,{force:true}).catch(()=>{});
+  // Named after the YouTube title; a different video with the same title
+  // gets its id added instead of replacing the other song.
+  const base=title?titleFileName(title):id;
+  let remote=DOWNLOAD_DIR+'/'+base+'.mp3';
+  const existing=await getYemotFile(remote).catch(()=>null);
+  const owner=await readCacheJson(DOWNLOAD_DIR+'/owners.json').catch(()=>null)||{};
+  if(existing?.file?.exists===true&&owner[base]&&owner[base]!==id)remote=DOWNLOAD_DIR+'/'+base+'_'+id+'.mp3';
+  await uploadToYemot(out,remote,undefined,{convertAudio:false});
+  const meta=await getYemotFile(remote);
+  if(meta?.file?.exists!==true||Number(meta?.file?.size)!==bytes)throw new Error('download copy not verified in Yemot');
+  if(!owner[base]){owner[base]=id;await writeCacheJson(DOWNLOAD_DIR+'/owners.json',owner).catch(()=>{});}
+  console.info('[COVER] downloadable copy with picture saved',{videoId:id,remote,bytes,picture:!!jpeg,ms:Date.now()-t});
+}
+
 // Result of the one-time account test (branch2-cover-selftest.js); read once.
 let coverPolicyCache=null;
 async function coverPolicy(){
@@ -500,7 +534,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
   const source=path.join(temp,id+'.source');
   const chunksDir=path.join(temp,'chunks');
   const paths=[];
-  let ext7Job=null;
+  let ext7Job=null, mp3Job=null;
   try {
     // Primary: Apify (downloads the full audio on their infra, bypassing the
     // datacenter block). Falls through to the older paths only if it fails.
@@ -541,7 +575,10 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     // clipping), then upload it to Yemot as ONE complete file.
     const phone=path.join(temp,'phone.wav');
     const mastered=await preparePhoneAudio(source,phone,{signal,onPercent:percent=>onProgress({stage:'converting',percent})});
-    await fs.rm(source,{force:true}).catch(()=>{}); // free disk before upload
+    // The original audio is kept only when a downloadable MP3 copy will be
+    // made from it (after the song is ready); otherwise free the disk now.
+    const mp3Policy=await downloadCopyPolicy();
+    if(!mp3Policy)await fs.rm(source,{force:true}).catch(()=>{});
     // The video's YouTube picture inside the file (shown when the file is
     // downloaded from Yemot), only once the account test proved Yemot keeps
     // it and still reports the right length. Never delays or fails a song.
@@ -590,11 +627,15 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
         upload:(file,remote)=>uploadToYemot(file,remote,undefined,{convertAudio:!(covered&&!cover.convert)}),log:console})
         .catch(e=>console.warn('[EXT7] song not added',{videoId:id,message:String(e?.message||e).slice(0,200)}));
     }
+    // Downloadable copy with the video's picture, in the background.
+    if(mp3Policy)mp3Job=saveDownloadCopy(id,source,sourceTitle,temp)
+      .catch(e=>console.warn('[COVER] downloadable copy not saved',{videoId:id,message:String(e?.message||e).slice(0,200)}));
     return {playbackPaths:paths,chunkCount:paths.length};
   } finally {
-    // The temporary copy is removed only after extension 7 has its copy.
+    // The temporary copy is removed only after the background copies finish.
     const cleanup=()=>fs.rm(temp,{recursive:true,force:true}).catch(()=>{});
-    if(ext7Job) void ext7Job.finally(cleanup); else await cleanup();
+    const pending=[ext7Job,mp3Job].filter(Boolean);
+    if(pending.length) void Promise.allSettled(pending).finally(cleanup); else await cleanup();
   }
 }
 

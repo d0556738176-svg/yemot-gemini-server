@@ -107,3 +107,30 @@ export async function addCoverArt(wavPath, { videoId, title, artist, ffmpegPath,
     return false;
   }
 }
+
+// Downloadable copy: the original (not phone-line) audio as MP3 with the
+// picture as its front cover. Measured on the account 04.11: Yemot keeps such
+// an MP3 byte for byte when uploaded without conversion.
+export async function makeMp3WithCover(source, out, { jpeg, title, ffmpegPath, bitrate = '128k', timeoutMs = 3 * 3600 * 1000, signal } = {}) {
+  const dir = path.dirname(out);
+  const jpg = path.join(dir, 'cover.jpg');
+  const args = ['-hide_banner', '-loglevel', 'error', '-y', '-i', source];
+  if (jpeg) { await fs.writeFile(jpg, jpeg); args.push('-i', jpg, '-map', '0:a:0', '-map', '1:v:0', '-c:v', 'copy', '-disposition:v', 'attached_pic',
+    '-metadata:s:v', 'title=Album cover', '-metadata:s:v', 'comment=Cover (front)'); }
+  else args.push('-map', '0:a:0');
+  args.push('-map_metadata', '-1', '-c:a', 'libmp3lame', '-b:a', bitrate, '-id3v2_version', '3');
+  if (title) args.push('-metadata', 'title=' + String(title).slice(0, 200));
+  args.push(out);
+  await new Promise((resolve, reject) => {
+    const p = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '';
+    p.stderr.on('data', d => { err = (err + d).slice(-400); });
+    const t = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
+    const onAbort = () => p.kill('SIGKILL');
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    p.on('error', reject);
+    p.on('close', c => { clearTimeout(t); signal?.removeEventListener?.('abort', onAbort); c === 0 ? resolve() : reject(new Error('mp3 ffmpeg failed (' + c + '): ' + err.trim())); });
+  });
+  await fs.rm(jpg, { force: true }).catch(() => {});
+  return (await fs.stat(out)).size;
+}
