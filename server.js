@@ -5010,6 +5010,21 @@ app.listen(port,async()=>{
     console.info('[SMART_SEARCH_TEST]',JSON.stringify(out));
     if(out.rewritten)await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
   })().catch(e=>console.warn('[SMART_SEARCH_TEST] failed',String(e?.message||e).slice(0,160)));
+  // One real song save after the naming change (05.11): same path as a caller's song.
+  if(process.env.YOUTUBE_API_KEY&&process.env.APIFY_TOKEN) void (async()=>{
+    const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
+    const MARK='ivr2:/2/selftest/song_name_test_v1.json';
+    if(await p.readCacheJson(MARK).catch(()=>null))return;
+    await new Promise(r=>setTimeout(r,200000)); // after the subtitle test
+    const { searchYouTubeVideos } = await import('./youtube-ivr.js');
+    const list=await searchYouTubeVideos('מרדכי בן דוד יידן',{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
+    let pick=null;
+    for(const v of list){if(/מחרוזת|קומזיץ|הופעה|live|medley|concert/i.test(v.title||''))continue;if(!(await pb.lookupCachedYouTubeAudio(v.videoId).catch(()=>null))){pick=v;break;}}
+    if(!pick)return;
+    await p.writeCacheJson(MARK,{at:new Date().toISOString(),videoId:pick.videoId,title:pick.title});
+    console.info('[SONG_NAME_TEST] saving a real song as a caller would',{videoId:pick.videoId,title:pick.title});
+    await pb.downloadAuthorizedAudioToYemot(pick.videoId);
+  })().catch(e=>console.warn('[SONG_NAME_TEST] failed',String(e?.message||e).slice(0,200)));
   if(process.env.APIFY_TOKEN&&process.env.DEEPGRAM_API_KEY) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
     const MARK='ivr2:/2/selftest/subtitles_v2.json';
