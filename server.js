@@ -1,6 +1,7 @@
 import { isConversationalReference, currentConversationText, resolveLookupContinuation, isYouTubeTechnicalDiscussion, mayUseYouTubeSearch, asksForFeedback } from './branch1-turn-context.js';
 import { isBranch1WebsiteRequest, answerBranch1Website } from './branch1-websites.js';
 import express from 'express';
+import { readMemory, rememberTurn } from './branch1-memory.js';
 import crypto from 'node:crypto';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -225,7 +226,31 @@ async function loadConversationLog() {
     })));
   } catch (e) { console.error('Supabase load error:', e.message); }
 }
+// Callers whose saved memory was already loaded into this server instance.
+const memoryLoadedFor = new Set();
+const callerSummaries = new Map();
+// Loads the caller's saved conversations (Yemot storage) at the start of a
+// call. Bounded: a slow storage read never delays the call by more than ~2.5s.
+async function loadCallerMemory(phone) {
+  const key = normalizePhone(phone);
+  if (key === 'לא מזוהה' || memoryLoadedFor.has(key)) return;
+  const t = Date.now();
+  const mem = await readMemory(key, { timeoutMs: 2500 }).catch(() => null);
+  memoryLoadedFor.add(key);
+  if (!mem) { console.info('[MEMORY] no saved memory for caller', { ms: Date.now() - t }); return; }
+  if (mem.summary) callerSummaries.set(key, String(mem.summary));
+  const have = new Set(conversationLog.filter(x => x.phone === key).map(x => x.time + '|' + x.user));
+  const add = (mem.entries || []).filter(e => e && e.user && !have.has(e.time + '|' + e.user))
+    .map((e, i) => ({ id: 'mem-' + i + '-' + Date.parse(e.time || 0), time: e.time, phone: key, callId: String(e.callId || ''), user: e.user, gemini: e.gemini || '' }));
+  conversationLog.unshift(...add);
+  console.info('[MEMORY] caller memory loaded', { turns: add.length, summary: !!mem.summary, ms: Date.now() - t });
+}
 async function persistConversationEntry(entry) {
+  // Durable memory in the Yemot account (works with or without Supabase).
+  if (entry && entry.user && entry.user !== 'לא ניתן היה לתמלל את ההקלטה' && normalizePhone(entry.phone) !== 'לא מזוהה')
+    void rememberTurn(normalizePhone(entry.phone), entry)
+      .then(ok => { if (!ok) console.warn('[MEMORY] turn not saved'); })
+      .catch(e => console.warn('[MEMORY] turn not saved', { message: String(e?.message || e).slice(0, 120) }));
   if (!SUPABASE_ENABLED) return;
   try {
     await supabaseRequest('/rest/v1/conversations', {
@@ -3716,7 +3741,9 @@ async function buildCallHistoryText(phone, callId, turnHistory=[]) {
     : [];
   const current=Array.isArray(turnHistory)?turnHistory.slice(-10):[];
   const combined=[...prior.map(x=>({user:x.user,assistant:x.gemini})),...current].slice(-30);
-  return combined.map((t,i)=>'תור '+(i+1)+' — מתקשר: '+String(t.user||'')+'\nתשובה: '+String(t.assistant||'')).join('\n\n');
+  const summary=normalized!=='לא מזוהה'&&typeof callerSummaries!=='undefined'?callerSummaries.get(normalized):'';
+  const head=summary?'סיכום שיחות קודמות עם המתקשר:\n'+summary+'\n\n':'';
+  return head+combined.map((t,i)=>'תור '+(i+1)+' — מתקשר: '+String(t.user||'')+'\nתשובה: '+String(t.assistant||'')).join('\n\n');
 }
 
 function contextualizeSearchQuestion(question, historyText='') {
@@ -3868,6 +3895,7 @@ async function callHandler(call) {
   let feedbackPending=false;
   const turnHistory=[];
   const turnContext={youtubeResults:[],currentWebsiteUrl:null,currentWebsitePages:[],currentWebsitePageIndex:0,currentWebsiteReadOffset:0};
+  if(typeof loadCallerMemory==='function') await loadCallerMemory(callerPhone);
   if (process.env.ENABLE_AI_OPENING !== 'false' && callerPhone !== 'לא מזוהה' && conversationLog.some(x=>x.phone===callerPhone)) {
     openingPrompt=await buildOpeningForCaller(callerPhone);
     console.info('[CALL_FLOW] returning_caller_memory_found', { callId: activeKey, hasMemory: !!openingPrompt });
@@ -4545,6 +4573,7 @@ async function backupCallHandler(call) {
   const turnHistory=[];
   const turnContext={youtubeResults:[]};
 
+  if(typeof loadCallerMemory==='function') await loadCallerMemory(callerPhone);
   if(process.env.ENABLE_AI_OPENING!=='false' && callerPhone!=='לא מזוהה' &&
      conversationLog.some(x=>x.phone===callerPhone)) {
     openingPrompt=await buildOpeningForCaller(callerPhone);
@@ -4903,6 +4932,14 @@ const port=process.env.PORT||3000;
 app.listen(port,async()=>{
   console.log('server running on port '+port);
   await loadConversationLog();
+  // Durable caller memory: one round trip at start proves the Yemot storage works.
+  void (async () => {
+    const { writeMemory, readMemory } = await import('./branch1-memory.js');
+    const t = Date.now();
+    const ok = await writeMemory('00000', { phone: 'check', summary: '', entries: [], at: new Date().toISOString() }).catch(() => false);
+    const back = ok ? await readMemory('00000').catch(() => null) : null;
+    console.info('[MEMORY] storage check', { write: !!ok, read: !!back, ms: Date.now() - t });
+  })().catch(e => console.warn('[MEMORY] storage check failed', { message: String(e?.message || e).slice(0, 120) }));
   console.info('[BRANCH1 MEMORY] configuration', {persistentStoreConfigured:SUPABASE_ENABLED,openingEnabled:process.env.ENABLE_AI_OPENING!=='false',loadedEntries:conversationLog.length});
   if(process.env.BRANCH1_VERIFY_PUBLIC_SOURCES==='true') {
     void import('./branch1-source-check.js').then(module=>module.verifyBranch1PublicSources({search:branch1Search,extract:extractBranch1Page})).catch(error=>logDetailedError('Branch1 source check',error));

@@ -27,6 +27,11 @@ export function selectRelevantHistoryForTurn(question, persistedHistoryText = ''
   // Keep durable memory available for genuine follow-ups, but do not inject
   // unrelated old calls into every new question. Within a live call, the
   // immediately relevant turns take precedence over persisted history.
+  // Questions about earlier conversations or about the caller himself ("על מה
+  // דיברנו בפעם הקודמת", "אתה זוכר מה שאלתי", "מה השם שלי") need the saved
+  // memory of previous calls together with the current call.
+  const memoryRecall = /(?:זוכר|תזכור|זכרת|נזכר|דיברנו|שוחחנו|בשיחה הקודמת|בשיחה האחרונה|בפעם הקודמת|בפעם שעברה|פעם קודמת|בפעם האחרונה|אתמול|שלשום|לפני כמה ימים|מה שאלתי|על מה שאלתי|שאלתי אותך|סיפרתי לך|אמרתי לך|ביקשתי ממך|השם שלי|איך קוראים לי|איפה אני גר|במה אני עובד|מה אני אוהב|מה אתה יודע עליי|מה אתה יודע עלי|מה אתה זוכר)/i.test(q);
+  if (memoryRecall) return [persisted, currentText].filter(Boolean).join('\n\n');
   if (answerTransformationFollowUp) return currentText;
   if (explicitFollowUp || shortReferential) {
     // Transformation-style requests such as "give me three advantages briefly"
