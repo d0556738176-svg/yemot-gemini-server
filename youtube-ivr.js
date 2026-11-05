@@ -49,7 +49,8 @@ export async function searchYouTubeVideos(query, {
   apiKey = process.env.YOUTUBE_API_KEY,
   regionCode = process.env.YOUTUBE_REGION_CODE || 'IL',
   fetchImpl = fetch,
-  timeoutMs = 15000
+  timeoutMs = 15000,
+  pageToken = null
 } = {}) {
   const key = String(apiKey || '').trim();
   const original = String(query || '').trim();
@@ -63,7 +64,7 @@ export async function searchYouTubeVideos(query, {
   // For "הסרטון הכי חדש של X", resolve the channel and then read its
   // dedicated uploads playlist. This is more precise than a generic video
   // search because YouTube exposes the uploads playlist on the channel.
-  if (wantsNewest) {
+  if (wantsNewest && !pageToken) {
     // Optional precision step. Any failure here (YouTube answers 404 for some
     // channels' uploads list, live 03.11) or no channel whose name matches
     // the request falls back to the normal search sorted by date below —
@@ -85,6 +86,7 @@ export async function searchYouTubeVideos(query, {
   url.searchParams.set('regionCode', regionCode);
   url.searchParams.set('order', wantsNewest ? 'date' : 'relevance');
   url.searchParams.set('key', key);
+  if (pageToken) url.searchParams.set('pageToken', pageToken);
 
   const data = await fetchJson(url, fetchImpl, timeoutMs);
   let results = (data.items || [])
@@ -111,6 +113,8 @@ export async function searchYouTubeVideos(query, {
     });
   }
 
+  // The next 50 results are one more request away ("עוד" after the last one).
+  Object.defineProperty(results, 'nextPageToken', { value: data.nextPageToken || null, enumerable: false });
   return results;
 }
 

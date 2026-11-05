@@ -4227,8 +4227,21 @@ async function youtubeCallHandler(call) {
       }
 
       if(isMoreResultsRequest(transcript)&&results.length) {
+        // No limit: when the loaded results are used up, the next page of the
+        // same search is fetched (50 more each time) for as long as YouTube has.
+        if(resultOffset>=results.length){
+          try {
+            const { moreYouTubeResults } = await import('./youtube-smart-search.js');
+            const more=await moreYouTubeResults(results,{apiKey:process.env.YOUTUBE_API_KEY,regionCode:process.env.YOUTUBE_REGION_CODE||'IL',timeoutMs:REQUEST_TIMEOUT_MS});
+            if(more?.add?.length){
+              const pages=more.pages;
+              results=[...results,...more.add];
+              Object.defineProperty(results,'pages',{value:pages,enumerable:false});
+            }
+          } catch(e){ console.warn('[YouTube IVR] more results failed',{message:String(e?.message||e).slice(0,120)}); }
+        }
         nextPrompt=resultOffset>=results.length
-          ? 'אין עוד תוצאות שכבר נטענו. אמור חיפוש חדש.'
+          ? 'אין עוד תוצאות לחיפוש הזה ביוטיוב. אמור חיפוש חדש.'
           : formatResultsPage();
         continue;
       }
@@ -4254,11 +4267,13 @@ async function youtubeCallHandler(call) {
       // happened, keep the previous results, and let the caller try again.
       let found;
       try {
-        found=await searchYouTubeVideos(currentQuery,{
+        const { smartYouTubeSearch } = await import('./youtube-smart-search.js');
+        found=await smartYouTubeSearch(currentQuery,{
           apiKey:process.env.YOUTUBE_API_KEY,
           regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
           timeoutMs:REQUEST_TIMEOUT_MS
         });
+        console.info('[YouTube IVR] smart search',{spoken:String(currentQuery).slice(0,80),rewritten:found.rewritten||null,results:found.length});
       } catch(searchError) {
         if(searchError instanceof ExitError||isCallerHangupError(searchError)) throw searchError;
         const status=Number(searchError?.status)||0;
@@ -4963,6 +4978,18 @@ app.listen(port,async()=>{
     console.info('[VIDEO] real test: as if the caller said "כן לוידאו"',{videoId:'_Je4NEIzupw'});
     startYouTubeVideoJob({videoId:'_Je4NEIzupw',title:'SHWEKEY - Your Time'});
   })().catch(()=>{});
+  // One-time live check of the smart search (05.11).
+  if(process.env.YOUTUBE_API_KEY) void (async()=>{
+    const { _pipeline } = await import('./youtube-authorized-playback.js');
+    const MARK='ivr2:/2/selftest/smart_search_v1.json';
+    if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
+    const { smartYouTubeSearch, moreYouTubeResults } = await import('./youtube-smart-search.js');
+    const r=await smartYouTubeSearch('תחפש לי את השיר של מוטי שטיינמיץ הנשמה בקירבי',{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
+    const more=await moreYouTubeResults(r,{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
+    const out={rewritten:r.rewritten||null,first:r.slice(0,3).map(v=>v.title),count:r.length,morePage:more?.add?.length||0};
+    console.info('[SMART_SEARCH_TEST]',JSON.stringify(out));
+    await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
+  })().catch(e=>console.warn('[SMART_SEARCH_TEST] failed',String(e?.message||e).slice(0,160)));
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())
