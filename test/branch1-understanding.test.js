@@ -6,6 +6,7 @@ import {answerBranch1Website, requestedSiteName, isBranch1WebsiteRequest} from '
 import {readSinglePublicWebsitePage} from '../website-reader.js';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import * as turnContext from '../branch1-turn-context.js';
 import {branch1Clarification,isCorrection,isBranch1LocalRequest,branch1SpeechItems} from '../branch1-reliability.js';
 
 const now=new Date('2026-10-25T17:00:00Z');
@@ -139,6 +140,8 @@ test('actual phone handler reads website, continues, switches topic and routes h
     knownPrimaryPhoneAnswer:()=>''};
   for(const key of ['isWeatherQuestion','isNewsQuestion','isWebsiteCapabilityQuestion','isWebsiteNavigationRequest','isGenericWebsiteRequest','isLongAnswerRequest','isDeepWebSearchRequest','isTransitRequest','isPhoneNumberRequest','isPharmacySearchRequest'])context[key]=()=>false;
   context.shouldForceWebSearch=q=>q.includes('שעות');context.isBusinessHoursRequest=q=>q.includes('שעות');context.extractExplicitHttpUrl=()=>'';
+  // The handler also uses the turn-context helpers that server.js imports.
+  for(const [key,fn] of Object.entries(turnContext)) if(!(key in context)) context[key]=fn;
   vm.createContext(context);vm.runInContext(handler+'\nglobalThis.handler=callHandler;',context);
   await context.handler({read:async items=>{reads++;if(reads>inputs.length)throw Error('hangup');return '/audio.wav';}});
   assert.equal(websiteReads,1);assert.equal(eventCalls,5);assert.equal(hoursCalls,1);

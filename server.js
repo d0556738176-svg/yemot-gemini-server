@@ -5,7 +5,7 @@ import { readMemory, rememberTurn } from './branch1-memory.js';
 import crypto from 'node:crypto';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { tavily } from '@tavily/core';
+import { withTavily, tavilyClient, searchSecondary, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
@@ -1445,8 +1445,18 @@ async function analyzePublicImageUrl(imageUrl, question) {
       }
     }
   }
-  // Gemini may be temporarily quota-limited. Always try the independent
-  // Google Vision path before returning an unavailable result.
+  // Gemini may be temporarily quota-limited. Independent vision models
+  // (Cloudflare Workers AI, OpenRouter) describe the same image bytes next.
+  try {
+    const {provider,text}=await describeImageIndependently(bytes,mime,prompt,{timeoutMs:Number(process.env.MEDIA_INDEPENDENT_VISION_TIMEOUT_MS||12000)});
+    if(String(text||'').trim()) {
+      console.info('[MULTIMODAL] independent vision model answered',{provider,afterGeminiStatus:geminiErrorStatus(lastError)});
+      return String(text).trim();
+    }
+  } catch(e) {
+    console.warn('[MULTIMODAL] independent vision models unavailable',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,200)});
+  }
+  // Last: the Google Vision label/OCR path before returning an unavailable result.
   if([429,408,500,502,503,504].includes(geminiErrorStatus(lastError)) || lastError) {
     try {
       const visionAnswer=await analyzePublicImageWithVision(imageUrl,question);
@@ -2160,14 +2170,53 @@ const PHONE_IN_TEXT=/\*\d{3,4}|(?<![\d])0\d{1,2}[\s\-‑–]?\d{3}[\s\-‑–]?\
 
 // When search snippets lack the requested detail, read the real page text of the best
 // candidates (official domain first) within a short budget.
+// One page-reading path for every flow: Tavily extract (primary key, then backup),
+// and for pages Tavily did not return — or when Tavily is slow — the page readers
+// (Jina, Firecrawl, Crawl4AI) race in parallel. Returns Tavily's {results:[...]} shape.
+async function extractPages(urls,opts={},budgetMs=4000,label='page extraction'){
+  const list=[...new Set((urls||[]).filter(Boolean).map(String))];
+  if(!list.length) return {results:[]};
+  const started=Date.now();
+  const norm=u=>String(u||'').replace(/#.*$/,'').replace(/\/+$/,'').toLowerCase();
+  const usable=item=>String(item?.rawContent||item?.raw_content||item?.content||'').trim().length>80;
+  const tavilyAttempt=withTimeout(withTavily(label,client=>client.extract(list,opts)),budgetMs,label)
+    .then(({result})=>(Array.isArray(result?.results)?result.results:[]).filter(usable))
+    .catch(e=>{ console.warn('[PAGE_READ] Tavily extract failed; page readers take over',{label,status:geminiErrorStatus(e)}); return []; });
+  const hedgeMs=Math.floor(budgetMs*0.45);
+  const early=await Promise.race([tavilyAttempt.then(v=>({v})),new Promise(r=>setTimeout(()=>r(null),hedgeMs))]);
+  const toReaderShape=p=>({url:p.url,title:p.title,rawContent:p.content,content:p.content,provider:p.provider});
+  const remainingFor=()=>Math.max(0,budgetMs-(Date.now()-started)-150);
+  if(early) {
+    const results=[...early.v];
+    const have=new Set(results.map(x=>norm(x.url)));
+    const missing=list.filter(u=>!have.has(norm(u)));
+    if(missing.length && remainingFor()>1500) {
+      const remaining=remainingFor();
+      const pages=await withTimeout(readPages(missing,{timeoutMs:remaining,hedgeMs:Math.min(1800,Math.floor(remaining/3))}),remaining,label+' readers').catch(()=>[]);
+      results.push(...pages.map(toReaderShape));
+      if(pages.length) console.info('[PAGE_READ] page readers filled pages Tavily missed',{label,pages:pages.length});
+    }
+    return {results};
+  }
+  // Tavily is slow: start the readers now and take whatever both return in budget.
+  const remaining=remainingFor();
+  const [fromTavily,fromReaders]=await Promise.all([
+    withTimeout(tavilyAttempt,remaining,label).catch(()=>[]),
+    remaining>1200?withTimeout(readPages(list,{timeoutMs:remaining,hedgeMs:Math.min(1500,Math.floor(remaining/3))}),remaining,label+' readers').catch(()=>[]):[]
+  ]);
+  const results=[...fromTavily];
+  const have=new Set(results.map(x=>norm(x.url)));
+  for(const page of fromReaders) if(!have.has(norm(page.url))) results.push(toReaderShape(page));
+  return {results};
+}
+
 async function readBestPages(question,results,budgetMs=2000){
   try {
     const domains=officialDomainsForQuestion(question);
     const ranked=[...(results||[]).filter(r=>domains.length&&isOfficialSearchUrl(r.url,domains)),...(results||[])];
     const urls=[...new Set(ranked.map(r=>r.url).filter(Boolean))].slice(0,2);
     if(!urls.length) return [];
-    const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
-    const extracted=await withTimeout(client.extract(urls,{extractDepth:'basic',timeout:Math.ceil(budgetMs/1000)}),budgetMs,'evidence page extraction');
+    const extracted=await extractPages(urls,{extractDepth:'basic',timeout:Math.ceil(budgetMs/1000)},budgetMs,'evidence page extraction');
     return (Array.isArray(extracted.results)?extracted.results:[]).map(page=>({
       title:String(page.title||''),url:String(page.url||''),
       snippet:String(page.rawContent||page.content||'').trim().slice(0,3000)
@@ -2178,7 +2227,10 @@ async function readBestPages(question,results,budgetMs=2000){
   }
 }
 
-async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate=null}={}){
+// quality=true is used when the caller explicitly asked to search the internet:
+// only the strongest models race (the small fast model is left out) and Gemini,
+// whose Flash model reasons well over long evidence, joins after a short hedge.
+async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate=null,quality=false}={}){
   // Gemini-only racer (not generateBranch1WithFallback, which would call Groq/OpenRouter a
   // second time) and it honors the shared circuit breaker so a stalled Gemini costs nothing.
   // Gemini is the last resort: it only starts after a short hedge delay, and never if an
@@ -2187,7 +2239,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
   const othersConfigured=Boolean((process.env.GROQ_API_KEY||'').trim()||(process.env.OPENROUTER_API_KEY||'').trim()||extraFastProviders(true).length);
   const racers=gemini?[(async()=>{
     if(othersConfigured) {
-      await new Promise(r=>setTimeout(r,Number(process.env.BRANCH1_GEMINI_HEDGE_MS||1800)));
+      await new Promise(r=>setTimeout(r,Number(quality?(process.env.BRANCH1_QUALITY_GEMINI_HEDGE_MS||700):(process.env.BRANCH1_GEMINI_HEDGE_MS||1800))));
       if(raceDone) throw Object.assign(new Error('Gemini not needed'),{status:499});
     }
     if(branch1PrimaryCooldown.isCoolingDown('primary')) throw Object.assign(new Error('Gemini cooling down'),{status:503});
@@ -2202,7 +2254,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     }
   })()]:[];
   for(const provider of [
-    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim()},
+    ...(quality?[]:[{name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim()}]),
     {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim(),big:true},
     {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim()},
     ...extraFastProviders(true)
@@ -2314,8 +2366,7 @@ async function answerBusinessHoursDirect(transcript) {
   const evidenceResults=[...unique];
   if(official.length && !unique.some(x=>hoursPattern.test(String(x.title||'')+' '+String(x.snippet||'')))) {
     try {
-      const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
-      const extracted=await withTimeout(client.extract(official.slice(0,3).map(x=>x.url),{extractDepth:'basic',timeout:4}),3000,'Official business hours page extraction');
+      const extracted=await extractPages(official.slice(0,3).map(x=>x.url),{extractDepth:'basic',timeout:4},3000,'Official business hours page extraction');
       for(const page of (Array.isArray(extracted.results)?extracted.results:[])) {
         const content=String(page.rawContent||page.content||'').trim();
         if(content.length>80) evidenceResults.push({
@@ -2346,8 +2397,7 @@ async function answerBusinessHoursDirect(transcript) {
       const relevant=evidenceResults.filter(x=>resultLooksRelevantForHours(x,business||generic,city)).slice(0,2);
       if(relevant.length) {
         try {
-          const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
-          const extracted=await withTimeout(client.extract(relevant.map(x=>x.url),{extractDepth:'basic',timeout:3}),2200,'Hours page extraction');
+          const extracted=await extractPages(relevant.map(x=>x.url),{extractDepth:'basic',timeout:3},2200,'Hours page extraction');
           for(const page of (Array.isArray(extracted.results)?extracted.results:[])) {
             const content=String(page.rawContent||page.content||'').trim();
             if(content.length>80) pages.push({title:String(page.title||''),url:String(page.url||''),snippet:content.slice(0,3500)});
@@ -2503,19 +2553,18 @@ async function searchWebDirect(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
   const timeoutMs=Number(options.timeoutMs||DIRECT_WEB_QUERY_TIMEOUT_MS);
-  // Prefer Tavily's official SDK. It supports authenticated use and a shared
-  // keyless search mode; when shared limits are reached, continue to fallbacks.
-  try {
-    const deepSearch=Boolean(options.deep) || /(לעומק|מחקר מקיף|סקירה מקיפה|השוואה מקיפה)/i.test(q);
-    const tavilyClient=process.env.TAVILY_API_KEY
-      ? tavily({apiKey:process.env.TAVILY_API_KEY})
-      : tavily();
+  // Search engine order: Tavily (primary key, then backup key). If Tavily has not
+  // answered within a short hedge, the keyed secondary engines (LangSearch,
+  // Serper/Google, Jina) race it, and the first engine with results wins. The
+  // caller never waits for one slow engine to time out before the next starts.
+  const deepSearch=Boolean(options.deep) || /(לעומק|מחקר מקיף|סקירה מקיפה|השוואה מקיפה)/i.test(q);
+  const runTavily=async()=>{
     // Tavily ignores the Google-style `site:` operator. Turn it into a real domain
     // restriction so official-site lookups (e.g. a bank's contact page) return that site's passages.
     const siteMatch=q.match(/\bsite:([a-z0-9.-]+\.[a-z]{2,})/i);
     const siteDomain=siteMatch?siteMatch[1].toLowerCase():'';
     const searchText=siteDomain?q.replace(siteMatch[0],' ').replace(/\s+/g,' ').trim():q;
-    const tavilyResponse=await withTimeout(tavilyClient.search(searchText.slice(0,400),{
+    const {result:tavilyResponse,mode}=await withTimeout(withTavily('search',client=>client.search(searchText.slice(0,400),{
       ...(siteDomain?{includeDomains:[siteDomain]}:{}),
       searchDepth:deepSearch?'advanced':(siteDomain?'basic':'fast'),
       topic:'general',
@@ -2523,7 +2572,7 @@ async function searchWebDirect(query, options={}) {
       includeAnswer:false,
       includeRawContent:false,
       timeout:Math.max(1,Math.ceil(Math.min(timeoutMs,3500)/1000))
-    }),Math.min(timeoutMs,3500),'Tavily web search');
+    })),Math.min(timeoutMs+800,4500),'Tavily web search');
     const tavilyResults=(Array.isArray(tavilyResponse.results)?tavilyResponse.results:[])
       .map(item=>({
         title:String(item.title||'').trim(),
@@ -2532,17 +2581,39 @@ async function searchWebDirect(query, options={}) {
       }))
       .filter(item=>item.title&&item.url)
       .slice(0,deepSearch?7:5);
-    if(tavilyResults.length) {
-      console.info('[DIRECT_WEB] Tavily succeeded',{query:q.slice(0,140),results:tavilyResults.length,depth:deepSearch?'advanced':'basic',mode:process.env.TAVILY_API_KEY?'authenticated':'keyless'});
-      return tavilyResults;
+    if(!tavilyResults.length) throw Object.assign(new Error('Tavily returned no usable results'),{status:502});
+    console.info('[DIRECT_WEB] Tavily succeeded',{query:q.slice(0,140),results:tavilyResults.length,depth:deepSearch?'advanced':'basic',mode});
+    return tavilyResults;
+  };
+  const secondaryAvailable=configuredSecondarySearch().length>0;
+  const runSecondary=async()=>{
+    const {provider,results}=await searchSecondary(q,{timeoutMs:Math.min(Math.max(timeoutMs,2500),4000)});
+    console.info('[DIRECT_WEB] secondary engine answered',{provider,query:q.slice(0,140),results:results.length});
+    return results.map(item=>({...item,url:normalizeSearchHref(item.url)})).filter(item=>item.title&&item.url);
+  };
+  {
+    const hedgeMs=Number(process.env.BRANCH1_SEARCH_HEDGE_MS||(deepSearch?2200:1300));
+    let secondaryStarted=null;
+    const tavilyAttempt=runTavily();
+    const hedged=secondaryAvailable
+      ? new Promise((resolve,reject)=>{
+          const timer=setTimeout(()=>{ secondaryStarted=runSecondary(); secondaryStarted.then(resolve,reject); },hedgeMs);
+          // If Tavily fails before the hedge, start the secondary engines at once.
+          tavilyAttempt.catch(()=>{ clearTimeout(timer); if(!secondaryStarted){ secondaryStarted=runSecondary(); secondaryStarted.then(resolve,reject); } });
+          tavilyAttempt.then(()=>clearTimeout(timer),()=>{});
+        })
+      : Promise.reject(Object.assign(new Error('No secondary engine configured'),{status:412}));
+    hedged.catch(()=>{});
+    try {
+      return await Promise.any([tavilyAttempt,hedged]);
+    } catch(e) {
+      for(const item of (Array.isArray(e?.errors)?e.errors:[e])) {
+        console.warn('[DIRECT_WEB] keyed search engine failed; using public fallbacks',{status:geminiErrorStatus(item),message:String(item?.message||item).slice(0,160)});
+      }
     }
-    throw Object.assign(new Error('Tavily returned no usable results'),{status:502});
-  } catch(e) {
-    console.warn('[DIRECT_WEB] Tavily failed; using existing fallback providers',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,160)});
   }
   const googleUrl='https://www.google.com/search?gbv=1&hl=he&gl=il&num=10&q='+encodeURIComponent(q.slice(0,240));
   const providers=[
-    ['jina-search','https://s.jina.ai/?q='+encodeURIComponent(q.slice(0,240)),parseJinaSearchResults],
     ['jina-google','https://r.jina.ai/'+googleUrl,parseJinaSearchResults],
     ['bing-rss','https://www.bing.com/search?format=rss&q='+encodeURIComponent(q.slice(0,240)),parseBingRssResults],
     ['google',googleUrl,parseGoogleResults],
@@ -2553,6 +2624,7 @@ async function searchWebDirect(query, options={}) {
   const attempts=providers.map(async provider=>{
     const name=provider[0], target=provider[1], parser=provider[2];
     const response=await withTimeout(fetch(target,{headers:{
+      ...(name.startsWith('jina')&&process.env.JINA_API_KEY?{authorization:'Bearer '+String(process.env.JINA_API_KEY).trim()}:{}),
       'user-agent':'Mozilla/5.0 (compatible; YemotAI/1.0)',
       'accept':'application/json,text/plain,application/rss+xml,application/xml,text/html;q=0.9,*/*;q=0.8',
       'accept-language':'he-IL,he;q=0.9,en;q=0.7'
@@ -2855,8 +2927,7 @@ async function answerPhoneNumberDirect(question){
   // verification failure; never require two snippets when one official page is clear.
   if(official.length){
     try{
-      const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
-      const extracted=await withTimeout(client.extract(official.slice(0,3).map(x=>x.url),{extractDepth:'basic',timeout:4}),4500,'Official phone page extraction');
+      const extracted=await extractPages(official.slice(0,3).map(x=>x.url),{extractDepth:'basic',timeout:4},4500,'Official phone page extraction');
       for(const page of (Array.isArray(extracted.results)?extracted.results:[])){
         const content=String(page.rawContent||page.content||'').trim();
         if(content.length>80) evidencePool.push({title:String(page.url||'האתר הרשמי'),url:String(page.url||''),snippet:content.slice(0,12000)});
@@ -3198,13 +3269,12 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     // general deep-search results; the existing search fallback is preserved.
     if(!openSiteRequest || !websitePageContentRead) {
       try {
-        const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
         const maxPages=(deepSearch||eventVenueLookup)?3:2;
         const urls=[...(openSiteRequest&&websiteRootUrl?[websiteRootUrl]:[]),...unique.map(x=>x.url).filter(Boolean)]
           .filter((url,i,all)=>all.indexOf(url)===i).slice(0,maxPages);
         if(urls.length) {
           const pageTimeoutMs=openSiteRequest?10000:Math.min(DIRECT_WEB_QUERY_TIMEOUT_MS,4500);
-          const extracted=await withTimeout(client.extract(urls,{extractDepth:(deepSearch||eventVenueLookup)?'advanced':'basic',timeout:Math.ceil(pageTimeoutMs/1000)}),
+          const extracted=await extractPages(urls,{extractDepth:(deepSearch||eventVenueLookup)?'advanced':'basic',timeout:Math.ceil(pageTimeoutMs/1000)},
             pageTimeoutMs,'Tavily page extraction');
           const normalizeExtractUrl=value=>String(value||'').replace(/#.*$/,'').replace(/\/+$/,'');
           const byUrl=new Map((Array.isArray(extracted.results)?extracted.results:[])
@@ -3298,22 +3368,31 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     // retrieved evidence so the caller hears an answer, not raw excerpts. Any
     // failure or timeout falls through to the excerpts below.
     try {
-      const synthBudgetMs=Number(process.env.BRANCH1_WEB_SYNTH_BUDGET_MS || 3200);
+      // An explicit "search the internet" request gets the strongest models and
+      // more time to read the evidence; ordinary lookups stay fast.
+      const synthBudgetMs=deepSearch
+        ? Number(process.env.BRANCH1_DEEP_SYNTH_BUDGET_MS || 6500)
+        : Number(process.env.BRANCH1_WEB_SYNTH_BUDGET_MS || 3200);
       if(synthBudgetMs>0) {
         let evidenceItems=unique.slice(0,deepSearch?6:4);
         // Phone request but no number in any snippet: read the best pages instead of guessing.
         if(isPhoneNumberRequest(question) && !evidenceItems.some(x=>PHONE_IN_TEXT.test(String(x.title||'')+' '+String(x.snippet||'')))) {
           const pages=await readBestPages(question,unique,1900);
           if(pages.length) evidenceItems=[...pages,...evidenceItems];
+        } else if(deepSearch && evidenceItems.reduce((n,x)=>n+String(x.snippet||'').length,0)<2400) {
+          // Explicit internet search with thin snippets: read the two best pages
+          // themselves so the answer rests on the source text, not on a teaser.
+          const pages=await readBestPages(question,unique,Number(process.env.BRANCH1_DEEP_READ_MS||2600));
+          if(pages.length) evidenceItems=[...pages,...evidenceItems];
         }
         const synthEvidence=evidenceItems.map((x,i)=>
           'מקור '+(i+1)+' ('+String(x.url||'').slice(0,100)+'): '+String(x.title||'').slice(0,120)+'\n'+String(x.snippet||'').slice(0,deepSearch?900:(i<2&&String(x.snippet||'').length>1200?1400:600))).join('\n\n');
-        const synthPrompt=EXCLUSIVE_INSTRUCTION+'\n\nענה לשאלת המתקשר בעברית טבעית וקצרה (עד 4 משפטים, ואם התבקשו כמה פריטים או סניפים פרט אותם) להקראה בטלפון, על בסיס המקורות בלבד. '+
+        const synthPrompt=EXCLUSIVE_INSTRUCTION+'\n\nענה לשאלת המתקשר בעברית טבעית וזורמת, כמו בשיחה, '+(deepSearch?'(עד 7 משפטים: קודם התשובה הישירה, אחר כך הפרטים החשובים, ואם המקורות חלוקים ציין זאת)':'(עד 4 משפטים, ואם התבקשו כמה פריטים או סניפים פרט אותם)')+' להקראה בטלפון, על בסיס המקורות בלבד. '+
           'כעת בישראל: '+israelNowText()+'. ענה בדיוק על מה שנשאל ולא על נושא סמוך. אם המקורות חלקיים, מסור את מה שנתמך בהם והבהר בקצרה מה חסר, ואל תסרב כשיש מידע רלוונטי. '+
           'התחל ישר בתשובה. אם המקורות לא עוסקים בנושא השאלה או שהשאלה נראית כתמלול משובש, אמור שלא הצלחת למצוא ובקש מהמתקשר לחזור על שם הגוף או הנושא. '+
           'מספר טלפון: מסור רק אם הוא מופיע במקור שמתאים לגוף שנשאל עליו, וללא שינוי בספרות או בכוכבית. אל תמציא פרטים שלא במקורות.\n\n'+
           'השאלה: '+question+'\n\nמקורות:\n'+synthEvidence;
-        const raced=await raceSynthesis(synthPrompt,synthBudgetMs,{validate:groundedValidator(synthEvidence+' '+israelNowText())});
+        const raced=await raceSynthesis(synthPrompt,synthBudgetMs,{validate:groundedValidator(synthEvidence+' '+israelNowText()),quality:deepSearch,maxTokens:deepSearch?1100:700});
         const synthAnswer=sanitizeForYemot(String(raced||'').trim());
         if(synthAnswer.length>8) {
           console.info('[BRANCH1_WEB_SYNTH] synthesized phone answer',{chars:synthAnswer.length,sources:Math.min(unique.length,deepSearch?6:4)});
@@ -3525,18 +3604,11 @@ async function answerExplicitWebsiteUrl(question, historyText='', turnContext=nu
       console.warn('[WEBSITE_READ] direct HTML fetch failed; using Tavily extraction',{message:String(e?.message||e).slice(0,160)});
     }
   }
-  const client=process.env.TAVILY_API_KEY
-    ? tavily({apiKey:process.env.TAVILY_API_KEY})
-    : tavily();
   const explicitPageTimeoutMs=10000;
-  const extracted=await withTimeout(
-    client.extract([url],{
+  const extracted=await extractPages([url],{
       extractDepth:/עמוק|יסודי|כל הפרטים|תוכן מלא|בהרחבה/i.test(question)?'advanced':'basic',
       timeout:Math.ceil(explicitPageTimeoutMs/1000)
-    }),
-    explicitPageTimeoutMs,
-    'Explicit website extraction'
-  );
+    },explicitPageTimeoutMs,'Explicit website extraction');
   const results=Array.isArray(extracted.results)?extracted.results:[];
   const item=results.find(x=>String(x.url||'').replace(/#.*$/,'')===url.replace(/#.*$/,'')) || results[0];
   const content=String(item?.rawContent||item?.content||'').trim();
@@ -3558,7 +3630,7 @@ async function answerExplicitWebsiteUrl(question, historyText='', turnContext=nu
 async function answerWebsiteNavigation(question, startUrl, historyText='', turnContext=null) {
   if(!startUrl) return null;
   try {
-    const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
+    const client=tavilyClient();
     const base=new URL(startUrl);
     const deepMode=/(לעומק|יסודי|כל הפרטים|תוכן מלא|כל האתר|כל העמודים|לפרטי פרטים|מחקר מקיף|סקירה מקיפה|פורום|פורומים|רשתות חברתיות|רשת חברתית)/i.test(String(question||''));
     const detailRequest=/(?:טלפון|מספר|יצירת קשר|צור קשר|שעות פתיחה|שעות פעילות|סניפים|מוקד|פרטי התקשרות)/i.test(String(question||''));
@@ -3659,12 +3731,12 @@ async function answerWebsiteNavigation(question, startUrl, historyText='', turnC
     const missingUrls=wantedUrls.filter(url=>!pageMap.has(url));
     if(missingUrls.length) {
       try {
-        const extra=await withTimeout(client.extract(missingUrls,{
+        const extra=await extractPages(missingUrls,{
           extractDepth,
           query,
           chunksPerSource:deepMode?5:3,
           timeout:deepMode?12:(detailRequest?6:7)
-        }),deepMode?13000:(detailRequest?6500:7500),'Website linked-page extraction');
+        },deepMode?13000:(detailRequest?6500:7500),'Website linked-page extraction');
         for(const item of (Array.isArray(extra.results)?extra.results:[])) addPage(item.url,rawContent(item));
       } catch(e) {
         console.warn('[WEBSITE_NAV] linked-page extraction failed',{status:geminiErrorStatus(e)});
@@ -3881,8 +3953,7 @@ async function answerBranch1Web(question, historyText='', turnContext=null) {
 }
 
 async function extractBranch1Page(url, timeoutMs=2500) {
-  const client=process.env.TAVILY_API_KEY?tavily({apiKey:process.env.TAVILY_API_KEY}):tavily();
-  const data=await withTimeout(client.extract([url],{extractDepth:'basic',timeout:Math.ceil(timeoutMs/1000)}),timeoutMs,'branch1 page extraction');
+  const data=await extractPages([url],{extractDepth:'basic',timeout:Math.ceil(timeoutMs/1000)},timeoutMs,'branch1 page extraction');
   const item=(data.results||[]).find(x=>{
     try { return new URL(x.url).hostname.replace(/^www\./,'')===new URL(url).hostname.replace(/^www\./,''); }catch{return false;}
   });
@@ -4737,6 +4808,12 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
   serverTime:new Date().toISOString()
 }));
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
+// Shows whether each web key works (never the keys themselves). The result is
+// cached for hours, so opening this page costs at most one tiny call per provider.
+app.get('/health/providers', rateLimit(6, 60 * 1000, 'provider-health'), async (req,res)=>{
+  try { res.json(await providerHealth()); }
+  catch(e) { res.status(500).json({ok:false,error:String(e?.message||e).slice(0,160)}); }
+});
 
 app.use('/dashboard', express.static(new URL('./public', import.meta.url).pathname));
 
