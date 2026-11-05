@@ -4963,6 +4963,7 @@ app.listen(port,async()=>{
     console.info('[VIDEO] real test: as if the caller said "כן לוידאו"',{videoId:'_Je4NEIzupw'});
     startYouTubeVideoJob({videoId:'_Je4NEIzupw',title:'SHWEKEY - Your Time'});
   })().catch(()=>{});
+  if(process.env.APIFY_TOKEN) void import('./branch2-name-probe.js').then(m=>m.runNameProbe()).catch(()=>{});
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())
