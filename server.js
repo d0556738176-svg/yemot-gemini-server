@@ -5034,8 +5034,9 @@ app.listen(port,async()=>{
     const buf=Buffer.from(await (await fetch(u)).arrayBuffer());
     const fsm=await import('node:fs/promises');const tmp=(await import('node:os')).tmpdir()+'/subcheck.mp4';await fsm.writeFile(tmp,buf);
     const { spawn: spawnP }=await import('node:child_process');const info=await new Promise(res=>{const c=spawnP(ffmpegPath,['-hide_banner','-i',tmp]);let e='';c.stderr.on('data',d=>e+=d);c.on('close',()=>res(e));});
-    const track=/Stream #0:\d+\(heb\)[^\n]*Subtitle: mov_text/.test(info);
-    const out={remote:r.remote,bytes:buf.length,hebrewTrackInFile:track,language:subsInfo?.language||null,cues:subsInfo?.cues||0,skipped:subsInfo?.skipped||null,
+    const track=/Stream #0:\d+(?:\[0x[0-9a-f]+\])?\(heb\)[^\n]*Subtitle: mov_text/i.test(info);
+    const streams=(info.match(/Stream #[^\n]*/g)||[]).map(x=>x.slice(0,90));
+    const out={remote:r.remote,bytes:buf.length,hebrewTrackInFile:track,streams,language:subsInfo?.language||null,cues:subsInfo?.cues||0,skipped:subsInfo?.skipped||null,
       srt:(subsInfo?.srt||'').split('\n').slice(0,12).join(' | ')};
     console.info('[SUBTITLES_TEST]',JSON.stringify(out));
     const del=async w=>{const x=new URL(p.YEMOT_API_BASE+'/FileAction');x.searchParams.set('token',p.yemotApiKey());x.searchParams.set('action','delete');x.searchParams.set('what',w);await fetch(x).catch(()=>{});};
