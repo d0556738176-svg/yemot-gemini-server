@@ -20,7 +20,7 @@ import { answerWithOpenAIText, answerWithOpenAIWebSearch, isOpenAIWebSearchReque
 import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
 import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visual-intent.js';
-import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion } from './conversation-context.js';
+import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion, isMemoryRecall } from './conversation-context.js';
 import { buildPharmacySearchQueries, buildPharmacySearchAnswer } from './pharmacy-search.js';
 import { shouldForceWebSearch } from './branch1-web-router.js';
 import { fuzzyCorrectEntities, lexiconKeyterms, ENTITY_LEXICON } from './speech-lexicon.js';
@@ -3732,6 +3732,16 @@ async function answerWithWebSearch(transcript, historyText='', turnContext=null)
   throw Object.assign(new Error('Branch 1 web retrieval unavailable'),{status:503});
 }
 
+// Short background of the caller's previous calls (summary + last questions),
+// so a returning caller is known without old topics taking over the answer.
+function callerBackground(phone, callId) {
+  const key=normalizePhone(phone);
+  if(key==='לא מזוהה') return '';
+  const prior=conversationLog.filter(x=>normalizePhone(x.phone)===key&&x.user&&String(x.callId||'')!==String(callId||'')).slice(-8);
+  const summary=typeof callerSummaries!=='undefined'?callerSummaries.get(key):'';
+  const lines=prior.map(x=>'- ['+String(x.time||'').slice(0,10)+'] שאל: '+String(x.user).slice(0,160)+' | נענה: '+String(x.gemini||'').slice(0,140));
+  return [summary?('סיכום: '+String(summary).slice(0,1200)):'',lines.join('\n')].filter(Boolean).join('\n');
+}
 async function buildCallHistoryText(phone, callId, turnHistory=[]) {
   const normalized=normalizePhone(phone);
   const currentCallId=String(callId||'');
@@ -4049,8 +4059,10 @@ async function callHandler(call) {
 
       if(!directDataRequest) {
         const longAnswer=isLongAnswerRequest(userTranscript);
-        const conversationalHistory=currentConversationText(turnHistory)||relevantHistoryText;
-        const answerPrompt=EXCLUSIVE_INSTRUCTION+'\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+'\n\nהקשר קודם של השיחה, לפי הסדר:\n'+(conversationalHistory || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המקורית של המתקשר (אין לשנות את כוונתה):\n'+originalSpokenTranscript+'\nנושא הבקשה הנוכחית: '+userTranscript+'\n\n'+(longAnswer
+        const recall=typeof isMemoryRecall==='function'&&isMemoryRecall(originalSpokenTranscript);
+        const conversationalHistory=recall?(relevantHistoryText||currentConversationText(turnHistory)):(currentConversationText(turnHistory)||relevantHistoryText);
+        const background=recall||typeof callerBackground!=='function'?'':callerBackground(callerPhone,callId);
+        const answerPrompt=EXCLUSIVE_INSTRUCTION+'\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+(background?'\n\nרקע משיחות קודמות עם אותו מתקשר (לרקע בלבד: השתמש בו רק אם הוא באמת קשור לשאלה, למשל כשהמתקשר ממשיך נושא קודם או שואל על עצמו; אל תזכיר אותו סתם):\n'+background:'')+'\n\nהקשר קודם של השיחה, לפי הסדר:\n'+(conversationalHistory || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המקורית של המתקשר (אין לשנות את כוונתה):\n'+originalSpokenTranscript+'\nנושא הבקשה הנוכחית: '+userTranscript+'\n\n'+(longAnswer
           ? 'זו בקשה לתשובה ארוכה ומפורטת. אל תקצר ל-1 עד 4 משפטים. בנה תשובה רציפה ומסודרת, בדרך כלל 8 עד 20 פסקאות או משפטים קצרים לפי הצורך, עד כ-'+LONG_ANSWER_MAX_CHARS+' תווים. שמור על רצף טבעי להקראה בטלפון, בלי כותרות טכניות ובלי לחזור על עצמך. '
           : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. ')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
         const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
@@ -4939,6 +4951,25 @@ app.listen(port,async()=>{
     const ok = await writeMemory('00000', { phone: 'check', summary: '', entries: [], at: new Date().toISOString() }).catch(() => false);
     const back = ok ? await readMemory('00000').catch(() => null) : null;
     console.info('[MEMORY] storage check', { write: !!ok, read: !!back, ms: Date.now() - t });
+    // Live recall check: a "previous call" is saved for a test number, then a
+    // "second call" asks what was discussed, through the same history path.
+    if (!ok || String(process.env.BRANCH1_MEMORY_SELFTEST || 'on') === 'off') return;
+    const { rememberTurn } = await import('./branch1-memory.js');
+    const phone = '0000000001';
+    await writeMemory(phone, { phone, summary: '', entries: [] });
+    await rememberTurn(phone, { time: new Date(Date.now() - 86400000).toISOString(), callId: 'selftest-1', user: 'קוראים לי משה ואני מחפש מתנה לבר מצווה של הבן שלי', gemini: 'מזל טוב משה! מתנות נפוצות לבר מצווה הן סט ספרים, תפילין מהודרות או שעון.' });
+    memoryLoadedFor.delete(phone);
+    for (let i = conversationLog.length - 1; i >= 0; i--) if (conversationLog[i].phone === phone) conversationLog.splice(i, 1);
+    await loadCallerMemory(phone);
+    const q = 'שלום, אתה זוכר על מה דיברנו בפעם הקודמת? ואיך קוראים לי?';
+    const historyText = await buildCallHistoryText(phone, 'selftest-2', []);
+    const rel = selectRelevantHistoryForTurn(q, historyText, []);
+    const prompt = EXCLUSIVE_INSTRUCTION + '\n\nהקשר קודם של השיחה, לפי הסדר:\n' + (rel || 'אין עדיין הקשר קודם.') + '\n\nהשאלה המקורית של המתקשר (אין לשנות את כוונתה):\n' + q + '\n\nענה ב-1 עד 3 משפטים. החזר אובייקט JSON תקין בלבד עם שדה "answer".';
+    const t2 = Date.now();
+    const txt = (await generateBranch1WithFallback([{ role: 'user', parts: [{ text: prompt }] }], false, true)).response.text();
+    console.info('[MEMORY] recall selftest', { historyHasPrevious: rel.includes('בר מצווה'), answer: String(txt).slice(0, 300), ms: Date.now() - t2 });
+    await writeMemory(phone, { phone, summary: '', entries: [] });
+    for (let i = conversationLog.length - 1; i >= 0; i--) if (conversationLog[i].phone === phone) conversationLog.splice(i, 1);
   })().catch(e => console.warn('[MEMORY] storage check failed', { message: String(e?.message || e).slice(0, 120) }));
   console.info('[BRANCH1 MEMORY] configuration', {persistentStoreConfigured:SUPABASE_ENABLED,openingEnabled:process.env.ENABLE_AI_OPENING!=='false',loadedEntries:conversationLog.length});
   if(process.env.BRANCH1_VERIFY_PUBLIC_SOURCES==='true') {
