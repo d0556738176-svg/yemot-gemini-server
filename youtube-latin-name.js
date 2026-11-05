@@ -1,3 +1,4 @@
+import { groqChat } from './groq-chat.js';
 // File names for the download folders (אודיו / וידאו).
 //
 // Measured 05.11: when a file is downloaded from Yemot, Yemot's server sends
@@ -47,22 +48,9 @@ export async function latinTitle(title, env = process.env, fetchImpl = fetch) {
   const t = String(title || '').trim();
   if (!t) return '';
   if (!/[א-ת]/.test(t)) return t;
-  const key = String(env.GROQ_API_KEY || '').trim();
-  if (key) {
-    try {
-      const r = await fetchImpl('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST', signal: AbortSignal.timeout(Number(env.LATIN_TITLE_TIMEOUT_MS || 5000)),
-        headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: env.LATIN_TITLE_MODEL || 'llama-3.3-70b-versatile', temperature: 0, max_tokens: 120,
-          messages: [{ role: 'system', content: 'You transliterate Hebrew titles into English letters the way Israelis spell them in English (for example "הנשמה בקרבי" -> "Haneshama Bekirbi", "מרדכי בן דוד" -> "Mordechai Ben David"). Keep words that are already in English. Output only the transliterated title, nothing else.' },
-            { role: 'user', content: t }],
-        }),
-      });
-      const j = await r.json().catch(() => null);
-      const out = String(j?.choices?.[0]?.message?.content || '').trim().split('\n')[0];
-      if (r.ok && out && !/[א-ת]/.test(out) && latinFileName(out).length >= 3) return out;
-    } catch { /* fallback below */ }
-  }
+  const out = String(await groqChat([
+    { role: 'system', content: 'You transliterate Hebrew titles into English letters the way Israelis spell them in English (for example "הנשמה בקרבי" -> "Haneshama Bekirbi", "מרדכי בן דוד" -> "Mordechai Ben David"). Keep words that are already in English. Output only the transliterated title, nothing else.' },
+    { role: 'user', content: t }], { env, fetchImpl, maxTokens: 120, timeoutMs: Number(env.LATIN_TITLE_TIMEOUT_MS || 8000) }) || '').split('\n')[0].replace(/^["'*]+|["'*]+$/g, '').trim();
+  if (out && !/[א-ת]/.test(out) && latinFileName(out).length >= 3) return out;
   return hebrewToLatin(t);
 }

@@ -304,3 +304,46 @@ export async function runRenameLatin() {
   console.info(TAG, 'rename latin', JSON.stringify(out));
   await p.writeCacheJson(MARK, { at: new Date().toISOString(), out }).catch(() => {});
 }
+
+// 05.11 evening: the first renaming ran while the language model was not
+// reachable, so names were letter-by-letter. Renames again with the working
+// model, from the original Hebrew title (first renaming record) or the song's
+// YouTube title (owners map -> video id).
+export async function runRenameLatinV2() {
+  const p = (await import('./youtube-authorized-playback.js'))._pipeline;
+  const MARK = 'ivr2:/2/selftest/rename_latin_v2.json';
+  if (await p.readCacheJson(MARK).catch(() => null)) return;
+  const { latinTitle, latinFileName } = await import('./youtube-latin-name.js');
+  const v1 = await p.readCacheJson('ivr2:/2/selftest/rename_latin_v1.json').catch(() => null);
+  const hebrewOf = new Map((v1?.out || []).map(x => [String(x.to).replace(/\.[^.]+$/, ''), String(x.from).replace(/\.[^.]+$/, '').replace(/_/g, ' ')]));
+  const OWN = 'ivr2:/2/youtubeaudio/download_owners.json';
+  const owners = await p.readCacheJson(OWN).catch(() => null) || {};
+  const ytTitle = async id => {
+    const key = process.env.YOUTUBE_API_KEY; if (!key || !id) return null;
+    const r = await fetch('https://www.googleapis.com/youtube/v3/videos?part=snippet&id=' + encodeURIComponent(id) + '&key=' + encodeURIComponent(key)).catch(() => null);
+    return (await r?.json().catch(() => null))?.items?.[0]?.snippet?.title || null;
+  };
+  const out = [];
+  const dirs = [];
+  for (const base of ['ivr2:/אודיו', 'ivr2:/וידאו']) for (const k of ['', '_2', '_3', '_4']) dirs.push(base + k);
+  for (const dir of dirs) {
+    const listing = await listDir(p, dir).catch(() => null);
+    for (const f of (listing?.files || [])) {
+      const name = String(f.name || '');
+      const m = /^(.*?)(_Part_\d+)?\.(flac|m4a|mp3|mp4|srt)$/i.exec(name);
+      if (!m) continue;
+      const stem = m[1];
+      const source = hebrewOf.get(stem) || (/[א-ת]/.test(stem) ? stem.replace(/_/g, ' ') : null) || await ytTitle(owners[stem]);
+      if (!source || !/[א-ת]/.test(source)) continue;
+      const latin = latinFileName(await latinTitle(source));
+      if (!latin || latin === stem) continue;
+      const target = latin + (m[2] || '') + '.' + m[3];
+      const res = await fileAction(p, { action: 'move', what: dir + '/' + name, target: dir + '/' + target });
+      if (res.ok && owners[stem] && !owners[latin]) { owners[latin] = owners[stem]; }
+      out.push({ dir, from: name, to: target, ok: res.ok });
+    }
+  }
+  await p.writeCacheJson(OWN, owners).catch(() => {});
+  console.info(TAG, 'rename latin v2', JSON.stringify(out));
+  await p.writeCacheJson(MARK, { at: new Date().toISOString(), out }).catch(() => {});
+}

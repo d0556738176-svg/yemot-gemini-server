@@ -3915,6 +3915,7 @@ function startYouTubeVideoJob(video) {
       fetchVideoFacts, titleFileName, log: console,
       nextFolder: async () => (await import('./download-folders.js')).nextFolder('video', { readJson: x => p.readCacheJson(x) }),
       uploadCap: async () => (await import('./youtube-authorized-playback.js')).uploadCapBytes(),
+      hebrewSubtitles: async (file, dir) => (await import('./youtube-subtitles.js')).hebrewSubtitlesFor(file, dir, { ffmpegPath, log: console }),
       countSaved: async () => (await import('./download-folders.js')).countSaved('video', { readJson: x => p.readCacheJson(x), writeJson: (x, d) => p.writeCacheJson(x, d) }),
     });
   })().then(r => { state.status = 'ready'; state.remote = r.remote; return videoPendingUpdate(l => l.filter(x => x !== id)); })
@@ -4990,16 +4991,56 @@ app.listen(port,async()=>{
     console.info('[SMART_SEARCH_TEST]',JSON.stringify(out));
     await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
   })().catch(e=>console.warn('[SMART_SEARCH_TEST] failed',String(e?.message||e).slice(0,160)));
-  // One-time: why the language-model call answered nothing (05.11).
-  if(process.env.GROQ_API_KEY) void (async()=>{
-    for(const model of ['llama-3.3-70b-versatile','llama-3.1-8b-instant',process.env.GROQ_MODEL||'openai/gpt-oss-20b']){
-      const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:AbortSignal.timeout(15000),
-        headers:{authorization:'Bearer '+process.env.GROQ_API_KEY.trim(),'content-type':'application/json'},
-        body:JSON.stringify({model,max_tokens:40,messages:[{role:'user',content:'Transliterate to English letters: הנשמה בקרבי'}]})}).catch(e=>({status:0,text:async()=>String(e)}));
-      const t=await r.text().catch(()=>'');
-      console.info('[GROQ_PROBE]',model,r.status,t.slice(0,300));
-    }
-  })().catch(()=>{});
+  // 05.11 evening: names again with the working language model, a smart-search
+  // check, and a full Hebrew-subtitle test on a short English video (saved in
+  // a test folder, checked from Yemot, then removed).
+  void import('./branch2-maintenance.js').then(async m=>{
+    for(let i=0;i<40&&!(await (await import('./youtube-authorized-playback.js'))._pipeline.readCacheJson('ivr2:/2/selftest/rename_latin_v1.json').catch(()=>null));i++)await new Promise(r=>setTimeout(r,15000));
+    await m.runRenameLatinV2();
+  }).catch(e=>console.warn('[BRANCH2_MAINT] rename v2 failed',String(e?.message||e).slice(0,160)));
+  if(process.env.YOUTUBE_API_KEY) void (async()=>{
+    const { _pipeline } = await import('./youtube-authorized-playback.js');
+    const MARK='ivr2:/2/selftest/smart_search_v2.json';
+    if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
+    const { smartYouTubeSearch } = await import('./youtube-smart-search.js');
+    const { latinTitle } = await import('./youtube-latin-name.js');
+    const r=await smartYouTubeSearch('תחפש לי את השיר של מוטי שטיינמיץ הנשמה בקירבי',{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
+    const out={rewritten:r.rewritten||null,first:r.slice(0,3).map(v=>v.title),count:r.length,latin:await latinTitle('הנשמה בקרבי - מוטי שטיינמץ')};
+    console.info('[SMART_SEARCH_TEST]',JSON.stringify(out));
+    if(out.rewritten)await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
+  })().catch(e=>console.warn('[SMART_SEARCH_TEST] failed',String(e?.message||e).slice(0,160)));
+  if(process.env.APIFY_TOKEN&&process.env.DEEPGRAM_API_KEY) void (async()=>{
+    const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
+    const MARK='ivr2:/2/selftest/subtitles_v1.json';
+    if(await p.readCacheJson(MARK).catch(()=>null))return;
+    await new Promise(r=>setTimeout(r,90000)); // after the boot work
+    const cover=await import('./youtube-cover-art.js');
+    const { downloadVideoToYemot } = await import('./youtube-video-download.js');
+    const { hebrewSubtitlesFor } = await import('./youtube-subtitles.js');
+    const ffmpegPath=(await import('ffmpeg-static')).default;
+    const dir='ivr2:/2/selftest/subs';
+    const mem=new Map();let subsInfo=null;
+    const r=await downloadVideoToYemot({videoId:'jNQXAC9IVRw',title:'Me at the zoo'},{
+      store:{read:async x=>mem.get(x)||null,write:async(x,d)=>{mem.set(x,d);}},
+      upload:(f,rr)=>p.uploadToYemot(f,rr,undefined,{convertAudio:false}),getFile:rr=>p.getYemotFile(rr),ffmpegPath,
+      fetchThumbnail:cover.fetchThumbnail,normalizeCover:cover.normalizeCover,downloadMetadata:cover.downloadMetadata,
+      fetchVideoFacts,log:console,nextFolder:async()=>dir,
+      uploadCap:async()=>pb.uploadCapBytes(),
+      hebrewSubtitles:async(f,d)=>(subsInfo=await hebrewSubtitlesFor(f,d,{ffmpegPath,log:console})),
+    });
+    // Read the saved video back from Yemot and look for the Hebrew track.
+    const u=new URL(p.YEMOT_API_BASE+'/DownloadFile');u.searchParams.set('token',p.yemotApiKey());u.searchParams.set('path',r.remote);
+    const buf=Buffer.from(await (await fetch(u)).arrayBuffer());
+    const fsm=await import('node:fs/promises');const tmp=(await import('node:os')).tmpdir()+'/subcheck.mp4';await fsm.writeFile(tmp,buf);
+    const { spawn: spawnP }=await import('node:child_process');const info=await new Promise(res=>{const c=spawnP(ffmpegPath,['-hide_banner','-i',tmp]);let e='';c.stderr.on('data',d=>e+=d);c.on('close',()=>res(e));});
+    const track=/Stream #0:\d+\(heb\)[^\n]*Subtitle: mov_text/.test(info);
+    const out={remote:r.remote,bytes:buf.length,hebrewTrackInFile:track,language:subsInfo?.language||null,cues:subsInfo?.cues||0,skipped:subsInfo?.skipped||null,
+      srt:(subsInfo?.srt||'').split('\n').slice(0,12).join(' | ')};
+    console.info('[SUBTITLES_TEST]',JSON.stringify(out));
+    const del=async w=>{const x=new URL(p.YEMOT_API_BASE+'/FileAction');x.searchParams.set('token',p.yemotApiKey());x.searchParams.set('action','delete');x.searchParams.set('what',w);await fetch(x).catch(()=>{});};
+    await del(r.remote);await del(r.remote.replace(/\.mp4$/,'.srt'));
+    if(track)await p.writeCacheJson(MARK,out).catch(()=>{});
+  })().catch(e=>console.warn('[SUBTITLES_TEST] failed',String(e?.message||e).slice(0,300)));
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())

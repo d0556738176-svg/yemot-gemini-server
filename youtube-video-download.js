@@ -165,6 +165,20 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       await new Promise((res, rej) => createReadStream(src).on('data', d => h.update(d)).on('end', res).on('error', rej));
       if (h.digest('hex') !== got.item.sha256.toLowerCase()) throw err('video_transfer_failed', 'Video file checksum mismatch');
     }
+    // Hebrew subtitles when the speech is not Hebrew: embedded as the default
+    // subtitle track (streams copied, nothing re-encoded) before any cutting.
+    let srcFile = src, subs = null;
+    if (deps.hebrewSubtitles) {
+      subs = await deps.hebrewSubtitles(src, temp).catch(() => null);
+      if (subs?.srt) {
+        const srt = path.join(temp, 'he.srt'), withSubs = path.join(temp, 'with_subs.mp4');
+        await fs.writeFile(srt, subs.srt);
+        try {
+          await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-i', srt, '-map', '0:v:0', '-map', '0:a:0?', '-map', '1:0', '-c', 'copy', '-c:s', 'mov_text', '-metadata:s:s:0', 'language=heb', '-metadata:s:s:0', 'title=עברית', '-disposition:s:0', 'default', withSubs]);
+          srcFile = withSubs;
+        } catch (e) { log.warn?.('[VIDEO] subtitles not embedded', { videoId, message: String(e.message).slice(0, 160) }); subs = { ...subs, embedded: false }; }
+      }
+    }
     // Picture + all details, streams copied untouched (no quality lost).
     const thumb = await deps.fetchThumbnail(videoId).catch(() => null);
     const jpeg = thumb ? await deps.normalizeCover(thumb.jpeg, { ffmpegPath, maxWidth: 1280, quality: 2 }) : null;
@@ -175,7 +189,8 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       if (jpeg) args.push('-i', path.join(temp, 'cover.jpg'));
       args.push('-map', '0:v:0', '-map', '0:a:0?');
       if (jpeg) args.push('-map', '1:v:0', '-disposition:v:1', 'attached_pic');
-      args.push('-c', 'copy', '-map_metadata', '-1');
+      args.push('-map', '0:s?', '-c', 'copy', '-map_metadata', '-1');
+      if (srcFile !== src) args.push('-metadata:s:s:0', 'language=heb', '-metadata:s:s:0', 'title=עברית', '-disposition:s:0', 'default');
       for (const [k, v] of Object.entries(tags)) args.push('-metadata', k + '=' + String(v));
       args.push('-movflags', '+faststart', outFile);
       try { await ffmpeg(ffmpegPath, args); return outFile; }
@@ -185,11 +200,12 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
     // video is cut (without re-encoding) into numbered complete parts.
     const cap = deps.uploadCap ? await deps.uploadCap() : Infinity;
     const pieces = [];
-    if (bytes <= cap * 0.97) pieces.push({ file: await dress(src, path.join(temp, 'video.mp4'), meta), suffix: '' });
+    const fullBytes = (await fs.stat(srcFile)).size;
+    if (fullBytes <= cap * 0.97) pieces.push({ file: await dress(srcFile, path.join(temp, 'video.mp4'), meta), suffix: '' });
     else {
       const dur = Number(durationSec) || Number(got.item?.durationSeconds) || 0;
-      const n = Math.ceil(bytes / (cap * 0.8)), seg = Math.max(30, Math.floor(dur / n) || 600);
-      await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-map', '0', '-c', 'copy', '-f', 'segment', '-segment_time', String(seg), '-reset_timestamps', '1', '-segment_format', 'mp4', path.join(temp, 'seg%03d.mp4')]);
+      const n = Math.ceil(fullBytes / (cap * 0.8)), seg = Math.max(30, Math.floor(dur / n) || 600);
+      await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', srcFile, '-map', '0', '-c', 'copy', '-f', 'segment', '-segment_time', String(seg), '-reset_timestamps', '1', '-segment_format', 'mp4', path.join(temp, 'seg%03d.mp4')]);
       const segs = (await fs.readdir(temp)).filter(f => /^seg\d{3}\.mp4$/.test(f)).sort();
       for (const [k, f] of segs.entries()) {
         const tags = { ...meta, title: meta.title + ' (חלק ' + (k + 1) + ' מתוך ' + segs.length + ')', track: (k + 1) + '/' + segs.length };
@@ -213,9 +229,19 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       await deps.countSaved?.().catch?.(() => {});
       saved.push({ remote, bytes: size });
     }
+    // A separate .srt with the same name, for players that read side files.
+    if (subs?.srt && pieces.length === 1) {
+      const srtRemote = saved[0].remote.replace(/\.mp4$/, '.srt');
+      try {
+        const f = path.join(temp, 'he.srt');
+        await upload(f, srtRemote);
+        const m = await getFile(srtRemote);
+        if (m?.file?.exists === true) { await deps.countSaved?.().catch?.(() => {}); saved.push({ remote: srtRemote, bytes: Number(m.file.size) || 0, subtitles: true }); }
+      } catch (e) { log.warn?.('[VIDEO] subtitle file not uploaded (embedded track still in the video)', { message: String(e.message).slice(0, 160) }); }
+    }
     const remote = saved[0].remote, size = saved.reduce((a, x) => a + x.bytes, 0);
-    await store.write(receiptPath, { videoId, actor: got.actor, runId: got.runId, state: 'done', remote, files: saved, bytes: size, quality, at: new Date().toISOString() });
-    log.info?.('[VIDEO] saved', { videoId, files: saved, quality, engine: got.actor, picture: !!jpeg, uploadMs: Date.now() - t });
+    await store.write(receiptPath, { videoId, actor: got.actor, runId: got.runId, state: 'done', remote, files: saved, bytes: size, quality, subtitles: subs?.srt ? 'hebrew' : (subs?.skipped || 'none'), at: new Date().toISOString() });
+    log.info?.('[VIDEO] saved', { videoId, files: saved, quality, engine: got.actor, picture: !!jpeg, subtitles: subs?.srt ? (subs.embedded === false ? 'file_only' : 'hebrew') : (subs?.skipped || 'none'), uploadMs: Date.now() - t });
     return { remote, bytes: size };
   } finally { await fs.rm(temp, { recursive: true, force: true }).catch(() => {}); }
 }

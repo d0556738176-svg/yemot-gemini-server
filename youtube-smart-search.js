@@ -1,3 +1,4 @@
+import { groqChat } from './groq-chat.js';
 // Smart search for extension 2: the caller's words come from speech
 // recognition (names are often misheard, filler words, "תחפש לי את השיר
 // של..."). A fast language model turns them into the search YouTube
@@ -8,24 +9,12 @@ import { searchYouTubeVideos } from './youtube-ivr.js';
 
 export async function rewriteSearchQuery(spoken, env = process.env, fetchImpl = fetch) {
   const text = String(spoken || '').trim();
-  const key = String(env.GROQ_API_KEY || '').trim();
-  if (!text || !key) return null;
-  try {
-    const r = await fetchImpl('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST', signal: AbortSignal.timeout(Number(env.SMART_SEARCH_TIMEOUT_MS || 3500)),
-      headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: env.SMART_SEARCH_MODEL || 'llama-3.3-70b-versatile', temperature: 0, max_tokens: 80,
-        messages: [
-          { role: 'system', content: 'אתה עוזר חיפוש ביוטיוב לקו טלפון. תקבל תמלול של בקשה קולית בעברית (ייתכנו שגיאות שמיעה בשמות של זמרים, רבנים, ערוצים ושירים). החזר רק את מחרוזת החיפוש הטובה ביותר ליוטיוב: תקן שמות שנשמעו לא נכון לכתיב הנכון והמוכר, הסר מילות פנייה כמו "תחפש לי" "אני רוצה לשמוע" "תשמיע", השאר את שם השיר והאמן או הנושא, ואם ביקשו "חדש" או "האחרון" השאר את המילה חדש. בלי הסברים, בלי מרכאות, שורה אחת בלבד.' },
-          { role: 'user', content: text },
-        ],
-      }),
-    });
-    const j = await r.json().catch(() => null);
-    const out = String(j?.choices?.[0]?.message?.content || '').split('\n')[0].replace(/^["'״]+|["'״]+$/g, '').trim();
-    return r.ok && out && out.length <= 120 ? out : null;
-  } catch { return null; }
+  if (!text) return null;
+  const raw = await groqChat([
+    { role: 'system', content: 'אתה עוזר חיפוש ביוטיוב לקו טלפון. תקבל תמלול של בקשה קולית בעברית (ייתכנו שגיאות שמיעה בשמות של זמרים, רבנים, ערוצים ושירים). החזר רק את מחרוזת החיפוש הטובה ביותר ליוטיוב: תקן שמות שנשמעו לא נכון לכתיב הנכון והמוכר, הסר מילות פנייה כמו "תחפש לי" "אני רוצה לשמוע" "תשמיע", השאר את שם השיר והאמן או הנושא, ואם ביקשו "חדש" או "האחרון" השאר את המילה חדש. בלי הסברים, בלי מרכאות, שורה אחת בלבד.' },
+    { role: 'user', content: text }], { env, fetchImpl, maxTokens: 80, timeoutMs: Number(env.SMART_SEARCH_TIMEOUT_MS || 4000) });
+  const out = String(raw || '').split('\n')[0].replace(/^["'״]+|["'״]+$/g, '').trim();
+  return out && out.length <= 120 ? out : null;
 }
 
 export async function smartYouTubeSearch(spoken, opts = {}, env = process.env, search = searchYouTubeVideos) {
