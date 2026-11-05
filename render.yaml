@@ -22,6 +22,20 @@ services:
         sync: false
       - key: TAVILY_API_KEY
         sync: false
+      - key: TAVILY_BACKUP_API_KEY
+        sync: false
+      - key: LANGSEARCH_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: JINA_API_KEY
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: CRAWL4AI_KEY
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
+        sync: false
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
