@@ -1,3 +1,4 @@
+import { groqChat } from './groq-chat.js';
 // Extension 1: durable memory of every caller's conversations.
 //
 // Found 05.11: memory lived only in the server's RAM (Supabase is not
@@ -52,21 +53,10 @@ export async function writeMemory(phone, data, { env = process.env, fetchImpl = 
 // provider first). Without a model the oldest turns are kept as short lines.
 export async function summarize(previousSummary, turns, { env = process.env, fetchImpl = fetch } = {}) {
   const lines = turns.map(t => 'מתקשר: ' + String(t.user || '').slice(0, 300) + '\nתשובה: ' + String(t.gemini || '').slice(0, 300)).join('\n');
-  const key = String(env.GROQ_API_KEY || '').trim();
-  if (key) {
-    try {
-      const r = await fetchImpl('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST', signal: AbortSignal.timeout(15000),
-        headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: env.MEMORY_SUMMARY_MODEL || 'llama-3.3-70b-versatile', temperature: 0, max_tokens: 700,
-          messages: [{ role: 'system', content: 'אתה מנהל זיכרון של עוזר טלפוני. כתוב סיכום עדכני וקצר בעברית (עד 15 שורות) של כל מה שחשוב לזכור על המתקשר משיחות קודמות: מי הוא, מה ביקש, העדפות, נושאים פתוחים, פרטים שמסר ותשובות חשובות שקיבל. שלב את הסיכום הקודם עם השיחות החדשות. אל תמציא.' },
-            { role: 'user', content: 'סיכום קודם:\n' + (previousSummary || 'אין') + '\n\nשיחות נוספות:\n' + lines }] }),
-      });
-      const j = await r.json().catch(() => null);
-      const out = String(j?.choices?.[0]?.message?.content || '').trim();
-      if (r.ok && out) return out.slice(0, 3000);
-    } catch { /* below */ }
-  }
+  const out = await groqChat([
+    { role: 'system', content: 'אתה מנהל זיכרון של עוזר טלפוני. כתוב סיכום עדכני וקצר בעברית (עד 15 שורות) של כל מה שחשוב לזכור על המתקשר משיחות קודמות: מי הוא, מה ביקש, העדפות, נושאים פתוחים, פרטים שמסר ותשובות חשובות שקיבל. שלב את הסיכום הקודם עם השיחות החדשות. אל תמציא.' },
+    { role: 'user', content: 'סיכום קודם:\n' + (previousSummary || 'אין') + '\n\nשיחות נוספות:\n' + lines }], { env, fetchImpl, maxTokens: 700, timeoutMs: 20000 });
+  if (out) return out.slice(0, 3000);
   const short = turns.map(t => '- ' + String(t.user || '').slice(0, 120)).join('\n');
   return ((previousSummary ? previousSummary + '\n' : '') + 'נושאים קודמים:\n' + short).slice(-3000);
 }
