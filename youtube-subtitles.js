@@ -52,23 +52,35 @@ export function toSrt(cues) {
   return cues.map((c, i) => (i + 1) + '\n' + srtTime(c.start) + ' --> ' + srtTime(c.end) + '\n' + c.text + '\n').join('\n');
 }
 
+// Several setups are tried (language detection is unreliable on some models
+// and short clips); the one that heard the most words wins.
+export const DEEPGRAM_SETUPS = [
+  { model: 'nova-2', detect_language: 'true' },
+  { model: 'nova-3', language: 'multi' },
+  { model: 'nova-3', detect_language: 'true' },
+];
 export async function transcribeTimed(audioFile, { env = process.env, fetchImpl = fetch, log = console, mime = 'audio/ogg' } = {}) {
   const key = String(env.DEEPGRAM_API_KEY || '').trim();
   if (!key) return null;
   const body = await fs.readFile(audioFile);
-  for (const model of ['nova-3', 'nova-2']) {
+  let best = null;
+  for (const setup of DEEPGRAM_SETUPS) {
     const url = new URL('https://api.deepgram.com/v1/listen');
-    url.searchParams.set('model', model);
-    url.searchParams.set('detect_language', 'true');
+    for (const [k, v] of Object.entries(setup)) url.searchParams.set(k, v);
     url.searchParams.set('smart_format', 'true');
     url.searchParams.set('punctuate', 'true');
-    const r = await fetchImpl(url, { method: 'POST', headers: { Authorization: 'Token ' + key, 'Content-Type': mime }, body, signal: AbortSignal.timeout(20 * 60 * 1000) });
-    const j = await r.json().catch(() => null);
-    if (!r.ok) { log.warn?.('[SUBTITLES] transcription refused', { model, status: r.status, message: String(j?.err_msg || j?.message || '').slice(0, 160) }); continue; }
-    const ch = j?.results?.channels?.[0];
-    return { language: String(ch?.detected_language || ''), words: ch?.alternatives?.[0]?.words || [], model };
+    try {
+      const r = await fetchImpl(url, { method: 'POST', headers: { Authorization: 'Token ' + key, 'Content-Type': mime }, body, signal: AbortSignal.timeout(20 * 60 * 1000) });
+      const j = await r.json().catch(() => null);
+      const ch = j?.results?.channels?.[0];
+      const words = ch?.alternatives?.[0]?.words || [];
+      const language = String(ch?.detected_language || ch?.alternatives?.[0]?.languages?.[0] || words.find(w => w.language)?.language || '');
+      log.info?.('[SUBTITLES] transcription attempt', { ...setup, status: r.status, bytes: body.length, language, words: words.length, error: r.ok ? undefined : String(j?.err_msg || j?.message || '').slice(0, 120) });
+      if (r.ok && (!best || words.length > best.words.length)) best = { language, words, model: setup.model + (setup.language ? '/' + setup.language : '') };
+      if (best && best.words.length >= 20 && best.language) break;
+    } catch (e) { log.warn?.('[SUBTITLES] transcription attempt failed', { ...setup, message: String(e?.message || e).slice(0, 120) }); }
   }
-  return null;
+  return best;
 }
 
 function parseLines(text, n) {

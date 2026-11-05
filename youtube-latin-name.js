@@ -48,8 +48,12 @@ export async function latinTitle(title, env = process.env, fetchImpl = fetch) {
   const t = String(title || '').trim();
   if (!t) return '';
   if (!/[א-ת]/.test(t)) return t;
+  // Many titles already carry their own English version ("עברית | English"):
+  // use it as is rather than spelling the Hebrew part again.
+  const own = t.split(/\s*[|｜/]\s*/).map(x => x.trim()).filter(x => x && !/[א-ת]/.test(x) && (x.match(/[A-Za-z]{2,}/g) || []).length >= 2);
+  if (own.length) return own.sort((a, b) => b.length - a.length)[0];
   const out = String(await groqChat([
-    { role: 'system', content: 'You transliterate Hebrew titles into English letters the way Israelis spell them in English (for example "הנשמה בקרבי" -> "Haneshama Bekirbi", "מרדכי בן דוד" -> "Mordechai Ben David"). Keep words that are already in English. Output only the transliterated title, nothing else.' },
+    { role: 'system', content: 'You transliterate Hebrew titles into English letters the way Israelis spell them in English (for example "הנשמה בקרבי" -> "Haneshama Bekirbi", "מרדכי בן דוד" -> "Mordechai Ben David"). Keep words that are already in English. If the title already contains an English version of itself, output the English version once and do not repeat it. Output only the transliterated title, nothing else.' },
     { role: 'user', content: t }], { env, fetchImpl, maxTokens: 120, timeoutMs: Number(env.LATIN_TITLE_TIMEOUT_MS || 8000) }) || '').split('\n')[0].replace(/^["'*]+|["'*]+$/g, '').trim();
   if (out && !/[א-ת]/.test(out) && latinFileName(out).length >= 3) return out;
   return hebrewToLatin(t);

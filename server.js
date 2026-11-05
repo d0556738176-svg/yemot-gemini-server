@@ -4997,6 +4997,7 @@ app.listen(port,async()=>{
   void import('./branch2-maintenance.js').then(async m=>{
     for(let i=0;i<40&&!(await (await import('./youtube-authorized-playback.js'))._pipeline.readCacheJson('ivr2:/2/selftest/rename_latin_v1.json').catch(()=>null));i++)await new Promise(r=>setTimeout(r,15000));
     await m.runRenameLatinV2();
+    await m.runRenameLatinV3();
   }).catch(e=>console.warn('[BRANCH2_MAINT] rename v2 failed',String(e?.message||e).slice(0,160)));
   if(process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
@@ -5011,7 +5012,7 @@ app.listen(port,async()=>{
   })().catch(e=>console.warn('[SMART_SEARCH_TEST] failed',String(e?.message||e).slice(0,160)));
   if(process.env.APIFY_TOKEN&&process.env.DEEPGRAM_API_KEY) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
-    const MARK='ivr2:/2/selftest/subtitles_v1.json';
+    const MARK='ivr2:/2/selftest/subtitles_v2.json';
     if(await p.readCacheJson(MARK).catch(()=>null))return;
     await new Promise(r=>setTimeout(r,90000)); // after the boot work
     const cover=await import('./youtube-cover-art.js');

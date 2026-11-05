@@ -309,13 +309,24 @@ export async function runRenameLatin() {
 // reachable, so names were letter-by-letter. Renames again with the working
 // model, from the original Hebrew title (first renaming record) or the song's
 // YouTube title (owners map -> video id).
-export async function runRenameLatinV2() {
+export async function runRenameLatinV2(MARK = 'ivr2:/2/selftest/rename_latin_v2.json', prior = ['ivr2:/2/selftest/rename_latin_v1.json']) {
   const p = (await import('./youtube-authorized-playback.js'))._pipeline;
-  const MARK = 'ivr2:/2/selftest/rename_latin_v2.json';
   if (await p.readCacheJson(MARK).catch(() => null)) return;
   const { latinTitle, latinFileName } = await import('./youtube-latin-name.js');
-  const v1 = await p.readCacheJson('ivr2:/2/selftest/rename_latin_v1.json').catch(() => null);
-  const hebrewOf = new Map((v1?.out || []).map(x => [String(x.to).replace(/\.[^.]+$/, ''), String(x.from).replace(/\.[^.]+$/, '').replace(/_/g, ' ')]));
+  // Each earlier pass recorded from -> to; follow the chain back to the
+  // original Hebrew title of every file.
+  const ownersAll = await p.readCacheJson('ivr2:/2/youtubeaudio/download_owners.json').catch(() => null) || {};
+  const hebrewOf = new Map(), idOf = new Map();
+  const stemOf = n => String(n).replace(/(_Part_\d+)?\.[^.]+$/, '');
+  for (const mk of prior) {
+    const rec = await p.readCacheJson(mk).catch(() => null);
+    for (const x of rec?.out || []) {
+      if (x.ok === false) continue;
+      const from = stemOf(x.from), to = stemOf(x.to);
+      hebrewOf.set(to, hebrewOf.get(from) || (/[\u05d0-\u05ea]/.test(from) ? from.replace(/_/g, ' ') : null));
+      idOf.set(to, idOf.get(from) || ownersAll[from] || null);
+    }
+  }
   const OWN = 'ivr2:/2/youtubeaudio/download_owners.json';
   const owners = await p.readCacheJson(OWN).catch(() => null) || {};
   const ytTitle = async id => {
@@ -333,7 +344,9 @@ export async function runRenameLatinV2() {
       const m = /^(.*?)(_Part_\d+)?\.(flac|m4a|mp3|mp4|srt)$/i.exec(name);
       if (!m) continue;
       const stem = m[1];
-      const source = hebrewOf.get(stem) || (/[א-ת]/.test(stem) ? stem.replace(/_/g, ' ') : null) || await ytTitle(owners[stem]);
+      // The song's full YouTube title is best (it often carries its own English version).
+      const yt = await ytTitle(owners[stem] || idOf.get(stem));
+      const source = yt || hebrewOf.get(stem) || (/[\u05d0-\u05ea]/.test(stem) ? stem.replace(/_/g, ' ') : null);
       if (!source || !/[א-ת]/.test(source)) continue;
       const latin = latinFileName(await latinTitle(source));
       if (!latin || latin === stem) continue;
@@ -347,3 +360,5 @@ export async function runRenameLatinV2() {
   console.info(TAG, 'rename latin v2', JSON.stringify(out));
   await p.writeCacheJson(MARK, { at: new Date().toISOString(), out }).catch(() => {});
 }
+
+export const runRenameLatinV3 = () => runRenameLatinV2('ivr2:/2/selftest/rename_latin_v3.json', ['ivr2:/2/selftest/rename_latin_v1.json', 'ivr2:/2/selftest/rename_latin_v2.json']);
