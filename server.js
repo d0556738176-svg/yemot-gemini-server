@@ -4795,6 +4795,24 @@ async function backupCallHandler(call) {
   }
 }
 
+// Owner's rule (06.11): * returns to the main menu in every extension. If
+// Yemot passes the star to us as the caller's latest input (in extension 1
+// or the backup extension 3), the call goes straight to the main menu.
+function latestYemotValue(query) {
+  const vals = Object.keys(query || {}).map(k => /^val_(\d+)$/.exec(k)).filter(Boolean).sort((a, b) => Number(b[1]) - Number(a[1]));
+  return vals.length ? String(query[vals[0][0]] ?? '') : null;
+}
+app.get(['/yemot', '/yemot-backup'], (req, res, next) => {
+  if (req.query?.hangup === 'yes') return next();
+  const starKeys = Object.entries(req.query || {}).filter(([k, v]) => /^val_\d+$/.test(k) && String(v).includes('*')).map(([k, v]) => k + '=' + String(v).slice(0, 20));
+  if (starKeys.length) console.info('[STAR] star seen in Yemot request', { path: req.path, keys: starKeys, ext: req.query?.ApiExtension });
+  const latest = latestYemotValue(req.query);
+  if (latest !== null && /^\*+#?$/.test(latest.trim())) {
+    console.info('[STAR] back to the main menu', { path: req.path });
+    return res.type('text/plain').send('go_to_folder=/');
+  }
+  next();
+});
 router.get('/yemot', callHandler);
 router.get('/yemot-backup', backupCallHandler);
 router.get('/yemot-youtube', youtubeCallHandler);
@@ -5021,6 +5039,19 @@ const port=process.env.PORT||3000;
 app.listen(port,async()=>{
   console.log('server running on port '+port);
   await loadConversationLog();
+  // What the main menu, extensions 1/3 and the account's star menu are set to
+  // (06.11, star = main menu everywhere).
+  void (async () => {
+    const u = String(process.env.YEMOT_API_USERNAME || '').trim(), pw = String(process.env.YEMOT_API_PASSWORD || '').trim();
+    const token = String(process.env.YEMOT_TOKEN || '').trim() || (u && pw ? u + ':' + pw : '');
+    if (!token) return;
+    const out = {};
+    for (const what of ['ivr2:/ext.ini', 'ivr2:/1/ext.ini', 'ivr2:/3/ext.ini', 'ivr2:/Star/ext.ini']) {
+      const j = await (await fetch('https://www.call2all.co.il/ym/api/GetTextFile?' + new URLSearchParams({ token, what }), { signal: AbortSignal.timeout(15000) })).json().catch(() => null);
+      out[what] = String(j?.contents ?? j?.message ?? '').replace(/(password|token|api_key)[^\n]*/gi, '$1=…').slice(0, 600);
+    }
+    console.info('[STAR] extension settings', JSON.stringify(out));
+  })().catch(() => {});
   // Durable caller memory: one round trip at start proves the Yemot storage works.
   void (async () => {
     const { writeMemory, readMemory } = await import('./branch1-memory.js');
