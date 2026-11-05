@@ -413,3 +413,50 @@ export async function runRenameHebrew() {
   console.info(TAG, 'rename hebrew', JSON.stringify(out));
   await p.writeCacheJson(MARK, { at: new Date().toISOString(), out }).catch(() => {});
 }
+
+// Videos saved in English letters with no record of their Hebrew title: the
+// title is found again on YouTube (the language model turns the letters back
+// into Hebrew words for the search) and the file renamed.
+export async function runRenameHebrewVideos() {
+  const p = (await import('./youtube-authorized-playback.js'))._pipeline;
+  const MARK = 'ivr2:/2/selftest/rename_hebrew_videos_v1.json';
+  if (await p.readCacheJson(MARK).catch(() => null)) return;
+  const key = process.env.YOUTUBE_API_KEY; if (!key) return;
+  const { titleFileName } = await import('./youtube-audio-cache.js');
+  const { groqChat } = await import('./groq-chat.js');
+  const { latinTitle, latinFileName } = await import('./youtube-latin-name.js');
+  const out = [];
+  for (const dir of ['ivr2:/וידאו', 'ivr2:/וידאו_2']) {
+    const listing = await listDir(p, dir).catch(() => null);
+    const done = new Map();
+    for (const f of (listing?.files || [])) {
+      const name = String(f.name || '');
+      const m = /^(.*?)(?:_חלק_(\d+))?\.(mp4|srt)$/i.exec(name);
+      if (!m || /[א-ת]/.test(m[1]) || /^SHWEKEY/i.test(m[1])) continue;
+      let heb = done.get(m[1]);
+      if (heb === undefined) {
+        heb = null;
+        const words = m[1].replace(/_/g, ' ');
+        const q = await groqChat([{ role: 'system', content: 'The user gives a Hebrew title that was written in English letters (Israeli transliteration). Write it back in Hebrew letters. Output only the Hebrew text.' }, { role: 'user', content: words }], { maxTokens: 120, timeoutMs: 15000 });
+        const r = q ? await fetch('https://www.googleapis.com/youtube/v3/search?' + new URLSearchParams({ part: 'snippet', type: 'video', maxResults: '8', q, key, regionCode: 'IL' })).catch(() => null) : null;
+        const items = (await r?.json().catch(() => null))?.items || [];
+        // Accept only a result whose own English spelling matches the file.
+        for (const it of items) {
+          const t = String(it.snippet?.title || '').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+          const again = latinFileName(await latinTitle(t)).toLowerCase();
+          const a = new Set(again.split('_').filter(w => w.length > 2)), b = m[1].toLowerCase().split('_').filter(w => w.length > 2);
+          const hit = b.filter(w => a.has(w)).length / Math.max(1, b.length);
+          if (hit >= 0.5) { heb = titleFileName(t, 100); break; }
+        }
+        done.set(m[1], heb);
+        out.push({ stem: m[1], search: q, found: heb });
+      }
+      if (!heb) continue;
+      const target = heb + (m[2] ? '_חלק_' + m[2] : '') + '.' + m[3];
+      const res = await fileAction(p, { action: 'move', what: dir + '/' + name, target: dir + '/' + target });
+      out.push({ from: name, to: target, ok: res.ok });
+    }
+  }
+  console.info(TAG, 'rename hebrew videos', JSON.stringify(out));
+  await p.writeCacheJson(MARK, { at: new Date().toISOString(), out }).catch(() => {});
+}

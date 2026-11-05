@@ -5011,6 +5011,7 @@ app.listen(port,async()=>{
     await m.runRenameLatinV2();
     await m.runRenameLatinV3();
     await m.runRenameHebrew();
+    await m.runRenameHebrewVideos();
     // Does any form of Yemot's own download keep a Hebrew name? (logged once)
     const pb=(await import('./youtube-authorized-playback.js'))._pipeline;
     if(!(await pb.readCacheJson('ivr2:/2/selftest/hebrew_download_probe_v1.json').catch(()=>null))){
@@ -5054,6 +5055,23 @@ app.listen(port,async()=>{
     console.info('[SONG_NAME_TEST] saving a real song as a caller would',{videoId:pick.videoId,title:pick.title});
     await pb.downloadAuthorizedAudioToYemot(pick.videoId);
   })().catch(e=>console.warn('[SONG_NAME_TEST] failed',String(e?.message||e).slice(0,200)));
+  // Download page self-test (06.11): refused without login; with the account
+  // login it lists the folders and serves a file under its Hebrew name.
+  void (async()=>{
+    await new Promise(r=>setTimeout(r,60000));
+    const port=process.env.PORT||3000, u='http://127.0.0.1:'+port;
+    const noAuth=(await fetch(u+'/downloads').catch(()=>({status:0}))).status;
+    const user=String(process.env.YEMOT_API_USERNAME||'').trim(), pass=String(process.env.YEMOT_API_PASSWORD||'').trim();
+    const auth={authorization:'Basic '+Buffer.from(user+':'+pass).toString('base64')};
+    const wrong=(await fetch(u+'/downloads',{headers:{authorization:'Basic '+Buffer.from(user+':x').toString('base64')}}).catch(()=>({status:0}))).status;
+    const page=await fetch(u+'/downloads',{headers:auth}).catch(()=>null);
+    const html=page?await page.text():'';
+    const link=(html.match(/href="(\/downloads\/file\?path=[^"]+)"/)||[])[1];
+    let file=null;
+    if(link){const ac=new AbortController();const r=await fetch(u+link.replace(/&amp;/g,'&'),{headers:{...auth,Range:'bytes=0-1023'},signal:ac.signal});
+      file={status:r.status,cd:decodeURIComponent((r.headers.get('content-disposition')||'').split("UTF-8''")[1]||''),type:r.headers.get('content-type'),range:r.headers.get('content-range')};ac.abort();}
+    console.info('[DOWNLOADS_PAGE_TEST]',JSON.stringify({noAuth,wrong,listed:page?.status,files:(html.match(/<li /g)||[]).length,file}));
+  })().catch(e=>console.warn('[DOWNLOADS_PAGE_TEST] failed',String(e?.message||e).slice(0,200)));
   if(process.env.APIFY_TOKEN&&process.env.DEEPGRAM_API_KEY) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
     const MARK='ivr2:/2/selftest/subtitles_v2.json';
