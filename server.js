@@ -4990,6 +4990,16 @@ app.listen(port,async()=>{
     console.info('[SMART_SEARCH_TEST]',JSON.stringify(out));
     await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
   })().catch(e=>console.warn('[SMART_SEARCH_TEST] failed',String(e?.message||e).slice(0,160)));
+  // One-time: why the language-model call answered nothing (05.11).
+  if(process.env.GROQ_API_KEY) void (async()=>{
+    for(const model of ['llama-3.3-70b-versatile','llama-3.1-8b-instant',process.env.GROQ_MODEL||'openai/gpt-oss-20b']){
+      const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:AbortSignal.timeout(15000),
+        headers:{authorization:'Bearer '+process.env.GROQ_API_KEY.trim(),'content-type':'application/json'},
+        body:JSON.stringify({model,max_tokens:40,messages:[{role:'user',content:'Transliterate to English letters: הנשמה בקרבי'}]})}).catch(e=>({status:0,text:async()=>String(e)}));
+      const t=await r.text().catch(()=>'');
+      console.info('[GROQ_PROBE]',model,r.status,t.slice(0,300));
+    }
+  })().catch(()=>{});
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())

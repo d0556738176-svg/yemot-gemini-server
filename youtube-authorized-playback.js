@@ -683,7 +683,7 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
       const f=path.join(temp,'part'+(k+1)+'.m4a');
       const tags={...metadata,title:metadata.title+' (חלק '+(k+1)+' מתוך '+n+')',track:(k+1)+'/'+n};
       await makeDownloadCopy(source,f,{format:'m4a',jpeg,metadata:tags,ffmpegPath,start:k*seg,length:seg});
-      files.push({file:f,suffix:'_חלק_'+(k+1),tags});
+      files.push({file:f,suffix:'_Part_'+(k+1),tags});
     }
   }
   await fs.rm(source,{force:true}).catch(()=>{});
