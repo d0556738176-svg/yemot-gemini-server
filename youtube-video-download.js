@@ -197,7 +197,9 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       }
       log.info?.('[VIDEO] video larger than one upload; cut into parts', { videoId, bytes, cap, parts: pieces.length });
     }
-    const name = deps.titleFileName(meta.title || videoId) || videoId;
+    // English-letter name: Yemot turns Hebrew letters in download names into spaces.
+    const { latinTitle, latinFileName } = await import('./youtube-latin-name.js');
+    const name = latinFileName(await latinTitle(meta.title || videoId, env)) || videoId;
     const saved = [];
     const t = Date.now();
     for (const pc of pieces) {

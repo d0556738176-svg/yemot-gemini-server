@@ -687,7 +687,9 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
     }
   }
   await fs.rm(source,{force:true}).catch(()=>{});
-  const base=titleFileName(metadata.title||title||id)||id;
+  // English-letter name: Yemot turns Hebrew letters in download names into spaces.
+  const { latinTitle, latinFileName } = await import('./youtube-latin-name.js');
+  const base=latinFileName(await latinTitle(metadata.title||title||id))||id;
   const owners=await readCacheJson(DOWNLOAD_OWNERS).catch(()=>null)||{};
   const name=owners[base]&&owners[base]!==id?base+'_'+id:base;
   const folders=await import('./download-folders.js');

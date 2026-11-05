@@ -281,3 +281,26 @@ export async function runUploadCapTest() {
   console.info(TAG, 'upload cap', JSON.stringify(out));
   await p.writeCacheJson(MARK, out).catch(() => {});
 }
+
+// Files already saved with Hebrew names get their English-letter names (05.11).
+export async function runRenameLatin() {
+  const p = (await import('./youtube-authorized-playback.js'))._pipeline;
+  const MARK = 'ivr2:/2/selftest/rename_latin_v1.json';
+  if (await p.readCacheJson(MARK).catch(() => null)) return;
+  const { latinTitle, latinFileName } = await import('./youtube-latin-name.js');
+  const out = [];
+  for (const dir of ['ivr2:/אודיו', 'ivr2:/וידאו']) {
+    const listing = await listDir(p, dir);
+    for (const f of (listing?.files || [])) {
+      const name = String(f.name || '');
+      const m = /^(.*)\.(flac|m4a|mp3|mp4)$/i.exec(name);
+      if (!m || !/[\u05d0-\u05ea]/.test(name)) continue;
+      const latin = latinFileName(await latinTitle(m[1].replace(/_/g, ' ')));
+      if (!latin) continue;
+      const res = await fileAction(p, { action: 'move', what: dir + '/' + name, target: dir + '/' + latin + '.' + m[2] });
+      out.push({ from: name, to: latin + '.' + m[2], ok: res.ok });
+    }
+  }
+  console.info(TAG, 'rename latin', JSON.stringify(out));
+  await p.writeCacheJson(MARK, { at: new Date().toISOString(), out }).catch(() => {});
+}

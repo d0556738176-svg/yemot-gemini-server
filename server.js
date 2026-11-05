@@ -4944,7 +4944,7 @@ app.listen(port,async()=>{
   // One-time maintenance: downloads moved to /2, >50MB one-file upload test,
   // Apify keys audit (branch2-maintenance.js).
   if(process.env.APIFY_TOKEN) void import('./branch2-maintenance.js')
-    .then(async m=>{await m.runMaintenance();await m.runMaintenanceV2();await m.runMultipartConvertTest();await m.runUploadCapTest();})
+    .then(async m=>{await m.runMaintenance();await m.runMaintenanceV2();await m.runMultipartConvertTest();await m.runUploadCapTest();await m.runRenameLatin();})
     .catch(e=>logDetailedError('Branch 2 maintenance',e));
   // Video downloads that were running before a restart continue (same run).
   if(process.env.APIFY_TOKEN) void (async()=>{
@@ -4963,7 +4963,6 @@ app.listen(port,async()=>{
     console.info('[VIDEO] real test: as if the caller said "כן לוידאו"',{videoId:'_Je4NEIzupw'});
     startYouTubeVideoJob({videoId:'_Je4NEIzupw',title:'SHWEKEY - Your Time'});
   })().catch(()=>{});
-  if(process.env.APIFY_TOKEN) void import('./branch2-name-probe.js').then(m=>m.runNameProbe()).catch(()=>{});
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')
     .then(m=>m.runBranch2AudioAB())
