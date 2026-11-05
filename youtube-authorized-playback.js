@@ -683,13 +683,14 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
       const f=path.join(temp,'part'+(k+1)+'.m4a');
       const tags={...metadata,title:metadata.title+' (חלק '+(k+1)+' מתוך '+n+')',track:(k+1)+'/'+n};
       await makeDownloadCopy(source,f,{format:'m4a',jpeg,metadata:tags,ffmpegPath,start:k*seg,length:seg});
-      files.push({file:f,suffix:'_Part_'+(k+1),tags});
+      files.push({file:f,suffix:'_חלק_'+(k+1),tags});
     }
   }
   await fs.rm(source,{force:true}).catch(()=>{});
-  // English-letter name: Yemot turns Hebrew letters in download names into spaces.
-  const { latinTitle, latinFileName } = await import('./youtube-latin-name.js');
-  const base=latinFileName(await latinTitle(metadata.title||title||id))||id;
+  // Full Hebrew name as seen in Yemot (owner, 06.11). Yemot's own download
+  // erases Hebrew from the name; the download page (/downloads) gives it back.
+  const { titleFileName } = await import('./youtube-audio-cache.js');
+  const base=titleFileName(metadata.title||title||id,100)||id;
   const owners=await readCacheJson(DOWNLOAD_OWNERS).catch(()=>null)||{};
   const name=owners[base]&&owners[base]!==id?base+'_'+id:base;
   const folders=await import('./download-folders.js');

@@ -209,13 +209,14 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       const segs = (await fs.readdir(temp)).filter(f => /^seg\d{3}\.mp4$/.test(f)).sort();
       for (const [k, f] of segs.entries()) {
         const tags = { ...meta, title: meta.title + ' (חלק ' + (k + 1) + ' מתוך ' + segs.length + ')', track: (k + 1) + '/' + segs.length };
-        pieces.push({ file: await dress(path.join(temp, f), path.join(temp, 'part' + (k + 1) + '.mp4'), tags), suffix: '_Part_' + (k + 1) });
+        pieces.push({ file: await dress(path.join(temp, f), path.join(temp, 'part' + (k + 1) + '.mp4'), tags), suffix: '_חלק_' + (k + 1) });
       }
       log.info?.('[VIDEO] video larger than one upload; cut into parts', { videoId, bytes, cap, parts: pieces.length });
     }
-    // English-letter name: Yemot turns Hebrew letters in download names into spaces.
-    const { latinTitle, latinFileName } = await import('./youtube-latin-name.js');
-    const name = latinFileName(await latinTitle(meta.title || videoId, env)) || videoId;
+    // Full Hebrew name as seen in Yemot (owner, 06.11); the download page
+    // (/downloads) serves it under the same Hebrew name.
+    const { titleFileName } = await import('./youtube-audio-cache.js');
+    const name = titleFileName(meta.title || videoId, 100) || videoId;
     const saved = [];
     const t = Date.now();
     for (const pc of pieces) {

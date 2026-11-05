@@ -41,7 +41,10 @@ test('keys match the requested layout', () => {
   assert.equal(EXT7_SETTINGS.control_play1, 'seconds_plus');
   assert.equal(EXT7_SETTINGS.control_play3, 'seconds_minus');
   assert.equal(EXT7_SETTINGS.control_play7, 'minut_plus_amount1');
-  assert.equal(EXT7_SETTINGS.minut_plus_amount1, '240000');
+  assert.equal(EXT7_SETTINGS.minut_plus_amount1, '180000');
+  assert.equal(EXT7_SETTINGS['control_play*'], 'go_to_folder');
+  assert.equal(EXT7_SETTINGS['playfile_control_play_*_goto'], '/');
+  assert.equal(EXT8_SETTINGS['control_play*'], 'go_to_folder');
   assert.equal(EXT7_SETTINGS.control_play2, undefined);
 });
 

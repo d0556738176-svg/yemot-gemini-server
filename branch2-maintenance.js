@@ -362,3 +362,54 @@ export async function runRenameLatinV2(MARK = 'ivr2:/2/selftest/rename_latin_v2.
 }
 
 export const runRenameLatinV3 = () => runRenameLatinV2('ivr2:/2/selftest/rename_latin_v3.json', ['ivr2:/2/selftest/rename_latin_v1.json', 'ivr2:/2/selftest/rename_latin_v2.json']);
+
+// 06.11: the owner wants the Hebrew names back in Yemot (the download page
+// serves them in Hebrew). Each file is traced to its YouTube title (owners
+// map, through every earlier renaming record) or its original Hebrew name.
+export async function runRenameHebrew() {
+  const p = (await import('./youtube-authorized-playback.js'))._pipeline;
+  const MARK = 'ivr2:/2/selftest/rename_hebrew_v1.json';
+  if (await p.readCacheJson(MARK).catch(() => null)) return;
+  const { titleFileName } = await import('./youtube-audio-cache.js');
+  const OWN = 'ivr2:/2/youtubeaudio/download_owners.json';
+  const owners = await p.readCacheJson(OWN).catch(() => null) || {};
+  const stemOf = n => String(n).replace(/(_(?:Part|Chelek|Chlk|חלק)_\d+)?\.[^.]+$/, '');
+  const hebrewOf = new Map(), idOf = new Map();
+  for (const mk of ['v1', 'v2', 'v3'].map(v => 'ivr2:/2/selftest/rename_latin_' + v + '.json')) {
+    const rec = await p.readCacheJson(mk).catch(() => null);
+    for (const x of rec?.out || []) {
+      if (x.ok === false) continue;
+      const from = stemOf(x.from), to = stemOf(x.to);
+      hebrewOf.set(to, hebrewOf.get(from) || (/[א-ת]/.test(from) ? from : null));
+      idOf.set(to, idOf.get(from) || owners[from] || null);
+    }
+  }
+  // Videos: the receipts know their id and file names.
+  const ytTitle = async id => {
+    const key = process.env.YOUTUBE_API_KEY; if (!key || !id) return null;
+    const r = await fetch('https://www.googleapis.com/youtube/v3/videos?part=snippet&id=' + encodeURIComponent(id) + '&key=' + encodeURIComponent(key)).catch(() => null);
+    return (await r?.json().catch(() => null))?.items?.[0]?.snippet?.title || null;
+  };
+  const out = [];
+  for (const base of ['ivr2:/אודיו', 'ivr2:/וידאו']) for (const k of ['', '_2', '_3', '_4']) {
+    const dir = base + k;
+    const listing = await listDir(p, dir).catch(() => null);
+    for (const f of (listing?.files || [])) {
+      const name = String(f.name || '');
+      const m = /^(.*?)(?:_(?:Part|Chelek|Chlk|חלק)_(\d+))?\.(flac|m4a|mp3|mp4|srt)$/i.exec(name);
+      if (!m) continue;
+      const stem = m[1];
+      const id = owners[stem] || idOf.get(stem);
+      const title = (await ytTitle(id)) || hebrewOf.get(stem);
+      const heb = title ? titleFileName(title, 100) : stem; // an English title stays as it is
+      const target = heb + (m[2] ? '_חלק_' + m[2] : '') + '.' + m[3];
+      if (target === name) continue;
+      const res = await fileAction(p, { action: 'move', what: dir + '/' + name, target: dir + '/' + target });
+      if (res.ok && id) owners[heb] = id;
+      out.push({ dir, from: name, to: target, ok: res.ok });
+    }
+  }
+  await p.writeCacheJson(OWN, owners).catch(() => {});
+  console.info(TAG, 'rename hebrew', JSON.stringify(out));
+  await p.writeCacheJson(MARK, { at: new Date().toISOString(), out }).catch(() => {});
+}

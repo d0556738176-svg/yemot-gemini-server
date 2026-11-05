@@ -11,7 +11,8 @@
 //   3 = seconds_minus         -> 10 seconds back
 //   4 = minus                 -> the file uploaded before (older)
 //   6 = plus                  -> the newer file
-//   7 = minut_plus_amount1    -> 4 minutes forward (minut_plus_amount1=240000 ms)
+//   7 = minut_plus_amount1    -> 3 minutes forward (minut_plus_amount1=180000 ms)
+//   * = go_to_folder          -> back to the main menu (playfile_control_play_*_goto=/)
 export const PLAY_KEYS = {
   control_play1: 'seconds_plus',
   control_play3: 'seconds_minus',
@@ -19,7 +20,9 @@ export const PLAY_KEYS = {
   control_play5: 'wait',
   control_play6: 'plus',
   control_play7: 'minut_plus_amount1',
-  minut_plus_amount1: '240000',
+  minut_plus_amount1: '180000',
+  'control_play*': 'go_to_folder',
+  'playfile_control_play_*_goto': '/',
 };
 export const EXT7_PATH = 'ivr2:/7';
 export const EXT7_SETTINGS = {

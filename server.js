@@ -4050,8 +4050,9 @@ async function youtubeCallHandler(call) {
       // Play the hold message and wait briefly. Any key pressed is ignored; an
       // empty return simply means "poll the job again". This keeps each HTTP
       // request short so Yemot never times the call out mid-preparation.
+      let holdKey=null;
       try {
-        await call.read(
+        holdKey=await call.read(
           holdMessages,
           'tap',
           {max_digits:1,min_digits:1,sec_wait:holdSec,allow_empty:true,empty_val:'None',typing_playback_mode:'No'}
@@ -4064,6 +4065,12 @@ async function youtubeCallHandler(call) {
           code:error?.code||error?.name||'unknown'
         });
         throw error;
+      }
+      // Star = back to the main menu (owner's rule for every extension). The
+      // preparation keeps running, so the song is ready if he comes back.
+      if(String(holdKey||'').includes('*')) {
+        console.info('[YouTube IVR] star pressed while waiting; back to the main menu',{videoId:video.videoId});
+        return call.go_to_folder('/');
       }
     }
   }
@@ -4711,6 +4718,8 @@ app.get('/api/youtube/search', rateLimit(20, 60 * 1000, 'youtube'), requireDashb
     return res.status(502).json({error:'YouTube search unavailable'});
   }
 });
+// Download page: the audio/video folders with full Hebrew file names (06.11).
+{ const { registerDownloadsPage } = await import('./branch2-downloads-page.js'); registerDownloadsPage(app); }
 app.get('/',(req,res)=>res.type('html').send('<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>AI Phone Line</title></head><body><h1>AI Phone Line Dashboard</h1><p>המערכת מחוברת וממתינה לשיחות</p></body></html>'));
 
 async function configureYemotStructure() {
@@ -4783,6 +4792,9 @@ async function configureYemotStructure() {
         }
       } catch (e) { console.warn('[Yemot automatic setup] extension 7 not configured', { message: String(e?.message || e).slice(0, 200) }); }
     }
+    // * = main menu in every playback extension of the account (owner, 06.11).
+    try { await (await import('./branch2-star-keys.js')).applyStarToMainMenu({ base, token }); }
+    catch (e) { console.warn('[STAR_KEYS] check skipped', { message: String(e?.message || e).slice(0, 160) }); }
     console.log('[Yemot automatic setup] branch-2-only mode; extensions 1 and 3 were left untouched');
     return;
   }
@@ -4998,6 +5010,23 @@ app.listen(port,async()=>{
     for(let i=0;i<40&&!(await (await import('./youtube-authorized-playback.js'))._pipeline.readCacheJson('ivr2:/2/selftest/rename_latin_v1.json').catch(()=>null));i++)await new Promise(r=>setTimeout(r,15000));
     await m.runRenameLatinV2();
     await m.runRenameLatinV3();
+    await m.runRenameHebrew();
+    // Does any form of Yemot's own download keep a Hebrew name? (logged once)
+    const pb=(await import('./youtube-authorized-playback.js'))._pipeline;
+    if(!(await pb.readCacheJson('ivr2:/2/selftest/hebrew_download_probe_v1.json').catch(()=>null))){
+      const l=await (await fetch(pb.YEMOT_API_BASE+'/GetIVR2Dir?'+new URLSearchParams({token:pb.yemotApiKey(),path:'ivr2:/אודיו'}))).json().catch(()=>null);
+      const f=(l?.files||[]).find(x=>/[\u05d0-\u05ea]/.test(x.name||''));
+      if(f){
+        const path='ivr2:/אודיו/'+f.name, out=[];
+        const variants=[['plain',pb.YEMOT_API_BASE+'/DownloadFile?'+new URLSearchParams({token:pb.yemotApiKey(),path})],
+          ['private host','https://private.call2all.co.il/ym/api/DownloadFile?'+new URLSearchParams({token:pb.yemotApiKey(),path})],
+          ['fileName param',pb.YEMOT_API_BASE+'/DownloadFile?'+new URLSearchParams({token:pb.yemotApiKey(),path,fileName:f.name,download:'1'})]];
+        for(const [k,u] of variants){const ac=new AbortController();const r=await fetch(u,{signal:ac.signal}).catch(e=>({status:0,headers:new Headers(),err:String(e)}));
+          out.push({k,status:r.status,cd:r.headers.get('content-disposition'),type:r.headers.get('content-type')});ac.abort();}
+        console.info('[HEBREW_DOWNLOAD_PROBE]',JSON.stringify({file:f.name,out}));
+        await pb.writeCacheJson('ivr2:/2/selftest/hebrew_download_probe_v1.json',{at:new Date().toISOString(),out}).catch(()=>{});
+      }
+    }
   }).catch(e=>console.warn('[BRANCH2_MAINT] rename v2 failed',String(e?.message||e).slice(0,160)));
   if(process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
