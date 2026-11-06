@@ -114,7 +114,7 @@ test('real reader extracts full homepage and link labels instead of first articl
   }finally{globalThis.fetch=oldFetch;}
 });
 
-test('actual phone handler reads website, continues, switches topic and routes hours without a model call',async()=>{
+test('branch 3 phone handler reads website, continues, switches topic and routes hours without a model call',async()=>{
   const source=readFileSync(new URL('../server.js',import.meta.url),'utf8');
   const handler=source.slice(source.indexOf('async function callHandler(call)'),source.indexOf('\n\n/**\n * Isolated YouTube'));
   const inputs=['פתח אתר הידברות וקרא מה שכתוב','תמשיך','אירועים היום בבית שמש','מה שעות הפעילות של חנות בקרית גת',
@@ -139,6 +139,7 @@ test('actual phone handler reads website, continues, switches topic and routes h
     logDetailedError(context,error){throw error;},sanitizeForYemot:x=>x,correctKnownSpeechNames:x=>x,rewriteFollowUp:async q=>q,normalizePhone:x=>x,persistConversationEntry:async()=>{},MAX_CONVERSATION_LOG:1000,
     knownPrimaryPhoneAnswer:()=>''};
   for(const key of ['isWeatherQuestion','isNewsQuestion','isWebsiteCapabilityQuestion','isWebsiteNavigationRequest','isGenericWebsiteRequest','isLongAnswerRequest','isDeepWebSearchRequest','isTransitRequest','isPhoneNumberRequest','isPharmacySearchRequest'])context[key]=()=>false;
+  context.callPersona={getStore:()=>({branch:'3'})};
   context.shouldForceWebSearch=q=>q.includes('שעות');context.isBusinessHoursRequest=q=>q.includes('שעות');context.extractExplicitHttpUrl=()=>'';
   // The handler also uses the turn-context helpers that server.js imports.
   for(const [key,fn] of Object.entries(turnContext)) if(!(key in context)) context[key]=fn;

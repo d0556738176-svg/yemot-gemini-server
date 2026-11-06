@@ -24,7 +24,7 @@ import { callCompatibleChatCompletion } from './provider-fallback.js';
 import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visual-intent.js';
 import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion, isMemoryRecall, resolveClarificationAnswer } from './conversation-context.js';
 import { buildPharmacySearchQueries, buildPharmacySearchAnswer } from './pharmacy-search.js';
-import { shouldForceWebSearch } from './branch1-web-router.js';
+import { branch1WebSearchSubject, shouldForceWebSearch } from './branch1-web-router.js';
 import { fuzzyCorrectEntities, lexiconKeyterms, ENTITY_LEXICON } from './speech-lexicon.js';
 
 import { branch1Clarification, branch1FollowUpHistory, filterBranch1Results, createBranch1Search, resolveBranch1Question, isCorrection, isBranch1LocalRequest, isBranch1EventRequest, answerBranch1Local, answerBranch1Events, branch1SpeechItems } from './branch1-reliability.js';
@@ -476,11 +476,55 @@ console.info('[BRANCH1 FALLBACK] extra providers configured',{names:extraFastPro
 const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:180000, transientMs:45000});
 const branch1BackupCooldowns = createCooldownRegistry({quotaMs:180000, transientMs:45000});
 
+async function tryBranch1ConversationProviders(contents,fastPhone) {
+  if(!Array.isArray(contents) || !contents.length || !contents.every(item=>
+    item?.parts?.length && item.parts.every(part=>typeof part?.text==='string'))) return '';
+  const prompt=contents.map(item=>(item.role==='model'?'Assistant: ':'User: ')+
+    item.parts.map(part=>part.text).join('\n')).join('\n\n');
+  const groqKey=(process.env.GROQ_API_KEY||'').trim();
+  const groqModel=(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim();
+  const accurateModel=(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim();
+  const groq={name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:groqKey,
+    timeoutMs:Number(process.env.GROQ_TIMEOUT_MS||(fastPhone?1600:6500))};
+  const providers=[
+    {...groq,model:fastPhone?groqModel:accurateModel},
+    ...extraFastProviders(fastPhone),
+    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),
+      model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),
+      timeoutMs:Number(process.env.OPENROUTER_TIMEOUT_MS||(fastPhone?1400:5500))},
+    {...groq,model:fastPhone?accurateModel:groqModel}
+  ];
+  if(groqModel===accurateModel) providers.pop();
+  for(const provider of providers) {
+    if(!provider.apiKey) continue;
+    try {
+      const answer=await callCompatibleChatCompletion({
+        provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
+        messages:[{role:'user',content:prompt}],timeoutMs:provider.timeoutMs,
+        maxTokens:fastPhone?700:1400,cooldowns:provider.name==='Groq' && provider.model===accurateModel?branch1SynthCooldownsBig:branch1FallbackProviderCooldowns
+      });
+      console.info('[BRANCH1 FALLBACK] conversation provider answered',{provider:provider.name,model:provider.model});
+      return answer;
+    } catch(error) {
+      console.warn('[BRANCH1 FALLBACK] conversation provider unavailable',{
+        provider:provider.name,model:provider.model,status:geminiErrorStatus(error),coolingDown:!!error?.coolingDown
+      });
+    }
+  }
+  return '';
+}
+
 async function generateBranch1WithFallback(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null) {
   contents=withPersona(contents);
+  const extensionOne=callPersona.getStore()?.branch!=='3';
+  const independentFirst=process.env.BRANCH1_GEMINI_LAST!=='off';
+  if(extensionOne && independentFirst && !useWebSearch) {
+    const answer=await tryBranch1ConversationProviders(contents,fastPhone);
+    if(answer) return {response:{text:()=>answer}};
+  }
   // Gemini is the least available provider: for plain-text prompts the independent fast
   // providers answer first, and Gemini is only used when they all fail.
-  if(process.env.BRANCH1_GEMINI_LAST!=='off' && !useWebSearch && Array.isArray(contents) && contents.length &&
+  if(!extensionOne && independentFirst && !useWebSearch && Array.isArray(contents) && contents.length &&
      contents.every(item=>Array.isArray(item?.parts)&&item.parts.length&&item.parts.every(part=>typeof part?.text==='string'))) {
     const flat=contents.map(item=>(item.role==='model'?'Assistant: ':'User: ')+item.parts.map(part=>part.text).join('\n')).join('\n\n');
     try {
@@ -530,7 +574,11 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
     // grounding or multimodal handling; web-search requests continue through the
     // existing retrieval/OpenAI/Gemini paths to avoid unsupported unsourced answers.
     const independentFallbackStatus = [429,408,500,502,503,504].includes(primaryStatus);
-    if (textOnlyInput && !useWebSearch && independentFallbackStatus) {
+    if(extensionOne && !independentFirst && textOnlyInput && !useWebSearch) {
+      const answer=await tryBranch1ConversationProviders(contents,fastPhone);
+      if(answer) return {response:{text:()=>answer}};
+    }
+    if (!extensionOne && textOnlyInput && !useWebSearch && independentFallbackStatus) {
       const independentProviders = [
         {
           name: 'Groq',
@@ -591,13 +639,13 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
     }
     // Hard deadline for ordinary phone turns: after primary Gemini and the
     // independent low-latency providers fail, do not stack slower fallbacks.
-    if (fastPhone && !useWebSearch && textOnlyInput && independentFallbackStatus) {
+    if (!extensionOne && fastPhone && !useWebSearch && textOnlyInput && independentFallbackStatus) {
       console.warn('[BRANCH1 FALLBACK] hard phone deadline reached after fast providers; skipping slow fallback chain', {
         status: primaryStatus, useWebSearch, fastPhone
       });
       throw primaryError;
     }
-    if (textOnlyInput && String(process.env.OPENAI_API_KEY || '').trim()) {
+    if (textOnlyInput && (!extensionOne || useWebSearch || !fastPhone) && String(process.env.OPENAI_API_KEY || '').trim()) {
       if (Date.now() < openAIBillingCooldownUntil) {
         console.warn('[BRANCH1 FALLBACK] skipping OpenAI during known billing cooldown', {
           remainingMs: openAIBillingCooldownUntil - Date.now(), useWebSearch, fastPhone
@@ -4149,6 +4197,7 @@ async function extractBranch1Page(url, timeoutMs=2500) {
 const branch1Search=createBranch1Search(searchWebDirect);
 
 async function callHandler(call) {
+  const explicitSearchOnly=callPersona.getStore()?.branch!=='3';
   const callerPhone = getCallerNumber(call);
   const callId = call?.callId || call?.values?.ApiCallId || '';
   const activeKey = String(callId || (Date.now()+'-'+callerPhone));
@@ -4252,6 +4301,7 @@ async function callHandler(call) {
     let userTranscript='';
     let originalSpokenTranscript='';
     let relevantHistoryText='';
+    let allowExternalLookup=!explicitSearchOnly;
     try {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
@@ -4261,12 +4311,17 @@ async function callHandler(call) {
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length,elapsedMs:Date.now()-turnStartedAt});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
       originalSpokenTranscript=userTranscript;
-      const pendingLookup=resolvePendingLookupQuestion(userTranscript,turnHistory, q =>
+      const searchSubject=explicitSearchOnly?branch1WebSearchSubject(originalSpokenTranscript):null;
+      allowExternalLookup=!explicitSearchOnly || searchSubject!==null;
+      if(searchSubject==='') {
+        userTranscript=turnHistory.at(-1)?.resolvedQuestion || '';
+      }
+      const pendingLookup=allowExternalLookup && resolvePendingLookupQuestion(userTranscript,turnHistory, q =>
         !/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(q) &&
         (isPhoneNumberRequest(q) || isBusinessHoursRequest(q) ||
           isLocalBusinessDiscoveryRequest(q,extractExplicitLocation(q)) || shouldForceWebSearch(q))
       );
-      const clarified=!pendingLookup && typeof resolveClarificationAnswer==='function' ? resolveClarificationAnswer(userTranscript,turnHistory) : '';
+      const clarified=allowExternalLookup && !pendingLookup && typeof resolveClarificationAnswer==='function' ? resolveClarificationAnswer(userTranscript,turnHistory) : '';
       if(clarified) {
         console.info('[CALL_FLOW] clarification answer joined to the earlier question',{callId:activeKey,question:clarified.slice(0,120)});
         userTranscript=clarified;
@@ -4278,32 +4333,36 @@ async function callHandler(call) {
         userTranscript=pendingLookup;
       }
       userTranscript=resolveBranch1Question(userTranscript,turnHistory);
-      userTranscript=resolveLookupContinuation(userTranscript,turnHistory, q=>
+      if(allowExternalLookup) userTranscript=resolveLookupContinuation(userTranscript,turnHistory, q=>
         shouldForceWebSearch(q)||/(youtube|יוטיוב|ביויוטב|ביוטוב)/i.test(q));
       relevantHistoryText=isCorrection(originalSpokenTranscript)
         ? selectRelevantHistoryForTurn('מה שאמרת קודם',historyText,turnHistory)
         : (branch1FollowUpHistory(originalSpokenTranscript,turnHistory) || selectRelevantHistoryForTurn(originalSpokenTranscript,historyText,turnHistory));
       if(isConversationalReference(originalSpokenTranscript)&&turnHistory.length)
         relevantHistoryText=currentConversationText(turnHistory);
-      const conversationOnly=isYouTubeTechnicalDiscussion(userTranscript)&&
+      const conversationOnly=!(explicitSearchOnly && allowExternalLookup) && isYouTubeTechnicalDiscussion(userTranscript)&&
         !/(?:חפש|תחפש|תבדוק).{0,25}(?:באינטרנט|ברשת|בגוגל)|(?:חפש|תחפש) מידע/u.test(userTranscript);
-      const youtubeIntent=mayUseYouTubeSearch(userTranscript,turnContext);
+      const youtubeIntent=allowExternalLookup && mayUseYouTubeSearch(userTranscript,turnContext);
       // Avoid spending a Gemini generation call on requests that are already
       // handled by deterministic/direct data paths below. This reduces quota use,
       // improves phone latency, and leaves more capacity for real conversation/advice.
-      const clarification=branch1Clarification(userTranscript);
-      const branch1Website=!clarification && isBranch1WebsiteRequest(userTranscript,turnContext);
-      const branch1Local=!branch1Website && isBranch1LocalRequest(userTranscript);
-      const branch1Events=!branch1Website && isBranch1EventRequest(userTranscript);
+      const clarification=allowExternalLookup && (userTranscript?branch1Clarification(userTranscript):'מה תרצה שאחפש באינטרנט?');
+      const branch1Website=allowExternalLookup && !clarification && isBranch1WebsiteRequest(userTranscript,turnContext);
+      const branch1Local=allowExternalLookup && !branch1Website && isBranch1LocalRequest(userTranscript);
+      const branch1Events=allowExternalLookup && !branch1Website && isBranch1EventRequest(userTranscript);
       turnContext.lastRoute=branch1Website?'website':branch1Local?'local':branch1Events?'events':youtubeIntent?'youtube':'other';
-      const forcedWebSearch=!conversationOnly&&shouldForceWebSearch(userTranscript);
+      const forcedWebSearch=allowExternalLookup && !conversationOnly && (explicitSearchOnly || shouldForceWebSearch(userTranscript));
       console.info('[BRANCH1_ROUTER]',{
         callId:activeKey,
         route:branch1Website?'website':branch1Local?'local':branch1Events?'events':forcedWebSearch?'web':'conversation',
         forcedWebSearch,
+        allowExternalLookup,
         transcriptChars:userTranscript.length
       });
-      const directDataRequest = !conversationOnly && (!!clarification || branch1Website || branch1Local || branch1Events ||
+      const deterministicDailyDateAnswer=answerDailyDateQuestion(userTranscript);
+      const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
+      const directDataRequest = (!allowExternalLookup && !!(deterministicDailyDateAnswer || deterministicTimeAnswer)) ||
+        allowExternalLookup && !conversationOnly && (!!clarification || branch1Website || branch1Local || branch1Events ||
         isMultimodalAnalysisRequest(userTranscript).any ||
         isVisualContinuationRequest(userTranscript,visualHistoryText) ||
         !!answerIsraelTimeQuestion(userTranscript) ||
@@ -4320,7 +4379,7 @@ async function callHandler(call) {
 
       // "What did I ask you before?" inside this call: answer from this call's
       // turns, never from the question being asked right now.
-      const withinCallRecall=!/(?:בשיחה הקודמת|בפעם הקודמת|בפעם שעברה|אתמול|שלשום|לפני כמה ימים)/u.test(userTranscript) &&
+      const withinCallRecall=!(explicitSearchOnly && allowExternalLookup) && !/(?:בשיחה הקודמת|בפעם הקודמת|בפעם שעברה|אתמול|שלשום|לפני כמה ימים)/u.test(userTranscript) &&
         /(?:מה|איזה|על מה)\s*(?:בדיוק\s*)?(?:שאלתי|ביקשתי|אמרתי)(?:\s+אותך|\s+ממך|\s+לך)?(?:\s+(?:קודם|לפני|לפני כן|לפני זה|בהתחלה|עד עכשיו))?|השאלה הקודמת(?:\s+שלי)?/u.test(userTranscript) &&
         turnHistory.length>0;
       if(withinCallRecall) {
@@ -4336,7 +4395,8 @@ async function callHandler(call) {
         const answerPrompt=EXCLUSIVE_INSTRUCTION+'\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+(background?'\n\nרקע משיחות קודמות עם אותו מתקשר (לרקע בלבד: השתמש בו רק אם הוא באמת קשור לשאלה, למשל כשהמתקשר ממשיך נושא קודם או שואל על עצמו; אל תזכיר אותו סתם):\n'+background:'')+'\n\nהקשר קודם של השיחה, לפי הסדר:\n'+(conversationalHistory || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המקורית של המתקשר (אין לשנות את כוונתה):\n'+originalSpokenTranscript+'\nנושא הבקשה הנוכחית: '+userTranscript+'\n\n'+(longAnswer
           ? 'זו בקשה לתשובה ארוכה ומפורטת. אל תקצר ל-1 עד 4 משפטים. בנה תשובה רציפה ומסודרת, בדרך כלל 8 עד 20 פסקאות או משפטים קצרים לפי הצורך, עד כ-'+LONG_ANSWER_MAX_CHARS+' תווים. שמור על רצף טבעי להקראה בטלפון, בלי כותרות טכניות ובלי לחזור על עצמך. '
           : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. ')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
-        const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
+        const lookupInstruction=allowExternalLookup?'':'\nבתור הזה לא בוצע חיפוש. אל תטען שבדקת מקורות או תמציא פרטים עדכניים. אם נדרש אימות באינטרנט, בקש מהמתקשר לומר תחפש באינטרנט.';
+        const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt+lookupInstruction}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
         let parsedTurn=null;
         try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\{[\s\S]*\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
         if(parsedTurn && typeof parsedTurn.answer==='string') {
@@ -4357,10 +4417,11 @@ async function callHandler(call) {
         else replyText='בסדר. מה לא היה ברור או מה חסר לך? אמור לי ואנסה לעזור בצורה אחרת.';
         feedbackPending=false;
       }
-      const deterministicDailyDateAnswer=answerDailyDateQuestion(userTranscript);
       if(deterministicDailyDateAnswer) replyText=deterministicDailyDateAnswer;
-      const deterministicTimeAnswer=answerIsraelTimeQuestion(userTranscript);
-      if(conversationOnly) { /* Keep the conversational answer; cached results do not select a tool. */ }
+      if(!allowExternalLookup) {
+        if(deterministicTimeAnswer) replyText=deterministicTimeAnswer;
+      }
+      else if(conversationOnly) { /* Keep the conversational answer; cached results do not select a tool. */ }
       else if(clarification) replyText=clarification;
       else if(branch1Website) {
         console.info('[BRANCH1 WEBSITE] direct reading route selected',{callId:activeKey});
@@ -4460,7 +4521,7 @@ async function callHandler(call) {
       const providerStatus=geminiErrorStatus(e);
       const deepSearchFallback=isDeepWebSearchRequest(userTranscript) ||
         /לעומק|מחקר מקיף|סקירה מקיפה|בדיקה יסודית|חיפוש מעמיק|חפש באינטרנט/i.test(userTranscript);
-      const eligibleForQuickWebFallback=!!userTranscript && userTranscript.length>=3 &&
+      const eligibleForQuickWebFallback=allowExternalLookup && !!userTranscript && userTranscript.length>=3 &&
         [408,429,500,502,503,504].includes(providerStatus) &&
         (!isLongAnswerRequest(userTranscript) || deepSearchFallback) &&
         // If a normal web-backed answer fails (including quota or timeout), allow
@@ -5035,16 +5096,11 @@ app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}))
 // place of recorded speech, and logs each question, answer and time. Nothing
 // is saved to caller memory or the dashboard.
 const BRANCH1_E2E_QUESTIONS=[
-  'תחפש באינטרנט מי ראש עיריית בית שמש היום',
-  'פתח את אתר בנק הפועלים ותקרא מה כתוב בעמוד הראשי',
-  'תמשיך',
-  'איזה כישורים יש בעמוד',
-  'מה הסרטון עם הכי הרבה צפיות ביוטיוב של הרב יצחק יוסף',
-  'מה שאלת אותך קודם',
-  'תגיד לי איך לנהל את היום בצבא החכמה',
-  // The two video steps use Gemini's free video quota (about 20 per model per
-  // day), so they run only when BRANCH1_E2E_VIDEO=on; callers keep the quota.
-  ...(String(process.env.BRANCH1_E2E_VIDEO||'off')==='on'?['מה בדיוק הוא אמר בסרטון הזה, שלב אחרי שלב','תמחיש לי מה רואים בסרטון']:[])
+  'מה היתרונות של אנרגיה סולארית',
+  'תסביר יותר על היתרון הראשון',
+  'מה מזג האוויר בבית שמש היום',
+  'תחפש באינטרנט מה מזג האוויר בבית שמש היום',
+  'מה שאלתי קודם'
 ];
 async function runBranch1EndToEndSelfTest(questions=BRANCH1_E2E_QUESTIONS) {
   let index=0;
@@ -5313,8 +5369,9 @@ app.listen(port,async()=>{
   try {
     const builtAt=Number(readFileSync(new URL('./.build-time',import.meta.url),'utf8'));
     if(builtAt && Date.now()-builtAt<Number(process.env.PROVIDER_HEALTH_AFTER_BUILD_MS||20*60*1000)) {
-      setTimeout(()=>providerHealth({force:true}).catch(e=>console.warn('[WEB_PROVIDERS] health check failed',String(e?.message||e).slice(0,160))),4000);
-      if(String(process.env.BRANCH1_E2E_SELFTEST||'on')!=='off') setTimeout(()=>runBranch1EndToEndSelfTest().then(()=>runBranch3SelfTest()).catch(e=>console.warn('[E2E_SELFTEST] crashed',String(e?.message||e).slice(0,200))),20000);
+      if(process.env.PROVIDER_HEALTH_ON_BUILD==='on')
+        setTimeout(()=>providerHealth({force:true}).catch(e=>console.warn('[WEB_PROVIDERS] health check failed',String(e?.message||e).slice(0,160))),4000);
+      if(String(process.env.BRANCH1_E2E_SELFTEST||'off')==='on') setTimeout(()=>runBranch1EndToEndSelfTest().then(()=>runBranch3SelfTest()).catch(e=>console.warn('[E2E_SELFTEST] crashed',String(e?.message||e).slice(0,200))),20000);
     }
   } catch {}
   await loadConversationLog();
