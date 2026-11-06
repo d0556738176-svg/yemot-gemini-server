@@ -347,12 +347,24 @@ export async function burnSubtitles(videoFile, srtText, tempDir, { ffmpegPath, l
   const out = path.join(tempDir, 'burned.mp4');
   const esc = p => p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
   const style = "FontName=DejaVu Sans,FontSize=22,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=28,WrapStyle=2";
-  const vf = (height ? 'scale=-2:' + height + ',' : '') + "subtitles='" + esc(srt) + "'" + (fonts ? ":fontsdir='" + esc(fonts) + "'" : '') + ":force_style='" + style + "'";
+  const vf = (height ? "scale=-2:'min(" + height + ",ih)'," : '') + "subtitles='" + esc(srt) + "'" + (fonts ? ":fontsdir='" + esc(fonts) + "'" : '') + ":force_style='" + style + "'";
   const t0 = Date.now();
   const ok = await new Promise(resolve => {
-    const p = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoFile, '-map', '0:v:0', '-map', '0:a:0?', '-vf', vf,
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-threads', '2', '-c:a', 'copy', '-movflags', '+faststart', out], { stdio: ['ignore', 'ignore', 'pipe'] });
-    let e = ''; p.stderr.on('data', d => { e = (e + d).slice(-300); });
+    // Measured 06.11 on this server (0.15 CPU, 512 MB): 1080p veryfast ran over an
+    // hour for 10 minutes of video and memory reached 500 MB. ultrafast, one
+    // thread and a smaller picture (see height) keep it fast and safe.
+    const p = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-stats', '-y', '-i', videoFile, '-map', '0:v:0', '-map', '0:a:0?', '-vf', vf,
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-threads', '1', '-x264-params', 'rc-lookahead=10:ref=1',
+      '-c:a', 'copy', '-movflags', '+faststart', out], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let e = '', lastLog = Date.now();
+    p.stderr.on('data', d => {
+      e = (e + d).slice(-300);
+      if (Date.now() - lastLog > 120000) {
+        lastLog = Date.now();
+        const m = /time=(\d+):(\d+):(\d+)/.exec(String(d)); const sp = /speed=\s*([\d.]+)x/.exec(String(d));
+        if (m) log.info?.('[SUBTITLES] drawing progress', { videoMinute: +((+m[1]) * 60 + (+m[2]) + (+m[3]) / 60).toFixed(1), speed: sp ? +sp[1] : null, minutesSoFar: +((Date.now() - t0) / 60000).toFixed(1) });
+      }
+    });
     const timer = setTimeout(() => { p.kill('SIGKILL'); log.warn?.('[SUBTITLES] drawing into the picture took too long; stopped', { minutes: Math.round(maxMs / 60000) }); }, maxMs);
     p.on('error', () => { clearTimeout(timer); resolve(false); });
     p.on('close', c => { clearTimeout(timer); if (c !== 0) log.warn?.('[SUBTITLES] drawing into the picture failed', { code: c, error: e.trim().slice(0, 200) }); resolve(c === 0); });

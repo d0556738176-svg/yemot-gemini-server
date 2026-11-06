@@ -3926,7 +3926,13 @@ function startYouTubeVideoJob(video) {
         }
         return r;
       },
-      burnSubtitles: async (file, srt, dir) => (await import('./youtube-subtitles.js')).burnSubtitles(file, srt, dir, { ffmpegPath, log: console, maxMs: Number(process.env.VIDEO_BURN_MAX_MIN || 240) * 60000 }),
+      burnSubtitles: async (file, srt, dir) => {
+        // Picture height for the version with the lines drawn in: 720p up to 30
+        // minutes, 480p for longer videos (this server is slow; see youtube-subtitles.js).
+        const facts = await fetchVideoFacts(id, process.env).catch(() => null);
+        const height = Number(facts?.durationSeconds || 0) > 1800 ? 480 : 720;
+        return (await import('./youtube-subtitles.js')).burnSubtitles(file, srt, dir, { ffmpegPath, log: console, height, maxMs: Number(process.env.VIDEO_BURN_MAX_MIN || 240) * 60000 });
+      },
       countSaved: async () => (await import('./download-folders.js')).countSaved('video', { readJson: x => p.readCacheJson(x), writeJson: (x, d) => p.writeCacheJson(x, d) }),
     });
   })().then(r => { state.status = 'ready'; state.remote = r.remote; return videoPendingUpdate(l => l.filter(x => x !== id)); })
