@@ -20,5 +20,5 @@ test('Yemot name: Hebrew first, then the same sounds in English letters', async 
   assert.equal(hebrewPart('הנשמה בקרבי | Haneshama Bekirbi'), 'הנשמה בקרבי');
   const n = await yemotFileName('הנשמה בקרבי | Haneshama Bekirbi', { env: {}, titleFileName });
   assert.match(n, /^הנשמה_בקרבי__[A-Za-z_]+$/);
-  assert.equal(await yemotFileName('SHWEKEY - Your Time', { env: {}, titleFileName }), 'SHWEKEY_Your_Time');
+  assert.equal(await yemotFileName('SHWEKEY - Your Time', { env: {}, titleFileName }), 'SHWEKEY_Your_Time'); // no translator available: English kept
 });

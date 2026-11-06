@@ -556,3 +556,33 @@ export const runRenameHebrewLatinV3 = async () => {
   await runRenameHebrewLatinV2();
   await p.writeCacheJson('ivr2:/2/selftest/rename_hebrew_latin_v3.json', { at: new Date().toISOString() }).catch(() => {});
 };
+
+// 06.11: English-only names get the Hebrew translation (+ its sounds), and the
+// Tesla test video is made again with fully translated subtitles.
+export async function runEnglishNamesToHebrew() {
+  const p = (await import('./youtube-authorized-playback.js'))._pipeline;
+  const MARK = 'ivr2:/2/selftest/rename_english_to_hebrew_v1.json';
+  if (await p.readCacheJson(MARK).catch(() => null)) return;
+  const { titleFileName } = await import('./youtube-audio-cache.js');
+  const { yemotFileName, withPart } = await import('./youtube-latin-name.js');
+  const out = [], named = new Map();
+  for (const base of ['ivr2:/אודיו', 'ivr2:/וידאו']) for (const k of ['', '_2', '_3', '_4']) {
+    const dir = base + k;
+    const listing = await listDir(p, dir).catch(() => null);
+    for (const f of (listing?.files || [])) {
+      const name = String(f.name || '');
+      const m = /^(.*)\.(flac|m4a|mp3|mp4|srt)$/i.exec(name);
+      if (!m || /[\u05d0-\u05ea]/.test(m[1])) continue;
+      let stem = m[1], part = null;
+      stem = stem.replace(/_(?:Chelek|Part)_(\d+)$/, (_, n) => { part = n; return ''; });
+      let next = named.get(stem);
+      if (!next) { next = await yemotFileName(stem.replace(/_/g, ' '), { titleFileName }); named.set(stem, next); }
+      if (!/[\u05d0-\u05ea]/.test(next)) continue;
+      const target = (part ? withPart(next, part) : next) + '.' + m[2];
+      const res = await fileAction(p, { action: 'move', what: dir + '/' + name, target: dir + '/' + target });
+      out.push({ dir, from: name, to: target, ok: res.ok });
+    }
+  }
+  console.info(TAG, 'english names to hebrew', JSON.stringify(out));
+  await p.writeCacheJson(MARK, { at: new Date().toISOString(), out }).catch(() => {});
+}

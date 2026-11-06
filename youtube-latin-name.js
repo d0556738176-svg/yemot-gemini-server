@@ -78,8 +78,16 @@ export function hebrewPart(title) {
 // downloaded file arrives as "   _   __Haneshama_Bekirbi.flac".
 export async function yemotFileName(title, { env = process.env, fetchImpl = fetch, titleFileName } = {}) {
   const t = String(title || '').normalize('NFC').trim();
-  const heb = hebrewPart(t);
-  if (!heb) return latinFileName(t, 100);
+  let heb = hebrewPart(t);
+  if (!heb) {
+    // No Hebrew in the title (the owner does not read English): the name is
+    // the title translated into Hebrew, then those Hebrew words by sound.
+    const tr = String(await groqChat([
+      { role: 'system', content: 'Translate this video title into short, natural Hebrew (Hebrew letters). Write names of people, bands and products in Hebrew letters too. Output only the Hebrew title.' },
+      { role: 'user', content: t }], { env, fetchImpl, maxTokens: 120, timeoutMs: 12000 }) || '').split('\n')[0].replace(/^["'״]+|["'״]+$/g, '').trim();
+    if (!/[א-ת]{2,}/.test(tr)) return latinFileName(t, 100);
+    heb = hebrewPart(tr) || tr;
+  }
   const hebName = titleFileName(heb, 70);
   const lat = latinFileName(await latinTitle(heb, env, fetchImpl), 70);
   return lat ? hebName + '__' + lat : hebName;

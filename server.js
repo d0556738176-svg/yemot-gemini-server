@@ -5013,6 +5013,23 @@ app.listen(port,async()=>{
     await m.runRenameHebrewLatin();
     await m.runRenameHebrewLatinV2();
     await m.runRenameHebrewLatinV3();
+    // The Tesla test video (06.11) had 60 untranslated lines: delete it and
+    // make it again with the fixed translation (same path as the caller's job).
+    { const pp=(await import('./youtube-authorized-playback.js'))._pipeline;
+      const RM='ivr2:/2/selftest/redo_video_3SAxXUIre28_v1.json';
+      if(!(await pp.readCacheJson(RM).catch(()=>null))){
+        const { videoReceiptPath } = await import('./youtube-video-download.js');
+        const rc=await pp.readCacheJson(videoReceiptPath('3SAxXUIre28')).catch(()=>null);
+        if(rc?.state==='done'){
+          for(const f of (rc.files||[])){const x=new URL(pp.YEMOT_API_BASE+'/FileAction');x.searchParams.set('token',pp.yemotApiKey());x.searchParams.set('action','delete');x.searchParams.set('what',f.remote);await fetch(x).catch(()=>{});}
+          await pp.writeCacheJson(videoReceiptPath('3SAxXUIre28'),{state:'redo',at:new Date().toISOString()});
+          await pp.writeCacheJson(RM,{at:new Date().toISOString(),deleted:(rc.files||[]).map(f=>f.remote)});
+          console.info('[VIDEO] remaking the Tesla video with full Hebrew subtitles',{deleted:(rc.files||[]).length});
+          startYouTubeVideoJob({videoId:'3SAxXUIre28',title:'How does an Electric Car work ? | Tesla Model S'});
+        }
+      }
+    }
+    await m.runEnglishNamesToHebrew();
   }).catch(e=>console.warn('[BRANCH2_MAINT] rename v2 failed',String(e?.message||e).slice(0,160)));
   if(process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');

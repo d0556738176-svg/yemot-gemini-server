@@ -33,3 +33,18 @@ test('Hebrew speech lines are proofread, count and timing kept', async () => {
   assert.deepEqual(out.map(c => c.text), ['שלום לכולם', 'פרשת השבוע']);
   assert.equal(out[1].start, 1);
 });
+
+test('a failing group is split and every line still gets Hebrew', async () => {
+  const { translateCues } = await import('./youtube-subtitles.js');
+  const cues = Array.from({ length: 8 }, (_, i) => ({ start: i, end: i + 1, text: 'line ' + i }));
+  // Gemini refuses groups bigger than 2 lines; Groq unavailable.
+  const fetchImpl = async (url, opts) => {
+    if (!String(url).includes('generativelanguage')) return new Response('{}', { status: 500 });
+    const lines = JSON.parse(JSON.parse(opts.body).contents[0].parts[0].text);
+    if (lines.length > 2) return new Response('{}', { status: 500 });
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(lines.map(l => 'עברית ' + l)) }] } }] }), { status: 200 });
+  };
+  const r = await translateCues(cues, { env: { GEMINI_API_KEYS: 'k', GROQ_API_KEY: '' }, fetchImpl, log: {} });
+  assert.equal(r.translated, 8);
+  assert.ok(r.cues.every(c => c.text.startsWith('עברית')));
+});

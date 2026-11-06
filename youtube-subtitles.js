@@ -112,39 +112,47 @@ async function geminiTranslate(lines, env, fetchImpl, system = SYSTEM) {
       const j = await r.json().catch(() => null);
       const out = parseLines(j?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join(''), lines.length);
       if (out) return out;
+      console.warn('[SUBTITLES] Gemini answer not usable', { model, status: r.status, reason: String(j?.error?.message || j?.candidates?.[0]?.finishReason || 'lines did not match').slice(0, 120), lines: lines.length });
     } catch { /* next key */ }
   }
   return null;
 }
 
-export async function translateCues(cues, { env = process.env, fetchImpl = fetch, log = console, batch = 60 } = {}) {
+// One group of lines -> Hebrew; a group that fails is split in half and
+// retried, down to single lines, so a long video never keeps English lines.
+async function translateGroup(texts, system, env, fetchImpl, log, depth = 0) {
+  let he = await geminiTranslate(texts, env, fetchImpl, system);
+  for (let tryN = 0; !he && tryN < 2; tryN++) {
+    he = parseLines(await groqChat([{ role: 'system', content: system }, { role: 'user', content: JSON.stringify(texts) }], { env, fetchImpl, maxTokens: 300 + texts.length * 120, timeoutMs: 60000 }), texts.length);
+    if (!he && env.GROQ_API_KEY) await sleep(5000 * (tryN + 1)); // rate limit pacing
+  }
+  if (he) return he;
+  if (texts.length > 1 && depth < 6) {
+    const mid = Math.ceil(texts.length / 2);
+    const a = await translateGroup(texts.slice(0, mid), system, env, fetchImpl, log, depth + 1);
+    const b = await translateGroup(texts.slice(mid), system, env, fetchImpl, log, depth + 1);
+    return [...a, ...b];
+  }
+  log.warn?.('[SUBTITLES] line left as is', { text: texts[0]?.slice(0, 60) });
+  return texts.map(() => null);
+}
+
+export async function translateCues(cues, { env = process.env, fetchImpl = fetch, log = console, batch = 25, system = SYSTEM } = {}) {
   const out = [];
   let ok = 0;
   for (let i = 0; i < cues.length; i += batch) {
     const part = cues.slice(i, i + batch).map(c => c.text);
-    let he = await geminiTranslate(part, env, fetchImpl);
-    for (let tryN = 0; !he && tryN < 3; tryN++) {
-      he = parseLines(await groqChat([{ role: 'system', content: SYSTEM }, { role: 'user', content: JSON.stringify(part) }], { env, fetchImpl, maxTokens: 4000, timeoutMs: 60000 }), part.length);
-      if (!he) await sleep(8000 * (tryN + 1)); // rate limit pacing
-    }
-    if (he) ok += part.length;
-    else log.warn?.('[SUBTITLES] a batch stayed untranslated', { from: i, count: part.length });
-    part.forEach((t, k) => out.push({ ...cues[i + k], text: (he?.[k] || t).replace(/\s+/g, ' ').trim() }));
+    const he = await translateGroup(part, system, env, fetchImpl, log);
+    part.forEach((t, k) => { if (he[k]) ok++; out.push({ ...cues[i + k], text: (he[k] || t).replace(/\s+/g, ' ').trim() }); });
   }
+  if (ok < cues.length) log.warn?.('[SUBTITLES] some lines not translated', { translated: ok, of: cues.length });
   return { cues: out, translated: ok };
 }
 
 const CORRECT = 'אתה מגיה כתוביות בעברית. תקבל מערך JSON של שורות כתוביות שנוצרו מזיהוי דיבור אוטומטי של סרטון בעברית (שיר, הרצאה או דיבור). תקן שגיאות זיהוי וכתיב לפי ההקשר, הוסף פיסוק קל, בשפה נקייה. אל תוסיף ואל תשמיט תוכן, ואל תאחד או תפצל שורות. החזר רק מערך JSON של מחרוזות באותו אורך ובאותו סדר בדיוק.';
 
-export async function correctHebrewCues(cues, { env = process.env, fetchImpl = fetch, log = console, batch = 60 } = {}) {
-  const out = [];
-  for (let i = 0; i < cues.length; i += batch) {
-    const part = cues.slice(i, i + batch).map(c => c.text);
-    let fixed = await geminiTranslate(part, env, fetchImpl, CORRECT);
-    if (!fixed) fixed = parseLines(await groqChat([{ role: 'system', content: CORRECT }, { role: 'user', content: JSON.stringify(part) }], { env, fetchImpl, maxTokens: 4000, timeoutMs: 60000 }), part.length);
-    part.forEach((t, k) => out.push({ ...cues[i + k], text: String(fixed?.[k] || t).replace(/\s+/g, ' ').trim() || t }));
-  }
-  return out;
+export async function correctHebrewCues(cues, { env = process.env, fetchImpl = fetch, log = console } = {}) {
+  return (await translateCues(cues, { env, fetchImpl, log, system: CORRECT })).cues;
 }
 
 async function mediaSeconds(ffmpegPath, file) {
