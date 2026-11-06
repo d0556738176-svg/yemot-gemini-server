@@ -23,6 +23,9 @@ export function isBranch1WebsiteRequest(q, context={}) {
   if((context.currentWebsitePages?.length||context.pendingWebsiteUrl)&&pageReference.test(q)&&(context.lastRoute==='website'||concreteReference))return true;
   if(context.currentWebsitePages?.length&&context.lastRoute==='website'&&/מאיזה מקור|מה המקור|איזה אתר פתחת/u.test(q))return true;
   if(context.pendingWebsiteUrl&&/נסה שוב|תנסה שוב|עוד פעם/u.test(q))return true;
+  // A page is open: questions about its links stay with it even after other
+  // turns (the caller asked about the weather in between, or a turn was mis-heard).
+  if(context.currentWebsitePages?.length&&/(?:איזה|אילו|תגיד|תקריא|יש)\s*(?:\S+\s+)?(?:קישורים|כישורים)|(?:קישור|כישור)\s*(?:מספר\s*)?(?:\d{1,2}|אחד|אחת|ראשון|שני|שלישי|רביעי|חמישי)|(?:בעמוד|בדף|באתר)\s+(?:הזה|שפתחת|שנפתח)/u.test(q))return true;
   return /https?:\/\/\S+|(?:פתח|תפתח|תיכנס|תכנס|לפתוח|להיכנס).{0,35}(?:אתר|דף|עמוד)|(?:תקרא|תקריא|קרא).{0,25}(?:באתר|מה שכתוב|מה כתוב)/u.test(q) ||
     !!context.currentWebsitePages?.length && (context.lastRoute==='website'||/חזור לאתר|תחזור לאתר/u.test(q)) && /^(?:כן[, ]*)?(?:תמשיך|המשך|תקרא|תקריא|קרא|מה כתוב|מה ראית|מה יש|תחזור|חזור|עוד|הלאה|דף|עמוד|פתח|תפתח|איזה קישורים|אילו קישורים|תפריט|תעבור)/u.test(q);
 }
@@ -72,12 +75,12 @@ export async function answerBranch1Website(q,context,{search,read=readSinglePubl
   if(context.pendingWebsiteUrl&&!fresh&&!context.websiteClarification)return load(context.pendingWebsiteUrl);
   if(current&&!fresh) {
     if(/מאיזה מקור|מה המקור|כתובת (?:האתר|הדף)|איזה אתר פתחת/u.test(q))return 'העמוד הפתוח הוא '+(current.title||new URL(current.url).hostname)+'. הכתובת היא '+current.url+'.';
-    if(/איזה קישורים|אילו קישורים|תפריט|רשימת (?:קישורים|כתבות)/u.test(q)) {
+    if(/(?:איזה|אילו)\s*(?:\S+\s+)?(?:קישורים|כישורים)|תפריט|רשימת (?:קישורים|כתבות)/u.test(q)) {
       const links=(current.links||[]).filter(l=>l.content?.length>3).slice(0,8);
       context.currentWebsiteChoices=links;
       return links.length?'הקישורים בעמוד: '+links.map((l,i)=>(i+1)+'. '+l.content).join('. ')+'. אפשר לומר פתח קישור ואת המספר.':'לא נמצאו קישורים קריאים בעמוד הזה.';
     }
-    const number=q.match(/(?:קישור|כתבה|עמוד|דף|פתח(?:\s+את)?)\s*(?:מספר\s*)?(\d{1,2}|אחד|אחת|הראשון|ראשון|שתיים|שניים|השני|שני|שלוש|השלישי|שלישי|ארבע|הרביעי|רביעי|חמש|החמישי|חמישי|שש|שבע|שמונה)(?:\s|[,.!?]|$)/u);
+    const number=q.match(/(?:קישור|כישור|כתבה|עמוד|דף|פתח(?:\s+את)?)\s*(?:מספר\s*)?(\d{1,2}|אחד|אחת|הראשון|ראשון|שתיים|שניים|השני|שני|שלוש|השלישי|שלישי|ארבע|הרביעי|רביעי|חמש|החמישי|חמישי|שש|שבע|שמונה)(?:\s|[,.!?]|$)/u);
     const ordinals={'אחד':1,'אחת':1,'הראשון':1,'ראשון':1,'שתיים':2,'שניים':2,'השני':2,'שני':2,'שלוש':3,'השלישי':3,'שלישי':3,'ארבע':4,'הרביעי':4,'רביעי':4,'חמש':5,'החמישי':5,'חמישי':5,'שש':6,'שבע':7,'שמונה':8};
     const chosenNumber=number?(Number(number[1])||ordinals[number[1]]):null;
     let link=number ? context.currentWebsiteChoices?.[chosenNumber-1] : null;

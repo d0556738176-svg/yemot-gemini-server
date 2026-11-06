@@ -126,3 +126,12 @@ test('website text read aloud drops image and link paths', async () => {
   assert.equal(/api|next|\.svg|png|!/.test(out), false);
   assert.match(out, /בנק הפועלים סניפים צרו קשר אודות/);
 });
+
+test('an open page keeps link questions even after other turns', async () => {
+  const { isBranch1WebsiteRequest } = await import('../branch1-websites.js');
+  const ctx = { currentWebsitePages: [{ url: 'https://www.bankhapoalim.co.il/', content: 'x', links: [] }], lastRoute: 'other' };
+  assert.equal(isBranch1WebsiteRequest('איזה קישורים יש בעמוד', ctx), true);
+  assert.equal(isBranch1WebsiteRequest('איזה כישורים יש בעמוד', ctx), true);
+  assert.equal(isBranch1WebsiteRequest('פתח קישור מספר 3', ctx), true);
+  assert.equal(isBranch1WebsiteRequest('מה מזג האוויר מחר', ctx), false);
+});
