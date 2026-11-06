@@ -31,7 +31,8 @@ export async function readMemory(phone, { env = process.env, fetchImpl = fetch, 
   if (!path || !tk) return null;
   const u = new URL(API + '/DownloadFile'); u.searchParams.set('token', tk); u.searchParams.set('path', path);
   const r = await fetchImpl(u, { signal: AbortSignal.timeout(timeoutMs) });
-  if (!r.ok) return null;
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error('Yemot memory read failed: HTTP ' + r.status);
   const text = await r.text();
   try { const j = JSON.parse(text); return j && Array.isArray(j.entries) ? j : null; } catch { return null; }
 }
@@ -67,7 +68,7 @@ export function rememberTurn(phone, entry, opts = {}) {
   const key = String(phone || '');
   const prev = chains.get(key) || Promise.resolve();
   const job = prev.then(async () => {
-    const mem = (await readMemory(phone, opts).catch(() => null)) || { phone: key, summary: '', entries: [] };
+    const mem = (await readMemory(phone, opts)) || { phone: key, summary: '', entries: [] };
     mem.entries.push({ time: entry.time, callId: entry.callId, user: entry.user, gemini: entry.gemini });
     if (mem.entries.length > SUMMARIZE_AT) {
       const old = mem.entries.splice(0, mem.entries.length - KEEP_TURNS);
@@ -76,6 +77,8 @@ export function rememberTurn(phone, entry, opts = {}) {
     mem.updatedAt = new Date().toISOString();
     return writeMemory(phone, mem, opts);
   });
-  chains.set(key, job.catch(() => {}));
+  const tail = job.catch(() => {});
+  chains.set(key, tail);
+  void tail.then(() => { if (chains.get(key) === tail) chains.delete(key); });
   return job;
 }

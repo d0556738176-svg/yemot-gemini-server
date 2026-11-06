@@ -36,3 +36,18 @@ test('questions about earlier calls receive the saved memory', () => {
     assert.match(selectRelevantHistoryForTurn(q, 'תור 1 — מתקשר: קוראים לי דוד', []), /דוד/);
   assert.equal(selectRelevantHistoryForTurn('מה השעה בניו יורק', 'תור 1 — מתקשר: קוראים לי דוד', []), '');
 });
+
+test('a temporary memory read error never overwrites the saved conversation', async () => {
+  const y = fakeYemot();
+  const phone = '0501112233';
+  const previous = { time: 't1', callId: 'a', user: 'שאלה ראשונה', gemini: 'תשובה ראשונה' };
+  const next = { time: 't2', callId: 'b', user: 'שאלה שנייה', gemini: 'תשובה שנייה' };
+  const opts = { env, fetchImpl: y.fetchImpl };
+  await rememberTurn(phone, previous, opts);
+  await assert.rejects(rememberTurn(phone, next, {
+    env, fetchImpl: async (url, init) => init.method === 'POST' ? y.fetchImpl(url, init) : new Response('', { status: 503 })
+  }), /HTTP 503/);
+  assert.deepEqual((await readMemory(phone, opts)).entries, [previous]);
+  await rememberTurn(phone, next, opts);
+  assert.deepEqual((await readMemory(phone, opts)).entries, [previous, next]);
+});
