@@ -118,3 +118,11 @@ test('official site falls back to the result Google shows with sitelinks', withE
   assert.equal(new URL(found.url).hostname, 'www.bankhapoalim.co.il');
   assert.equal(found.source, 'sitelinks');
 }));
+
+test('website text read aloud drops image and link paths', async () => {
+  const { speakablePageText } = await import('../branch1-websites.js');
+  const raw = 'בנק הפועלים (/api/media/l3h/logo.svg) סניפים ! (/ next/image?url=%2Fapi w=96) צרו קשר ![x](https://a.b/c.png) [אודות](/about)';
+  const out = speakablePageText(raw);
+  assert.equal(/api|next|\.svg|png|!/.test(out), false);
+  assert.match(out, /בנק הפועלים סניפים צרו קשר אודות/);
+});

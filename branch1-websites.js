@@ -35,9 +35,22 @@ export function requestedSiteName(q) {
   return /^(?:הזה|זה|שפתחת|שנפתח|הנוכחי)(?:\s|$)/u.test(name)?'':name;
 }
 
+// Page text is read aloud: drop image/link paths, markdown image markers and
+// framework image URLs that readers leave in, so only real words are spoken.
+export function speakablePageText(text) {
+  return String(text||'')
+    .replace(/!\[[^\]]*\]\([^)]*\)/gu,' ')
+    .replace(/\[([^\]]+)\]\((?:https?:\/\/|\/)[^)]*\)/gu,'$1')
+    .replace(/\((?:https?:\/\/|\/)[^)\s]*(?:\s[^)]*)?\)/gu,' ')
+    .replace(/(?:https?:\/\/|\/_?next\/|\/api\/media\/)\S+/gu,' ')
+    .replace(/(?:^|\s)!(?=\s|$)/gu,' ')
+    .replace(/\s+/gu,' ').trim();
+}
+
 export function websiteChunk(context, restart=false, maxChars=850) {
   const page=context.currentWebsitePages?.[context.currentWebsitePageIndex||0];
   if(!page?.content)return null;
+  if(!page.speakable){page.content=speakablePageText(page.content);page.speakable=true;}
   const offset=restart?0:Number(context.currentWebsiteReadOffset||0);
   if(offset>=page.content.length)return 'זה סוף הטקסט שנקרא מהעמוד. אפשר לבקש את רשימת הקישורים או לפתוח כתבה מסוימת.';
   let end=Math.min(page.content.length,offset+maxChars);
