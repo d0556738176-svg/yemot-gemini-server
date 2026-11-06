@@ -19,6 +19,10 @@ export function isNewsQuestion(transcript) {
   const hasCategory = CATEGORY_PATTERNS.some(item => item.pattern.test(q));
   if (EXPLICIT_NEWS_CUES.test(q)) return true;
   if (/(מה החדשות|מה חדש היום|מה קרה היום|מה קורה בישראל|מה המצב בישראל|מה מתרחש בישראל|עדכוני היום)/i.test(q)) return true;
+  // "How do I manage my day wisely" mis-heard as "...בצבא החכמה" matched the
+  // security category + "היום" and read news headlines. Advice and how-to
+  // questions are never news unless they say so explicitly.
+  if (/(?:^|\s)(?:איך|כיצד|תן לי עצה|עצה|עצות|טיפים|מה כדאי|מה עדיף|ללמוד|לנהל|לארגן|לתכנן)(?:\s|$)/u.test(q)) return false;
   return hasCategory && CURRENT_AFFAIRS_CUES.test(q);
 }
 

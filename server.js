@@ -5023,6 +5023,7 @@ const BRANCH1_E2E_QUESTIONS=[
   'איזה כישורים יש בעמוד',
   'מה הסרטון עם הכי הרבה צפיות ביוטיוב של הרב יצחק יוסף',
   'מה שאלת אותך קודם',
+  'תגיד לי איך לנהל את היום בצבא החכמה',
   // The two video steps use Gemini's free video quota (about 20 per model per
   // day), so they run only when BRANCH1_E2E_VIDEO=on; callers keep the quota.
   ...(String(process.env.BRANCH1_E2E_VIDEO||'off')==='on'?['מה בדיוק הוא אמר בסרטון הזה, שלב אחרי שלב','תמחיש לי מה רואים בסרטון']:[])
@@ -5049,7 +5050,7 @@ async function runBranch1EndToEndSelfTest(questions=BRANCH1_E2E_QUESTIONS) {
 // Extension 3 shares the engine; one conversational turn checks that it answers
 // and speaks about itself in the feminine.
 async function runBranch3SelfTest() {
-  await callPersona.run({persona:'female',branch:'3'},()=>runBranch1EndToEndSelfTest(['ספרי לי בקצרה מי את ומה את יכולה לעשות בשבילי']));
+  await callPersona.run({persona:'female',branch:'3'},()=>runBranch1EndToEndSelfTest(['ספרי לי בקצרה מי את ומה את יכולה לעשות בשבילי','תחפשי באינטרנט מי ראש עיריית ירושלים']));
 }
 // Shows whether each web key works (never the keys themselves). The result is
 // cached for hours, so opening this page costs at most one tiny call per provider.
@@ -5247,7 +5248,7 @@ async function configureYemotStructure() {
   if (process.env.BRANCH3_AUTO_CONFIGURE !== 'false') {
     try {
       await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
-      const voice=(process.env.BRANCH3_VOICE||'Sivan').trim();
+      const voice=(process.env.BRANCH3_VOICE||'Osnat').trim();
       try { await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup',voice}); console.log('[Yemot automatic setup] extension 3 voice set to '+voice); }
       catch(e) { console.warn('[Yemot automatic setup] extension 3 voice rejected',String(e?.message||e).slice(0,200)); }
       if (process.env.YEMOT_RECORD_SILENCE_SECONDS !== 'off') {
