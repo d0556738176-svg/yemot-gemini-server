@@ -45,6 +45,11 @@ async function fetchJson(url, fetchImpl, timeoutMs) {
   }
 }
 
+// YouTube search returns titles HTML-escaped (&quot; &#39; &amp;); callers hear the text.
+function decodeEntities(value) {
+  return String(value || '').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
 export async function searchYouTubeVideos(query, {
   apiKey = process.env.YOUTUBE_API_KEY,
   regionCode = process.env.YOUTUBE_REGION_CODE || 'IL',
@@ -104,7 +109,7 @@ export async function searchYouTubeVideos(query, {
           .filter(item => item.contentDetails?.videoId)
           .map(item => ({
             videoId: item.contentDetails.videoId,
-            title: String(item.snippet?.title || 'ללא כותרת'),
+            title: decodeEntities(String(item.snippet?.title || 'ללא כותרת')),
             channelTitle: String(item.snippet?.channelTitle || channelDetails.items?.[0]?.snippet?.title || 'ערוץ לא ידוע'),
             publishedAt: item.contentDetails?.videoPublishedAt || item.snippet?.publishedAt || null,
             description: String(item.snippet?.description || '')
@@ -130,7 +135,7 @@ export async function searchYouTubeVideos(query, {
     .filter(item => item.id?.videoId)
     .map(item => ({
       videoId: item.id.videoId,
-      title: String(item.snippet?.title || 'ללא כותרת'),
+      title: decodeEntities(String(item.snippet?.title || 'ללא כותרת')),
       channelTitle: String(item.snippet?.channelTitle || 'ערוץ לא ידוע'),
       publishedAt: item.snippet?.publishedAt || null,
       description: String(item.snippet?.description || '')
