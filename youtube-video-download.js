@@ -216,7 +216,8 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
     // Full Hebrew name as seen in Yemot (owner, 06.11); the download page
     // (/downloads) serves it under the same Hebrew name.
     const { titleFileName } = await import('./youtube-audio-cache.js');
-    const name = titleFileName(meta.title || videoId, 100) || videoId;
+    const { yemotFileName } = await import('./youtube-latin-name.js');
+    const name = await yemotFileName(meta.title || videoId, { env, titleFileName }) || videoId;
     const saved = [];
     const t = Date.now();
     for (const pc of pieces) {

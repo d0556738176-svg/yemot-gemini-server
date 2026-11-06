@@ -4718,8 +4718,6 @@ app.get('/api/youtube/search', rateLimit(20, 60 * 1000, 'youtube'), requireDashb
     return res.status(502).json({error:'YouTube search unavailable'});
   }
 });
-// Download page: the audio/video folders with full Hebrew file names (06.11).
-{ const { registerDownloadsPage } = await import('./branch2-downloads-page.js'); registerDownloadsPage(app); }
 app.get('/',(req,res)=>res.type('html').send('<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>AI Phone Line</title></head><body><h1>AI Phone Line Dashboard</h1><p>המערכת מחוברת וממתינה לשיחות</p></body></html>'));
 
 async function configureYemotStructure() {
@@ -5012,22 +5010,7 @@ app.listen(port,async()=>{
     await m.runRenameLatinV3();
     await m.runRenameHebrew();
     await m.runRenameHebrewVideos();
-    // Does any form of Yemot's own download keep a Hebrew name? (logged once)
-    const pb=(await import('./youtube-authorized-playback.js'))._pipeline;
-    if(!(await pb.readCacheJson('ivr2:/2/selftest/hebrew_download_probe_v1.json').catch(()=>null))){
-      const l=await (await fetch(pb.YEMOT_API_BASE+'/GetIVR2Dir?'+new URLSearchParams({token:pb.yemotApiKey(),path:'ivr2:/אודיו'}))).json().catch(()=>null);
-      const f=(l?.files||[]).find(x=>/[\u05d0-\u05ea]/.test(x.name||''));
-      if(f){
-        const path='ivr2:/אודיו/'+f.name, out=[];
-        const variants=[['plain',pb.YEMOT_API_BASE+'/DownloadFile?'+new URLSearchParams({token:pb.yemotApiKey(),path})],
-          ['private host','https://private.call2all.co.il/ym/api/DownloadFile?'+new URLSearchParams({token:pb.yemotApiKey(),path})],
-          ['fileName param',pb.YEMOT_API_BASE+'/DownloadFile?'+new URLSearchParams({token:pb.yemotApiKey(),path,fileName:f.name,download:'1'})]];
-        for(const [k,u] of variants){const ac=new AbortController();const r=await fetch(u,{signal:ac.signal}).catch(e=>({status:0,headers:new Headers(),err:String(e)}));
-          out.push({k,status:r.status,cd:r.headers.get('content-disposition'),type:r.headers.get('content-type')});ac.abort();}
-        console.info('[HEBREW_DOWNLOAD_PROBE]',JSON.stringify({file:f.name,out}));
-        await pb.writeCacheJson('ivr2:/2/selftest/hebrew_download_probe_v1.json',{at:new Date().toISOString(),out}).catch(()=>{});
-      }
-    }
+    await m.runRenameHebrewLatin();
   }).catch(e=>console.warn('[BRANCH2_MAINT] rename v2 failed',String(e?.message||e).slice(0,160)));
   if(process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
@@ -5055,55 +5038,50 @@ app.listen(port,async()=>{
     console.info('[SONG_NAME_TEST] saving a real song as a caller would',{videoId:pick.videoId,title:pick.title});
     await pb.downloadAuthorizedAudioToYemot(pick.videoId);
   })().catch(e=>console.warn('[SONG_NAME_TEST] failed',String(e?.message||e).slice(0,200)));
-  // Download page self-test (06.11): refused without login; with the account
-  // login it lists the folders and serves a file under its Hebrew name.
-  void (async()=>{
-    await new Promise(r=>setTimeout(r,60000));
-    const port=process.env.PORT||3000, u='http://127.0.0.1:'+port;
-    const noAuth=(await fetch(u+'/downloads').catch(()=>({status:0}))).status;
-    const user=String(process.env.YEMOT_API_USERNAME||'').trim(), pass=String(process.env.YEMOT_API_PASSWORD||'').trim();
-    const auth={authorization:'Basic '+Buffer.from(user+':'+pass).toString('base64')};
-    const wrong=(await fetch(u+'/downloads',{headers:{authorization:'Basic '+Buffer.from(user+':x').toString('base64')}}).catch(()=>({status:0}))).status;
-    const page=await fetch(u+'/downloads',{headers:auth}).catch(()=>null);
-    const html=page?await page.text():'';
-    const link=(html.match(/href="(\/downloads\/file\?path=[^"]+)"/)||[])[1];
-    let file=null;
-    if(link){const ac=new AbortController();const r=await fetch(u+link.replace(/&amp;/g,'&'),{headers:{...auth,Range:'bytes=0-1023'},signal:ac.signal});
-      file={status:r.status,cd:decodeURIComponent((r.headers.get('content-disposition')||'').split("UTF-8''")[1]||''),type:r.headers.get('content-type'),range:r.headers.get('content-range')};ac.abort();}
-    console.info('[DOWNLOADS_PAGE_TEST]',JSON.stringify({noAuth,wrong,listed:page?.status,files:(html.match(/<li /g)||[]).length,file}));
-  })().catch(e=>console.warn('[DOWNLOADS_PAGE_TEST] failed',String(e?.message||e).slice(0,200)));
   if(process.env.APIFY_TOKEN&&process.env.DEEPGRAM_API_KEY) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
-    const MARK='ivr2:/2/selftest/subtitles_v2.json';
+    const MARK='ivr2:/2/selftest/subtitles_v3.json';
     if(await p.readCacheJson(MARK).catch(()=>null))return;
     await new Promise(r=>setTimeout(r,90000)); // after the boot work
     const cover=await import('./youtube-cover-art.js');
     const { downloadVideoToYemot } = await import('./youtube-video-download.js');
     const { hebrewSubtitlesFor } = await import('./youtube-subtitles.js');
     const ffmpegPath=(await import('ffmpeg-static')).default;
-    const dir='ivr2:/2/selftest/subs';
-    const mem=new Map();let subsInfo=null;
-    const r=await downloadVideoToYemot({videoId:'jNQXAC9IVRw',title:'Me at the zoo'},{
-      store:{read:async x=>mem.get(x)||null,write:async(x,d)=>{mem.set(x,d);}},
-      upload:(f,rr)=>p.uploadToYemot(f,rr,undefined,{convertAudio:false}),getFile:rr=>p.getYemotFile(rr),ffmpegPath,
-      fetchThumbnail:cover.fetchThumbnail,normalizeCover:cover.normalizeCover,downloadMetadata:cover.downloadMetadata,
-      fetchVideoFacts,log:console,nextFolder:async()=>dir,
-      uploadCap:async()=>pb.uploadCapBytes(),
-      hebrewSubtitles:async(f,d)=>(subsInfo=await hebrewSubtitlesFor(f,d,{ffmpegPath,log:console})),
-    });
-    // Read the saved video back from Yemot and look for the Hebrew track.
-    const u=new URL(p.YEMOT_API_BASE+'/DownloadFile');u.searchParams.set('token',p.yemotApiKey());u.searchParams.set('path',r.remote);
-    const buf=Buffer.from(await (await fetch(u)).arrayBuffer());
-    const fsm=await import('node:fs/promises');const tmp=(await import('node:os')).tmpdir()+'/subcheck.mp4';await fsm.writeFile(tmp,buf);
-    const { spawn: spawnP }=await import('node:child_process');const info=await new Promise(res=>{const c=spawnP(ffmpegPath,['-hide_banner','-i',tmp]);let e='';c.stderr.on('data',d=>e+=d);c.on('close',()=>res(e));});
-    const track=/Stream #0:\d+(?:\[0x[0-9a-f]+\])?\(heb\)[^\n]*Subtitle: mov_text/i.test(info);
-    const streams=(info.match(/Stream #[^\n]*/g)||[]).map(x=>x.slice(0,90));
-    const out={remote:r.remote,bytes:buf.length,hebrewTrackInFile:track,streams,language:subsInfo?.language||null,cues:subsInfo?.cues||0,skipped:subsInfo?.skipped||null,
-      srt:(subsInfo?.srt||'').split('\n').slice(0,12).join(' | ')};
-    console.info('[SUBTITLES_TEST]',JSON.stringify(out));
-    const del=async w=>{const x=new URL(p.YEMOT_API_BASE+'/FileAction');x.searchParams.set('token',p.yemotApiKey());x.searchParams.set('action','delete');x.searchParams.set('what',w);await fetch(x).catch(()=>{});};
-    await del(r.remote);await del(r.remote.replace(/\.mp4$/,'.srt'));
-    if(track)await p.writeCacheJson(MARK,out).catch(()=>{});
+    // A short Hebrew talk (found by search, 2-8 minutes) and a short English clip.
+    const key=process.env.YOUTUBE_API_KEY;const tests=[];
+    if(key){
+      const sr=await (await fetch('https://www.googleapis.com/youtube/v3/search?'+new URLSearchParams({part:'snippet',type:'video',maxResults:'10',q:'דבר תורה קצר על פרשת השבוע',videoDuration:'short',regionCode:'IL',relevanceLanguage:'he',key}))).json().catch(()=>null);
+      const ids=(sr?.items||[]).map(x=>x.id?.videoId).filter(Boolean);
+      const det=ids.length?await (await fetch('https://www.googleapis.com/youtube/v3/videos?'+new URLSearchParams({part:'contentDetails,snippet',id:ids.join(','),key}))).json().catch(()=>null):null;
+      const sec=d=>{const m=/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(d||'');return m?(+m[1]||0)*3600+(+m[2]||0)*60+(+m[3]||0):0;};
+      const pick=(det?.items||[]).find(v=>sec(v.contentDetails?.duration)>=120&&sec(v.contentDetails?.duration)<=480);
+      if(pick)tests.push({videoId:pick.id,title:pick.snippet.title});
+    }
+    tests.push({videoId:'jNQXAC9IVRw',title:'Me at the zoo'});
+    const results=[];
+    for(const v of tests){
+      const dir='ivr2:/2/selftest/subs';
+      const mem=new Map();let subsInfo=null;
+      const r=await downloadVideoToYemot(v,{
+        store:{read:async x=>mem.get(x)||null,write:async(x,d)=>{mem.set(x,d);}},
+        upload:(f,rr)=>p.uploadToYemot(f,rr,undefined,{convertAudio:false}),getFile:rr=>p.getYemotFile(rr),ffmpegPath,
+        fetchThumbnail:cover.fetchThumbnail,normalizeCover:cover.normalizeCover,downloadMetadata:cover.downloadMetadata,
+        fetchVideoFacts,log:console,nextFolder:async()=>dir,
+        uploadCap:async()=>pb.uploadCapBytes(),
+        hebrewSubtitles:async(f,d)=>(subsInfo=await hebrewSubtitlesFor(f,d,{ffmpegPath,log:console})),
+      });
+      const u=new URL(p.YEMOT_API_BASE+'/DownloadFile');u.searchParams.set('token',p.yemotApiKey());u.searchParams.set('path',r.remote);
+      const buf=Buffer.from(await (await fetch(u)).arrayBuffer());
+      const fsm=await import('node:fs/promises');const tmp=(await import('node:os')).tmpdir()+'/subcheck.mp4';await fsm.writeFile(tmp,buf);
+      const { spawn: spawnP }=await import('node:child_process');const info=await new Promise(res=>{const c=spawnP(ffmpegPath,['-hide_banner','-i',tmp]);let e='';c.stderr.on('data',d=>e+=d);c.on('close',()=>res(e));});
+      const track=/Stream #0:\d+(?:\[0x[0-9a-f]+\])?\(heb\)[^\n]*Subtitle: mov_text/i.test(info);
+      const out={title:v.title,remote:r.remote,hebrewTrackInFile:track,language:subsInfo?.language||null,mode:subsInfo?.mode||null,cues:subsInfo?.cues||0,skipped:subsInfo?.skipped||null,
+        srt:(subsInfo?.srt||'').split('\n').slice(0,16).join(' | ')};
+      console.info('[SUBTITLES_TEST]',JSON.stringify(out));results.push(out);
+      const del=async w=>{const x=new URL(p.YEMOT_API_BASE+'/FileAction');x.searchParams.set('token',p.yemotApiKey());x.searchParams.set('action','delete');x.searchParams.set('what',w);await fetch(x).catch(()=>{});};
+      for(const f of (r.files||[]))await del(f.remote);
+    }
+    if(results.length&&results.every(x=>x.hebrewTrackInFile||x.skipped))await p.writeCacheJson(MARK,{at:new Date().toISOString(),results}).catch(()=>{});
   })().catch(e=>console.warn('[SUBTITLES_TEST] failed',String(e?.message||e).slice(0,300)));
   // Listening test files (old vs new phone mastering); once per version.
   if(process.env.APIFY_TOKEN) void import('./branch2-audio-ab.js')

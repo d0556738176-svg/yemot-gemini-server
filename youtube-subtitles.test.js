@@ -24,3 +24,12 @@ test('translation keeps timing and count; falls back to Groq', async () => {
   assert.deepEqual(r.cues.map(c => c.text), ['שלום', 'עולם']);
   assert.equal(r.cues[1].start, 1);
 });
+
+test('Hebrew speech lines are proofread, count and timing kept', async () => {
+  const { correctHebrewCues } = await import('./youtube-subtitles.js');
+  const cues = [{ start: 0, end: 1, text: 'שלום לכלם' }, { start: 1, end: 2, text: 'פרשת השבו' }];
+  const fetchImpl = async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '["שלום לכולם","פרשת השבוע"]' }] } }] }), { status: 200 });
+  const out = await correctHebrewCues(cues, { env: { GEMINI_API_KEYS: 'k' }, fetchImpl });
+  assert.deepEqual(out.map(c => c.text), ['שלום לכולם', 'פרשת השבוע']);
+  assert.equal(out[1].start, 1);
+});

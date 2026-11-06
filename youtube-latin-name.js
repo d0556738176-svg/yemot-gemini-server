@@ -58,3 +58,22 @@ export async function latinTitle(title, env = process.env, fetchImpl = fetch) {
   if (out && !/[א-ת]/.test(out) && latinFileName(out).length >= 3) return out;
   return hebrewToLatin(t);
 }
+
+// The Hebrew part of a title ("עברית | English" -> "עברית").
+export function hebrewPart(title) {
+  const segs = String(title || '').split(/\s*[|｜/]\s*/).filter(x => /[א-ת]/.test(x));
+  return segs.join(' ').trim();
+}
+
+// Owner, 06.11 (see also the header note): the file shows its Hebrew name in Yemot, and since Yemot's
+// download erases Hebrew letters, the same name follows in English letters
+// (Hebrew sounds, not an English translation: he reads the sounds). So a
+// downloaded file arrives as "   _   __Haneshama_Bekirbi.flac".
+export async function yemotFileName(title, { env = process.env, fetchImpl = fetch, titleFileName } = {}) {
+  const t = String(title || '').normalize('NFC').trim();
+  const heb = hebrewPart(t);
+  if (!heb) return latinFileName(t, 100);
+  const hebName = titleFileName(heb, 70);
+  const lat = latinFileName(await latinTitle(heb, env, fetchImpl), 70);
+  return lat ? hebName + '__' + lat : hebName;
+}

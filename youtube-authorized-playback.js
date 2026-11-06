@@ -690,7 +690,8 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
   // Full Hebrew name as seen in Yemot (owner, 06.11). Yemot's own download
   // erases Hebrew from the name; the download page (/downloads) gives it back.
   const { titleFileName } = await import('./youtube-audio-cache.js');
-  const base=titleFileName(metadata.title||title||id,100)||id;
+  const { yemotFileName } = await import('./youtube-latin-name.js');
+  const base=await yemotFileName(metadata.title||title||id,{titleFileName})||id;
   const owners=await readCacheJson(DOWNLOAD_OWNERS).catch(()=>null)||{};
   const name=owners[base]&&owners[base]!==id?base+'_'+id:base;
   const folders=await import('./download-folders.js');

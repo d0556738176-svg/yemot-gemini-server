@@ -59,12 +59,12 @@ export const DEEPGRAM_SETUPS = [
   { model: 'nova-3', language: 'multi' },
   { model: 'nova-3', detect_language: 'true' },
 ];
-export async function transcribeTimed(audioFile, { env = process.env, fetchImpl = fetch, log = console, mime = 'audio/ogg' } = {}) {
+export async function transcribeTimed(audioFile, { env = process.env, fetchImpl = fetch, log = console, mime = 'audio/ogg', setups = DEEPGRAM_SETUPS, all = false } = {}) {
   const key = String(env.DEEPGRAM_API_KEY || '').trim();
   if (!key) return null;
   const body = await fs.readFile(audioFile);
-  let best = null;
-  for (const setup of DEEPGRAM_SETUPS) {
+  let best = null; const tried = [];
+  for (const setup of setups) {
     const url = new URL('https://api.deepgram.com/v1/listen');
     for (const [k, v] of Object.entries(setup)) url.searchParams.set(k, v);
     url.searchParams.set('smart_format', 'true');
@@ -76,11 +76,14 @@ export async function transcribeTimed(audioFile, { env = process.env, fetchImpl 
       const words = ch?.alternatives?.[0]?.words || [];
       const language = String(ch?.detected_language || ch?.alternatives?.[0]?.languages?.[0] || words.find(w => w.language)?.language || '');
       log.info?.('[SUBTITLES] transcription attempt', { ...setup, status: r.status, bytes: body.length, language, words: words.length, error: r.ok ? undefined : String(j?.err_msg || j?.message || '').slice(0, 120) });
-      if (r.ok && (!best || words.length > best.words.length)) best = { language, words, model: setup.model + (setup.language ? '/' + setup.language : '') };
-      if (best && best.words.length >= 20 && best.language) break;
+      const conf = words.length ? words.reduce((a, w) => a + Number(w.confidence || 0), 0) / words.length : 0;
+      const res = { language, words, conf, setup, model: setup.model + (setup.language ? '/' + setup.language : '') };
+      if (r.ok) tried.push(res);
+      if (r.ok && (!best || words.length > best.words.length)) best = res;
+      if (!all && best && best.words.length >= 20 && best.language) break;
     } catch (e) { log.warn?.('[SUBTITLES] transcription attempt failed', { ...setup, message: String(e?.message || e).slice(0, 120) }); }
   }
-  return best;
+  return all ? { best, tried } : best;
 }
 
 function parseLines(text, n) {
@@ -96,14 +99,14 @@ function parseLines(text, n) {
 
 const SYSTEM = 'אתה מתרגם כתוביות לעברית. תקבל מערך JSON של שורות כתוביות ממוספרות מסרטון. תרגם כל שורה לעברית טבעית, קצרה וברורה, בשפה נקייה ומכובדת, בהתאם להקשר של השורות הסמוכות. שמות אנשים ומקומות כתוב בעברית. החזר רק מערך JSON של מחרוזות באותו אורך ובאותו סדר בדיוק, בלי הסברים.';
 
-async function geminiTranslate(lines, env, fetchImpl) {
+async function geminiTranslate(lines, env, fetchImpl, system = SYSTEM) {
   const keys = String(env.GEMINI_API_KEYS || env.GEMINI_API_KEY || '').split(',').map(x => x.trim()).filter(Boolean);
   const models = String(env.SUBTITLE_GEMINI_MODELS || env.GEMINI_MODELS || 'gemini-3.6-flash,gemini-3.5-flash-lite').split(',').map(x => x.trim()).filter(Boolean);
   for (const model of models) for (const key of keys) {
     try {
       const r = await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key), {
         method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(60000),
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: SYSTEM }] }, contents: [{ role: 'user', parts: [{ text: JSON.stringify(lines) }] }], generationConfig: { temperature: 0.2, responseMimeType: 'application/json' } }),
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text: JSON.stringify(lines) }] }], generationConfig: { temperature: 0.2, responseMimeType: 'application/json' } }),
       });
       if (r.status === 404) break; // model gone: next model
       const j = await r.json().catch(() => null);
@@ -131,26 +134,95 @@ export async function translateCues(cues, { env = process.env, fetchImpl = fetch
   return { cues: out, translated: ok };
 }
 
+const CORRECT = 'אתה מגיה כתוביות בעברית. תקבל מערך JSON של שורות כתוביות שנוצרו מזיהוי דיבור אוטומטי של סרטון בעברית (שיר, הרצאה או דיבור). תקן שגיאות זיהוי וכתיב לפי ההקשר, הוסף פיסוק קל, בשפה נקייה. אל תוסיף ואל תשמיט תוכן, ואל תאחד או תפצל שורות. החזר רק מערך JSON של מחרוזות באותו אורך ובאותו סדר בדיוק.';
+
+export async function correctHebrewCues(cues, { env = process.env, fetchImpl = fetch, log = console, batch = 60 } = {}) {
+  const out = [];
+  for (let i = 0; i < cues.length; i += batch) {
+    const part = cues.slice(i, i + batch).map(c => c.text);
+    let fixed = await geminiTranslate(part, env, fetchImpl, CORRECT);
+    if (!fixed) fixed = parseLines(await groqChat([{ role: 'system', content: CORRECT }, { role: 'user', content: JSON.stringify(part) }], { env, fetchImpl, maxTokens: 4000, timeoutMs: 60000 }), part.length);
+    part.forEach((t, k) => out.push({ ...cues[i + k], text: String(fixed?.[k] || t).replace(/\s+/g, ' ').trim() || t }));
+  }
+  return out;
+}
+
+async function mediaSeconds(ffmpegPath, file) {
+  const info = await new Promise(res => { const c = spawn(ffmpegPath, ['-hide_banner', '-i', file]); let e = ''; c.stderr.on('data', d => { e += d; }); c.on('close', () => res(e)); c.on('error', () => res('')); });
+  const m = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(info);
+  return m ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) : 0;
+}
+
+// Hebrew subtitles already burned into the picture? A few frames are shown to
+// Gemini. Unknown (no key / no answer) counts as "no".
+export async function hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath, env = process.env, fetchImpl = fetch, seconds }) {
+  const keys = String(env.GEMINI_API_KEYS || env.GEMINI_API_KEY || '').split(',').map(x => x.trim()).filter(Boolean);
+  if (!keys.length || !seconds) return null;
+  const parts = [];
+  for (const f of [0.2, 0.4, 0.6, 0.8]) {
+    const out = path.join(tempDir, 'frame_' + f + '.jpg');
+    try { await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(Math.floor(seconds * f)), '-i', videoFile, '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '4', out]); parts.push({ inline_data: { mime_type: 'image/jpeg', data: (await fs.readFile(out)).toString('base64') } }); } catch { /* skip frame */ }
+  }
+  if (!parts.length) return null;
+  parts.push({ text: 'אלה תמונות מתוך סרטון. האם מופיעות בהן כתוביות בעברית צרובות בתוך התמונה (שורות טקסט של מילים או תרגום, בדרך כלל בתחתית המסך, שמתחלפות לאורך הסרטון)? כותרת קבועה, שם השיר או לוגו אינם כתוביות. החזר JSON בלבד: {"hebrew_subtitles": true או false}' });
+  const models = String(env.SUBTITLE_GEMINI_MODELS || env.GEMINI_MODELS || 'gemini-3.6-flash,gemini-3.5-flash-lite').split(',').map(x => x.trim()).filter(Boolean);
+  for (const model of models) for (const key of keys) {
+    try {
+      const r = await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key), {
+        method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(45000),
+        body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } }),
+      });
+      if (r.status === 404) break;
+      const j = await r.json().catch(() => null);
+      const t = j?.candidates?.[0]?.content?.parts?.map(x => x.text || '').join('') || '';
+      const m = /"hebrew_subtitles"\s*:\s*(true|false)/.exec(t);
+      if (m) return m[1] === 'true';
+    } catch { /* next key */ }
+  }
+  return null;
+}
+
 // The whole thing for one local video file. Returns { srt, language, cues } or
-// { skipped } / null.
+// { skipped } / null. Every video without Hebrew subtitles gets them: Hebrew
+// speech is written down (and proofread), any other language is translated.
 export async function hebrewSubtitlesFor(videoFile, tempDir, { ffmpegPath, env = process.env, fetchImpl = fetch, log = console } = {}) {
   try {
     if (/^(0|false|off)$/i.test(String(env.VIDEO_HEBREW_SUBTITLES || ''))) return { skipped: 'disabled' };
-    let audio = path.join(tempDir, 'speech.ogg'), mime = 'audio/ogg';
-    try { await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoFile, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '24k', audio]); }
-    catch { audio = path.join(tempDir, 'speech.mp3'); mime = 'audio/mpeg'; await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoFile, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libmp3lame', '-b:a', '32k', audio]); }
+    const seconds = await mediaSeconds(ffmpegPath, videoFile);
+    const burned = await hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath, env, fetchImpl, seconds }).catch(() => null);
+    if (burned === true) { log.info?.('[SUBTITLES] the picture already has Hebrew subtitles; none added'); return { skipped: 'hebrew_in_picture' }; }
+    const extract = async (name, extra) => {
+      let file = path.join(tempDir, name + '.ogg'), mime = 'audio/ogg';
+      try { await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', ...extra, '-i', videoFile, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '24k', file]); }
+      catch { file = path.join(tempDir, name + '.mp3'); mime = 'audio/mpeg'; await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', ...extra, '-i', videoFile, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libmp3lame', '-b:a', '32k', file]); }
+      return { file, mime };
+    };
     const t0 = Date.now();
-    const tr = await transcribeTimed(audio, { env, fetchImpl, log, mime });
-    await fs.rm(audio, { force: true }).catch(() => {});
-    if (!tr) return null;
-    const lang = tr.language.toLowerCase();
-    if (/^(he|iw)/.test(lang)) { log.info?.('[SUBTITLES] speech is Hebrew; no subtitles needed', { language: lang }); return { skipped: 'hebrew', language: lang }; }
-    if (tr.words.length < 5) { log.info?.('[SUBTITLES] almost no speech; no subtitles', { language: lang, words: tr.words.length }); return { skipped: 'no_speech', language: lang }; }
+    // 1. Which language? A sample of up to 3 minutes, every setup plus Hebrew.
+    const sampleStart = seconds > 300 ? Math.floor(seconds * 0.15) : 0;
+    const sample = await extract('sample', ['-ss', String(sampleStart), '-t', '180']);
+    const probe = await transcribeTimed(sample.file, { env, fetchImpl, log, mime: sample.mime, all: true, setups: [...DEEPGRAM_SETUPS, { model: 'nova-3', language: 'he' }] });
+    await fs.rm(sample.file, { force: true }).catch(() => {});
+    if (!probe?.tried?.length) return null;
+    const he = probe.tried.find(x => x.setup.language === 'he');
+    const detect = probe.tried.filter(x => x !== he).sort((a, b) => b.words.length - a.words.length)[0];
+    const saysHebrew = probe.tried.some(x => x !== he && /^(he|iw)/i.test(x.language));
+    const hebrew = saysHebrew || (he && he.words.length >= 5 && (!detect || detect.words.length < 5 || he.conf >= detect.conf - 0.03));
+    const language = hebrew ? 'he' : String(detect?.language || '').toLowerCase();
+    log.info?.('[SUBTITLES] language', { language, hebrewConf: he?.conf?.toFixed?.(2), otherConf: detect?.conf?.toFixed?.(2), other: detect?.language, sampleWords: (hebrew ? he : detect)?.words?.length || 0 });
+    // 2. The whole video with the right setting.
+    const full = await extract('speech', []);
+    const setup = hebrew ? { model: 'nova-3', language: 'he' } : (language ? { model: detect.setup.model, language } : detect.setup);
+    let tr = await transcribeTimed(full.file, { env, fetchImpl, log, mime: full.mime, setups: [setup] });
+    if (!tr?.words?.length && !hebrew) tr = await transcribeTimed(full.file, { env, fetchImpl, log, mime: full.mime });
+    await fs.rm(full.file, { force: true }).catch(() => {});
+    if (!tr || tr.words.length < 5) { log.info?.('[SUBTITLES] almost no speech; no subtitles', { language, words: tr?.words?.length || 0 }); return { skipped: 'no_speech', language }; }
     const cues = buildCues(tr.words);
-    const { cues: he, translated } = await translateCues(cues, { env, fetchImpl, log });
-    if (!translated) return null;
-    log.info?.('[SUBTITLES] Hebrew subtitles ready', { language: lang, cues: he.length, translated, model: tr.model, ms: Date.now() - t0 });
-    return { srt: toSrt(he), language: lang, cues: he.length };
+    let he2, done;
+    if (hebrew) { he2 = await correctHebrewCues(cues, { env, fetchImpl, log }); done = he2.length; }
+    else { const t = await translateCues(cues, { env, fetchImpl, log }); he2 = t.cues; done = t.translated; if (!done) return null; }
+    log.info?.('[SUBTITLES] Hebrew subtitles ready', { language, mode: hebrew ? 'hebrew_speech_written' : 'translated', cues: he2.length, done, model: tr.model, ms: Date.now() - t0 });
+    return { srt: toSrt(he2), language, cues: he2.length, mode: hebrew ? 'hebrew' : 'translated' };
   } catch (e) {
     log.warn?.('[SUBTITLES] not added', { message: String(e?.message || e).slice(0, 200) });
     return null;
