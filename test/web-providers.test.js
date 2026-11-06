@@ -143,3 +143,12 @@ test('an answer to a clarifying question completes the earlier question', async 
   assert.equal(resolveClarificationAnswer('מה מזג האוויר מחר', history), '');
   assert.equal(resolveClarificationAnswer('בבית שמש', [{ user: 'שלום', assistant: 'היי, מה שלומך היום.' }]), '');
 });
+
+test('spoken answers keep sentence breaks as separate items', async () => {
+  const { branch1SpeechItems } = await import('../branch1-reliability.js');
+  const items = branch1SpeechItems('ראש העיר הוא שמואל גרינברג ¶ הוא נכנס לתפקיד במרץ 2024 ¶ רוצה עוד פרטים?');
+  assert.equal(items.length, 3);
+  assert.equal(items[2].data.endsWith('?'), true);
+  const plain = branch1SpeechItems('משפט ראשון. משפט שני!');
+  assert.equal(plain.length, 2);
+});

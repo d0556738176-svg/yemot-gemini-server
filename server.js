@@ -151,6 +151,7 @@ const DIALOGUE_STYLE_INSTRUCTION = [
   'דבר בעברית טבעית, חמה, חכמה ואישית. השיחה צריכה להרגיש כמו שיחה עם אדם חד, רגוע, קשוב ומעניין, לא כמו מוקד אוטומטי.',
   'פנה אל המתקשר בלשון זכר באופן עקבי: תרצה, אמרת, ביקשת, דיברת. אל תעבור ללשון נקבה אלא אם המתקשר ביקש זאת במפורש.',
   'אל תפתח תשובות במשפטי מוקד כמו "איך אפשר לעזור", "אמור בבקשה", "אני מיד בודק" או "מצאתי מידע". ענה או המשך את השיחה מיד, באופן אנושי.',
+  'כתוב בדיוק כמו שמדברים בטלפון עם אדם: משפטים קצרים ושלמים שכל אחד מסתיים בנקודה, קצב משתנה (משפט קצר, ואחריו משפט מעט ארוך יותר), מילות קישור טבעיות כמו "אז", "בעצם", "תשמע", ופסיקים במקום שבו אדם עוצר לנשום. בלי סוגריים, בלי רשימות ממוספרות, בלי קיצורים ובלי לציין "מקור 1" או "לפי מקור 2"; אם צריך לציין מקור, אמור אותו במילים בתוך המשפט.',
   'התאם את אורך התשובה לקצב השיחה. בדרך כלל 1 עד 4 משפטים קצרים, אבל כשצריך הסבר או ייעוץ אפשר להרחיב בהדרגה ולא להציף.',
   'כשמבקשים עצה, אל תיתן סיסמאות. הבן את המצב, הפרד בין עובדות להנחות, שקול כמה אפשרויות, הצג יתרונות וחסרונות, ואז תן כיוון מעשי והגיוני. אם יש פרט חסר שמשנה את העצה, שאל שאלה אחת ממוקדת.',
   'היה אנושי בשיחה: אפשר להראות הבנה, הומור עדין כשמתאים, סקרנות וחשיבה משותפת. אל תהיה מתיילד, מתחנף או מלאכותי.',
@@ -275,14 +276,26 @@ function sanitizeForYemot(text) {
   if (!text) return '';
   // Keep branch 1 speech output conservative: strip URLs/markdown/control
   // characters and normalize punctuation that can confuse phone TTS.
+  // Sentence ends become a '¶' marker instead of disappearing: Yemot cannot
+  // take '.', so without the marker every answer was one breathless run-on
+  // line read in a flat robotic tone. branch1SpeechItems turns each sentence
+  // into its own spoken item, which gives a natural pause and a falling tone.
   return String(text)
     .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/(\d)\.(\d)/g, '$1 נקודה $2')
+    .replace(/\r?\n+/g, ' ¶ ')
+    .replace(/[.!?;:…]+(?=\s|$|["“”'’)])/g, m => (m.includes('?') ? '?' : '') + ' ¶ ')
+    .replace(/[()]/g, ' , ')
     .replace(/[|]/g, ' ')
     .replace(/[\\*_#<>\[\]{}]/g, ' ')
     .replace(/[.&"“”‘’']/g, ' ')
     .replace(/[-–—]/g, ' ')
     .replace(/[\u0000-\u001F\u007F]/g, ' ')
     .replace(/\s+/g, ' ')
+    .replace(/\s*,\s*(?:,\s*)+/g, ', ')
+    .replace(/(?:\s*¶\s*)+/g, ' ¶ ')
+    .replace(/^\s*¶\s*|\s*¶\s*$/g, '')
+    .replace(/\s*,\s*¶/g, ' ¶')
     .trim();
 }
 function withTimeout(promise, ms, label) {
@@ -4585,7 +4598,7 @@ async function youtubeCallHandler(call) {
       const prompt=nextPrompt || basePrompt;
       nextPrompt=null;
       const recordPath=await call.read(
-        [{type:'text',data:sanitizeForYemot(prompt)}],
+        [{type:'text',data:sanitizeForYemot(prompt).replace(/\s*¶\s*/g,' ')}],
         'record',
         {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000}
       );
@@ -4710,7 +4723,7 @@ async function youtubeCallHandler(call) {
     logDetailedError('YouTube IVR',error);
     const status=geminiErrorStatus(error);
     const message=status===429?'החיפוש עמוס כרגע. נא לנסות שוב':status===503?'שירות יוטיוב אינו זמין כרגע':'אירעה תקלה זמנית בחיפוש ביוטיוב. נא לנסות שוב';
-    return call.id_list_message([{type:'text',data:message}]);
+    return call.id_list_message([{type:'text',data:String(message).replace(/\s*¶\s*/g,' ')}]);
   }
 }
 
@@ -4840,7 +4853,7 @@ async function backupCallHandler(call) {
     firstTurn=false;
 
     const recordPath=await call.read(
-      [{type:'text',data:prompt}],
+      [{type:'text',data:String(prompt).replace(/\s*¶\s*/g,' ')}],
       'record',
       {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000}
     );
@@ -5209,9 +5222,11 @@ async function configureYemotStructure() {
   // branch 3, or their voice menu on a branch-1 deployment: another workstream owns them.
   // Extension 1 speaks with a man's Yemot voice (BRANCH1_VOICE, default Jacob).
   // Every later /1 update repeats it so the voice is never reset.
-  const branch1Voice=(process.env.BRANCH1_VOICE||'Jacob').trim();
-  const branch1Base={type:'api',api_link:publicUrl + '/yemot',...(branch1Voice&&branch1Voice!=='default'?{voice:branch1Voice}:{})};
-  try { await updateExtension('ivr2:/1',branch1Base); console.log('[Yemot automatic setup] extension 1 voice set to '+branch1Voice); }
+  // The owner prefers the original system voice: empty voice clears the
+  // extension override. Set BRANCH1_VOICE to a Yemot voice name to change it.
+  const branch1Voice=(process.env.BRANCH1_VOICE||'').trim();
+  const branch1Base={type:'api',api_link:publicUrl + '/yemot',voice:branch1Voice&&branch1Voice!=='default'?branch1Voice:''};
+  try { await updateExtension('ivr2:/1',branch1Base); console.log('[Yemot automatic setup] extension 1 voice set to '+(branch1Voice||'system default')); }
   catch(e) { console.warn('[Yemot automatic setup] extension 1 voice rejected; keeping the default voice',String(e?.message||e).slice(0,200)); await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'}); }
   // Hands-free conversation: end each recording after a few seconds of silence, as if
   // the caller pressed #. Set in a separate, non-fatal call so an unsupported setting can
