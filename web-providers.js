@@ -4,7 +4,10 @@
 import { tavily } from '@tavily/core';
 import { createCooldownRegistry } from './provider-cooldowns.js';
 
-const env = name => String(process.env[name] || '').trim();
+// Keys pasted into a dashboard sometimes carry quotes, a "Bearer " prefix or a
+// line break; any of these makes the provider reject an otherwise valid key.
+const env = name => String(process.env[name] || '').trim()
+  .replace(/^["'`]+|["'`]+$/g, '').replace(/^bearer\s+/i, '').replace(/\s+/g, '');
 const cooldowns = createCooldownRegistry({ quotaMs: 10 * 60 * 1000, transientMs: 30000 });
 
 // Statuses that mean "this key cannot be used right now" (Tavily uses 432/433

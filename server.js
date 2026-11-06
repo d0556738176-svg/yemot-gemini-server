@@ -1259,15 +1259,40 @@ ${raw}
   const compact=latest.slice(0,5).map(x=>sanitizeForYemot(x.title)+(x.source?' ('+sanitizeForYemot(x.source)+')':'')).join('. ');
   return 'אלה הכותרות העדכניות שמצאתי: '+compact+'. אפשר לבקש ממני להרחיב על כותרת מסוימת.';
 }
-async function analyzePublicYouTubeVideo(videoUrl, question) {
-  const key = apiKeys[0] || '';
-  if (!key) throw Object.assign(new Error('Gemini key unavailable for YouTube video analysis'), {status:503});
+async function analyzePublicYouTubeVideo(videoUrl, question, {verbatim=false}={}) {
+  // Every Gemini key and a short model chain: one exhausted key or a busy
+  // model must not make video questions fail while another can answer.
+  const keys=[...new Set((apiKeys||[]).filter(Boolean))];
+  if (!keys.length) throw Object.assign(new Error('Gemini key unavailable for YouTube video analysis'), {status:503});
+  const models=[...new Set([(process.env.YOUTUBE_GEMINI_MODEL||'gemini-3.8-flash').trim(),'gemini-3.6-flash','gemini-3.5-flash'])];
+  let lastError=null;
+  for(const model of models) for(const key of keys) {
+    try {
+      const text=await analyzePublicYouTubeVideoOnce(videoUrl,question,{key,model,verbatim});
+      if(String(text||'').trim()) return text;
+    } catch(e) {
+      lastError=e;
+      const status=geminiErrorStatus(e);
+      console.warn('[YouTube] video analysis attempt failed',{model,status,message:String(e?.message||e).slice(0,200)});
+      if(![429,500,502,503,504,408,404].includes(status)) throw e;
+    }
+  }
+  throw lastError||Object.assign(new Error('YouTube video analysis returned no text'),{status:502});
+}
+
+async function analyzePublicYouTubeVideoOnce(videoUrl, question, {key, model, verbatim=false}) {
 
   // Use the current Interactions API because it supports passing a public YouTube URL
   // directly as video input. The previous generateContent/fileData approach did not
   // reliably analyze YouTube URLs.
-  const model = (process.env.YOUTUBE_GEMINI_MODEL || 'gemini-3.8-flash').trim();
-  const prompt = `נתח את סרטון YouTube הציבורי המצורף עצמו, לא רק את הכותרת או התיאור.
+  const prompt = verbatim ? `האזן לסרטון YouTube הציבורי המצורף עצמו, לא לכותרת או לתיאור.
+השאלה של המתקשר: ${question}
+המתקשר רוצה לדעת מה בדיוק נאמר בסרטון. כתוב בעברית, לפי סדר הסרטון, שלב אחרי שלב:
+- לכל שלב: זמן משוער בסרטון (דקה ושנייה), מי מדבר אם ניתן לזהות, ואת המילים שנאמרו במדויק ככל האפשר, בציטוט קצר.
+- אם הדיבור בשפה אחרת, תרגם לעברית וציין שזה תרגום.
+- התמקד בדברים העיקריים שנאמרו; דלג על מוזיקה, חזרות ומילות מילוי.
+- אם קטע לא נשמע בבירור, כתוב שלא ניתן לשמוע אותו. אל תמציא מילים.
+התשובה מוקראת בטלפון, אז בלי סימני עיצוב.` : `נתח את סרטון YouTube הציבורי המצורף עצמו, לא רק את הכותרת או התיאור.
 השאלה של המתקשר: ${question}
 תן מידע מדויק בעברית שמתאים להקראה בטלפון:
 1. על מה הסרטון
@@ -1813,7 +1838,7 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   if(!explicitYouTube && !hasResultReference && !hasPinnedVideo) return null;
 
   const wantsNewest=/(הכי חדש|החדש ביותר|הכי חדשה|האחרון|האחרונה|אחרון|אחרונה|העדכני ביותר|חדש ביותר|מה יצא לאחרונה|מה עלה לאחרונה|הכי חדש שעלה)/i.test(question);
-  const wantsContent=/(על מה|מה דיברו|מה דיבר|מה אמרו|מה נאמר|מה היה|מה קרה בסרטון|מה בדיוק|הדו.?שיח|השיחה|תוכן הסרטון|תוכן השיר|תוכן הבדיחה|מילים|סכם|סיכום|תספר לי מה יש)/i.test(question);
+  const wantsContent=/(על מה|מה דיברו|מה דיבר|מה אמר|מה אמרה|מה אמרו|מה נאמר|מה הוא אומר|מה היא אומרת|בדיוק|מילה במילה|שלב אחרי שלב|ציטוט|תמליל|מה היה|מה קרה בסרטון|מה בדיוק|הדו.?שיח|השיחה|תוכן הסרטון|תוכן השיר|תוכן הבדיחה|מילים|סכם|סיכום|תספר לי מה יש)/i.test(question);
 
   // Resolve references against the exact YouTube results already found in this call.
   let resolvedQuestion=question;
@@ -1836,7 +1861,11 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
       if(previousTitle) resolvedQuestion=previousTitle;
     }
   }
-  const wantsStats=/(כמה צפיות|כמה צפיות יש|מספר צפיות|צפיות|כמה לייקים|לייקים|כמה תגובות|תגובות|מה אומרים בתגובות|מה כתבו בתגובות|תגובות על הסרטון)/i.test(question);
+  // "The video with the most views" is a ranking question, not a stats question
+  // about the first search hit: compare view counts across the results.
+  const wantsMostViewed=/(הכי הרבה צפיות|הכי נצפה|הכי נצפים|הכי נצפית|הכי צפוי|הכי פופולרי|הכי פופולארי|הכי מפורסם|הכי מוכר|מספר הצפיות הגבוה|הכי הרבה לייקים)/i.test(question);
+  const wantsVerbatim=/(בדיוק מה (הוא |היא |הם )?(אמר|אמרה|אמרו|נאמר)|מה (הוא |היא |הם )?(אמר|אמרה|אמרו) בדיוק|מילה במילה|את המילים|מילים מדויקות|שלב אחרי שלב|שלב שלב|ציטוט|תצטט|תמלול|תמליל)/i.test(question);
+  const wantsStats=!wantsMostViewed && /(כמה צפיות|כמה צפיות יש|מספר צפיות|צפיות|כמה לייקים|לייקים|כמה תגובות|תגובות|מה אומרים בתגובות|מה כתבו בתגובות|תגובות על הסרטון)/i.test(question);
   const wantsCommentDetails=/(יותר.*תגובות|פרטים.*תגובות|פירוט.*תגובות|בפירוט.*תגובות|דעות.*תגובות|מה אנשים חושבים|מה אנשים אומרים|מה חוזר בתגובות|מגמה בתגובות|תנתח.*תגובות|ניתוח.*תגובות)/i.test(question);
   const wantsDetails=/(פרטי הסרטון|פרטי סירטון|פרטים על הסרטון|פרטים על סירטון|מידע על הסרטון|מידע על סירטון|מתי עלה|מתי פורסם|תאריך הפרסום|תיאור הסרטון|תיאור של הסרטון|מי העלה|באיזה ערוץ|שם הערוץ)/i.test(question);
   if (context && Array.isArray(context.youtubeResults) && resultMatch && (wantsStats || wantsDetails)) {
@@ -1897,6 +1926,31 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
   }
 
   if(!videos.length) return 'לא מצאתי כרגע תוצאה מתאימה ביוטיוב.';
+  if(wantsMostViewed && !resultMatch && !hasPinnedVideo) {
+    try {
+      const stats=await getYouTubeStats(videos.slice(0,50).map(v=>v.videoId));
+      const metric=/לייקים/.test(question)?'likeCount':'viewCount';
+      const ranked=videos.slice(0,50).filter(v=>stats.get(v.videoId))
+        .sort((a,b)=>Number(stats.get(b.videoId).statistics?.[metric]||0)-Number(stats.get(a.videoId).statistics?.[metric]||0));
+      if(ranked.length) {
+        const top=ranked[0];
+        const item=stats.get(top.videoId);
+        const st=item.statistics||{};
+        if(context) { context.youtubeResults=ranked.slice(0,15); context.currentVideo=top; }
+        const date=item.snippet?.publishedAt?new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'long'}).format(new Date(item.snippet.publishedAt)):'';
+        let answer='מבין '+ranked.length+' הסרטונים שמצאתי, '+(metric==='likeCount'?'הכי הרבה לייקים':'הכי הרבה צפיות')+' יש לסרטון '+
+          sanitizeForYemot(item.snippet?.title||top.title||'')+', בערוץ '+sanitizeForYemot(item.snippet?.channelTitle||top.channelTitle||'')+
+          ', עם '+Number(st.viewCount||0).toLocaleString('he-IL')+' צפיות'+(st.likeCount!=null?' ו-'+Number(st.likeCount).toLocaleString('he-IL')+' לייקים':'')+
+          (date?', פורסם ב'+date:'')+'.';
+        const second=ranked[1]&&stats.get(ranked[1].videoId);
+        if(second) answer+=' במקום השני: '+sanitizeForYemot(second.snippet?.title||ranked[1].title||'')+', עם '+Number(second.statistics?.viewCount||0).toLocaleString('he-IL')+' צפיות.';
+        console.info('[YouTube] most viewed answered',{candidates:ranked.length,videoId:top.videoId});
+        return answer;
+      }
+    } catch(e) {
+      console.warn('[YouTube] most-viewed ranking unavailable',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,200)});
+    }
+  }
   if (context && Array.isArray(context.youtubeResults) && videos.length && !resultMatch) {
     context.youtubeResults = videos.slice(0, 15);
   }
@@ -1971,11 +2025,19 @@ ${transcriptText.slice(0,50000)}
 
 ענה בעברית, להקראה בטלפון, על בסיס התמליל בלבד.
 אם נשאל "על מה דיברו" או "על מה הסרטון" — תן סיכום ברור ומפורט של הנושאים.
-אם נשאל "מה בדיוק היה הדו-שיח" או שאלה דומה — תאר לפי סדר את עיקרי הדברים והטענות/השאלות והתשובות שנאמרו, בלי להמציא ובלי לטעון לציטוט מילה במילה אם התמליל אינו מלא.
+${wantsVerbatim?'המתקשר ביקש לדעת מה בדיוק נאמר: עבור לפי סדר התמליל, שלב אחרי שלב, ובכל שלב צטט במדויק את המילים שנאמרו (ציטוט קצר מתוך התמליל עצמו, בלי לשנות מילים), ואחריו משפט קצר שמסביר. אם התמליל בשפה אחרת, תרגם לעברית וציין שזה תרגום.':'אם נשאל "מה בדיוק היה הדו-שיח" או שאלה דומה — תאר לפי סדר את עיקרי הדברים והטענות/השאלות והתשובות שנאמרו, בלי להמציא.'}
 אם מדובר בשיר — הסבר על מה השיר ומה המסר שלו לפי המילים הזמינות.
 אם המידע בתמליל לא מספיק כדי לענות, אמור זאת במפורש.`;
-        const result=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,false);
-        const answer=String(result?.response?.text?.()||'').trim();
+        let answer='';
+        try {
+          const result=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,false);
+          answer=String(result?.response?.text?.()||'').trim();
+        } catch(e) {
+          // Gemini busy: the independent models read a shorter slice of the same transcript.
+          console.warn('[YouTube] Gemini transcript answer failed; using independent models',{status:geminiErrorStatus(e)});
+          const shortPrompt=prompt.replace(transcriptText.slice(0,50000),transcriptText.slice(0,14000));
+          answer=String(await raceSynthesis(shortPrompt,Number(process.env.YOUTUBE_TRANSCRIPT_SYNTH_MS||12000),{gemini:false,maxTokens:1400,quality:true})||'').trim();
+        }
         if(answer) return 'מצאתי את הסרטון '+title+'. '+sanitizeForYemot(answer);
       }
     } catch(e) {
@@ -1988,7 +2050,7 @@ ${transcriptText.slice(0,50000)}
 
     // Second fallback: direct public-video understanding by Gemini.
     try {
-      const summary=await analyzePublicYouTubeVideo(videoUrl, question);
+      const summary=await analyzePublicYouTubeVideo(videoUrl, question, {verbatim:wantsVerbatim});
       if(summary && String(summary).trim())
         return 'מצאתי את הסרטון '+title+'. '+sanitizeForYemot(summary);
     } catch(e) {
@@ -4048,7 +4110,7 @@ async function callHandler(call) {
       // the caller for the generic 30-second network budget.
       const recordingDownloadTimeoutMs=Math.min(REQUEST_TIMEOUT_MS,
         Math.max(2500,Number(process.env.BRANCH1_RECORDING_DOWNLOAD_TIMEOUT_MS || 6000)));
-      const response=await withTimeout(yemotApi.download_file('ivr2:'+recordPath), recordingDownloadTimeoutMs, 'yemotApi.download_file');
+      const response=call.selfTest?{data:Buffer.from('selftest')}:await withTimeout(yemotApi.download_file('ivr2:'+recordPath), recordingDownloadTimeoutMs, 'yemotApi.download_file');
       audioBuffer=response.data;
     } catch(e) {
       logDetailedError('recording download',e);
@@ -4072,7 +4134,7 @@ async function callHandler(call) {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
       const asrMeta={};
-      userTranscript=correctKnownSpeechNames(await transcribePhoneAudio(audioBuffer,{failFastOnNoSpeech:true,secondOpinion:true,meta:asrMeta}));
+      userTranscript=correctKnownSpeechNames(call.selfTest?call.selfTest.next():await transcribePhoneAudio(audioBuffer,{failFastOnNoSpeech:true,secondOpinion:true,meta:asrMeta}));
       turnContext.asrConfidence=(asrMeta.confidence===undefined||asrMeta.confidence===null||(asrMeta.weakWords||[]).length)?null:asrMeta.confidence;
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length,elapsedMs:Date.now()-turnStartedAt});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
@@ -4311,14 +4373,14 @@ async function callHandler(call) {
     }
     const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
       phone:normalizePhone(callerPhone),callId:String(callId||''),user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript) || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText};
-    conversationLog.push(entry);
+    if(!call.selfTest) conversationLog.push(entry);
     if(conversationLog.length>MAX_CONVERSATION_LOG)
       conversationLog.splice(0,conversationLog.length-MAX_CONVERSATION_LOG);
     // The spoken answer is already ready. Do not make the caller wait for
     // Supabase/network persistence before Yemot starts the next playback/read.
     // In-memory history is updated synchronously; durable persistence continues
     // asynchronously and reports failures without interrupting the call.
-    void persistConversationEntry(entry)
+    void (call.selfTest?Promise.resolve():persistConversationEntry(entry))
       .then(()=>console.info('[CALL_FLOW] conversation_saved', { callId: activeKey, transcriptReady: !!userTranscript }))
       .catch(err=>console.warn('[CALL_FLOW] background_conversation_save_failed',{
         callId:activeKey,status:geminiErrorStatus(err),message:String(err?.message||err).slice(0,180)
@@ -4827,6 +4889,38 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
   serverTime:new Date().toISOString()
 }));
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
+
+// End-to-end check of branch 1 after each build: one simulated call runs the
+// real phone handler (routing, search, websites, YouTube, video) with text in
+// place of recorded speech, and logs each question, answer and time. Nothing
+// is saved to caller memory or the dashboard.
+const BRANCH1_E2E_QUESTIONS=[
+  'תחפש באינטרנט מי ראש עיריית בית שמש היום',
+  'פתח את אתר בנק הפועלים ותקרא מה כתוב בעמוד הראשי',
+  'תמשיך',
+  'מה הסרטון עם הכי הרבה צפיות ביוטיוב של הרב יצחק יוסף',
+  'מה בדיוק הוא אמר בסרטון הזה, שלב אחרי שלב',
+  'תמחיש לי מה רואים בסרטון'
+];
+async function runBranch1EndToEndSelfTest(questions=BRANCH1_E2E_QUESTIONS) {
+  let index=0;
+  let askedAt=Date.now();
+  const id='e2e-selftest-'+Date.now();
+  const call={
+    selfTest:{next:()=>questions[index++]||''},
+    values:{ApiPhone:'0000000001',ApiCallId:id},callId:id,
+    read:async items=>{
+      const text=(Array.isArray(items)?items:[]).map(x=>x?.data||'').join(' ').trim();
+      if(index>0) console.info('[E2E_SELFTEST]',JSON.stringify({step:index,question:questions[index-1],ms:Date.now()-askedAt,reply:text.slice(0,900)}));
+      if(index>=questions.length) throw new Error('call was disconnected by the caller');
+      askedAt=Date.now();
+      return '/e2e-selftest.wav';
+    },
+    id_list_message:async()=>{},go_to_folder:async()=>{},hangup:async()=>{}
+  };
+  await callHandler(call);
+  console.info('[E2E_SELFTEST] finished',{steps:questions.length});
+}
 // Shows whether each web key works (never the keys themselves). The result is
 // cached for hours, so opening this page costs at most one tiny call per provider.
 app.get('/health/providers', rateLimit(6, 60 * 1000, 'provider-health'), async (req,res)=>{
@@ -5046,6 +5140,7 @@ app.listen(port,async()=>{
     const builtAt=Number(readFileSync(new URL('./.build-time',import.meta.url),'utf8'));
     if(builtAt && Date.now()-builtAt<Number(process.env.PROVIDER_HEALTH_AFTER_BUILD_MS||20*60*1000)) {
       setTimeout(()=>providerHealth({force:true}).catch(e=>console.warn('[WEB_PROVIDERS] health check failed',String(e?.message||e).slice(0,160))),4000);
+      if(String(process.env.BRANCH1_E2E_SELFTEST||'on')!=='off') setTimeout(()=>runBranch1EndToEndSelfTest().catch(e=>console.warn('[E2E_SELFTEST] crashed',String(e?.message||e).slice(0,200))),20000);
     }
   } catch {}
   await loadConversationLog();
