@@ -1265,19 +1265,18 @@ async function analyzePublicYouTubeVideo(videoUrl, question, {verbatim=false,vis
   const keys=[...new Set((apiKeys||[]).filter(Boolean))];
   if (!keys.length) throw Object.assign(new Error('Gemini key unavailable for YouTube video analysis'), {status:503});
   const models=[...new Set([(process.env.YOUTUBE_GEMINI_MODEL||'gemini-3.8-flash').trim(),'gemini-3.6-flash','gemini-3.5-flash'])];
-  let lastError=null;
-  for(const model of models) for(const key of keys) {
-    try {
-      const text=await analyzePublicYouTubeVideoOnce(videoUrl,question,{key,model,verbatim,visual});
-      if(String(text||'').trim()) return text;
-    } catch(e) {
-      lastError=e;
-      const status=geminiErrorStatus(e);
-      console.warn('[YouTube] video analysis attempt failed',{model,status,message:String(e?.message||e).slice(0,200)});
-      if(![429,500,502,503,504,408,404].includes(status)) throw e;
-    }
-  }
-  throw lastError||Object.assign(new Error('YouTube video analysis returned no text'),{status:502});
+  // Watching a video takes Gemini 15-40 seconds, so the models run in parallel
+  // (each on its own key where possible) and the first full answer wins. A busy
+  // model (503) drops out at once instead of holding the caller.
+  const timeoutMs=Number(process.env.YOUTUBE_VIDEO_TIMEOUT_MS||45000);
+  const attempts=models.map((model,i)=>{
+    const key=keys[i%keys.length];
+    return withTimeout(analyzePublicYouTubeVideoOnce(videoUrl,question,{key,model,verbatim,visual}),timeoutMs,'Gemini YouTube video analysis '+model)
+      .then(text=>{ if(!String(text||'').trim()) throw Object.assign(new Error('empty video analysis'),{status:502}); console.info('[YouTube] video analysis answered',{model}); return text; })
+      .catch(e=>{ console.warn('[YouTube] video analysis attempt failed',{model,status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,200)}); throw e; });
+  });
+  try { return await Promise.any(attempts); }
+  catch(e) { throw (e?.errors||[]).find(x=>geminiErrorStatus(x)===429)||e?.errors?.[0]||Object.assign(new Error('YouTube video analysis returned no text'),{status:502}); }
 }
 
 async function analyzePublicYouTubeVideoOnce(videoUrl, question, {key, model, verbatim=false, visual=false}) {
@@ -1318,7 +1317,7 @@ async function analyzePublicYouTubeVideoOnce(videoUrl, question, {key, model, ve
         {type:'video',uri:videoUrl}
       ]
     })
-  }), REQUEST_TIMEOUT_MS, 'Gemini YouTube video analysis');
+  }), Number(process.env.YOUTUBE_VIDEO_TIMEOUT_MS||45000), 'Gemini YouTube video analysis');
 
   const data=await response.json().catch(()=>({}));
   if(!response.ok) {
@@ -2026,10 +2025,14 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
     const videoUrl='https://www.youtube.com/watch?v='+selected.videoId;
     const title=sanitizeForYemot(selected.title||'הסרטון שנמצא');
 
+    // Gemini starts watching the video at once, in parallel with the caption
+    // download, so a missing or blocked transcript costs the caller no extra time.
+    const videoAnalysis=analyzePublicYouTubeVideo(videoUrl, question, {verbatim:wantsVerbatim});
+    videoAnalysis.catch(()=>{});
     // Prefer an actual YouTube subtitle/auto-caption transcript so content
     // questions are answered from the video's spoken words, not its title.
     try {
-      const transcriptData=await getYouTubeTranscript(selected.videoId);
+      const transcriptData=await withTimeout(getYouTubeTranscript(selected.videoId),Number(process.env.YOUTUBE_TRANSCRIPT_TIMEOUT_MS||15000),'YouTube transcript');
       const transcriptText=String(transcriptData?.text||'').trim();
       if(transcriptText) {
         const prompt=`${EXCLUSIVE_INSTRUCTION}
@@ -2064,7 +2067,7 @@ ${wantsVerbatim?'המתקשר ביקש לדעת מה בדיוק נאמר: עבו
 
     // Second fallback: direct public-video understanding by Gemini.
     try {
-      const summary=await analyzePublicYouTubeVideo(videoUrl, question, {verbatim:wantsVerbatim});
+      const summary=await videoAnalysis;
       if(summary && String(summary).trim())
         return 'מצאתי את הסרטון '+title+'. '+sanitizeForYemot(summary);
     } catch(e) {
