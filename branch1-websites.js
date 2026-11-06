@@ -47,7 +47,7 @@ export function websiteChunk(context, restart=false, maxChars=850) {
     (end<page.content.length?' להמשך אפשר לומר תמשיך.':' זה סוף הטקסט הזמין בעמוד.');
 }
 
-export async function answerBranch1Website(q,context,{search,read=readSinglePublicWebsitePage,extract,logger=console}={}) {
+export async function answerBranch1Website(q,context,{search,read=readSinglePublicWebsitePage,extract,official=null,logger=console}={}) {
   const pages=context.currentWebsitePages||[];
   const current=pages[context.currentWebsitePageIndex||0];
   const site=requestedSiteName(q);
@@ -92,6 +92,10 @@ export async function answerBranch1Website(q,context,{search,read=readSinglePubl
   }
   if(!url&&!site&&context.pendingWebsiteUrl)return load(context.pendingWebsiteUrl);
   if(!url&&!site)return 'איזה אתר לפתוח ולקרוא? אפשר לומר את שמו או את כתובתו.';
+  if(!url&&official&&!/(?:כתבה|מאמר|עמוד על|דף של)/u.test(q)) {
+    const found=await official(site).catch(()=>null);
+    if(found?.url){url=new URL(found.url).origin+'/';logger.info('[BRANCH1 WEBSITE] official site from knowledge panel',{host:new URL(url).hostname});}
+  }
   if(!url) {
     const results=await search(site+' אתר רשמי',{timeoutMs:2200});
     const selected=selectWebsiteResult('פתח אתר '+site,results);

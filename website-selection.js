@@ -17,9 +17,13 @@ export function selectWebsiteResult(question, results) {
   const scored=results.map((item,index)=>{
     const haystack=(String(item?.title||'')+' '+String(item?.url||'')).toLowerCase();
     const matchedTokens=tokens.filter(token=>haystack.includes(token));
-    const score=matchedTokens.length*2+(index===0?0.1:0);
+    let score=matchedTokens.length*2+(index===0?0.1:0);
     try {
       const parsed=new URL(item.url);
+      // "Open the X website" means X's own site. A homepage outranks a deep page
+      // on a directory or review site that merely mentions X in its title.
+      const depth=parsed.pathname.split('/').filter(Boolean).length;
+      if(matchedTokens.length) score+=depth===0?1.5:depth===1?0.5:-0.5;
       if(parsed.protocol!=='https:' && parsed.protocol!=='http:') {
         return {item,score:-Infinity,index,matchedTokens:[]};
       }

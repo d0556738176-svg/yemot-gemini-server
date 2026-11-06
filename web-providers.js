@@ -158,6 +158,24 @@ export async function searchSerper(query, { timeoutMs = 3500, count = 8 } = {}) 
   return normalizeResults(items, count);
 }
 
+/**
+ * The official website of a named organization from Google's knowledge panel
+ * (via Serper). Directory and review sites often outrank the official site for
+ * "<name> אתר רשמי"; the knowledge panel names the organization's own site.
+ */
+export async function findOfficialWebsite(name, { timeoutMs = 2500 } = {}) {
+  const key = env('SERPER_API_KEY');
+  if (!key || !String(name || '').trim()) return null;
+  const data = await fetchJson('https://google.serper.dev/search', {
+    method: 'POST', timeoutMs, label: 'Serper official site',
+    headers: { 'x-api-key': key },
+    body: { q: String(name).slice(0, 120) + ' אתר רשמי', gl: 'il', hl: 'iw', num: 5 }
+  });
+  const site = data?.knowledgeGraph?.website;
+  if (site && /^https?:\/\//i.test(site)) return { url: site, title: data.knowledgeGraph.title || name, source: 'knowledgeGraph' };
+  return null;
+}
+
 export async function searchJina(query, { timeoutMs = 4500, count = 6 } = {}) {
   const key = env('JINA_API_KEY');
   if (!key) throw Object.assign(new Error('Jina key not configured'), { status: 412 });
