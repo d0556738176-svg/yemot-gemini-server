@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "postinstall": "node -e \"require('fs').writeFileSync('.build-time',String(Date.now()))\""
   },
   "engines": {
     "node": ">=22"
