@@ -5119,6 +5119,33 @@ app.listen(port,async()=>{
     console.info('[FINAL_CHECK]',JSON.stringify(report));
     await p.writeCacheJson(MARK,{at:new Date().toISOString(),report}).catch(()=>{});
   })().catch(e=>console.warn('[FINAL_CHECK] failed',String(e?.message||e).slice(0,300)));
+  // 06.11: proof from Yemot that the Hebrew lines are in the picture: a part of
+  // the Tesla video is read back, 4 frames are read by Gemini, the text is logged.
+  void (async()=>{
+    const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
+    const MARK='ivr2:/2/selftest/burn_check_v1.json';
+    if(await p.readCacheJson(MARK).catch(()=>null))return;
+    await new Promise(r=>setTimeout(r,60000));
+    const { videoReceiptPath } = await import('./youtube-video-download.js');
+    const rc=await p.readCacheJson(videoReceiptPath('3SAxXUIre28')).catch(()=>null);
+    if(rc?.subtitles!=='hebrew_in_picture'&&!(rc?.files||[]).length)return;
+    const part=(rc.files||[])[1]||(rc.files||[])[0];
+    const u=new URL(p.YEMOT_API_BASE+'/DownloadFile');u.searchParams.set('token',p.yemotApiKey());u.searchParams.set('path',part.remote);
+    const fsm=await import('node:fs/promises');const os=await import('node:os');
+    const dir=await fsm.mkdtemp(os.tmpdir()+'/burncheck-');const f=dir+'/part.mp4';
+    await fsm.writeFile(f,Buffer.from(await (await fetch(u)).arrayBuffer()));
+    const ffmpegPath=(await import('ffmpeg-static')).default;
+    const sub=await import('./youtube-subtitles.js');
+    const { spawn: spB }=await import('node:child_process');const info=await new Promise(res=>{const c=spB(ffmpegPath,['-hide_banner','-i',f]);let e='';c.stderr.on('data',d=>e+=d);c.on('close',()=>res(e));c.on('error',()=>res(''));});
+    const m=/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(info);const sec=m?(+m[1])*3600+(+m[2])*60+(+m[3]):0;
+    let seen=[];
+    const burned=await sub.hasBurnedHebrewSubtitles(f,dir,{ffmpegPath,seconds:sec,onSeen:l=>{seen=l;}});
+    const vid=(/Video: [^\n]*?(\d{3,4})x(\d{3,4})/.exec(info)||[]).slice(1,3).join('x');
+    const out={file:part.remote.split('/').pop(),bytes:part.bytes,picture:vid,seconds:Math.round(sec),hebrewTextInPicture:burned,linesReadFromPicture:seen};
+    console.info('[BURN_CHECK]',JSON.stringify(out));
+    await fsm.rm(dir,{recursive:true,force:true}).catch(()=>{});
+    if(burned!==null)await p.writeCacheJson(MARK,{at:new Date().toISOString(),out}).catch(()=>{});
+  })().catch(e=>console.warn('[BURN_CHECK] failed',String(e?.message||e).slice(0,200)));
   if(process.env.APIFY_TOKEN&&process.env.DEEPGRAM_API_KEY) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
     const MARK='ivr2:/2/selftest/subtitles_v4.json';

@@ -354,7 +354,10 @@ export async function burnSubtitles(videoFile, srtText, tempDir, { ffmpegPath, l
     // hour for 10 minutes of video and memory reached 500 MB. ultrafast, one
     // thread and a smaller picture (see height) keep it fast and safe.
     const p = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-stats', '-y', '-i', videoFile, '-map', '0:v:0', '-map', '0:a:0?', '-vf', vf,
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-threads', '1', '-x264-params', 'rc-lookahead=10:ref=1',
+      // ultrafast makes big files (the 10-minute Tesla video needed 7 parts):
+      // a bitrate ceiling keeps them small (720p 1.8 Mb/s, 480p 0.9 Mb/s).
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-maxrate', (height && height <= 480 ? '900k' : '1800k'), '-bufsize', (height && height <= 480 ? '1800k' : '3600k'),
+      '-pix_fmt', 'yuv420p', '-threads', '1', '-x264-params', 'rc-lookahead=10:ref=1',
       '-c:a', 'copy', '-movflags', '+faststart', out], { stdio: ['ignore', 'ignore', 'pipe'] });
     let e = '', lastLog = Date.now();
     p.stderr.on('data', d => {
