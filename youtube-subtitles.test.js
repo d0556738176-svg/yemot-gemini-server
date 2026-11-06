@@ -44,7 +44,18 @@ test('a failing group is split and every line still gets Hebrew', async () => {
     if (lines.length > 2) return new Response('{}', { status: 500 });
     return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(lines.map(l => 'עברית ' + l)) }] } }] }), { status: 200 });
   };
-  const r = await translateCues(cues, { env: { GEMINI_API_KEYS: 'k', GROQ_API_KEY: '' }, fetchImpl, log: {} });
+  const r = await translateCues(cues, { env: { GEMINI_API_KEYS: 'k', GROQ_API_KEY: '' }, fetchImpl, log: {}, maxWaitMs: 0 });
   assert.equal(r.translated, 8);
   assert.ok(r.cues.every(c => c.text.startsWith('עברית')));
+});
+
+test('backup transcription (Whisper) gives timed words', async () => {
+  const { whisperTimed } = await import('./youtube-subtitles.js');
+  const fsm = await import('node:fs/promises');
+  await fsm.writeFile('/tmp/w.ogg', Buffer.from('x'));
+  const fetchImpl = async () => new Response(JSON.stringify({ language: 'hebrew', words: [{ word: 'שלום', start: 0.1, end: 0.5 }, { word: 'לכולם', start: 0.6, end: 1.0 }] }), { status: 200 });
+  const r = await whisperTimed('/tmp/w.ogg', { env: { GROQ_API_KEY: 'g' }, fetchImpl, log: {} });
+  assert.equal(r.language, 'he');
+  assert.equal(r.words.length, 2);
+  assert.equal(r.words[1].punctuated_word, 'לכולם');
 });

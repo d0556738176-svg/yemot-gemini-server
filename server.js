@@ -3915,7 +3915,17 @@ function startYouTubeVideoJob(video) {
       fetchVideoFacts, titleFileName, log: console,
       nextFolder: async () => (await import('./download-folders.js')).nextFolder('video', { readJson: x => p.readCacheJson(x) }),
       uploadCap: async () => (await import('./youtube-authorized-playback.js')).uploadCapBytes(),
-      hebrewSubtitles: async (file, dir) => (await import('./youtube-subtitles.js')).hebrewSubtitlesFor(file, dir, { ffmpegPath, log: console }),
+      hebrewSubtitles: async (file, dir) => {
+        const { hebrewSubtitlesFor } = await import('./youtube-subtitles.js');
+        let r = await hebrewSubtitlesFor(file, dir, { ffmpegPath, log: console });
+        if (!r) { // a full failure: wait for the services and try once more
+          console.warn('[SUBTITLES] first attempt failed; trying again in 90 seconds', { videoId: id });
+          await new Promise(x => setTimeout(x, 90000));
+          r = await hebrewSubtitlesFor(file, dir, { ffmpegPath, log: console });
+          if (!r) console.error('[SUBTITLES] FAILED twice; video saved without Hebrew subtitles', { videoId: id });
+        }
+        return r;
+      },
       countSaved: async () => (await import('./download-folders.js')).countSaved('video', { readJson: x => p.readCacheJson(x), writeJson: (x, d) => p.writeCacheJson(x, d) }),
     });
   })().then(r => { state.status = 'ready'; state.remote = r.remote; return videoPendingUpdate(l => l.filter(x => x !== id)); })
@@ -5057,6 +5067,51 @@ app.listen(port,async()=>{
     console.info('[SONG_NAME_TEST] saving a real song as a caller would',{videoId:pick.videoId,title:pick.title});
     await pb.downloadAuthorizedAudioToYemot(pick.videoId);
   })().catch(e=>console.warn('[SONG_NAME_TEST] failed',String(e?.message||e).slice(0,200)));
+  // 06.11 final check of what is really in Yemot: the Tesla video parts and a
+  // fresh song, read back and inspected (picture, details, Hebrew subtitles).
+  if(process.env.APIFY_TOKEN&&process.env.YOUTUBE_API_KEY) void (async()=>{
+    const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
+    const MARK='ivr2:/2/selftest/final_check_v1.json';
+    if(await p.readCacheJson(MARK).catch(()=>null))return;
+    await new Promise(r=>setTimeout(r,120000));
+    const ffmpegPath=(await import('ffmpeg-static')).default;
+    const { inspectMedia } = await import('./youtube-cover-art.js');
+    const { spawn: sp } = await import('node:child_process');
+    const fsm=await import('node:fs/promises');const os=await import('node:os');
+    const fetchBack=async remote=>{const u=new URL(p.YEMOT_API_BASE+'/DownloadFile');u.searchParams.set('token',p.yemotApiKey());u.searchParams.set('path',remote);
+      const f=os.tmpdir()+'/check_'+Date.now()+remote.slice(remote.lastIndexOf('.'));await fsm.writeFile(f,Buffer.from(await (await fetch(u)).arrayBuffer()));return f;};
+    const srtOf=f=>new Promise(res=>{const c=sp(ffmpegPath,['-hide_banner','-loglevel','error','-i',f,'-map','0:s:0','-f','srt','-']);let o='';c.stdout.on('data',d=>o+=d);c.on('close',()=>res(o));c.on('error',()=>res(''));});
+    const report={};
+    // Video: every part of the Tesla video.
+    const { videoReceiptPath } = await import('./youtube-video-download.js');
+    const rc=await p.readCacheJson(videoReceiptPath('3SAxXUIre28')).catch(()=>null);
+    report.video=[];
+    for(const f of (rc?.files||[]).filter(x=>/\.mp4$/.test(x.remote))){
+      const local=await fetchBack(f.remote);const info=await inspectMedia(local,ffmpegPath);const srt=await srtOf(local);
+      const lines=srt.split('\n').filter(l=>l&&!/^\d+$/.test(l)&&!/-->/.test(l));
+      const english=lines.filter(l=>!/[א-ת]/.test(l)&&/[A-Za-z]{3,}/.test(l));
+      report.video.push({file:f.remote.split('/').pop(),bytes:f.bytes,picture:info.picture,title:info.tags.title,artist:info.tags.artist,date:info.tags.date,tagCount:Object.keys(info.tags).length,hebrewLines:lines.length-english.length,englishLines:english.length,sample:lines.slice(0,3)});
+      await fsm.rm(local,{force:true}).catch(()=>{});
+    }
+    // Song: a fresh song saved exactly as from the phone, then read back.
+    const { searchYouTubeVideos } = await import('./youtube-ivr.js');
+    const list=await searchYouTubeVideos('אברהם פריד שיר',{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
+    let pick=null;
+    for(const v of list){if(/מחרוזת|קומזיץ|הופעה|live|medley|concert/i.test(v.title||''))continue;if(!(await pb.lookupCachedYouTubeAudio(v.videoId).catch(()=>null))){pick=v;break;}}
+    if(pick){
+      await pb.downloadAuthorizedAudioToYemot(pick.videoId);
+      const owners=await p.readCacheJson('ivr2:/2/youtubeaudio/download_owners.json').catch(()=>({}))||{};
+      const name=Object.entries(owners).find(([,id])=>id===pick.videoId)?.[0];
+      const l=await (await fetch(p.YEMOT_API_BASE+'/GetIVR2Dir?'+new URLSearchParams({token:p.yemotApiKey(),path:'ivr2:/אודיו'}))).json().catch(()=>null);
+      const file=(l?.files||[]).find(x=>name&&String(x.name).startsWith(name));
+      if(file){const local=await fetchBack('ivr2:/אודיו/'+file.name);const info=await inspectMedia(local,ffmpegPath);
+        report.song={youtube:pick.title,file:file.name,picture:info.picture,pictureSize:info.pictureSize,audio:info.audio,tags:Object.fromEntries(Object.entries(info.tags).map(([k,v])=>[k,String(v).slice(0,80)]))};
+        await fsm.rm(local,{force:true}).catch(()=>{});}
+      else report.song={youtube:pick.title,error:'file not found in ivr2:/אודיו',name};
+    }
+    console.info('[FINAL_CHECK]',JSON.stringify(report));
+    await p.writeCacheJson(MARK,{at:new Date().toISOString(),report}).catch(()=>{});
+  })().catch(e=>console.warn('[FINAL_CHECK] failed',String(e?.message||e).slice(0,300)));
   if(process.env.APIFY_TOKEN&&process.env.DEEPGRAM_API_KEY) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
     const MARK='ivr2:/2/selftest/subtitles_v4.json';

@@ -225,3 +225,22 @@ export async function inspectMedia(file, ffmpegPath) {
   return { tags, picture, pictureSize: pm ? pm[1] + 'x' + pm[2] : null,
     audio: am ? { codec: am[1], hz: Number(am[2]), channels: am[3], sample: am[4] || null, kbps: am[5] ? Number(am[5]) : null } : null };
 }
+
+// A step that reaches YouTube is tried up to 3 times (2 s, then 6 s apart), so
+// a slow moment never leaves a saved file without its picture or details.
+export async function retrying(fn, { tries = 3, waits = [2000, 6000], ok = x => x != null } = {}) {
+  let last = null;
+  for (let i = 0; i < tries; i++) {
+    try { last = await fn(); if (ok(last)) return last; } catch { last = null; }
+    if (i < tries - 1) await new Promise(r => setTimeout(r, waits[i] ?? waits[waits.length - 1]));
+  }
+  return last;
+}
+
+// The picture for a saved file: YouTube's thumbnail, made 16:9; if shrinking
+// fails the original picture is used rather than none.
+export async function coverFor(videoId, { ffmpegPath, maxWidth = 1280, quality = 2, fetchThumbnailImpl = fetchThumbnail, normalize = normalizeCover } = {}) {
+  const thumb = await retrying(() => fetchThumbnailImpl(videoId));
+  if (!thumb?.jpeg) return null;
+  try { return await normalize(thumb.jpeg, { ffmpegPath, maxWidth, quality }); } catch { return thumb.jpeg; }
+}

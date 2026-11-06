@@ -86,6 +86,35 @@ export async function transcribeTimed(audioFile, { env = process.env, fetchImpl 
   return all ? { best, tried } : best;
 }
 
+// Backup transcription when Deepgram gives nothing (no credit, outage): Groq's
+// Whisper with word timings. Returns the same shape as transcribeTimed.
+export async function whisperTimed(audioFile, { env = process.env, fetchImpl = fetch, log = console, mime = 'audio/ogg', language } = {}) {
+  const key = String(env.GROQ_API_KEY || '').trim();
+  if (!key) return null;
+  const body = await fs.readFile(audioFile);
+  if (body.length > 24 * 1024 * 1024) { log.warn?.('[SUBTITLES] backup transcription skipped: audio too large', { bytes: body.length }); return null; }
+  for (const model of ['whisper-large-v3', 'whisper-large-v3-turbo']) {
+    try {
+      const fd = new FormData();
+      fd.append('file', new Blob([body], { type: mime }), mime === 'audio/mpeg' ? 'speech.mp3' : 'speech.ogg');
+      fd.append('model', model);
+      fd.append('response_format', 'verbose_json');
+      fd.append('timestamp_granularities[]', 'word');
+      fd.append('timestamp_granularities[]', 'segment');
+      if (language) fd.append('language', language);
+      const r = await fetchImpl('https://api.groq.com/openai/v1/audio/transcriptions', { method: 'POST', headers: { authorization: 'Bearer ' + key }, body: fd, signal: AbortSignal.timeout(15 * 60 * 1000) });
+      const j = await r.json().catch(() => null);
+      if (!r.ok) { log.warn?.('[SUBTITLES] backup transcription refused', { model, status: r.status, message: String(j?.error?.message || '').slice(0, 120) }); continue; }
+      const words = (j?.words || []).map(w => ({ word: w.word, punctuated_word: String(w.word || '').trim(), start: Number(w.start), end: Number(w.end), confidence: 0.9 }));
+      const lang = String(j?.language || '').toLowerCase();
+      const code = /hebrew/.test(lang) ? 'he' : /english/.test(lang) ? 'en' : lang.slice(0, 2);
+      log.info?.('[SUBTITLES] backup transcription', { model, language: code, words: words.length });
+      if (words.length) return { language: code, words, conf: 0.9, setup: { model, language: code }, model: 'groq/' + model };
+    } catch (e) { log.warn?.('[SUBTITLES] backup transcription failed', { model, message: String(e?.message || e).slice(0, 120) }); }
+  }
+  return null;
+}
+
 function parseLines(text, n) {
   const s = String(text || '').replace(/^```(?:json)?|```$/gm, '').trim();
   try {
@@ -101,7 +130,7 @@ const SYSTEM = 'אתה מתרגם כתוביות לעברית. תקבל מערך
 
 async function geminiTranslate(lines, env, fetchImpl, system = SYSTEM) {
   const keys = String(env.GEMINI_API_KEYS || env.GEMINI_API_KEY || '').split(',').map(x => x.trim()).filter(Boolean);
-  const models = String(env.SUBTITLE_GEMINI_MODELS || env.GEMINI_MODELS || 'gemini-3.6-flash,gemini-3.5-flash-lite').split(',').map(x => x.trim()).filter(Boolean);
+  const models = [...new Set(String(env.SUBTITLE_GEMINI_MODELS || env.GEMINI_MODELS || '').split(',').concat(['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash']).map(x => x.trim()).filter(Boolean))];
   for (const model of models) for (const key of keys) {
     try {
       const r = await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(key), {
@@ -120,7 +149,7 @@ async function geminiTranslate(lines, env, fetchImpl, system = SYSTEM) {
 
 // One group of lines -> Hebrew; a group that fails is split in half and
 // retried, down to single lines, so a long video never keeps English lines.
-async function translateGroup(texts, system, env, fetchImpl, log, depth = 0) {
+async function translateGroup(texts, system, env, fetchImpl, log, depth = 0, ctx = { waited: 0, max: 10 * 60 * 1000 }) {
   let he = await geminiTranslate(texts, env, fetchImpl, system);
   for (let tryN = 0; !he && tryN < 2; tryN++) {
     he = parseLines(await groqChat([{ role: 'system', content: system }, { role: 'user', content: JSON.stringify(texts) }], { env, fetchImpl, maxTokens: 300 + texts.length * 120, timeoutMs: 60000 }), texts.length);
@@ -129,20 +158,30 @@ async function translateGroup(texts, system, env, fetchImpl, log, depth = 0) {
   if (he) return he;
   if (texts.length > 1 && depth < 6) {
     const mid = Math.ceil(texts.length / 2);
-    const a = await translateGroup(texts.slice(0, mid), system, env, fetchImpl, log, depth + 1);
-    const b = await translateGroup(texts.slice(mid), system, env, fetchImpl, log, depth + 1);
+    const a = await translateGroup(texts.slice(0, mid), system, env, fetchImpl, log, depth + 1, ctx);
+    const b = await translateGroup(texts.slice(mid), system, env, fetchImpl, log, depth + 1, ctx);
     return [...a, ...b];
+  }
+  // A busy service is temporary: wait and try this group again before giving up.
+  for (const wait of [20000, 60000, 120000]) {
+    if (ctx.waited + wait > ctx.max) break; // total waiting per video is bounded
+    ctx.waited += wait;
+    await sleep(wait);
+    he = await geminiTranslate(texts, env, fetchImpl, system)
+      || parseLines(await groqChat([{ role: 'system', content: system }, { role: 'user', content: JSON.stringify(texts) }], { env, fetchImpl, maxTokens: 300 + texts.length * 120, timeoutMs: 60000 }), texts.length);
+    if (he) return he;
   }
   log.warn?.('[SUBTITLES] line left as is', { text: texts[0]?.slice(0, 60) });
   return texts.map(() => null);
 }
 
-export async function translateCues(cues, { env = process.env, fetchImpl = fetch, log = console, batch = 25, system = SYSTEM } = {}) {
+export async function translateCues(cues, { env = process.env, fetchImpl = fetch, log = console, batch = 25, system = SYSTEM, maxWaitMs = 10 * 60 * 1000 } = {}) {
   const out = [];
+  const ctx = { waited: 0, max: maxWaitMs };
   let ok = 0;
   for (let i = 0; i < cues.length; i += batch) {
     const part = cues.slice(i, i + batch).map(c => c.text);
-    const he = await translateGroup(part, system, env, fetchImpl, log);
+    const he = await translateGroup(part, system, env, fetchImpl, log, 0, ctx);
     part.forEach((t, k) => { if (he[k]) ok++; out.push({ ...cues[i + k], text: (he[k] || t).replace(/\s+/g, ' ').trim() }); });
   }
   if (ok < cues.length) log.warn?.('[SUBTITLES] some lines not translated', { translated: ok, of: cues.length });
@@ -217,9 +256,27 @@ export async function hebrewSubtitlesFor(videoFile, tempDir, { ffmpegPath, env =
     // 1. Which language? A sample of up to 3 minutes, every setup plus Hebrew.
     const sampleStart = seconds > 300 ? Math.floor(seconds * 0.15) : 0;
     const sample = await extract('sample', ['-ss', String(sampleStart), '-t', '180']);
-    const probe = await transcribeTimed(sample.file, { env, fetchImpl, log, mime: sample.mime, all: true, setups: [...DEEPGRAM_SETUPS, { model: 'nova-3', language: 'he' }] });
+    let probe = await transcribeTimed(sample.file, { env, fetchImpl, log, mime: sample.mime, all: true, setups: [...DEEPGRAM_SETUPS, { model: 'nova-3', language: 'he' }] });
     await fs.rm(sample.file, { force: true }).catch(() => {});
-    if (!probe?.tried?.length) return null;
+    // Little speech in the sample (music, an opening): take another from the middle.
+    if (seconds > 240 && Math.max(0, ...(probe?.tried || []).map(x => x.words.length)) < 20) {
+      const mid = await extract('sample2', ['-ss', String(Math.floor(seconds * 0.5)), '-t', '180']);
+      const p2 = await transcribeTimed(mid.file, { env, fetchImpl, log, mime: mid.mime, all: true, setups: [...DEEPGRAM_SETUPS, { model: 'nova-3', language: 'he' }] });
+      await fs.rm(mid.file, { force: true }).catch(() => {});
+      if (Math.max(0, ...(p2?.tried || []).map(x => x.words.length)) > Math.max(0, ...(probe?.tried || []).map(x => x.words.length))) probe = p2;
+    }
+    if (!probe?.tried?.length) {
+      // Deepgram unavailable: the backup service does the whole job.
+      const full0 = await extract('speech', []);
+      const w = await whisperTimed(full0.file, { env, fetchImpl, log, mime: full0.mime });
+      await fs.rm(full0.file, { force: true }).catch(() => {});
+      if (!w || w.words.length < 5) return null;
+      const cues0 = buildCues(w.words);
+      const heb0 = /^(he|iw)/.test(w.language);
+      const outCues = heb0 ? await correctHebrewCues(cues0, { env, fetchImpl, log }) : (await translateCues(cues0, { env, fetchImpl, log })).cues;
+      log.info?.('[SUBTITLES] Hebrew subtitles ready', { language: w.language, mode: heb0 ? 'hebrew_speech_written' : 'translated', cues: outCues.length, model: w.model, backup: true, ms: Date.now() - t0 });
+      return { srt: toSrt(outCues), language: w.language, cues: outCues.length, mode: heb0 ? 'hebrew' : 'translated' };
+    }
     const he = probe.tried.find(x => x.setup.language === 'he');
     const detect = probe.tried.filter(x => x !== he).sort((a, b) => b.words.length - a.words.length)[0];
     const saysHebrew = probe.tried.some(x => x !== he && /^(he|iw)/i.test(x.language));
@@ -231,6 +288,7 @@ export async function hebrewSubtitlesFor(videoFile, tempDir, { ffmpegPath, env =
     const setup = hebrew ? { model: 'nova-3', language: 'he' } : (language ? { model: detect.setup.model, language } : detect.setup);
     let tr = await transcribeTimed(full.file, { env, fetchImpl, log, mime: full.mime, setups: [setup] });
     if (!tr?.words?.length && !hebrew) tr = await transcribeTimed(full.file, { env, fetchImpl, log, mime: full.mime });
+    if (!tr?.words?.length) tr = await whisperTimed(full.file, { env, fetchImpl, log, mime: full.mime, language: hebrew ? 'he' : (language || undefined) });
     await fs.rm(full.file, { force: true }).catch(() => {});
     if (!tr || tr.words.length < 5) { log.info?.('[SUBTITLES] almost no speech; no subtitles', { language, words: tr?.words?.length || 0 }); return { skipped: 'no_speech', language }; }
     const cues = buildCues(tr.words);

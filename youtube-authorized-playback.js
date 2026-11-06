@@ -660,8 +660,12 @@ async function uploadDownloadVerified(file,remote,temp){
 async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
   const t=Date.now();
   const { fetchVideoFacts } = await import('./youtube-video-facts.js');
-  const [facts,thumb]=await Promise.all([fetchVideoFacts(id,process.env).catch(()=>null),fetchThumbnail(id).catch(()=>null)]);
-  const jpeg=thumb?await normalizeCover(thumb.jpeg,{ffmpegPath,maxWidth:1280,quality:2}):null;
+  const { retrying, coverFor } = await import('./youtube-cover-art.js');
+  const [facts,jpeg]=await Promise.all([
+    retrying(()=>fetchVideoFacts(id,process.env),{ok:x=>!!(x&&x.title)}),
+    coverFor(id,{ffmpegPath,maxWidth:1280,quality:2}),
+  ]);
+  if(!jpeg||!facts?.title)console.warn('[DOWNLOADS] saved with less than full details',{videoId:id,picture:!!jpeg,details:!!facts?.title});
   const metadata=downloadMetadata(id,facts||{},title);
   const cap=await uploadCapBytes();
   let format=policy.format;
@@ -687,8 +691,8 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
     }
   }
   await fs.rm(source,{force:true}).catch(()=>{});
-  // Full Hebrew name as seen in Yemot (owner, 06.11). Yemot's own download
-  // erases Hebrew from the name; the download page (/downloads) gives it back.
+  // Hebrew name as seen in Yemot, then the same name in English letters, which
+  // is what remains when Yemot's download erases the Hebrew (owner, 06.11).
   const { titleFileName } = await import('./youtube-audio-cache.js');
   const { yemotFileName } = await import('./youtube-latin-name.js');
   const base=await yemotFileName(metadata.title||title||id,{titleFileName})||id;

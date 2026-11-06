@@ -132,7 +132,8 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
   if (done?.state === 'done') return { remote: done.remote, already: true };
   const tokens = apifyTokens(env);
   if (!tokens.length) throw err('apify_not_configured', 'No engine keys');
-  const facts = await deps.fetchVideoFacts(videoId, env).catch(() => null);
+  const { retrying, coverFor } = await import('./youtube-cover-art.js');
+  const facts = await retrying(() => deps.fetchVideoFacts(videoId, env), { ok: x => !!(x && x.title) });
   const durationSec = facts?.durationSeconds || video.durationSeconds || null;
   const quality = videoQualityFor(durationSec);
   const costs = engineCosts(durationSec);
@@ -180,8 +181,8 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       }
     }
     // Picture + all details, streams copied untouched (no quality lost).
-    const thumb = await deps.fetchThumbnail(videoId).catch(() => null);
-    const jpeg = thumb ? await deps.normalizeCover(thumb.jpeg, { ffmpegPath, maxWidth: 1280, quality: 2 }) : null;
+    const jpeg = await coverFor(videoId, { ffmpegPath, maxWidth: 1280, quality: 2, fetchThumbnailImpl: deps.fetchThumbnail, normalize: deps.normalizeCover });
+    if (!jpeg || !facts?.title) log.warn?.('[VIDEO] saved with less than full details', { videoId, picture: !!jpeg, details: !!facts?.title });
     if (jpeg) await fs.writeFile(path.join(temp, 'cover.jpg'), jpeg);
     const meta = deps.downloadMetadata(videoId, facts || {}, video.title || got.item?.title);
     const dress = async (inFile, outFile, tags) => {
