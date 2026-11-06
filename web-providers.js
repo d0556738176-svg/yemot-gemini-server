@@ -36,7 +36,11 @@ async function fetchJson(url, { method = 'GET', headers = {}, body, timeoutMs = 
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
     if (!response.ok) {
-      const message = data?.error?.message || data?.message || data?.detail || data?.error || ('HTTP ' + response.status);
+      // Cloudflare puts the reason in errors[0]; others use error/message/detail.
+      const first = Array.isArray(data?.errors) ? data.errors[0] : null;
+      const message = (first && (first.message + (first.code ? ' (code ' + first.code + ')' : ''))) ||
+        data?.error?.message || data?.message || (typeof data?.detail === 'string' ? data.detail : '') ||
+        (typeof data?.error === 'string' ? data.error : '') || ('HTTP ' + response.status);
       throw Object.assign(new Error(label + ' HTTP ' + response.status + ': ' + String(message).slice(0, 160)), { status: response.status });
     }
     return data;
@@ -228,11 +232,23 @@ export async function readWithFirecrawl(url, { timeoutMs = 9000 } = {}) {
 export async function readWithCrawl4ai(url, { timeoutMs = 9000 } = {}) {
   const key = env('CRAWL4AI_KEY');
   if (!key) throw Object.assign(new Error('Crawl4AI key not configured'), { status: 412 });
-  const data = await fetchJson('https://api.crawl4ai.com/scrape', {
-    method: 'POST', timeoutMs, label: 'Crawl4AI',
-    headers: { authorization: 'Bearer ' + key },
-    body: { url }
-  });
+  // Crawl4AI Cloud has two surfaces: /scrape (Bearer) and /v1/scrape (X-API-Key).
+  // Keys from either dashboard are accepted by at least one, so try both.
+  let data;
+  try {
+    data = await fetchJson('https://api.crawl4ai.com/scrape', {
+      method: 'POST', timeoutMs, label: 'Crawl4AI',
+      headers: { authorization: 'Bearer ' + key },
+      body: { url, format: 'md' }
+    });
+  } catch (err) {
+    if (![401, 403].includes(statusOf(err))) throw err;
+    data = await fetchJson('https://api.crawl4ai.com/v1/scrape', {
+      method: 'POST', timeoutMs, label: 'Crawl4AI v1',
+      headers: { 'x-api-key': key },
+      body: { url }
+    });
+  }
   const content = typeof data?.markdown === 'string' ? data.markdown : String(data?.markdown?.raw_markdown || data?.markdown?.fit_markdown || data?.data?.markdown || '');
   return { title: clean(data?.title || data?.metadata?.title), url: data?.url || url, content: content.trim() };
 }
@@ -294,9 +310,20 @@ async function resolveCloudflareAccountId(token) {
   if (cloudflareAccountId) return cloudflareAccountId;
   // The account ID is not secret and can be discovered with the token itself,
   // so only CLOUDFLARE_API_TOKEN is required.
-  const data = await fetchJson('https://api.cloudflare.com/client/v4/accounts?per_page=5', {
-    timeoutMs: 4000, label: 'Cloudflare accounts', headers: { authorization: 'Bearer ' + token }
-  });
+  let data;
+  try {
+    data = await fetchJson('https://api.cloudflare.com/client/v4/accounts?per_page=5', {
+      timeoutMs: 4000, label: 'Cloudflare accounts', headers: { authorization: 'Bearer ' + token }
+    });
+  } catch (err) {
+    // Say why: an invalid or mistyped token fails verification; a valid token
+    // without account access needs CLOUDFLARE_ACCOUNT_ID instead.
+    const verify = await fetchJson('https://api.cloudflare.com/client/v4/user/tokens/verify', {
+      timeoutMs: 4000, label: 'Cloudflare token verify', headers: { authorization: 'Bearer ' + token }
+    }).catch(e => ({ verifyError: String(e?.message || e) }));
+    const detail = verify.verifyError ? 'token rejected: ' + verify.verifyError : 'token is ' + (verify?.result?.status || 'unknown') + ' but cannot list accounts; set CLOUDFLARE_ACCOUNT_ID';
+    throw Object.assign(new Error(String(err?.message || err) + ' | ' + detail), { status: statusOf(err) || 412 });
+  }
   cloudflareAccountId = String(data?.result?.[0]?.id || '');
   if (!cloudflareAccountId) throw Object.assign(new Error('Cloudflare token cannot list an account; set CLOUDFLARE_ACCOUNT_ID'), { status: 412 });
   return cloudflareAccountId;
@@ -370,7 +397,7 @@ async function probe(name, configured, run) {
     const detail = await run();
     return [name, { configured: true, ok: true, ms: Date.now() - started, ...(detail || {}) }];
   } catch (err) {
-    return [name, { configured: true, ok: false, ms: Date.now() - started, status: statusOf(err), error: String(err?.message || err).replace(/[A-Za-z0-9_-]{24,}/g, '[hidden]').slice(0, 160) }];
+    return [name, { configured: true, ok: false, ms: Date.now() - started, status: statusOf(err), error: String(err?.message || err).replace(/[A-Za-z0-9_-]{24,}/g, '[hidden]').slice(0, 300) }];
   }
 }
 
