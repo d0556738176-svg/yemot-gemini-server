@@ -93,7 +93,7 @@ export async function answerBranch1Website(q,context,{search,read=readSinglePubl
   if(!url&&!site&&context.pendingWebsiteUrl)return load(context.pendingWebsiteUrl);
   if(!url&&!site)return 'איזה אתר לפתוח ולקרוא? אפשר לומר את שמו או את כתובתו.';
   if(!url&&official&&!/(?:כתבה|מאמר|עמוד על|דף של)/u.test(q)) {
-    const found=await official(site).catch(()=>null);
+    const found=await official(site).catch(e=>{logger.warn('[BRANCH1 WEBSITE] official site lookup failed',{status:e?.status||0});return null;});
     if(found?.url){url=new URL(found.url).origin+'/';logger.info('[BRANCH1 WEBSITE] official site from knowledge panel',{host:new URL(url).hostname});}
   }
   if(!url) {
