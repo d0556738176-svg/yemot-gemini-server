@@ -105,24 +105,30 @@ export function filterBranch1Results(question, results) {
 
 // Keep each TTS item short and remove protocol/control/emoji characters. Preserve
 // the whole response through multiple text items; never silently drop its tail.
+// Each sentence (marked '¶' by sanitizeForYemot, or ending in . ! ?) becomes
+// its own spoken item: Yemot reads it with a sentence-final tone and a short
+// pause before the next one, instead of one flat run-on stream.
 export function branch1SpeechItems(text, size = 400) {
   const clean = String(text || '').normalize('NFC')
     .replace(/https?:\/\/\S+/gu, ' ')
+    .replace(/[.!?]+(?=\s|$)/gu, m => (m.includes('?') ? '?' : '') + ' ¶ ')
     .replace(/[\p{Cc}\p{Cf}\p{So}]/gu, ' ')
     .replace(/[|&<>\[\]{}_*#\\]/gu, ' ')
     .replace(/\s+/gu, ' ').trim();
-  const words = clean.split(' ');
   const chunks = [];
-  let chunk = '';
-  for (const word of words) {
-    if (chunk && chunk.length + word.length + 1 > size) { chunks.push(chunk); chunk = ''; }
-    if (word.length > size) {
-      if (chunk) { chunks.push(chunk); chunk = ''; }
-      for (let i = 0; i < word.length; i += size) chunks.push(word.slice(i, i + size));
-    } else chunk += (chunk ? ' ' : '') + word;
+  for (const sentence of clean.split('¶').map(x => x.trim()).filter(Boolean)) {
+    const words = sentence.split(' ');
+    let chunk = '';
+    for (const word of words) {
+      if (chunk && chunk.length + word.length + 1 > size) { chunks.push(chunk); chunk = ''; }
+      if (word.length > size) {
+        if (chunk) { chunks.push(chunk); chunk = ''; }
+        for (let i = 0; i < word.length; i += size) chunks.push(word.slice(i, i + size));
+      } else chunk += (chunk ? ' ' : '') + word;
+    }
+    if (chunk) chunks.push(chunk);
   }
-  if (chunk) chunks.push(chunk);
-  return (chunks.length ? chunks : ['אני איתך.']).map(data => ({ type: 'text', data }));
+  return (chunks.length ? chunks : ['אני איתך']).map(data => ({ type: 'text', data }));
 }
 
 export async function answerBranch1Local(q, search) {
