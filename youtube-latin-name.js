@@ -61,7 +61,10 @@ export async function latinTitle(title, env = process.env, fetchImpl = fetch) {
 
 // The Hebrew part of a title ("עברית | English" -> "עברית").
 export function hebrewPart(title) {
-  const segs = String(title || '').split(/\s*[|｜/]\s*/).filter(x => /[א-ת]/.test(x));
+  const segs = String(title || '').split(/\s*[|｜/]\s*/).filter(x => /[א-ת]/.test(x))
+    // "עלה קטן אברהם פריד Ale Katan Avraham Fried": a closing run of 2+ English
+    // words after the Hebrew is its translation, not part of the name.
+    .map(x => x.replace(/((?:[\s_\-–]+[A-Za-z][A-Za-z'.]*){2,}[\s_\-–.()]*)$/, m => /[א-ת]/.test(m) ? m : ''));
   return segs.join(' ').trim();
 }
 
@@ -76,4 +79,12 @@ export async function yemotFileName(title, { env = process.env, fetchImpl = fetc
   const hebName = titleFileName(heb, 70);
   const lat = latinFileName(await latinTitle(heb, env, fetchImpl), 70);
   return lat ? hebName + '__' + lat : hebName;
+}
+
+// Part k of a split file, readable both in Yemot and after download:
+// "שם_חלק_2__Shem_Chelek_2".
+export function withPart(name, k) {
+  const i = String(name).indexOf('__');
+  if (i < 0) return name + '_Chelek_' + k;
+  return name.slice(0, i) + '_חלק_' + k + '__' + name.slice(i + 2) + '_Chelek_' + k;
 }

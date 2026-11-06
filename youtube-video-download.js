@@ -209,7 +209,7 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       const segs = (await fs.readdir(temp)).filter(f => /^seg\d{3}\.mp4$/.test(f)).sort();
       for (const [k, f] of segs.entries()) {
         const tags = { ...meta, title: meta.title + ' (חלק ' + (k + 1) + ' מתוך ' + segs.length + ')', track: (k + 1) + '/' + segs.length };
-        pieces.push({ file: await dress(path.join(temp, f), path.join(temp, 'part' + (k + 1) + '.mp4'), tags), suffix: '_חלק_' + (k + 1) });
+        pieces.push({ file: await dress(path.join(temp, f), path.join(temp, 'part' + (k + 1) + '.mp4'), tags), suffix: '', part: k + 1 });
       }
       log.info?.('[VIDEO] video larger than one upload; cut into parts', { videoId, bytes, cap, parts: pieces.length });
     }
@@ -224,7 +224,8 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       const size = (await fs.stat(pc.file)).size;
       if (size > cap) throw err('video_too_large', 'A video part is still larger than one upload');
       const folder = deps.nextFolder ? await deps.nextFolder() : VIDEO_DIR;
-      const remote = folder + '/' + name + pc.suffix + '.mp4';
+      const { withPart } = await import('./youtube-latin-name.js');
+      const remote = folder + '/' + (pc.part ? withPart(name, pc.part) : name) + pc.suffix + '.mp4';
       await upload(pc.file, remote);
       const m = await getFile(remote);
       if (m?.file?.exists !== true || Number(m?.file?.size) !== size) throw err('video_upload_unverified', 'Video not verified in Yemot');

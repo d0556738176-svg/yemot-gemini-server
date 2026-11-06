@@ -683,7 +683,7 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
       const f=path.join(temp,'part'+(k+1)+'.m4a');
       const tags={...metadata,title:metadata.title+' (חלק '+(k+1)+' מתוך '+n+')',track:(k+1)+'/'+n};
       await makeDownloadCopy(source,f,{format:'m4a',jpeg,metadata:tags,ffmpegPath,start:k*seg,length:seg});
-      files.push({file:f,suffix:'_חלק_'+(k+1),tags});
+      files.push({file:f,suffix:'',part:k+1,tags});
     }
   }
   await fs.rm(source,{force:true}).catch(()=>{});
@@ -697,7 +697,8 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
   const folders=await import('./download-folders.js');
   const saved=[];let seen=null;
   for(const x of files){
-    const remote=(await folders.nextFolder('audio',{readJson:readCacheJson}))+'/'+name+x.suffix+'.'+format;
+    const { withPart } = await import('./youtube-latin-name.js');
+    const remote=(await folders.nextFolder('audio',{readJson:readCacheJson}))+'/'+(x.part?withPart(name,x.part):name)+x.suffix+'.'+format;
     const r=await uploadDownloadVerified(x.file,remote,temp);
     await fs.rm(x.file,{force:true}).catch(()=>{});
     await folders.countSaved('audio',{readJson:readCacheJson,writeJson:writeCacheJson});

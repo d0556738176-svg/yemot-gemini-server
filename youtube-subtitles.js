@@ -155,7 +155,7 @@ async function mediaSeconds(ffmpegPath, file) {
 
 // Hebrew subtitles already burned into the picture? A few frames are shown to
 // Gemini. Unknown (no key / no answer) counts as "no".
-export async function hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath, env = process.env, fetchImpl = fetch, seconds }) {
+export async function hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath, env = process.env, fetchImpl = fetch, seconds, onSeen }) {
   const keys = String(env.GEMINI_API_KEYS || env.GEMINI_API_KEY || '').split(',').map(x => x.trim()).filter(Boolean);
   if (!keys.length || !seconds) return null;
   const parts = [];
@@ -164,7 +164,7 @@ export async function hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath,
     try { await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(Math.floor(seconds * f)), '-i', videoFile, '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '4', out]); parts.push({ inline_data: { mime_type: 'image/jpeg', data: (await fs.readFile(out)).toString('base64') } }); } catch { /* skip frame */ }
   }
   if (!parts.length) return null;
-  parts.push({ text: 'אלה תמונות מתוך סרטון. האם מופיעות בהן כתוביות בעברית צרובות בתוך התמונה (שורות טקסט של מילים או תרגום, בדרך כלל בתחתית המסך, שמתחלפות לאורך הסרטון)? כותרת קבועה, שם השיר או לוגו אינם כתוביות. החזר JSON בלבד: {"hebrew_subtitles": true או false}' });
+  parts.push({ text: 'אלה ' + parts.length + ' תמונות מתוך סרטון, לפי הסדר. לכל תמונה, העתק את שורת הכתובית בעברית שצרובה בתמונה (טקסט של דיבור או תרגום, בדרך כלל בתחתית המסך). כותרת קבועה, שם השיר, שם הערוץ, לוגו או כיתוב פרסומי אינם כתובית: במקרה כזה החזר מחרוזת ריקה. החזר JSON בלבד: {"frames": ["...", "..."]}' });
   const models = String(env.SUBTITLE_GEMINI_MODELS || env.GEMINI_MODELS || 'gemini-3.6-flash,gemini-3.5-flash-lite').split(',').map(x => x.trim()).filter(Boolean);
   for (const model of models) for (const key of keys) {
     try {
@@ -175,8 +175,14 @@ export async function hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath,
       if (r.status === 404) break;
       const j = await r.json().catch(() => null);
       const t = j?.candidates?.[0]?.content?.parts?.map(x => x.text || '').join('') || '';
-      const m = /"hebrew_subtitles"\s*:\s*(true|false)/.exec(t);
-      if (m) return m[1] === 'true';
+      let frames = null;
+      try { frames = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)).frames; } catch { /* next */ }
+      if (Array.isArray(frames)) {
+        const lines = frames.map(x => String(x || '').trim()).filter(x => /[א-ת]{2,}/.test(x));
+        const distinct = new Set(lines).size;
+        onSeen?.(lines);
+        return distinct >= 2; // changing Hebrew lines in at least 2 frames
+      }
     } catch { /* next key */ }
   }
   return null;
@@ -185,12 +191,14 @@ export async function hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath,
 // The whole thing for one local video file. Returns { srt, language, cues } or
 // { skipped } / null. Every video without Hebrew subtitles gets them: Hebrew
 // speech is written down (and proofread), any other language is translated.
-export async function hebrewSubtitlesFor(videoFile, tempDir, { ffmpegPath, env = process.env, fetchImpl = fetch, log = console } = {}) {
+export async function hebrewSubtitlesFor(videoFile, tempDir, { ffmpegPath, env = process.env, fetchImpl = fetch, log = console, force = false } = {}) {
   try {
     if (/^(0|false|off)$/i.test(String(env.VIDEO_HEBREW_SUBTITLES || ''))) return { skipped: 'disabled' };
     const seconds = await mediaSeconds(ffmpegPath, videoFile);
-    const burned = await hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath, env, fetchImpl, seconds }).catch(() => null);
-    if (burned === true) { log.info?.('[SUBTITLES] the picture already has Hebrew subtitles; none added'); return { skipped: 'hebrew_in_picture' }; }
+    let seen = [];
+    const burned = force ? null : await hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath, env, fetchImpl, seconds, onSeen: l => { seen = l; } }).catch(() => null);
+    log.info?.('[SUBTITLES] Hebrew subtitles in the picture?', { burned, seen: seen.map(x => x.slice(0, 60)) });
+    if (burned === true) { log.info?.('[SUBTITLES] the picture already has Hebrew subtitles; none added'); return { skipped: 'hebrew_in_picture', seen }; }
     const extract = async (name, extra) => {
       let file = path.join(tempDir, name + '.ogg'), mime = 'audio/ogg';
       try { await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', ...extra, '-i', videoFile, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '24k', file]); }

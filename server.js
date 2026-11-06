@@ -5011,6 +5011,7 @@ app.listen(port,async()=>{
     await m.runRenameHebrew();
     await m.runRenameHebrewVideos();
     await m.runRenameHebrewLatin();
+    await m.runRenameHebrewLatinV2();
   }).catch(e=>console.warn('[BRANCH2_MAINT] rename v2 failed',String(e?.message||e).slice(0,160)));
   if(process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
@@ -5040,7 +5041,7 @@ app.listen(port,async()=>{
   })().catch(e=>console.warn('[SONG_NAME_TEST] failed',String(e?.message||e).slice(0,200)));
   if(process.env.APIFY_TOKEN&&process.env.DEEPGRAM_API_KEY) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
-    const MARK='ivr2:/2/selftest/subtitles_v3.json';
+    const MARK='ivr2:/2/selftest/subtitles_v4.json';
     if(await p.readCacheJson(MARK).catch(()=>null))return;
     await new Promise(r=>setTimeout(r,90000)); // after the boot work
     const cover=await import('./youtube-cover-art.js');
@@ -5061,21 +5062,24 @@ app.listen(port,async()=>{
     const results=[];
     for(const v of tests){
       const dir='ivr2:/2/selftest/subs';
-      const mem=new Map();let subsInfo=null;
+      const mem=new Map();let subsInfo=null,forced=null;
       const r=await downloadVideoToYemot(v,{
         store:{read:async x=>mem.get(x)||null,write:async(x,d)=>{mem.set(x,d);}},
         upload:(f,rr)=>p.uploadToYemot(f,rr,undefined,{convertAudio:false}),getFile:rr=>p.getYemotFile(rr),ffmpegPath,
         fetchThumbnail:cover.fetchThumbnail,normalizeCover:cover.normalizeCover,downloadMetadata:cover.downloadMetadata,
         fetchVideoFacts,log:console,nextFolder:async()=>dir,
         uploadCap:async()=>pb.uploadCapBytes(),
-        hebrewSubtitles:async(f,d)=>(subsInfo=await hebrewSubtitlesFor(f,d,{ffmpegPath,log:console})),
+        hebrewSubtitles:async(f,d)=>{subsInfo=await hebrewSubtitlesFor(f,d,{ffmpegPath,log:console});
+          // Also run the transcription path itself when the picture check skipped it.
+          if(subsInfo?.skipped==='hebrew_in_picture'){forced=await hebrewSubtitlesFor(f,d,{ffmpegPath,log:console,force:true});console.info('[SUBTITLES_TEST] forced transcription',JSON.stringify({language:forced?.language,mode:forced?.mode,cues:forced?.cues,srt:(forced?.srt||'').split('\n').slice(0,20).join(' | ')}));}
+          return subsInfo;},
       });
       const u=new URL(p.YEMOT_API_BASE+'/DownloadFile');u.searchParams.set('token',p.yemotApiKey());u.searchParams.set('path',r.remote);
       const buf=Buffer.from(await (await fetch(u)).arrayBuffer());
       const fsm=await import('node:fs/promises');const tmp=(await import('node:os')).tmpdir()+'/subcheck.mp4';await fsm.writeFile(tmp,buf);
       const { spawn: spawnP }=await import('node:child_process');const info=await new Promise(res=>{const c=spawnP(ffmpegPath,['-hide_banner','-i',tmp]);let e='';c.stderr.on('data',d=>e+=d);c.on('close',()=>res(e));});
       const track=/Stream #0:\d+(?:\[0x[0-9a-f]+\])?\(heb\)[^\n]*Subtitle: mov_text/i.test(info);
-      const out={title:v.title,remote:r.remote,hebrewTrackInFile:track,language:subsInfo?.language||null,mode:subsInfo?.mode||null,cues:subsInfo?.cues||0,skipped:subsInfo?.skipped||null,
+      const out={title:v.title,seen:subsInfo?.seen||null,forcedCues:forced?.cues||null,remote:r.remote,hebrewTrackInFile:track,language:subsInfo?.language||null,mode:subsInfo?.mode||null,cues:subsInfo?.cues||0,skipped:subsInfo?.skipped||null,
         srt:(subsInfo?.srt||'').split('\n').slice(0,16).join(' | ')};
       console.info('[SUBTITLES_TEST]',JSON.stringify(out));results.push(out);
       const del=async w=>{const x=new URL(p.YEMOT_API_BASE+'/FileAction');x.searchParams.set('token',p.yemotApiKey());x.searchParams.set('action','delete');x.searchParams.set('what',w);await fetch(x).catch(()=>{});};
