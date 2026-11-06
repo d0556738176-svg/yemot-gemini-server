@@ -241,8 +241,8 @@ async function loadCallerMemory(phone) {
   if (key === 'לא מזוהה' || memoryLoadedFor.has(key)) return;
   const t = Date.now();
   const mem = await readMemory(key, { timeoutMs: 2500 }).catch(() => null);
-  memoryLoadedFor.add(key);
   if (!mem) { console.info('[MEMORY] no saved memory for caller', { ms: Date.now() - t }); return; }
+  memoryLoadedFor.add(key);
   if (mem.summary) callerSummaries.set(key, String(mem.summary));
   const have = new Set(conversationLog.filter(x => x.phone === key).map(x => x.time + '|' + x.user));
   const add = (mem.entries || []).filter(e => e && e.user && !have.has(e.time + '|' + e.user))
@@ -4073,10 +4073,15 @@ function contextualizeSearchQuestion(question, historyText='') {
   return prior.replace(/[?!.]+$/,'').trim()+'. '+q;
 }
 
-function buildOpeningForCaller(phone) {
+function buildOpeningForCaller(phone, concise=false) {
   const key=normalizePhone(phone);
   const previous=conversationLog.filter(x=>normalizePhone(x.phone)===key).filter(x=>x.user && x.user!=='לא ניתן היה לתמלל את ההקלטה').slice(-12);
   if(!previous.length) return process.env.FIRST_CALL_MESSAGE || 'שלום, איזה כיף לשמוע אותך. אני כאן איתך. מה מתחשק לך לבדוק או לעשות עכשיו?';
+  if(concise) {
+    const last=previous.at(-1);
+    const question=sanitizeForYemot(String(last.user).replace(/\s+/g,' ').trim()).slice(0,140).replace(/[.!?]+$/u,'');
+    return question?'בפעם הקודמת שאלת: '+question+'. רוצה להמשיך משם?':'טוב לשמוע אותך שוב. מה תרצה לעשות היום?';
+  }
   const recent=previous.slice().reverse();
   const topics=[];
   for(const item of recent) {
@@ -4212,7 +4217,7 @@ async function callHandler(call) {
   const turnContext={youtubeResults:[],currentWebsiteUrl:null,currentWebsitePages:[],currentWebsitePageIndex:0,currentWebsiteReadOffset:0};
   if(typeof loadCallerMemory==='function') await loadCallerMemory(callerPhone);
   if (process.env.ENABLE_AI_OPENING !== 'false' && callerPhone !== 'לא מזוהה' && conversationLog.some(x=>x.phone===callerPhone)) {
-    openingPrompt=await buildOpeningForCaller(callerPhone);
+    openingPrompt=await buildOpeningForCaller(callerPhone,explicitSearchOnly);
     console.info('[CALL_FLOW] returning_caller_memory_found', { callId: activeKey, hasMemory: !!openingPrompt });
   } else {
     console.info('[CALL_FLOW] caller_memory_status', { callId: activeKey, callerKnown: callerPhone !== 'לא מזוהה', hasMemory: false });
@@ -4396,7 +4401,8 @@ async function callHandler(call) {
           ? 'זו בקשה לתשובה ארוכה ומפורטת. אל תקצר ל-1 עד 4 משפטים. בנה תשובה רציפה ומסודרת, בדרך כלל 8 עד 20 פסקאות או משפטים קצרים לפי הצורך, עד כ-'+LONG_ANSWER_MAX_CHARS+' תווים. שמור על רצף טבעי להקראה בטלפון, בלי כותרות טכניות ובלי לחזור על עצמך. '
           : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. ')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
         const lookupInstruction=allowExternalLookup?'':'\nבתור הזה לא בוצע חיפוש. אל תטען שבדקת מקורות או תמציא פרטים עדכניים. אם נדרש אימות באינטרנט, בקש מהמתקשר לומר תחפש באינטרנט.';
-        const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt+lookupInstruction}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
+        const voiceInstruction=explicitSearchOnly?'\nדבר בעברית יומיומית, בלשון זכר ובמשפטים שקל לשמוע בטלפון. התחל ישר בתשובה. אם המתקשר מבקש להמשיך או אומר הפרט הראשון, היעזר במה שאמרת לו קודם. סיים בשאלת המשך קצרה רק כשיש בה תועלת.':'';
+        const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt+lookupInstruction+voiceInstruction}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
         let parsedTurn=null;
         try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\{[\s\S]*\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
         if(parsedTurn && typeof parsedTurn.answer==='string') {
