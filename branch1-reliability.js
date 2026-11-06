@@ -115,19 +115,21 @@ export function branch1SpeechItems(text, size = 400) {
     .replace(/[\p{Cc}\p{Cf}\p{So}]/gu, ' ')
     .replace(/[|&<>\[\]{}_*#\\]/gu, ' ')
     .replace(/\s+/gu, ' ').trim();
+  // Separate items made Yemot pause too long between sentences (slow, heavy
+  // pace). Sentences are packed into as few items as possible again, joined by
+  // a comma: a short natural breath at each sentence end, no long gap.
+  const joined = clean.split('¶').map(x => x.trim()).filter(Boolean)
+    .map(x => /[?,]$/.test(x) ? x : x + ',').join(' ').replace(/,\s*$/, '');
   const chunks = [];
-  for (const sentence of clean.split('¶').map(x => x.trim()).filter(Boolean)) {
-    const words = sentence.split(' ');
-    let chunk = '';
-    for (const word of words) {
-      if (chunk && chunk.length + word.length + 1 > size) { chunks.push(chunk); chunk = ''; }
-      if (word.length > size) {
-        if (chunk) { chunks.push(chunk); chunk = ''; }
-        for (let i = 0; i < word.length; i += size) chunks.push(word.slice(i, i + size));
-      } else chunk += (chunk ? ' ' : '') + word;
-    }
-    if (chunk) chunks.push(chunk);
+  let chunk = '';
+  for (const word of joined.split(' ')) {
+    if (chunk && chunk.length + word.length + 1 > size) { chunks.push(chunk); chunk = ''; }
+    if (word.length > size) {
+      if (chunk) { chunks.push(chunk); chunk = ''; }
+      for (let i = 0; i < word.length; i += size) chunks.push(word.slice(i, i + size));
+    } else chunk += (chunk ? ' ' : '') + word;
   }
+  if (chunk) chunks.push(chunk);
   return (chunks.length ? chunks : ['אני איתך']).map(data => ({ type: 'text', data }));
 }
 
