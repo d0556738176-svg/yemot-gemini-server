@@ -3,6 +3,7 @@ import { isBranch1WebsiteRequest, answerBranch1Website } from './branch1-website
 import express from 'express';
 import { readMemory, rememberTurn } from './branch1-memory.js';
 import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { withTavily, tavilyClient, searchSecondary, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
@@ -5038,6 +5039,15 @@ process.on('uncaughtException',(err)=>{if(!(err instanceof ExitError)) logDetail
 const port=process.env.PORT||3000;
 app.listen(port,async()=>{
   console.log('server running on port '+port);
+  // Check every web key once right after a new build, so each deploy leaves a
+  // clear ok/failed line per provider in the logs. Wake-ups from sleep do not
+  // rebuild, so they spend no credits on this.
+  try {
+    const builtAt=Number(readFileSync(new URL('./.build-time',import.meta.url),'utf8'));
+    if(builtAt && Date.now()-builtAt<Number(process.env.PROVIDER_HEALTH_AFTER_BUILD_MS||20*60*1000)) {
+      setTimeout(()=>providerHealth({force:true}).catch(e=>console.warn('[WEB_PROVIDERS] health check failed',String(e?.message||e).slice(0,160))),4000);
+    }
+  } catch {}
   await loadConversationLog();
   // What the main menu, extensions 1/3 and the account's star menu are set to
   // (06.11, star = main menu everywhere).
