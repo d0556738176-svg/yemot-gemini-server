@@ -63,3 +63,20 @@ export function resolvePendingLookupQuestion(question, currentTurnHistory = [], 
 export function isMemoryRecall(question) {
   return /(?:זוכר|תזכור|זכרת|נזכר|דיברנו|שוחחנו|בשיחה הקודמת|בשיחה האחרונה|בפעם הקודמת|בפעם שעברה|פעם קודמת|בפעם האחרונה|אתמול|שלשום|לפני כמה ימים|מה שאלתי|על מה שאלתי|שאלתי אותך|סיפרתי לך|אמרתי לך|ביקשתי ממך|השם שלי|איך קוראים לי|איפה אני גר|במה אני עובד|מה אני אוהב|מה אתה יודע עליי|מה אתה יודע עלי|מה אתה זוכר)/i.test(String(question || ''));
 }
+
+// The assistant asked for a missing detail ("באיזו עיר?") and the caller answered
+// with just that detail ("בבית שמש בקניון השדרה"): the answer completes the
+// earlier question instead of becoming a new, meaningless search.
+export function resolveClarificationAnswer(question, currentTurnHistory = []) {
+  const q = String(question || '').trim();
+  const previous = Array.isArray(currentTurnHistory) ? currentTurnHistory.at(-1) : null;
+  if (!q || !previous) return '';
+  const asked = String(previous.assistant || '');
+  if (!/[?？]\s*$/.test(asked.trim()) && !/(?:באיזו|באיזה|איזה|איזו|איפה|לאיזה|לאיזו|מאיזה|מאיזו)\s+\S+/u.test(asked)) return '';
+  if (!/(?:באיזו|באיזה|איזה|איזו|איפה|לאיזה|לאיזו|מאיזה|מאיזו|מה שם|את מי|מתי)/u.test(asked)) return '';
+  if (q.split(/\s+/).length > 8) return '';
+  if (/(?:^|\s)(?:מה|מי|איך|למה|מתי|כמה|האם|תחפש|חפש|פתח|תפתח)(?:\s|$)/u.test(q.replace(/תחפש באינטרנט/u, ''))) return '';
+  const earlier = String(previous.resolvedQuestion || previous.user || '').trim();
+  if (!earlier || earlier === q) return '';
+  return (earlier.replace(/[?!.]+$/u, '') + ' ' + q.replace(/^(?:ב|זה ב)?(?=\S)/u, m => m)).trim();
+}

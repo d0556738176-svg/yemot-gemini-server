@@ -225,20 +225,28 @@ export function configuredSecondarySearch() {
  * Races the keyed secondary search providers and returns the first non-empty
  * result set. Providers in cooldown are skipped.
  */
+// One phone question fans out into several search queries at once. Free plans
+// limit queries per second (LangSearch answered 429), so each engine takes at
+// most a couple of queries at a time; extra queries skip it instead of failing.
+const MAX_IN_FLIGHT = { langsearch: 1, serper: 3, jina: 2 };
+const inFlight = new Map();
+
 export async function searchSecondary(query, { timeoutMs = 3500 } = {}) {
   const racers = [];
   for (const [name, keyName, run] of SECONDARY_SEARCH) {
     if (!env(keyName)) continue;
     const id = 'search:' + name;
     if (cooldowns.isCoolingDown(id)) continue;
-    racers.push(run(query, { timeoutMs }).then(results => {
+    if ((inFlight.get(name) || 0) >= (MAX_IN_FLIGHT[name] || 2)) continue;
+    inFlight.set(name, (inFlight.get(name) || 0) + 1);
+    racers.push(run(query, { timeoutMs }).finally(() => inFlight.set(name, Math.max(0, (inFlight.get(name) || 1) - 1))).then(results => {
       if (!results.length) throw Object.assign(new Error(name + ' returned no results'), { status: 502 });
       cooldowns.clear(id);
       console.info('[WEB_PROVIDERS] search provider succeeded', { provider: name, results: results.length });
       return { provider: name, results };
     }).catch(err => {
       const status = statusOf(err);
-      if (status !== 502) coolKey(id, status);
+      if (status === 429) cooldowns.cool(id, 503); else if (status !== 502) coolKey(id, status);
       console.warn('[WEB_PROVIDERS] search provider failed', { provider: name, status, message: String(err?.message || err).slice(0, 160) });
       throw err;
     }));

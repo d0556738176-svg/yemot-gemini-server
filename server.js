@@ -22,7 +22,7 @@ import { answerWithOpenAIText, answerWithOpenAIWebSearch, isOpenAIWebSearchReque
 import { createCooldownRegistry } from './provider-cooldowns.js';
 import { callCompatibleChatCompletion } from './provider-fallback.js';
 import { isMultimodalAnalysisRequest, isVisualContinuationRequest } from './visual-intent.js';
-import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion, isMemoryRecall } from './conversation-context.js';
+import { selectRelevantHistoryForTurn, resolvePendingLookupQuestion, isMemoryRecall, resolveClarificationAnswer } from './conversation-context.js';
 import { buildPharmacySearchQueries, buildPharmacySearchAnswer } from './pharmacy-search.js';
 import { shouldForceWebSearch } from './branch1-web-router.js';
 import { fuzzyCorrectEntities, lexiconKeyterms, ENTITY_LEXICON } from './speech-lexicon.js';
@@ -826,6 +826,30 @@ function chooseBetterTranscript(deepgramText, geminiText, vocabulary=[]) {
   return dg;
 }
 
+// Independent speech-recognition backup: Whisper large-v3 on Groq (free daily
+// quota, separate from Gemini). Used when Deepgram times out or fails, before the
+// Gemini chain, whose transcription model allows only a few requests a minute.
+async function transcribeWithGroqWhisper(audioBuffer) {
+  const key=(process.env.GROQ_API_KEY||'').trim();
+  if(!key) throw Object.assign(new Error('Groq key not configured'),{status:412});
+  const bytes=Buffer.isBuffer(audioBuffer)?audioBuffer:Buffer.from(audioBuffer);
+  const mime=(process.env.YEMOT_AUDIO_MIME_TYPE||'').trim() || detectAudioMime(bytes) || 'audio/wav';
+  const ext=/mpeg|mp3/.test(mime)?'mp3':/ogg/.test(mime)?'ogg':/webm/.test(mime)?'webm':'wav';
+  const form=new FormData();
+  form.append('file',new Blob([bytes],{type:mime}),'call.'+ext);
+  form.append('model',(process.env.GROQ_WHISPER_MODEL||'whisper-large-v3').trim());
+  form.append('language','he');
+  form.append('temperature','0');
+  const response=await withTimeout(fetch('https://api.groq.com/openai/v1/audio/transcriptions',{
+    method:'POST',headers:{authorization:'Bearer '+key},body:form
+  }),Number(process.env.GROQ_WHISPER_TIMEOUT_MS||7000),'Groq Whisper transcription');
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok) throw Object.assign(new Error('Groq Whisper HTTP '+response.status+': '+String(data?.error?.message||'').slice(0,160)),{status:response.status});
+  const text=String(data?.text||'').trim();
+  if(!text) throw Object.assign(new Error('Groq Whisper returned empty text'),{status:502,noSpeech:true});
+  return sanitizeForYemot(text);
+}
+
 async function transcribePhoneAudio(audioBuffer, options={}) {
   // Primary path for Israeli Hebrew phone speech: Deepgram Nova-3 when configured.
   // It is purpose-built for speech-to-text, supports Hebrew in production, and
@@ -878,6 +902,16 @@ async function transcribePhoneAudio(audioBuffer, options={}) {
       if(err?.noSpeech && options.failFastOnNoSpeech) {
         throw Object.assign(new Error('Empty phone transcription'),{status:400,noSpeech:true});
       }
+    }
+  }
+
+  if((process.env.GROQ_API_KEY||'').trim() && process.env.BRANCH1_WHISPER_FALLBACK!=='off') {
+    try {
+      const whisperText=await transcribeWithGroqWhisper(audioBuffer);
+      console.info('[TRANSCRIBE] Groq Whisper backup used',{chars:whisperText.length});
+      return whisperText;
+    } catch(e) {
+      console.warn('[TRANSCRIBE] Groq Whisper backup failed',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,200)});
     }
   }
 
@@ -4201,6 +4235,11 @@ async function callHandler(call) {
         (isPhoneNumberRequest(q) || isBusinessHoursRequest(q) ||
           isLocalBusinessDiscoveryRequest(q,extractExplicitLocation(q)) || shouldForceWebSearch(q))
       );
+      const clarified=!pendingLookup && typeof resolveClarificationAnswer==='function' ? resolveClarificationAnswer(userTranscript,turnHistory) : '';
+      if(clarified) {
+        console.info('[CALL_FLOW] clarification answer joined to the earlier question',{callId:activeKey,question:clarified.slice(0,120)});
+        userTranscript=clarified;
+      }
       if(pendingLookup) {
         console.info('[CALL_FLOW] retrying_pending_branch1_lookup',{callId:activeKey,requestType:
           isPhoneNumberRequest(pendingLookup)?'phone':isBusinessHoursRequest(pendingLookup)?'business-hours':

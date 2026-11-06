@@ -135,3 +135,11 @@ test('an open page keeps link questions even after other turns', async () => {
   assert.equal(isBranch1WebsiteRequest('פתח קישור מספר 3', ctx), true);
   assert.equal(isBranch1WebsiteRequest('מה מזג האוויר מחר', ctx), false);
 });
+
+test('an answer to a clarifying question completes the earlier question', async () => {
+  const { resolveClarificationAnswer } = await import('../conversation-context.js');
+  const history = [{ user: 'האם רמי לוי פתוח עכשיו?', assistant: 'באיזו עיר או באיזה אזור נמצא הסניף? כך אוכל לבדוק את שעות הפתיחה' }];
+  assert.equal(resolveClarificationAnswer('בבית שמש בקניון השדרה', history), 'האם רמי לוי פתוח עכשיו בבית שמש בקניון השדרה');
+  assert.equal(resolveClarificationAnswer('מה מזג האוויר מחר', history), '');
+  assert.equal(resolveClarificationAnswer('בבית שמש', [{ user: 'שלום', assistant: 'היי, מה שלומך היום.' }]), '');
+});

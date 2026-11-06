@@ -159,9 +159,16 @@ function chunkText(text, maxLength = 1400) {
   return chunks;
 }
 
+// YouTube answers this server's address with "Sign in to confirm you're not a
+// bot". After that, caption downloads are skipped for a while instead of
+// spending three yt-dlp runs per question; Gemini watches the video meanwhile.
+let botBlockedUntil = 0;
+const BOT_BLOCK_REST_MS = Number(process.env.YOUTUBE_CAPTIONS_BOT_REST_MS || 6 * 60 * 60 * 1000);
+
 export async function getYouTubeTranscript(videoId) {
   const id = String(videoId || '').trim();
   if (!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
+  if (Date.now() < botBlockedUntil) throw new Error('YouTube captions resting after a bot check from this server');
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yemot-youtube-caption-'));
   const url = 'https://www.youtube.com/watch?v=' + id;
@@ -199,6 +206,11 @@ export async function getYouTubeTranscript(videoId) {
         return { language, text, chunks };
       } catch (error) {
         lastError = error;
+        if (/confirm you.?re not a bot|Sign in to confirm/i.test(String(error?.message || error))) {
+          botBlockedUntil = Date.now() + BOT_BLOCK_REST_MS;
+          console.warn('[YouTube captions] blocked by YouTube bot check; resting', { hours: BOT_BLOCK_REST_MS / 3600000 });
+          throw error;
+        }
         console.warn('[YouTube captions] client failed', {
           videoId: id,
           client,
