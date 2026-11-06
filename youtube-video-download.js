@@ -70,10 +70,10 @@ function classify(item) {
 }
 
 // Runs one engine to the end; returns { url, item, token, actor, runId }.
-async function runEngine(actor, videoId, quality, { tokens, log, store, receiptPath, fetchImpl = fetch, sleep = ms => new Promise(r => setTimeout(r, ms)) }) {
+async function runEngine(actor, videoId, quality, { tokens, log, store, receiptPath, startAt = null, fetchImpl = fetch, sleep = ms => new Promise(r => setTimeout(r, ms)) }) {
   const receipt = await store.read(receiptPath).catch(() => null);
   let runId = receipt?.actor === actor && receipt?.state === 'running' ? receipt.runId : null;
-  let ti = Number.isInteger(receipt?.tokenIndex) ? receipt.tokenIndex : 0;
+  let ti = runId && Number.isInteger(receipt?.tokenIndex) ? receipt.tokenIndex : (Number.isInteger(startAt) ? startAt % tokens.length : 0);
   const api = (t, route, init = {}, ms = 30000) => fetchImpl(API + route, { ...init, headers: { authorization: 'Bearer ' + t, 'content-type': 'application/json' }, signal: AbortSignal.timeout(ms) });
   if (!runId) {
     let started = false;
@@ -82,7 +82,8 @@ async function runEngine(actor, videoId, quality, { tokens, log, store, receiptP
       const r = await api(tokens[idx], '/acts/' + actor + '/runs?timeout=10800&maxTotalChargeUsd=' + (actor === JOHNVC ? '0.05' : '0.2'), { method: 'POST', body: JSON.stringify(inputFor(actor, videoId, quality)) });
       if (ACCOUNT_REFUSAL.has(r.status)) { log.info?.('[VIDEO] account refused start; next key', { videoId, actor, account: idx + 1, status: r.status }); continue; }
       const b = await r.json().catch(() => null);
-      if (!r.ok || !b?.data?.id) throw err('video_start_failed', 'Video engine did not start: HTTP ' + r.status);
+      // Any other "no" also created no run: the next backup key gets the job.
+      if (!r.ok || !b?.data?.id) { log.warn?.('[VIDEO] start failed on this key; next key', { videoId, actor, account: idx + 1, status: r.status, reason: String(b?.error?.message || '').slice(0, 120) }); continue; }
       runId = b.data.id; ti = idx; started = true;
     }
     if (!started) throw err('apify_accounts_unavailable', 'No account could start the video engine');
@@ -103,7 +104,9 @@ async function runEngine(actor, videoId, quality, { tokens, log, store, receiptP
   const url = fileUrlOf(item);
   if (!url || item?.error || (item?.resultType && item.resultType !== 'file')) {
     await store.write(receiptPath, { videoId, actor, runId, tokenIndex: ti, state: 'failed', at: new Date().toISOString() }).catch(() => {});
-    throw err(classify(item), 'Video engine delivered no file (' + run.status + ')');
+    const e = err(classify(item), 'Video engine delivered no file (' + run.status + ')');
+    e.tokenIndex = ti;
+    throw e;
   }
   const u = new URL(url);
   if (u.hostname === 'api.apify.com' && !u.searchParams.has('token') && !u.searchParams.has('signature')) u.searchParams.set('token', token);
@@ -142,22 +145,41 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
   if (done?.state === 'running' && order.includes(done.actor)) order = [done.actor, ...order.filter(a => a !== done.actor)];
   log.info?.('[VIDEO] engine plan', { videoId, durationSec, quality, order, estimatedUsd: costs });
   let got = null, lastErr = null;
+  // Each engine is tried on every backup key in turn (a run that failed on one
+  // account, e.g. credit ran out mid-run, is started again on the next).
   for (const actor of order) {
-    try { got = await runEngine(actor, videoId, quality, { tokens, log, store, receiptPath }); break; }
-    catch (e) {
-      lastErr = e;
-      if (e.code === 'youtube_unavailable' || e.code === 'video_pending') throw e; // no engine changes that
-      log.warn?.('[VIDEO] engine could not deliver; trying the next one', { videoId, actor, code: e.code, message: String(e.message).slice(0, 160) });
+    let startAt = null;
+    for (let attempt = 0; attempt < tokens.length && !got; attempt++) {
+      try { got = await runEngine(actor, videoId, quality, { tokens, log, store, receiptPath, startAt }); }
+      catch (e) {
+        lastErr = e;
+        if (e.code === 'youtube_unavailable' || e.code === 'video_pending') throw e; // no engine or key changes that
+        if (!Number.isInteger(e.tokenIndex)) { log.warn?.('[VIDEO] no key could start this engine; trying the next engine', { videoId, actor, code: e.code }); break; }
+        startAt = e.tokenIndex + 1;
+        log.warn?.('[VIDEO] run failed on this key; trying the next key', { videoId, actor, account: e.tokenIndex + 1, next: (startAt % tokens.length) + 1, message: String(e.message).slice(0, 160) });
+      }
     }
+    if (got) break;
+    log.warn?.('[VIDEO] engine could not deliver; trying the next one', { videoId, actor });
   }
   if (!got) throw lastErr || err('video_engine_failed', 'No engine delivered the video');
 
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'video-'));
   try {
     const src = path.join(temp, 'source.mp4'), out = path.join(temp, 'video.mp4');
-    const r = await fetch(got.url, { signal: AbortSignal.timeout(2 * 3600 * 1000) });
-    if (!r.ok || !r.body) throw err('video_transfer_failed', 'Video file download HTTP ' + r.status);
-    await pipeline(Readable.fromWeb(r.body), createWriteStream(src));
+    // The finished file is fetched up to 3 times (a dropped connection is not a failed video).
+    for (let k = 1; ; k++) {
+      try {
+        const r = await fetch(got.url, { signal: AbortSignal.timeout(2 * 3600 * 1000) });
+        if (!r.ok || !r.body) throw err('video_transfer_failed', 'Video file download HTTP ' + r.status);
+        await pipeline(Readable.fromWeb(r.body), createWriteStream(src));
+        break;
+      } catch (e) {
+        if (k >= 3) throw e;
+        log.warn?.('[VIDEO] file transfer interrupted; fetching again', { videoId, attempt: k, message: String(e?.message || e).slice(0, 120) });
+        await new Promise(x => setTimeout(x, 10000 * k));
+      }
+    }
     const bytes = (await fs.stat(src)).size;
     const expected = Number(got.item?.fileSizeBytes);
     if (Number.isFinite(expected) && expected > 0 && expected !== bytes) throw err('video_transfer_failed', 'Video file size mismatch');
@@ -174,7 +196,10 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       if (subs?.srt) {
         const srt = path.join(temp, 'he.srt'), withSubs = path.join(temp, 'with_subs.mp4');
         await fs.writeFile(srt, subs.srt);
-        try {
+        // First choice: the lines drawn into the picture (shown by every player).
+        const burned = deps.burnSubtitles ? await deps.burnSubtitles(src, subs.srt, temp).catch(() => null) : null;
+        if (burned) { srcFile = burned; subs = { ...subs, burned: true }; }
+        else try {
           await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-i', srt, '-map', '0:v:0', '-map', '0:a:0?', '-map', '1:0', '-c', 'copy', '-c:s', 'mov_text', '-metadata:s:s:0', 'language=heb', '-metadata:s:s:0', 'title=עברית', '-disposition:s:0', 'default', withSubs]);
           srcFile = withSubs;
         } catch (e) { log.warn?.('[VIDEO] subtitles not embedded', { videoId, message: String(e.message).slice(0, 160) }); subs = { ...subs, embedded: false }; }
@@ -191,7 +216,7 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       args.push('-map', '0:v:0', '-map', '0:a:0?');
       if (jpeg) args.push('-map', '1:v:0', '-disposition:v:1', 'attached_pic');
       args.push('-map', '0:s?', '-c', 'copy', '-map_metadata', '-1');
-      if (srcFile !== src) args.push('-metadata:s:s:0', 'language=heb', '-metadata:s:s:0', 'title=עברית', '-disposition:s:0', 'default');
+      if (srcFile !== src && !subs?.burned) args.push('-metadata:s:s:0', 'language=heb', '-metadata:s:s:0', 'title=עברית', '-disposition:s:0', 'default');
       for (const [k, v] of Object.entries(tags)) args.push('-metadata', k + '=' + String(v));
       args.push('-movflags', '+faststart', outFile);
       try { await ffmpeg(ffmpegPath, args); return outFile; }
@@ -234,7 +259,7 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       saved.push({ remote, bytes: size });
     }
     // A separate .srt with the same name, for players that read side files.
-    if (subs?.srt && pieces.length === 1) {
+    if (subs?.srt && !subs.burned && pieces.length === 1) {
       const srtRemote = saved[0].remote.replace(/\.mp4$/, '.srt');
       try {
         const f = path.join(temp, 'he.srt');
@@ -245,7 +270,8 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
     }
     const remote = saved[0].remote, size = saved.reduce((a, x) => a + x.bytes, 0);
     await store.write(receiptPath, { videoId, actor: got.actor, runId: got.runId, state: 'done', remote, files: saved, bytes: size, quality, subtitles: subs?.srt ? 'hebrew' : (subs?.skipped || 'none'), at: new Date().toISOString() });
-    log.info?.('[VIDEO] saved', { videoId, files: saved, quality, engine: got.actor, picture: !!jpeg, subtitles: subs?.srt ? (subs.embedded === false ? 'file_only' : 'hebrew') : (subs?.skipped || 'none'), uploadMs: Date.now() - t });
+    log.info?.('[VIDEO] saved', { videoId, files: saved, quality, engine: got.actor, picture: !!jpeg, subtitles: subs?.srt ? (subs.burned ? 'hebrew_in_picture' : subs.embedded === false ? 'file_only' : 'hebrew_track') : (subs?.skipped || 'none'), uploadMs: Date.now() - t });
     return { remote, bytes: size };
   } finally { await fs.rm(temp, { recursive: true, force: true }).catch(() => {}); }
 }
+export { runEngine as _runEngine };

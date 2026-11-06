@@ -302,3 +302,62 @@ export async function hebrewSubtitlesFor(videoFile, tempDir, { ffmpegPath, env =
     return null;
   }
 }
+
+// ---- Subtitles drawn into the picture (owner, 06.11) -----------------------
+// Many players (phone galleries, Windows) do not show a subtitle track unless
+// it is switched on, so the Hebrew lines are drawn into the picture itself.
+// Lines are broken here (max ~42 letters, 2 lines) and each line is wrapped in
+// right-to-left marks: libass then puts punctuation and numbers on the correct
+// side (checked by eye on a rendered frame, 06.11).
+const RLM = '\u200f';
+export function wrapRtl(text, max = 42) {
+  const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ');
+  const lines = []; let cur = '';
+  for (const w of words) {
+    if (cur && (cur + ' ' + w).length > max) { lines.push(cur); cur = w; } else cur = cur ? cur + ' ' + w : w;
+  }
+  if (cur) lines.push(cur);
+  // Never more than 2 lines on screen: merge the rest into the second line.
+  const two = lines.length > 2 ? [lines[0], lines.slice(1).join(' ')] : lines;
+  return two.map(l => RLM + l + RLM).join('\n');
+}
+
+export function burnSrt(srt) {
+  return String(srt).split(/\n\n+/).map(block => {
+    const rows = block.split('\n');
+    if (rows.length < 3) return block;
+    return [rows[0], rows[1], wrapRtl(rows.slice(2).join(' '))].join('\n');
+  }).join('\n\n') + '\n';
+}
+
+export async function fontsDir() {
+  try {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    return path.join(path.dirname(req.resolve('dejavu-fonts-ttf/package.json')), 'ttf');
+  } catch { return null; }
+}
+
+// Re-encodes the picture with the Hebrew lines drawn in (H.264, sound copied).
+// Returns the new file path, or null if it failed or ran past maxMs.
+export async function burnSubtitles(videoFile, srtText, tempDir, { ffmpegPath, log = console, maxMs = 3 * 3600 * 1000, height = null } = {}) {
+  const fonts = await fontsDir();
+  const srt = path.join(tempDir, 'burn.srt');
+  await fs.writeFile(srt, burnSrt(srtText));
+  const out = path.join(tempDir, 'burned.mp4');
+  const esc = p => p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+  const style = "FontName=DejaVu Sans,FontSize=22,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=28,WrapStyle=2";
+  const vf = (height ? 'scale=-2:' + height + ',' : '') + "subtitles='" + esc(srt) + "'" + (fonts ? ":fontsdir='" + esc(fonts) + "'" : '') + ":force_style='" + style + "'";
+  const t0 = Date.now();
+  const ok = await new Promise(resolve => {
+    const p = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoFile, '-map', '0:v:0', '-map', '0:a:0?', '-vf', vf,
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-threads', '2', '-c:a', 'copy', '-movflags', '+faststart', out], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let e = ''; p.stderr.on('data', d => { e = (e + d).slice(-300); });
+    const timer = setTimeout(() => { p.kill('SIGKILL'); log.warn?.('[SUBTITLES] drawing into the picture took too long; stopped', { minutes: Math.round(maxMs / 60000) }); }, maxMs);
+    p.on('error', () => { clearTimeout(timer); resolve(false); });
+    p.on('close', c => { clearTimeout(timer); if (c !== 0) log.warn?.('[SUBTITLES] drawing into the picture failed', { code: c, error: e.trim().slice(0, 200) }); resolve(c === 0); });
+  });
+  if (!ok) { await fs.rm(out, { force: true }).catch(() => {}); return null; }
+  log.info?.('[SUBTITLES] Hebrew lines drawn into the picture', { minutes: +((Date.now() - t0) / 60000).toFixed(1) });
+  return out;
+}

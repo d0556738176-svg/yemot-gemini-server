@@ -3926,6 +3926,7 @@ function startYouTubeVideoJob(video) {
         }
         return r;
       },
+      burnSubtitles: async (file, srt, dir) => (await import('./youtube-subtitles.js')).burnSubtitles(file, srt, dir, { ffmpegPath, log: console, maxMs: Number(process.env.VIDEO_BURN_MAX_MIN || 240) * 60000 }),
       countSaved: async () => (await import('./download-folders.js')).countSaved('video', { readJson: x => p.readCacheJson(x), writeJson: (x, d) => p.writeCacheJson(x, d) }),
     });
   })().then(r => { state.status = 'ready'; state.remote = r.remote; return videoPendingUpdate(l => l.filter(x => x !== id)); })
@@ -5026,7 +5027,7 @@ app.listen(port,async()=>{
     // The Tesla test video (06.11) had 60 untranslated lines: delete it and
     // make it again with the fixed translation (same path as the caller's job).
     { const pp=(await import('./youtube-authorized-playback.js'))._pipeline;
-      const RM='ivr2:/2/selftest/redo_video_3SAxXUIre28_v1.json';
+      const RM='ivr2:/2/selftest/redo_video_3SAxXUIre28_v2.json';
       if(!(await pp.readCacheJson(RM).catch(()=>null))){
         const { videoReceiptPath } = await import('./youtube-video-download.js');
         const rc=await pp.readCacheJson(videoReceiptPath('3SAxXUIre28')).catch(()=>null);
@@ -5034,7 +5035,7 @@ app.listen(port,async()=>{
           for(const f of (rc.files||[])){const x=new URL(pp.YEMOT_API_BASE+'/FileAction');x.searchParams.set('token',pp.yemotApiKey());x.searchParams.set('action','delete');x.searchParams.set('what',f.remote);await fetch(x).catch(()=>{});}
           await pp.writeCacheJson(videoReceiptPath('3SAxXUIre28'),{state:'redo',at:new Date().toISOString()});
           await pp.writeCacheJson(RM,{at:new Date().toISOString(),deleted:(rc.files||[]).map(f=>f.remote)});
-          console.info('[VIDEO] remaking the Tesla video with full Hebrew subtitles',{deleted:(rc.files||[]).length});
+          console.info('[VIDEO] remaking the Tesla video with Hebrew subtitles drawn into the picture',{deleted:(rc.files||[]).length});
           startYouTubeVideoJob({videoId:'3SAxXUIre28',title:'How does an Electric Car work ? | Tesla Model S'});
         }
       }
