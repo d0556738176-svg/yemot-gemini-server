@@ -14,12 +14,18 @@ const YTDLP_PLUGIN_ROOT = path.join(
 
 const PREFERRED_LANGS = ['he', 'iw', 'en'];
 
+// The PO-token plugin only helps when its provider server is actually running
+// (YTDLP_POT_PROVIDER_URL). Loading it without one crashes yt-dlp at start-up,
+// so by default yt-dlp runs without plugins.
+const POT_PROVIDER_URL = String(process.env.YTDLP_POT_PROVIDER_URL || '').trim();
 function extractorArgs(client) {
   return [
     'youtube:player_client=' + client,
-    'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416',
-    'pot_trace=true'
+    ...(POT_PROVIDER_URL ? ['youtubepot-bgutilhttp:base_url=' + POT_PROVIDER_URL, 'pot_trace=true'] : [])
   ].join(';');
+}
+function pluginOptions() {
+  return POT_PROVIDER_URL ? { pluginDirs: YTDLP_PLUGIN_ROOT } : { noPluginDirs: true };
 }
 
 function cleanCaptionText(raw) {
@@ -103,7 +109,7 @@ async function getInfo(url, client) {
     skipDownload: true,
     quiet: true,
     jsRuntimes: 'node',
-    pluginDirs: YTDLP_PLUGIN_ROOT,
+    ...pluginOptions(),
     extractorArgs: extractorArgs(client)
   }));
 }
@@ -120,7 +126,7 @@ async function downloadCaption(url, tempDir, language, client) {
     quiet: false,
     verbose: true,
     jsRuntimes: 'node',
-    pluginDirs: YTDLP_PLUGIN_ROOT,
+    ...pluginOptions(),
     extractorArgs: extractorArgs(client),
     output: outputTemplate
   });
