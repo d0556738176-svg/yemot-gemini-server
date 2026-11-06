@@ -1920,7 +1920,7 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
     }
     videos=(data.items||[]).filter(x=>x.id?.videoId).map(x=>({
       videoId:x.id.videoId,
-      title:String(x.snippet?.title||'ללא כותרת'),
+      title:decodeHtmlEntities(String(x.snippet?.title||'ללא כותרת')),
       channelTitle:String(x.snippet?.channelTitle||'ערוץ לא ידוע'),
       publishedAt:x.snippet?.publishedAt||null,
       description:String(x.snippet?.description||'')
@@ -2025,17 +2025,17 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
     const selected=videos[0];
     try {
       const description=await analyzePublicYouTubeVideo('https://www.youtube.com/watch?v='+selected.videoId,question,{visual:true});
-      if(String(description||'').trim()) return 'בסרטון '+sanitizeForYemot(selected.title||'')+': '+sanitizeForYemot(description);
+      if(String(description||'').trim()) return 'בסרטון '+sanitizeForYemot(decodeHtmlEntities(selected.title||''))+': '+sanitizeForYemot(description);
     } catch(e) {
       console.warn('[YouTube] visual description unavailable',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,200)});
     }
-    return 'מצאתי את הסרטון '+sanitizeForYemot(selected.title||'')+' אבל לא הצלחתי כרגע לצפות בו ולתאר אותו. נסה שוב בעוד רגע.';
+    return 'מצאתי את הסרטון '+sanitizeForYemot(decodeHtmlEntities(selected.title||''))+' אבל לא הצלחתי כרגע לצפות בו ולתאר אותו. נסה שוב בעוד רגע.';
   }
 
   if(wantsContent) {
     const selected=videos[0];
     const videoUrl='https://www.youtube.com/watch?v='+selected.videoId;
-    const title=sanitizeForYemot(selected.title||'הסרטון שנמצא');
+    const title=sanitizeForYemot(decodeHtmlEntities(selected.title||'הסרטון שנמצא'));
 
     // Gemini starts watching the video at once, in parallel with the caption
     // download, so a missing or blocked transcript costs the caller no extra time.
@@ -4928,8 +4928,9 @@ const BRANCH1_E2E_QUESTIONS=[
   'פתח את אתר בנק הפועלים ותקרא מה כתוב בעמוד הראשי',
   'תמשיך',
   'מה הסרטון עם הכי הרבה צפיות ביוטיוב של הרב יצחק יוסף',
-  'מה בדיוק הוא אמר בסרטון הזה, שלב אחרי שלב',
-  'תמחיש לי מה רואים בסרטון'
+  // The two video steps use Gemini's free video quota (about 20 per model per
+  // day), so they run only when BRANCH1_E2E_VIDEO=on; callers keep the quota.
+  ...(String(process.env.BRANCH1_E2E_VIDEO||'off')==='on'?['מה בדיוק הוא אמר בסרטון הזה, שלב אחרי שלב','תמחיש לי מה רואים בסרטון']:[])
 ];
 async function runBranch1EndToEndSelfTest(questions=BRANCH1_E2E_QUESTIONS) {
   let index=0;
