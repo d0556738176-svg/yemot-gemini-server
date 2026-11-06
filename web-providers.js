@@ -165,15 +165,38 @@ export async function searchSerper(query, { timeoutMs = 3500, count = 8 } = {}) 
  */
 export async function findOfficialWebsite(name, { timeoutMs = 2500 } = {}) {
   const key = env('SERPER_API_KEY');
-  if (!key || !String(name || '').trim()) return null;
+  const q = String(name || '').trim();
+  if (!key || !q) return null;
+  // The plain name (no "official site" words) is what Google ranks best. Signals,
+  // strongest first: the knowledge panel's website; a result with sitelinks
+  // (Google shows them for an organization's own site, not for directories);
+  // a homepage result whose title starts with the name.
   const data = await fetchJson('https://google.serper.dev/search', {
     method: 'POST', timeoutMs, label: 'Serper official site',
     headers: { 'x-api-key': key },
-    body: { q: String(name).slice(0, 120) + ' אתר רשמי', gl: 'il', hl: 'iw', num: 5 }
+    body: { q: q.slice(0, 120), gl: 'il', hl: 'iw', num: 8 }
   });
-  const site = data?.knowledgeGraph?.website;
-  if (site && /^https?:\/\//i.test(site)) return { url: site, title: data.knowledgeGraph.title || name, source: 'knowledgeGraph' };
-  return null;
+  const organic = Array.isArray(data?.organic) ? data.organic : [];
+  const kgSite = data?.knowledgeGraph?.website;
+  let pick = null;
+  if (kgSite && /^https?:\/\//i.test(kgSite)) pick = { url: kgSite, source: 'knowledgeGraph' };
+  if (!pick) {
+    const withSitelinks = organic.find(x => Array.isArray(x.sitelinks) && x.sitelinks.length >= 2 && /^https?:\/\//i.test(x.link || ''));
+    if (withSitelinks) pick = { url: withSitelinks.link, source: 'sitelinks' };
+  }
+  if (!pick) {
+    const first = q.split(/\s+/)[0];
+    const home = organic.find(x => {
+      try { return new URL(x.link).pathname.replace(/\/+$/, '') === '' && String(x.title || '').trim().startsWith(first); } catch { return false; }
+    });
+    if (home) pick = { url: home.link, source: 'homepage-title' };
+  }
+  console.info('[WEB_PROVIDERS] official site lookup', {
+    name: q.slice(0, 60), source: pick?.source || 'none',
+    picked: pick ? new URL(pick.url).hostname : null,
+    top: organic.slice(0, 3).map(x => { try { return new URL(x.link).hostname + (x.sitelinks ? '+links' : ''); } catch { return ''; } })
+  });
+  return pick ? { ...pick, title: q } : null;
 }
 
 export async function searchJina(query, { timeoutMs = 4500, count = 6 } = {}) {

@@ -107,3 +107,14 @@ test('follow-ups about the found video stay on YouTube', async () => {
   assert.equal(mayUseYouTubeSearch('תמחיש לי מה רואים בסרטון', ctx), true);
   assert.equal(mayUseYouTubeSearch('מה בדיוק הוא אמר', { lastRoute: 'other' }), false);
 });
+
+test('official site falls back to the result Google shows with sitelinks', withEnv({ SERPER_API_KEY: 'k' }, async () => {
+  const { findOfficialWebsite } = await import('../web-providers.js');
+  mockFetch(() => ({ body: { organic: [
+    { title: 'בנק הפועלים - שירות לקוחות', link: 'https://sherutplus.com/bank-hapoalim' },
+    { title: 'בנק הפועלים', link: 'https://www.bankhapoalim.co.il/he', sitelinks: [{ title: 'א' }, { title: 'ב' }] }
+  ] } }));
+  const found = await findOfficialWebsite('בנק הפועלים');
+  assert.equal(new URL(found.url).hostname, 'www.bankhapoalim.co.il');
+  assert.equal(found.source, 'sitelinks');
+}));
