@@ -152,3 +152,10 @@ test('spoken answers keep sentence breaks as short comma pauses in few items', a
   const plain = branch1SpeechItems('משפט ראשון. משפט שני!');
   assert.equal(plain[0].data, 'משפט ראשון, משפט שני');
 });
+
+test('advice questions are not routed to news headlines', async () => {
+  const { isNewsQuestion } = await import('../news-routing.js');
+  assert.equal(isNewsQuestion('תגיד לי איך לנהל את היום בצבא החכמה'), false);
+  assert.equal(isNewsQuestion('מה החדשות היום'), true);
+  assert.equal(isNewsQuestion('מה קורה היום עם הצבא'), true);
+});
