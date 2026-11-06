@@ -43,7 +43,9 @@ export function mayUseYouTubeSearch(text, context={}) {
   if(isYouTubeTechnicalDiscussion(q))return false;
   if(/youtube|יוטיוב|ביויוטב|ביוטוב/iu.test(q))return true;
   if(context.lastRoute!=='youtube')return false;
-  return /(?:תוצאה|סרטון|בדיחה)\s*(?:מספר\s*)?(?:[1-9]|ראשו|שני|שליש|רביע|חמיש)|הראשו|השני|השליש|כמה צפיות|כמה לייקים|שם הערוץ|מתי פורסם|תוכן הסרטון|סכם|תסכם|תמשיך/u.test(q);
+  // Follow-ups about the video just found stay with that video: what was said,
+  // word for word, step by step, and what is seen in it.
+  return /(?:תוצאה|סרטון|בדיחה)\s*(?:מספר\s*)?(?:[1-9]|ראשו|שני|שליש|רביע|חמיש)|הראשו|השני|השליש|כמה צפיות|כמה לייקים|שם הערוץ|מתי פורסם|תוכן הסרטון|סכם|תסכם|תמשיך|בסרטון|הסרטון|בסירטון|הסירטון|בוידאו|הוידאו|מה (?:הוא|היא|הם) (?:אמר|אמרה|אמרו|אומר|אומרת|אומרים)|מה נאמר|בדיוק|מילה במילה|שלב אחרי שלב|תמליל|תצטט|ציטוט|על מה|תמחיש|המחשה|מה רואים|איך (?:הוא|היא) נראה|תגובות/u.test(q);
 }
 
 export function asksForFeedback(answer) {

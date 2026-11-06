@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { withTavily, tavilyClient, searchSecondary, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
+import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
@@ -1259,7 +1259,7 @@ ${raw}
   const compact=latest.slice(0,5).map(x=>sanitizeForYemot(x.title)+(x.source?' ('+sanitizeForYemot(x.source)+')':'')).join('. ');
   return 'אלה הכותרות העדכניות שמצאתי: '+compact+'. אפשר לבקש ממני להרחיב על כותרת מסוימת.';
 }
-async function analyzePublicYouTubeVideo(videoUrl, question, {verbatim=false}={}) {
+async function analyzePublicYouTubeVideo(videoUrl, question, {verbatim=false,visual=false}={}) {
   // Every Gemini key and a short model chain: one exhausted key or a busy
   // model must not make video questions fail while another can answer.
   const keys=[...new Set((apiKeys||[]).filter(Boolean))];
@@ -1268,7 +1268,7 @@ async function analyzePublicYouTubeVideo(videoUrl, question, {verbatim=false}={}
   let lastError=null;
   for(const model of models) for(const key of keys) {
     try {
-      const text=await analyzePublicYouTubeVideoOnce(videoUrl,question,{key,model,verbatim});
+      const text=await analyzePublicYouTubeVideoOnce(videoUrl,question,{key,model,verbatim,visual});
       if(String(text||'').trim()) return text;
     } catch(e) {
       lastError=e;
@@ -1280,12 +1280,15 @@ async function analyzePublicYouTubeVideo(videoUrl, question, {verbatim=false}={}
   throw lastError||Object.assign(new Error('YouTube video analysis returned no text'),{status:502});
 }
 
-async function analyzePublicYouTubeVideoOnce(videoUrl, question, {key, model, verbatim=false}) {
+async function analyzePublicYouTubeVideoOnce(videoUrl, question, {key, model, verbatim=false, visual=false}) {
 
   // Use the current Interactions API because it supports passing a public YouTube URL
   // directly as video input. The previous generateContent/fileData approach did not
   // reliably analyze YouTube URLs.
-  const prompt = verbatim ? `האזן לסרטון YouTube הציבורי המצורף עצמו, לא לכותרת או לתיאור.
+  const prompt = visual ? `צפה בסרטון YouTube הציבורי המצורף עצמו, לא בכותרת או בתיאור.
+השאלה של המתקשר: ${question}
+תן המחשה קולית בעברית, לפי סדר הסרטון: איפה זה מתרחש, מי או מה נראה, מה עושים, טקסט שמופיע על המסך, ואיך הסצנות מתחלפות. ציין זמנים משוערים לרגעים חשובים.
+הפרד בין מה שנראה בבירור לבין השערה, ואל תמציא פרטים. התשובה מוקראת בטלפון, בלי סימני עיצוב.` : verbatim ? `האזן לסרטון YouTube הציבורי המצורף עצמו, לא לכותרת או לתיאור.
 השאלה של המתקשר: ${question}
 המתקשר רוצה לדעת מה בדיוק נאמר בסרטון. כתוב בעברית, לפי סדר הסרטון, שלב אחרי שלב:
 - לכל שלב: זמן משוער בסרטון (דקה ושנייה), מי מדבר אם ניתן לזהות, ואת המילים שנאמרו במדויק ככל האפשר, בציטוט קצר.
@@ -2005,6 +2008,17 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
       console.warn('[YouTube] statistics/comments unavailable',{message:String(e?.message||e).slice(0,500)});
       return 'מצאתי את הסרטון אבל נתוני הצפיות והתגובות אינם זמינים כרגע.';
     }
+  }
+
+  if(wantsVisualFollowUp && !wantsContent && videos[0]?.videoId) {
+    const selected=videos[0];
+    try {
+      const description=await analyzePublicYouTubeVideo('https://www.youtube.com/watch?v='+selected.videoId,question,{visual:true});
+      if(String(description||'').trim()) return 'בסרטון '+sanitizeForYemot(selected.title||'')+': '+sanitizeForYemot(description);
+    } catch(e) {
+      console.warn('[YouTube] visual description unavailable',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,200)});
+    }
+    return 'מצאתי את הסרטון '+sanitizeForYemot(selected.title||'')+' אבל לא הצלחתי כרגע לצפות בו ולתאר אותו. נסה שוב בעוד רגע.';
   }
 
   if(wantsContent) {
@@ -4227,7 +4241,7 @@ async function callHandler(call) {
       else if(clarification) replyText=clarification;
       else if(branch1Website) {
         console.info('[BRANCH1 WEBSITE] direct reading route selected',{callId:activeKey});
-        replyText=await answerBranch1Website(userTranscript,turnContext,{search:branch1Search,extract:extractBranch1Page});
+        replyText=await answerBranch1Website(userTranscript,turnContext,{search:branch1Search,extract:extractBranch1Page,official:findOfficialWebsite});
       }
       else if(branch1Local) replyText=await answerBranch1Local(userTranscript,branch1Search);
       else if(branch1Events) replyText=await answerBranch1Events(userTranscript,branch1Search,{extract:extractBranch1Page});
@@ -4250,7 +4264,7 @@ async function callHandler(call) {
           replyText=await answerBranch1Web(userTranscript, relevantHistoryText, turnContext);
         }
       }
-      else if(isMultimodalAnalysisRequest(userTranscript).any || isVisualContinuationRequest(userTranscript,visualHistoryText)) {
+      else if(!(youtubeIntent && turnContext.currentVideo?.videoId && !extractExplicitHttpUrl(userTranscript)) && (isMultimodalAnalysisRequest(userTranscript).any || isVisualContinuationRequest(userTranscript,visualHistoryText))) {
         const visualFollowUp=isVisualContinuationRequest(userTranscript,visualHistoryText);
         console.info('[MULTIMODAL] visual_route_selected',{
           callId:activeKey,

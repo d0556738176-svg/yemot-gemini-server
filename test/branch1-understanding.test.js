@@ -129,7 +129,7 @@ test('actual phone handler reads website, continues, switches topic and routes h
     buildCallHistoryText:async()=>'',transcribePhoneAudio:async()=>inputs[transcriptIndex++],
     resolvePendingLookupQuestion:()=>'',resolveBranch1Question,isCorrection,branch1Clarification,selectRelevantHistoryForTurn:()=>'',branch1FollowUpHistory,
     isBranch1WebsiteRequest,isBranch1LocalRequest,isBranch1EventRequest,
-    branch1Search:async()=>[],extractBranch1Page:async()=>null,
+    branch1Search:async()=>[],extractBranch1Page:async()=>null,findOfficialWebsite:async()=>null,
     answerBranch1Website:(q,state)=>answerBranch1Website(q,state,{search:async()=>[],read:async({url})=>{websiteReads++;return {url,title:'הידברות',content:'טקסט מקורי '.repeat(250),links:[]};}}),
     answerBranch1Events:async q=>{eventCalls++;return findBranch1Events(q,async()=>[],{now,read:async()=>municipal});},
     answerBusinessHoursDirect:async()=>{hoursCalls++;return 'לוח שעות מאומת';},

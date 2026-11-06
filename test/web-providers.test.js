@@ -83,3 +83,27 @@ test('Cloudflare vision discovers the account ID from the token', withEnv({ CLOU
   const body = JSON.parse(calls[1].init.body);
   assert.match(body.messages[0].content[1].image_url.url, /^data:image\/png;base64,/);
 }));
+
+test('opening a named site prefers the homepage over a directory page about it', async () => {
+  const { selectWebsiteResult } = await import('../website-selection.js');
+  const pick = selectWebsiteResult('פתח אתר בנק הפועלים', [
+    { title: 'בנק הפועלים - שירות לקוחות | השג לי נציג', url: 'https://directory.example/companies/bank-hapoalim/service' },
+    { title: 'בנק הפועלים - דף הבית', url: 'https://www.bankhapoalim.co.il/' }
+  ]);
+  assert.equal(pick.url, 'https://www.bankhapoalim.co.il/');
+});
+
+test('official site comes from the Google knowledge panel', withEnv({ SERPER_API_KEY: 'k' }, async () => {
+  const { findOfficialWebsite } = await import('../web-providers.js');
+  mockFetch(() => ({ body: { knowledgeGraph: { title: 'בנק הפועלים', website: 'https://www.bankhapoalim.co.il/' }, organic: [] } }));
+  const found = await findOfficialWebsite('בנק הפועלים');
+  assert.equal(found.url, 'https://www.bankhapoalim.co.il/');
+}));
+
+test('follow-ups about the found video stay on YouTube', async () => {
+  const { mayUseYouTubeSearch } = await import('../branch1-turn-context.js');
+  const ctx = { lastRoute: 'youtube' };
+  assert.equal(mayUseYouTubeSearch('מה בדיוק הוא אמר בסרטון הזה, שלב אחרי שלב', ctx), true);
+  assert.equal(mayUseYouTubeSearch('תמחיש לי מה רואים בסרטון', ctx), true);
+  assert.equal(mayUseYouTubeSearch('מה בדיוק הוא אמר', { lastRoute: 'other' }), false);
+});
