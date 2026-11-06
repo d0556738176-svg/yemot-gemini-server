@@ -546,3 +546,13 @@ export async function runRenameHebrewLatinV2() {
   console.info(TAG, 'rename hebrew+latin v2', JSON.stringify(out));
   await p.writeCacheJson(MARK, { at: new Date().toISOString(), out }).catch(() => {});
 }
+
+export const runRenameHebrewLatinV3 = async () => {
+  // same pass, new record, after the translation rule was made sturdier
+  const p = (await import('./youtube-authorized-playback.js'))._pipeline;
+  if (await p.readCacheJson('ivr2:/2/selftest/rename_hebrew_latin_v3.json').catch(() => null)) return;
+  const v2 = await p.readCacheJson('ivr2:/2/selftest/rename_hebrew_latin_v2.json').catch(() => null);
+  if (v2) await p.writeCacheJson('ivr2:/2/selftest/rename_hebrew_latin_v2.json', null).catch(() => {});
+  await runRenameHebrewLatinV2();
+  await p.writeCacheJson('ivr2:/2/selftest/rename_hebrew_latin_v3.json', { at: new Date().toISOString() }).catch(() => {});
+};

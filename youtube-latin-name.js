@@ -64,7 +64,11 @@ export function hebrewPart(title) {
   const segs = String(title || '').split(/\s*[|｜/]\s*/).filter(x => /[א-ת]/.test(x))
     // "עלה קטן אברהם פריד Ale Katan Avraham Fried": a closing run of 2+ English
     // words after the Hebrew is its translation, not part of the name.
-    .map(x => x.replace(/((?:[\s_\-–]+[A-Za-z][A-Za-z'.]*){2,}[\s_\-–.()]*)$/, m => /[א-ת]/.test(m) ? m : ''));
+    .map(x => {
+      const last = Math.max(...[...x].map((c, i) => (/[א-ת]/.test(c) ? i : -1)));
+      const tail = x.slice(last + 1);
+      return (tail.match(/[A-Za-z]{2,}/g) || []).length >= 2 ? x.slice(0, last + 1) + tail.replace(/^([^A-Za-z]*?)[\s_\-–|:]*[A-Za-z][\s\S]*$/, '$1') : x;
+    });
   return segs.join(' ').trim();
 }
 

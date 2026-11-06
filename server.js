@@ -5012,6 +5012,7 @@ app.listen(port,async()=>{
     await m.runRenameHebrewVideos();
     await m.runRenameHebrewLatin();
     await m.runRenameHebrewLatinV2();
+    await m.runRenameHebrewLatinV3();
   }).catch(e=>console.warn('[BRANCH2_MAINT] rename v2 failed',String(e?.message||e).slice(0,160)));
   if(process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
