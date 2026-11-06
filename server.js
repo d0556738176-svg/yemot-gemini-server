@@ -1932,7 +1932,19 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
     try {
       const stats=await getYouTubeStats(videos.slice(0,50).map(v=>v.videoId));
       const metric=/לייקים/.test(question)?'likeCount':'viewCount';
-      const ranked=videos.slice(0,50).filter(v=>stats.get(v.videoId))
+      // Rank only videos that are about the subject asked for: search results
+      // also contain related clips of other people, which must not win on views.
+      const filler=/^(?:מה|מהו|מי|הסרטון|סרטון|הסרטונים|סרטונים|עם|הכי|הרבה|צפיות|לייקים|נצפה|נצפים|פופולרי|פופולארי|מפורסם|מוכר|ביוטיוב|ביויוטב|ביוטוב|יוטיוב|youtube|של|את|על|יש|הוא|היא|תגיד|לי|תמצא|תחפש|הרב|רב|הרבנית|הגאון|רבי|מרן|ה)$/iu;
+      const subjectTokens=String(resolvedQuestion||question).replace(/[?!.,"׳״'()]/g,' ').split(/\s+/).filter(w=>w.length>1&&!filler.test(w));
+      const aboutSubject=v=>{
+        const item=stats.get(v.videoId);
+        const hay=[item?.snippet?.title,item?.snippet?.channelTitle,item?.snippet?.description,v.title,v.channelTitle].join(' ');
+        return subjectTokens.length && subjectTokens.every(t=>hay.includes(t));
+      };
+      const pool=videos.slice(0,50).filter(v=>stats.get(v.videoId));
+      const focused=pool.filter(aboutSubject);
+      console.info('[YouTube] most-viewed subject filter',{tokens:subjectTokens,candidates:pool.length,aboutSubject:focused.length});
+      const ranked=(focused.length?focused:pool)
         .sort((a,b)=>Number(stats.get(b.videoId).statistics?.[metric]||0)-Number(stats.get(a.videoId).statistics?.[metric]||0));
       if(ranked.length) {
         const top=ranked[0];
