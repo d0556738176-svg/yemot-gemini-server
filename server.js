@@ -5168,18 +5168,23 @@ async function configureYemotStructure() {
 
   // This release is intentionally scoped to branch 1. Do not rewrite branch 2,
   // branch 3, or their voice menu on a branch-1 deployment: another workstream owns them.
-  await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'});
+  // Extension 1 speaks with a man's Yemot voice (BRANCH1_VOICE, default Jacob).
+  // Every later /1 update repeats it so the voice is never reset.
+  const branch1Voice=(process.env.BRANCH1_VOICE||'Jacob').trim();
+  const branch1Base={type:'api',api_link:publicUrl + '/yemot',...(branch1Voice&&branch1Voice!=='default'?{voice:branch1Voice}:{})};
+  try { await updateExtension('ivr2:/1',branch1Base); console.log('[Yemot automatic setup] extension 1 voice set to '+branch1Voice); }
+  catch(e) { console.warn('[Yemot automatic setup] extension 1 voice rejected; keeping the default voice',String(e?.message||e).slice(0,200)); await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'}); }
   // Hands-free conversation: end each recording after a few seconds of silence, as if
   // the caller pressed #. Set in a separate, non-fatal call so an unsupported setting can
   // never break the main API link. Format: silenceSeconds-minSeconds-maxSeconds.
   if (process.env.YEMOT_RECORD_SILENCE_SECONDS !== 'off') {
     const silence=Math.max(1,Math.min(10,Number(process.env.YEMOT_RECORD_SILENCE_SECONDS||3)||3));
     try {
-      await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot',option_record:silence+'-1-60'});
+      await updateExtension('ivr2:/1',{...branch1Base,option_record:silence+'-1-60'});
       console.log('[Yemot automatic setup] hands-free recording (end on '+silence+'s silence) requested for ivr2:/1');
     } catch(e) {
       console.warn('[Yemot automatic setup] hands-free recording setting rejected; continuing with # key',String(e?.message||e).slice(0,200));
-      try { await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'}); } catch {}
+      try { await updateExtension('ivr2:/1',branch1Base); } catch {}
     }
   }
   // Extension 3: same engine as /1, woman's voice (Yemot TTS voice, default Sivan),
