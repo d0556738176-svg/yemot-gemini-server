@@ -2415,17 +2415,20 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     }
   })()]:[];
   for(const provider of [
-    ...(quality?[]:[{name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim()}]),
+    // In quality mode the small fast model is a reserve: it joins only if the
+    // strong models have not answered after a short wait (they hit free-tier
+    // rate limits under load, and the caller must never get raw excerpts).
+    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(process.env.BRANCH1_QUALITY_RESERVE_MS||2500):0},
     {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim(),big:true},
     {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim()},
     ...extraFastProviders(true)
   ]) {
     if(!provider.apiKey) continue;
-    racers.push(callCompatibleChatCompletion({
+    racers.push((provider.delayMs?new Promise(r=>setTimeout(r,provider.delayMs)).then(()=>{ if(raceDone) throw Object.assign(new Error('not needed'),{status:499}); }):Promise.resolve()).then(()=>callCompatibleChatCompletion({
       provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
       messages:[{role:'user',content:prompt}],timeoutMs:Math.max(1200,budgetMs-300),
       maxTokens,cooldowns:provider.big?branch1SynthCooldownsBig:branch1SynthCooldowns,cooldownMs:15000
-    }).then(text=>{ if(!String(text||'').trim()) throw new Error('empty'); return String(text).trim(); })
+    })).then(text=>{ if(!String(text||'').trim()) throw new Error('empty'); return String(text).trim(); })
       .catch(err=>{ console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
   }
   const checked=validate?racers.map(r=>r.then(text=>{
@@ -3503,6 +3506,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
     // A phone caller needs the useful facts, not internal failure messages or a
     // spoken list of search-result titles. Prefer snippet text; titles are only
     // a last resort when a provider returns no readable excerpt.
+    let directExtractiveAnswer='';
     const usable=unique.map(item=>{
       const snippet=sanitizeForYemot(String(item.snippet||'').trim())
         .replace(/^\s*(?:\d+[.)、:]\s*)+/,'')
@@ -3514,6 +3518,18 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
         .trim();
       return {snippet,title};
     }).filter(item=>item.snippet.length>35 || item.title.length>12);
+    // When no model can phrase the answer, speak the two sentences from the
+    // sources that best match the question, not a dump of several excerpts.
+    {
+      const terms=[...new Set(String(question||'').replace(/[?!.,"׳״']/g,' ').split(/\s+/)
+        .map(w=>w.replace(/^[והבלמשכ](?=[\u0590-\u05FF]{3,})/u,'')).filter(w=>w.length>2&&!/^(?:תחפש|תחפשי|חפש|באינטרנט|תגיד|תגידי|לי|מה|מי|איך|היום|עכשיו|את|של|על)$/u.test(w)))];
+      const sentences=usable.flatMap(item=>String(item.snippet||'').split(/\s*¶\s*|[.!?]\s+/u).map(x=>x.trim()).filter(x=>x.length>20&&x.length<260));
+      const ranked=sentences.map(text=>({text,score:terms.filter(t=>text.includes(t)).length})).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+      if(ranked.length) {
+        const picked=[...new Set(ranked.slice(0,2).map(x=>x.text))];
+        directExtractiveAnswer=(deepSearch?'לפי מה שמצאתי בחיפוש, ':'לפי מה שמצאתי, ')+picked.join(' ¶ ');
+      }
+    }
     const snippetLimit=deepSearch?4:2;
     const snippets=usable.slice(0,snippetLimit).map((item,index)=>{
       // Do not speak raw search titles: they are often phrased as questions.
@@ -3568,6 +3584,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
       }
     }
     console.warn('[BRANCH1 FALLBACK] returning source-grounded excerpts after answer-model outage',{results:Math.min(snippetLimit,usable.length),deepSearch});
+    if(directExtractiveAnswer) return directExtractiveAnswer;
     return (deepSearch?'בחיפוש המעמיק מצאתי את המידע הבא. ':'לפי המידע שמצאתי ברשת, ')+snippets+'.';
   }
 
