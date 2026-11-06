@@ -1936,13 +1936,16 @@ async function searchYouTubeForPhone(transcript, historyText='', context={}) {
       // also contain related clips of other people, which must not win on views.
       const filler=/^(?:מה|מהו|מי|הסרטון|סרטון|הסרטונים|סרטונים|עם|הכי|הרבה|צפיות|לייקים|נצפה|נצפים|פופולרי|פופולארי|מפורסם|מוכר|ביוטיוב|ביויוטב|ביוטוב|יוטיוב|youtube|של|את|על|יש|הוא|היא|תגיד|לי|תמצא|תחפש|הרב|רב|הרבנית|הגאון|רבי|מרן|ה)$/iu;
       const subjectTokens=String(resolvedQuestion||question).replace(/[?!.,"׳״'()]/g,' ').split(/\s+/).filter(w=>w.length>1&&!filler.test(w));
-      const aboutSubject=v=>{
+      // Title and channel decide; descriptions are full of hashtags naming other
+      // people, so they count only when no title or channel matches.
+      const matches=(v,withDescription)=>{
         const item=stats.get(v.videoId);
-        const hay=[item?.snippet?.title,item?.snippet?.channelTitle,item?.snippet?.description,v.title,v.channelTitle].join(' ');
+        const hay=[item?.snippet?.title,item?.snippet?.channelTitle,v.title,v.channelTitle,withDescription?item?.snippet?.description:''].join(' ');
         return subjectTokens.length && subjectTokens.every(t=>hay.includes(t));
       };
       const pool=videos.slice(0,50).filter(v=>stats.get(v.videoId));
-      const focused=pool.filter(aboutSubject);
+      let focused=pool.filter(v=>matches(v,false));
+      if(!focused.length) focused=pool.filter(v=>matches(v,true));
       console.info('[YouTube] most-viewed subject filter',{tokens:subjectTokens,candidates:pool.length,aboutSubject:focused.length});
       const ranked=(focused.length?focused:pool)
         .sort((a,b)=>Number(stats.get(b.videoId).statistics?.[metric]||0)-Number(stats.get(a.videoId).statistics?.[metric]||0));
