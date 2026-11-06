@@ -4,6 +4,7 @@ import express from 'express';
 import { readMemory, rememberTurn } from './branch1-memory.js';
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
@@ -317,7 +318,22 @@ function geminiErrorStatus(err) {
   return match ? Number(match[1]) : 0;
 }
 
+// Per-call speaking persona. Extension 3 speaks with a woman's voice, so the
+// model must refer to itself in the feminine; extension 1 keeps the default.
+const callPersona=new AsyncLocalStorage();
+const FEMININE_SELF_INSTRUCTION='את העוזרת הקולית בשלוחה זו, והקול שלך נשי. כשאת מדברת על עצמך השתמשי תמיד בלשון נקבה (למשל: אני בודקת, מצאתי, אני שמחה לעזור, הבנתי). את המתקשר המשיכי לפנות בלשון זכר.';
+function withPersona(contents) {
+  if(callPersona.getStore()?.persona!=='female' || !Array.isArray(contents) || !contents.length) return contents;
+  const [first,...rest]=contents;
+  if(!Array.isArray(first?.parts) || typeof first.parts[0]?.text!=='string') return contents;
+  return [{...first,parts:[{...first.parts[0],text:FEMININE_SELF_INSTRUCTION+'\n\n'+first.parts[0].text},...first.parts.slice(1)]},...rest];
+}
+function promptWithPersona(prompt) {
+  return callPersona.getStore()?.persona==='female' ? FEMININE_SELF_INSTRUCTION+'\n\n'+prompt : prompt;
+}
+
 async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null, phoneBudgetOverrideMs=null) {
+  contents=withPersona(contents);
   if (!modelsByName.length || !modelsByName[0]?.length)
     throw Object.assign(new Error('Gemini is not configured'), {status:400});
   const groups = useWebSearch ? webModelsByName : modelsByName;
@@ -446,6 +462,7 @@ const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:180000, transient
 const branch1BackupCooldowns = createCooldownRegistry({quotaMs:180000, transientMs:45000});
 
 async function generateBranch1WithFallback(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null) {
+  contents=withPersona(contents);
   // Gemini is the least available provider: for plain-text prompts the independent fast
   // providers answer first, and Gemini is only used when they all fail.
   if(process.env.BRANCH1_GEMINI_LAST!=='off' && !useWebSearch && Array.isArray(contents) && contents.length &&
@@ -2326,6 +2343,7 @@ async function readBestPages(question,results,budgetMs=2000){
 // only the strongest models race (the small fast model is left out) and Gemini,
 // whose Flash model reasons well over long evidence, joins after a short hedge.
 async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate=null,quality=false}={}){
+  prompt=promptWithPersona(prompt);
   // Gemini-only racer (not generateBranch1WithFallback, which would call Groq/OpenRouter a
   // second time) and it honors the shared circuit breaker so a stalled Gemini costs nothing.
   // Gemini is the last resort: it only starts after a short hedge delay, and never if an
@@ -4248,7 +4266,7 @@ async function callHandler(call) {
         console.info('[CALL_FLOW] direct_data_path_skip_initial_gemini', { callId: activeKey });
       }
       if (userTranscript && feedbackPending && /^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר|לא|לא עזר|לא ממש|לא כל כך)\s*$/i.test(userTranscript)) {
-        if (/^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר)/i.test(userTranscript)) replyText='מצוין. שמח שעזרתי לך. מה עוד תרצה שאעשה עבורך?';
+        if (/^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר)/i.test(userTranscript)) replyText='מצוין, טוב לשמוע שזה עזר. מה עוד תרצה שאעשה עבורך?';
         else replyText='בסדר. מה לא היה ברור או מה חסר לך? אמור לי ואנסה לעזור בצורה אחרת.';
         feedbackPending=false;
       }
@@ -4856,7 +4874,7 @@ async function backupCallHandler(call) {
       if(feedbackPending &&
          /^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר|לא|לא עזר|לא ממש|לא כל כך)\\s*$/i.test(userTranscript)) {
         replyText=/^(כן|כן בהחלט|בוודאי|בטח|מעולה|עזר)/i.test(userTranscript)
-          ? 'מצוין. שמח שעזרתי לך. מה עוד תרצה שאעשה עבורך?'
+          ? 'מצוין, טוב לשמוע שזה עזר. מה עוד תרצה שאעשה עבורך?'
           : 'בסדר. מה לא היה ברור או מה חסר לך? אמור לי ואנסה לעזור בצורה אחרת.';
         feedbackPending=false;
       }
@@ -4909,7 +4927,10 @@ app.get(['/yemot', '/yemot-backup'], (req, res, next) => {
   next();
 });
 router.get('/yemot', callHandler);
-router.get('/yemot-backup', backupCallHandler);
+// Extension 3 runs the same engine as extension 1 (search, websites, YouTube,
+// video, memory), with a woman's voice set on the extension and feminine
+// self-reference in every model answer.
+router.get('/yemot-backup', call => callPersona.run({persona:'female',branch:'3'}, () => callHandler(call)));
 router.get('/yemot-youtube', youtubeCallHandler);
 app.use(router);
 
@@ -4953,6 +4974,11 @@ async function runBranch1EndToEndSelfTest(questions=BRANCH1_E2E_QUESTIONS) {
   };
   await callHandler(call);
   console.info('[E2E_SELFTEST] finished',{steps:questions.length});
+}
+// Extension 3 shares the engine; one conversational turn checks that it answers
+// and speaks about itself in the feminine.
+async function runBranch3SelfTest() {
+  await callPersona.run({persona:'female',branch:'3'},()=>runBranch1EndToEndSelfTest(['ספרי לי בקצרה מי את ומה את יכולה לעשות בשבילי']));
 }
 // Shows whether each web key works (never the keys themselves). The result is
 // cached for hours, so opening this page costs at most one tiny call per provider.
@@ -5137,6 +5163,24 @@ async function configureYemotStructure() {
       try { await updateExtension('ivr2:/1',{type:'api',api_link:publicUrl + '/yemot'}); } catch {}
     }
   }
+  // Extension 3: same engine as /1, woman's voice (Yemot TTS voice, default Sivan),
+  // hands-free recording like /1. Each setting is applied separately so a
+  // rejected one never breaks the API link.
+  if (process.env.BRANCH3_AUTO_CONFIGURE !== 'false') {
+    try {
+      await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
+      const voice=(process.env.BRANCH3_VOICE||'Sivan').trim();
+      try { await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup',voice}); console.log('[Yemot automatic setup] extension 3 voice set to '+voice); }
+      catch(e) { console.warn('[Yemot automatic setup] extension 3 voice rejected',String(e?.message||e).slice(0,200)); }
+      if (process.env.YEMOT_RECORD_SILENCE_SECONDS !== 'off') {
+        const silence=Math.max(1,Math.min(10,Number(process.env.YEMOT_RECORD_SILENCE_SECONDS||3)||3));
+        try { await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup',voice,option_record:silence+'-1-60'}); console.log('[Yemot automatic setup] hands-free recording requested for ivr2:/3'); }
+        catch(e) { console.warn('[Yemot automatic setup] extension 3 hands-free setting rejected',String(e?.message||e).slice(0,200)); }
+      }
+    } catch(e) {
+      console.warn('[Yemot automatic setup] extension 3 setup failed',String(e?.message||e).slice(0,200));
+    }
+  }
   if (process.env.YEMOT_AUTO_CONFIGURE_ALL_EXTENSIONS === 'true') {
     await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
     if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
@@ -5173,7 +5217,7 @@ app.listen(port,async()=>{
     const builtAt=Number(readFileSync(new URL('./.build-time',import.meta.url),'utf8'));
     if(builtAt && Date.now()-builtAt<Number(process.env.PROVIDER_HEALTH_AFTER_BUILD_MS||20*60*1000)) {
       setTimeout(()=>providerHealth({force:true}).catch(e=>console.warn('[WEB_PROVIDERS] health check failed',String(e?.message||e).slice(0,160))),4000);
-      if(String(process.env.BRANCH1_E2E_SELFTEST||'on')!=='off') setTimeout(()=>runBranch1EndToEndSelfTest().catch(e=>console.warn('[E2E_SELFTEST] crashed',String(e?.message||e).slice(0,200))),20000);
+      if(String(process.env.BRANCH1_E2E_SELFTEST||'on')!=='off') setTimeout(()=>runBranch1EndToEndSelfTest().then(()=>runBranch3SelfTest()).catch(e=>console.warn('[E2E_SELFTEST] crashed',String(e?.message||e).slice(0,200))),20000);
     }
   } catch {}
   await loadConversationLog();
