@@ -4129,8 +4129,8 @@ async function youtubeCallHandler(call) {
           fallback:'לאישור הקש 1. לביטול הקש 2.',
           subtitles:'להוספת כתובית בעברית הקש 1. בלי כתובית הקש 2.',
           confirm:'להשמעה הקש 1. להורדת הסרטון עצמו לתיקיית וידאו הקש 2. לחזרה לתוצאות הקש 3.',
-          results:'לבחירה הקש את מספר התוצאה, מ 1 עד '+pageCount+'. לתוצאות נוספות הקש סולמית. לחיפוש חדש הקש 7.',
-        }[keyState]+' לאמירה בקול הקש 0. לחזרה לתפריט הראשי הקש כוכבית.';
+          results:'לבחירה הקש את מספר התוצאה, מ 1 עד '+pageCount+'. לתוצאות נוספות הקש 0. לחיפוש חדש הקש 7.',
+        }[keyState]+' לאמירה בקול הקש 8. לחזרה לתפריט הראשי הקש כוכבית.';
         // Spoken instructions ("אמור ...") are replaced by the key instructions.
         const said=String(prompt).split(/(?<=[.?!])\s+/).filter(x=>!/אמור|אמרו|הקש סולמית/.test(x)).join(' ');
         const spoken=sanitizeForYemot((said?said+' ':'')+hint);
@@ -4148,6 +4148,8 @@ async function youtubeCallHandler(call) {
         if(key==='None'&&waited<messageSec+45) key='#';
         console.info('[YouTube IVR] key read',{state:keyState,key,waitedSec:Math.round(waited),messageSec:Math.round(messageSec)});
         if(key.includes('*')) return call.go_to_folder('/');
+        // 0 = more results (owner, 07.11); # works the same as a backup.
+        if(key==='0'&&keyState==='results') key='#';
         if(key==='#') {
           if(keyState==='results') { keyTranscript='עוד'; key=''; }
           else { nextPrompt=prompt; continue; }
@@ -4159,7 +4161,7 @@ async function youtubeCallHandler(call) {
         }
         emptyTaps=0;
         if(!keyTranscript) {
-        if(key==='0') { voiceOnce=true; nextPrompt=prompt===basePrompt?null:prompt; continue; }
+        if(key==='8') { voiceOnce=true; nextPrompt=prompt===basePrompt?null:prompt; continue; }
         if(keyState==='confirm'&&key==='3') { pendingVideo=null; resultOffset=pageStart; nextPrompt=await formatResultsPage(); continue; }
         const map={
           fallback:{'1':'כן','2':'לא'},
