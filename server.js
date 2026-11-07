@@ -495,6 +495,12 @@ async function tryBranch1ConversationProviders(contents,fastPhone) {
     {...groq,model:fastPhone?accurateModel:groqModel}
   ];
   if(groqModel===accurateModel) providers.pop();
+  providers.push({
+    name:'Aion Labs',baseUrl:'https://api.aionlabs.ai/v1',
+    apiKey:(process.env.AIONLABS_API_KEY||'').trim(),
+    model:(process.env.AIONLABS_MODEL||'').trim()||'aion-labs/aion-3.5-mini',
+    timeoutMs:fastPhone?3000:6500
+  });
   for(const provider of providers) {
     if(!provider.apiKey) continue;
     try {
