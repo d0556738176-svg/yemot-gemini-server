@@ -14,7 +14,7 @@ const API = 'https://www.call2all.co.il/ym/api';
 const FOLDER = 'ivr2:/6';
 const PROGRESS = FOLDER + '/english-course-progress.txt';
 const HE_VOICE = process.env.ENGLISH_HE_VOICE || 'he-IL-AvriNeural';
-const EN_VOICES = (process.env.ENGLISH_EN_VOICE || 'en-US-AndrewNeural,en-US-GuyNeural').split(',');
+const EN_VOICES = [process.env.ENGLISH_EN_VOICE || 'en-US-AndrewNeural'];
 const BUILD_VERSION = 'v1';
 const log = (...a) => console.info('[ENGLISH]', ...a);
 
@@ -62,26 +62,16 @@ function ffmpeg(args) {
 
 const rateStr = r => (r >= 0 ? '+' : '') + Math.round(r) + '%';
 
-const badVoices = new Set();
-let voiceLogged = false;
+// One fixed voice per language for the whole course; transient timeouts are retried, never
+// answered by switching voice (a mixed voice inside a lesson sounds broken).
 async function speak(seg) {
   const isHe = seg[0] === 'he';
+  const voice = isHe ? HE_VOICE : EN_VOICES[0];
   const rate = isHe ? '-4%' : rateStr(seg[2] ?? -10);
   let last;
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const pool = (isHe ? [HE_VOICE] : EN_VOICES).filter(v => !badVoices.has(v));
-    const voice = pool[0] || (isHe ? HE_VOICE : EN_VOICES[EN_VOICES.length - 1]);
-    try {
-      const audio = await synthesize(seg[1], { voice, rate, timeoutMs: 20000 });
-      if (!isHe && !voiceLogged) { voiceLogged = true; log('English voice in use:', voice); }
-      return audio;
-    } catch (e) {
-      last = e;
-      // A voice that fails twice in a row is skipped for the rest of the run.
-      const k = 'fail:' + voice; speak[k] = (speak[k] || 0) + 1;
-      if (speak[k] >= 2 && pool.length > 1) { badVoices.add(voice); log('voice', voice, 'failing, switching:', String(e.message).slice(0, 120)); }
-      await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
-    }
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try { return await synthesize(seg[1], { voice, rate, timeoutMs: 25000 }); }
+    catch (e) { last = e; await new Promise(r => setTimeout(r, Math.min(1000 * 2 ** attempt, 20000))); }
   }
   throw last;
 }
@@ -104,7 +94,7 @@ export async function buildLesson(lesson, dir, speakFn = speak) {
     return silences.get(key);
   };
   const cache = new Map();
-  const speechFiles = await mapLimit(lesson.segments, 8, async (seg, k) => {
+  const speechFiles = await mapLimit(lesson.segments, 6, async (seg, k) => {
     if (seg[0] === 'p') return null;
     const key = seg.join('|');
     if (!cache.has(key)) cache.set(key, (async () => { const f = path.join(dir, 's' + k + '.mp3'); await fs.writeFile(f, await speakFn(seg)); return f; })());
