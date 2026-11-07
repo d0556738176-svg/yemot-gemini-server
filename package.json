@@ -19,6 +19,7 @@
     "@google/genai": "^1.31.0",
     "@tavily/core": "^0.7.14",
     "youtube-dl-exec": "^3.1.17",
-    "dejavu-fonts-ttf": "2.37.3"
+    "dejavu-fonts-ttf": "2.37.3",
+    "msedge-tts": "2.1.1"
   }
 }

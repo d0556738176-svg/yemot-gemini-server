@@ -13,6 +13,8 @@
 //   6 = plus                  -> the newer file
 //   7 = minut_plus_amount1    -> 3 minutes forward (minut_plus_amount1=180000 ms)
 //   * = go_to_folder          -> back to the main menu (playfile_control_play_*_goto=/)
+//   8 = send_api              -> the file's details, spoken (owner, 07.11)
+//   9 = send_api              -> Hebrew dubbing of the file, after 1 = yes / 2 = no
 export const PLAY_KEYS = {
   control_play1: 'seconds_plus',
   control_play3: 'seconds_minus',
@@ -23,6 +25,12 @@ export const PLAY_KEYS = {
   minut_plus_amount1: '180000',
   'control_play*': 'go_to_folder',
   'playfile_control_play_*_goto': '/',
+  // 8 = the file's details spoken; 9 = Hebrew dubbing (asks 1/2 first).
+  // Yemot sends the playing file (what) and position (PlayStop) to api_link
+  // (set at start to <server>/yemot-media); playback then resumes there.
+  control_play8: 'send_api',
+  control_play9: 'send_api',
+  api_hangup_send: 'no',
 };
 export const EXT7_PATH = 'ivr2:/7';
 export const EXT7_SETTINGS = {

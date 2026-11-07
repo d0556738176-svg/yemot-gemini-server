@@ -657,7 +657,7 @@ async function uploadDownloadVerified(file,remote,temp){
 // account's measured request limit): lossless FLAC; if too big, M4A (AAC
 // 256k, or YouTube's own AAC untouched); if even that is too big (very long
 // recordings), M4A in numbered parts, each a complete file with the picture.
-async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
+async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null,titleSuffix=''){
   const t=Date.now();
   const { fetchVideoFacts } = await import('./youtube-video-facts.js');
   const { retrying, coverFor } = await import('./youtube-cover-art.js');
@@ -667,6 +667,8 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
   ]);
   if(!jpeg||!facts?.title)console.warn('[DOWNLOADS] saved with less than full details',{videoId:id,picture:!!jpeg,details:!!facts?.title});
   const metadata=downloadMetadata(id,facts||{},title);
+  // A dubbed version (" - דיבוב לעברית") keeps all details, named apart.
+  if(titleSuffix)metadata.title=String(metadata.title||title||id)+titleSuffix;
   const cap=await uploadCapBytes();
   let format=policy.format;
   let out=path.join(temp,'download.'+format);
@@ -697,7 +699,8 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
   const { yemotFileName } = await import('./youtube-latin-name.js');
   const base=await yemotFileName(metadata.title||title||id,{titleFileName})||id;
   const owners=await readCacheJson(DOWNLOAD_OWNERS).catch(()=>null)||{};
-  const name=owners[base]&&owners[base]!==id?base+'_'+id:base;
+  const ownerId=titleSuffix?id+'-he':id;
+  const name=owners[base]&&owners[base]!==ownerId?base+'_'+id:base;
   const folders=await import('./download-folders.js');
   const saved=[];let seen=null;
   for(const x of files){
@@ -708,7 +711,7 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null){
     await folders.countSaved('audio',{readJson:readCacheJson,writeJson:writeCacheJson});
     saved.push({remote,bytes:r.bytes});seen=seen||r.seen;
   }
-  if(!owners[name]){owners[name]=id;await writeCacheJson(DOWNLOAD_OWNERS,owners).catch(()=>{});}
+  if(!owners[name]){owners[name]=ownerId;await writeCacheJson(DOWNLOAD_OWNERS,owners).catch(()=>{});}
   console.info('[DOWNLOADS] song saved for downloading',{videoId:id,files:saved,format,identicalInYemot:true,
     picture:seen?.picture??!!jpeg,pictureSize:seen?.pictureSize||null,audio:seen?.audio||null,
     title:seen?.tags?.title||null,artist:seen?.tags?.artist||null,date:seen?.tags?.date||null,genre:seen?.tags?.genre||null,
@@ -858,7 +861,7 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
 // Narrow exports for the branch 2 self-test (branch2-selftest.js). They use
 // the same conversion and upload code as real playback, so a passing
 // self-test proves the production path, not a copy of it.
-export const _pipeline = { uploadToYemotInParts, lastDoneVariant: () => doneVariant, makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE, ensureUploadedAndVerified, getYemotFile, transferProviderFile, readCacheJson, writeCacheJson };
+export const _pipeline = { uploadToYemotInParts, lastDoneVariant: () => doneVariant, makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE, ensureUploadedAndVerified, getYemotFile, transferProviderFile, readCacheJson, writeCacheJson, downloadApifySource, preparePhoneAudio, saveDownloadCopy, downloadCopyPolicy };
 
 
 

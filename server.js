@@ -4605,6 +4605,119 @@ router.get('/yemot', callHandler);
 router.get('/yemot-backup', backupCallHandler);
 router.get('/yemot-youtube', youtubeCallHandler);
 
+// ---- Extensions 7/8: key 8 = file details, key 9 = Hebrew dubbing (07.11) ----
+const DUB_PENDING = 'ivr2:/2/youtubejobs/dub_pending.json';
+const dubReceipt = id => 'ivr2:/2/youtubejobs/dub_' + Buffer.from(String(id)).toString('hex') + '.json';
+const dubJobs = new Map();
+async function ext7Lookup(dir, file) {
+  const { _pipeline: p } = await import('./youtube-authorized-playback.js');
+  if (!/^\/?[78]$/.test(String(dir).replace(/\/$/, '')) && dir !== '/7') return null;
+  const index = await p.readCacheJson('ivr2:/2/youtubeaudio/ext7_index.json').catch(() => null);
+  for (const [id, e] of Object.entries(index?.items || {})) {
+    if (String(e?.file) === String(file)) {
+      const dub = /-he$/.test(id);
+      return { videoId: dub ? id.slice(0, -3) : id, title: e.title || '', dub };
+    }
+  }
+  return null;
+}
+async function mediaDetails(videoId, title, dub) {
+  const facts = await fetchVideoFacts(videoId, process.env).catch(() => null);
+  const h = await import('./youtube-title-hebrew.js');
+  const v = { videoId, title: facts?.title || title || '', channelTitle: facts?.channel || '' };
+  await h.hebrewizeResults([v]).catch(() => {});
+  const lines = ['שם הקובץ: ' + h.spokenTitle(v) + (dub ? ', מדובב לעברית' : '')];
+  if (v.channelTitle) lines.push('הערוץ ביוטיוב: ' + h.spokenChannel(v));
+  const len = formatAudioLengthHebrew(facts?.durationSeconds);
+  if (len) lines.push('אורך: ' + len);
+  if (facts?.publishedAt) {
+    const d = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(facts.publishedAt));
+    const ago = publishedAgoHebrew(facts.publishedAt);
+    lines.push('עלה ליוטיוב ב' + d + (ago ? ', ' + ago : ''));
+  }
+  const views = viewsHebrew(facts?.viewCount);
+  if (views) lines.push(views);
+  try {
+    const { videoLanguage } = await import('./youtube-video-facts.js');
+    const lang = videoLanguage(facts, v.title);
+    if (lang && lang.code !== 'he') lines.push('שפת הסרטון: ' + lang.name);
+  } catch {}
+  let desc = String(facts?.description || '').replace(/https?:\/\/\S+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (desc) {
+    desc = desc.slice(0, 300);
+    if (!/[\u05d0-\u05ea]/.test(desc)) {
+      const { groqChat } = await import('./groq-chat.js');
+      const t = await groqChat([{ role: 'system', content: 'תרגם לעברית קצרה וטבעית את תיאור הסרטון הבא, עד שני משפטים. החזר רק את התרגום.' }, { role: 'user', content: desc }], { maxTokens: 200, timeoutMs: 4000 }).catch(() => null);
+      desc = /[\u05d0-\u05ea]/.test(String(t || '')) ? String(t) : '';
+    }
+    if (desc) lines.push('תיאור: ' + desc.slice(0, 260));
+  }
+  return lines;
+}
+function startDubJob(videoId, title) {
+  const id = String(videoId);
+  const existing = dubJobs.get(id);
+  if (existing?.status === 'running') return existing;
+  const state = { status: 'running', startedAt: Date.now() };
+  dubJobs.set(id, state);
+  const release = playbackAwake.acquire();
+  (async () => {
+    const pb = await import('./youtube-authorized-playback.js'); const p = pb._pipeline;
+    const pend = (await p.readCacheJson(DUB_PENDING).catch(() => null)) || [];
+    await p.writeCacheJson(DUB_PENDING, [...new Set([...pend.filter(x => x?.videoId !== id).map(x => JSON.stringify(x)), JSON.stringify({ videoId: id, title })])].map(x => JSON.parse(x))).catch(() => {});
+    await p.writeCacheJson(dubReceipt(id), { state: 'running', at: new Date().toISOString() }).catch(() => {});
+    const { dubToHebrew } = await import('./youtube-dub.js');
+    const { publishToExt7 } = await import('./branch2-ext7.js');
+    const ffmpegPath = (await import('ffmpeg-static')).default;
+    const r = await dubToHebrew({ videoId: id, title }, {
+      ffmpegPath,
+      fetchSource: (vid, out) => p.downloadApifySource(vid, out),
+      preparePhone: (src, out) => p.preparePhoneAudio(src, out, {}),
+      publishExt7: (key, wav, t) => publishToExt7(key, wav, t, { readJson: x => p.readCacheJson(x), writeJson: (x, d) => p.writeCacheJson(x, d), upload: (f, rr) => p.uploadToYemot(f, rr, undefined, { convertAudio: true }), log: console }),
+      saveDownload: async (vid, mix, t, temp, dur, suffix) => { const policy = await p.downloadCopyPolicy(); if (policy) return p.saveDownloadCopy(vid, mix, t, temp, policy, dur, suffix); },
+    });
+    await p.writeCacheJson(dubReceipt(id), { ...r, at: new Date().toISOString() }).catch(() => {});
+    return r;
+  })().then(r => { state.status = r?.state === 'done' ? 'done' : (r?.state || 'done'); state.file = r?.file; })
+    .catch(async e => {
+      state.status = 'failed';
+      console.warn('[DUB] job failed', { videoId: id, code: e?.code, message: String(e?.message || e).slice(0, 200) });
+      const { _pipeline: p } = await import('./youtube-authorized-playback.js');
+      await p.writeCacheJson(dubReceipt(id), { state: 'failed', code: e?.code || null, at: new Date().toISOString() }).catch(() => {});
+    })
+    .finally(async () => {
+      try { release(); } catch {}
+      try {
+        const { _pipeline: p } = await import('./youtube-authorized-playback.js');
+        const pend = (await p.readCacheJson(DUB_PENDING).catch(() => null)) || [];
+        if (state.status !== 'running') await p.writeCacheJson(DUB_PENDING, pend.filter(x => x?.videoId !== id)).catch(() => {});
+      } catch {}
+    });
+  return state;
+}
+async function dubStatusOf(videoId) {
+  const live = dubJobs.get(String(videoId));
+  if (live?.status === 'running') return { state: 'running' };
+  const { _pipeline: p } = await import('./youtube-authorized-playback.js');
+  const r = await p.readCacheJson(dubReceipt(videoId)).catch(() => null);
+  if (r?.state === 'running' && !live) return { state: 'stale' }; // a restart: it will be resumed
+  return r || null;
+}
+app.get('/yemot-media', async (req, res) => {
+  try {
+    const { handleMediaKey } = await import('./branch2-media-keys.js');
+    const out = await handleMediaKey(req.query || {}, {
+      lookup: ext7Lookup, details: mediaDetails, dubStatus: dubStatusOf, startDub: startDubJob,
+      language: async (vid, title) => (await import('./youtube-video-facts.js')).videoLanguage(await fetchVideoFacts(vid, process.env).catch(() => null), title),
+    });
+    console.info('[MEDIA KEYS]', { key: req.query?.PressKey, what: req.query?.what, answer: req.query?.dub_ok, reply: out.slice(0, 140) });
+    res.type('text/plain').send(out);
+  } catch (e) {
+    console.warn('[MEDIA KEYS] failed', { message: String(e?.message || e).slice(0, 200) });
+    res.type('text/plain').send('noop');
+  }
+});
+
 // Apify completion webhook. Apify POSTs here the MOMENT a download run finishes
 // (success or failure), which wakes a spun-down free-tier instance exactly when
 // its terminal state must be reconciled. We verify the shared
@@ -4826,8 +4939,8 @@ async function configureYemotStructure() {
     if (String(process.env.BRANCH2_EXT7 || 'on').toLowerCase() !== 'off') {
       try {
         const { EXT7_PATH, EXT7_SETTINGS, EXT8_PATH, EXT8_SETTINGS } = await import('./branch2-ext7.js');
-        await updateExtension(EXT7_PATH, EXT7_SETTINGS);
-        await updateExtension(EXT8_PATH, EXT8_SETTINGS);
+        await updateExtension(EXT7_PATH, { ...EXT7_SETTINGS, api_link: publicUrl + '/yemot-media' });
+        await updateExtension(EXT8_PATH, { ...EXT8_SETTINGS, api_link: publicUrl + '/yemot-media' });
         // The video folder exists from the start (visible in the file manager).
         // Download folders live at the top, outside every extension.
         for (const [dir, title] of [['ivr2:/אודיו', 'אודיו'], ['ivr2:/וידאו', 'וידאו']])
@@ -5034,6 +5147,9 @@ app.listen(port,async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
     const list=(await _pipeline.readCacheJson(VIDEO_PENDING).catch(()=>null))||[];
     for(const videoId of (Array.isArray(list)?list:[])) startYouTubeVideoJob({videoId,title:''});
+    // Dubbing jobs that were running before a restart continue too.
+    const dubs=await _pipeline.readCacheJson(DUB_PENDING).catch(()=>null);
+    for(const d of (Array.isArray(dubs)?dubs:[])) if(d?.videoId) startDubJob(d.videoId,d.title||'');
   })().catch(e=>console.warn('[VIDEO] resume skipped',{message:String(e?.message||e).slice(0,160)}));
   // One-time real test of "כן לוידאו" on a short religious video (04.11).
   if(process.env.APIFY_TOKEN) void (async()=>{
@@ -5199,6 +5315,34 @@ app.listen(port,async()=>{
     console.info('[HEBREW_RESULTS_TEST]',JSON.stringify({ms:Date.now()-t,spoken}));
     if(list.some(v=>v.heTitle))await _pipeline.writeCacheJson(MARK,{at:new Date().toISOString(),spoken}).catch(()=>{});
   })().catch(e=>console.warn('[HEBREW_RESULTS_TEST] failed',String(e?.message||e).slice(0,200)));
+  // 07.11: keys 8/9 and Hebrew dubbing - one live check (test folder only).
+  void (async()=>{
+    const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
+    const MARK='ivr2:/2/selftest/dub_check_v1.json';
+    if(await p.readCacheJson(MARK).catch(()=>null))return;
+    await new Promise(r=>setTimeout(r,45000));
+    const out={};
+    const ini=await (await fetch(p.YEMOT_API_BASE+'/GetTextFile?'+new URLSearchParams({token:p.yemotApiKey(),what:'ivr2:/7/ext.ini'}))).json().catch(()=>null);
+    out.ext7Keys=String(ini?.contents||'').split(/\r?\n/).filter(l=>/control_play[89]|api_link/.test(l));
+    const fsm=await import('node:fs/promises');const os=await import('node:os');
+    const dub=await import('./youtube-dub.js');
+    const d=await fsm.mkdtemp(os.tmpdir()+'/voice-');
+    try{ out.voice=await dub.speakHebrew('שלום, זו בדיקה של הקול העברי למערכת.',d+'/v.mp3'); out.voiceBytes=(await fsm.stat(d+'/v.mp3')).size; }catch(e){ out.voice='failed: '+String(e?.message||e).slice(0,120); }
+    const index=await p.readCacheJson('ivr2:/2/youtubeaudio/ext7_index.json').catch(()=>null);
+    const newest=Object.values(index?.items||{}).map(e=>e.file).sort().pop();
+    if(newest){ const { handleMediaKey }=await import('./branch2-media-keys.js');
+      out.key8=await handleMediaKey({what:'ivr2:/7/'+newest+'.wav',PlayStop:'12000',PressKey:'8'},{lookup:ext7Lookup,details:mediaDetails,dubStatus:dubStatusOf,startDub:()=>({}),language:async()=>null},{}); }
+    console.info('[DUB_CHECK] keys, voice, details',JSON.stringify(out));
+    const ffmpegPath=(await import('ffmpeg-static')).default;
+    const t=Date.now();
+    const r=await dub.dubToHebrew({videoId:'jNQXAC9IVRw',title:'Me at the zoo'},{
+      ffmpegPath,fetchSource:(vid,o)=>p.downloadApifySource(vid,o),preparePhone:(src,o)=>p.preparePhoneAudio(src,o,{}),
+      publishExt7:async(key,wav)=>{await p.uploadToYemot(wav,'ivr2:/2/selftest/dub_test.wav',undefined,{convertAudio:true});return {file:'test'};},
+      saveDownload:async()=>{},
+    }).catch(e=>({state:'failed',message:String(e?.message||e).slice(0,200)}));
+    console.info('[DUB_CHECK] dubbing',JSON.stringify({...r,seconds:Math.round((Date.now()-t)/1000)}));
+    if(r?.state==='done')await p.writeCacheJson(MARK,{at:new Date().toISOString(),out,r}).catch(()=>{});
+  })().catch(e=>console.warn('[DUB_CHECK] failed',String(e?.message||e).slice(0,200)));
   if(process.env.APIFY_TOKEN&&process.env.DEEPGRAM_API_KEY) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
     const MARK='ivr2:/2/selftest/subtitles_v4.json';

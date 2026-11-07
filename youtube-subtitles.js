@@ -246,17 +246,11 @@ export async function hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath,
   return null;
 }
 
-// The whole thing for one local video file. Returns { srt, language, cues } or
-// { skipped } / null. Every video without Hebrew subtitles gets them: Hebrew
-// speech is written down (and proofread), any other language is translated.
-export async function hebrewSubtitlesFor(videoFile, tempDir, { ffmpegPath, env = process.env, fetchImpl = fetch, log = console, force = false } = {}) {
-  try {
-    if (/^(0|false|off)$/i.test(String(env.VIDEO_HEBREW_SUBTITLES || ''))) return { skipped: 'disabled' };
-    const seconds = await mediaSeconds(ffmpegPath, videoFile);
-    let seen = [];
-    const burned = force ? null : await hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath, env, fetchImpl, seconds, onSeen: l => { seen = l; } }).catch(() => null);
-    log.info?.('[SUBTITLES] Hebrew subtitles in the picture?', { burned, seen: seen.map(x => x.slice(0, 60)) });
-    if (burned === true) { log.info?.('[SUBTITLES] the picture already has Hebrew subtitles; none added'); return { skipped: 'hebrew_in_picture', seen }; }
+// Speech of a media file with timed words, in its detected language (shared by
+// subtitles and Hebrew dubbing). Returns { hebrew, language, words, model }
+// or null when no service could transcribe it.
+export async function transcribeMedia(videoFile, tempDir, { ffmpegPath, env = process.env, fetchImpl = fetch, log = console, seconds } = {}) {
+  seconds = seconds ?? await mediaSeconds(ffmpegPath, videoFile);
     const extract = async (name, extra) => {
       let file = path.join(tempDir, name + '.ogg'), mime = 'audio/ogg';
       try { await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', ...extra, '-i', videoFile, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '24k', file]); }
@@ -281,12 +275,8 @@ export async function hebrewSubtitlesFor(videoFile, tempDir, { ffmpegPath, env =
       const full0 = await extract('speech', []);
       const w = await whisperTimed(full0.file, { env, fetchImpl, log, mime: full0.mime });
       await fs.rm(full0.file, { force: true }).catch(() => {});
-      if (!w || w.words.length < 5) return null;
-      const cues0 = buildCues(w.words);
-      const heb0 = /^(he|iw)/.test(w.language);
-      const outCues = heb0 ? await correctHebrewCues(cues0, { env, fetchImpl, log }) : (await translateCues(cues0, { env, fetchImpl, log })).cues;
-      log.info?.('[SUBTITLES] Hebrew subtitles ready', { language: w.language, mode: heb0 ? 'hebrew_speech_written' : 'translated', cues: outCues.length, model: w.model, backup: true, ms: Date.now() - t0 });
-      return { srt: toSrt(outCues), language: w.language, cues: outCues.length, mode: heb0 ? 'hebrew' : 'translated' };
+      if (!w) return null;
+      return { hebrew: /^(he|iw)/.test(w.language), language: w.language, words: w.words, model: w.model, backup: true };
     }
     const he = probe.tried.find(x => x.setup.language === 'he');
     const detect = probe.tried.filter(x => x !== he).sort((a, b) => b.words.length - a.words.length)[0];
@@ -301,7 +291,25 @@ export async function hebrewSubtitlesFor(videoFile, tempDir, { ffmpegPath, env =
     if (!tr?.words?.length && !hebrew) tr = await transcribeTimed(full.file, { env, fetchImpl, log, mime: full.mime });
     if (!tr?.words?.length) tr = await whisperTimed(full.file, { env, fetchImpl, log, mime: full.mime, language: hebrew ? 'he' : (language || undefined) });
     await fs.rm(full.file, { force: true }).catch(() => {});
-    if (!tr || tr.words.length < 5) { log.info?.('[SUBTITLES] almost no speech; no subtitles', { language, words: tr?.words?.length || 0 }); return { skipped: 'no_speech', language }; }
+    return { hebrew, language, words: tr?.words || [], model: tr?.model || null };
+}
+
+// The whole thing for one local video file. Returns { srt, language, cues } or
+// { skipped } / null. Every video without Hebrew subtitles gets them: Hebrew
+// speech is written down (and proofread), any other language is translated.
+export async function hebrewSubtitlesFor(videoFile, tempDir, { ffmpegPath, env = process.env, fetchImpl = fetch, log = console, force = false } = {}) {
+  try {
+    if (/^(0|false|off)$/i.test(String(env.VIDEO_HEBREW_SUBTITLES || ''))) return { skipped: 'disabled' };
+    const seconds = await mediaSeconds(ffmpegPath, videoFile);
+    let seen = [];
+    const burned = force ? null : await hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath, env, fetchImpl, seconds, onSeen: l => { seen = l; } }).catch(() => null);
+    log.info?.('[SUBTITLES] Hebrew subtitles in the picture?', { burned, seen: seen.map(x => x.slice(0, 60)) });
+    if (burned === true) { log.info?.('[SUBTITLES] the picture already has Hebrew subtitles; none added'); return { skipped: 'hebrew_in_picture', seen }; }
+    const t0 = Date.now();
+    const tr = await transcribeMedia(videoFile, tempDir, { ffmpegPath, env, fetchImpl, log, seconds });
+    if (!tr) return null;
+    const { hebrew, language } = tr;
+    if (tr.words.length < 5) { log.info?.('[SUBTITLES] almost no speech; no subtitles', { language, words: tr.words.length }); return { skipped: 'no_speech', language }; }
     const cues = buildCues(tr.words);
     let he2, done;
     if (hebrew) { he2 = await correctHebrewCues(cues, { env, fetchImpl, log }); done = he2.length; }
