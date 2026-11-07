@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { YemotRouter, ExitError } from 'yemot-router2';
+import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
@@ -5086,6 +5087,8 @@ router.get('/yemot', callHandler);
 // self-reference in every model answer.
 router.get('/yemot-backup', call => callPersona.run({persona:'female',branch:'3'}, () => callHandler(call)));
 router.get('/yemot-youtube', youtubeCallHandler);
+// Extension 5: live internet broadcast channels, opened only when the owner turns them on.
+router.get('/yemot-live', liveBroadcastHandler);
 app.use(router);
 
 app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDashboardAuth, (req,res)=>res.json({
@@ -5340,6 +5343,8 @@ async function configureYemotStructure() {
       console.warn('[Yemot automatic setup] extension 3 setup failed',String(e?.message||e).slice(0,200));
     }
   }
+  try { await configureLiveExtension(publicUrl); }
+  catch(e) { console.warn('[LIVE5] extension 5 setup failed',String(e?.message||e).slice(0,200)); }
   if (process.env.YEMOT_AUTO_CONFIGURE_ALL_EXTENSIONS === 'true') {
     await updateExtension('ivr2:/2',{type:'api',api_link:publicUrl + '/yemot-youtube'});
     if (BACKUP_GEMINI_API_KEY) await updateExtension('ivr2:/3',{type:'api',api_link:publicUrl + '/yemot-backup'});
