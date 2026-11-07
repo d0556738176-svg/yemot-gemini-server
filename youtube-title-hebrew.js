@@ -9,10 +9,11 @@ import { groqChat } from './groq-chat.js';
 const HEB = /[א-ת]/;
 const cache = new Map(); // videoId -> { t, c, l }
 
+const FOREIGN = /[A-Za-z\u00c0-\u024f\u0400-\u04ff\u0600-\u06ff\u4e00-\u9fff\u3040-\u30ff]/g;
+function foreign(t) { t = String(t || ''); return !HEB.test(t) && (t.match(FOREIGN) || []).length >= 2; }
+// A title or a channel name not in Hebrew letters (both are read aloud).
 export function needsHebrew(v) {
-  const t = String(v?.title || '');
-  const letters = (t.match(/[A-Za-zÀ-ɏЀ-ӿ؀-ۿ一-鿿぀-ヿ]/g) || []).length;
-  return !HEB.test(t) && letters >= 2;
+  return foreign(v?.title) || foreign(v?.channelTitle);
 }
 
 function parse(text, n) {
@@ -40,7 +41,8 @@ export async function hebrewizeResults(videos, { env = process.env, fetchImpl = 
   if (!out) { log.warn?.('[YouTube IVR] result titles not translated this time', { count: rest.length, ms: Date.now() - t0 }); return videos; }
   rest.forEach((v, i) => {
     const r = out[i] || {};
-    const t = String(r.t || '').trim(), c = String(r.c || '').trim(), l = String(r.l || '').trim();
+    let t = String(r.t || '').trim(); const c = String(r.c || '').trim(), l = String(r.l || '').trim();
+    if (!foreign(v.title)) t = String(v.title); // the title was Hebrew already
     if (!HEB.test(t)) return;
     const entry = { t, c: HEB.test(c) ? c : '', l: HEB.test(l) && l !== 'עברית' ? l : '' };
     cache.set(v.videoId, entry);
@@ -53,7 +55,8 @@ export async function hebrewizeResults(videos, { env = process.env, fetchImpl = 
 
 // What is spoken for a result: the Hebrew title (+ its language) when there is one.
 export function spokenTitle(v) {
-  if (v?.heTitle) return v.heTitle + (v.langName ? ', סרטון ב' + v.langName : '');
+  if (v?.heTitle && foreign(v.title)) return v.heTitle + (v.langName ? ', סרטון ב' + v.langName : '');
+  if (v?.heTitle) return v.heTitle;
   return String(v?.title || '');
 }
 export function spokenChannel(v) {
