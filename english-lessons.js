@@ -128,10 +128,18 @@ export async function runEnglishCourseJob({ force = false } = {}) {
     try { progress = JSON.parse((await getText(PROGRESS)) || '{}'); } catch { progress = {}; }
     progress.lessons ||= {};
 
+    // Same keys as extension 7: 6 next lesson, 4 previous lesson, 5 pause, 1 +10s, 3 -10s,
+    // 7 +3 minutes, * main menu. Starts at lesson 1 (start=min) and resumes automatically
+    // where the caller last stopped (save_last_play + last_play_auto).
+    const wantIni = ['type=playfile', 'title=לימוד אנגלית', 'start=min', 'control_play6=plus', 'control_play4=minus',
+      'control_play5=wait', 'control_play1=seconds_plus', 'control_play3=seconds_minus', 'control_play7=minut_plus_amount1',
+      'minut_plus_amount1=180000', 'control_play*=go_to_folder', 'playfile_control_play_*_goto=/',
+      'save_last_play=yes', 'last_play_auto=yes', ''].join('\n');
     const ini = await getText(FOLDER + '/ext.ini');
-    if (!/type=playfile/.test(ini || '')) {
-      log('setting extension 6 to play the lessons in order; previous ext.ini:', JSON.stringify(String(ini || '').slice(0, 300)));
-      await putText(FOLDER + '/ext.ini', 'type=playfile\n');
+    if (String(ini || '').replace(/\r/g, '').trim() !== wantIni.trim()) {
+      log('updating extension 6 settings; previous ext.ini:', JSON.stringify(String(ini || '').slice(0, 300)));
+      await putText(FOLDER + '/ext.ini', wantIni);
+      log('extension 6 ext.ini now:', JSON.stringify(((await getText(FOLDER + '/ext.ini')) || '').slice(0, 400)));
     }
 
     const todo = course.lessons.filter(l => progress.lessons[l.n]?.hash !== hashOf(l));
