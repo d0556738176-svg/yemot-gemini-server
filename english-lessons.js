@@ -62,17 +62,25 @@ function ffmpeg(args) {
 
 const rateStr = r => (r >= 0 ? '+' : '') + Math.round(r) + '%';
 
+const badVoices = new Set();
+let voiceLogged = false;
 async function speak(seg) {
   const isHe = seg[0] === 'he';
-  const voices = isHe ? [HE_VOICE] : EN_VOICES;
+  const rate = isHe ? '-4%' : rateStr(seg[2] ?? -10);
   let last;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const voice = voices[Math.min(attempt >> 1, voices.length - 1)];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const pool = (isHe ? [HE_VOICE] : EN_VOICES).filter(v => !badVoices.has(v));
+    const voice = pool[0] || (isHe ? HE_VOICE : EN_VOICES[EN_VOICES.length - 1]);
     try {
-      return await synthesize(seg[1], { voice, rate: isHe ? '-4%' : rateStr(seg[2] ?? -10) });
+      const audio = await synthesize(seg[1], { voice, rate, timeoutMs: 20000 });
+      if (!isHe && !voiceLogged) { voiceLogged = true; log('English voice in use:', voice); }
+      return audio;
     } catch (e) {
       last = e;
-      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      // A voice that fails twice in a row is skipped for the rest of the run.
+      const k = 'fail:' + voice; speak[k] = (speak[k] || 0) + 1;
+      if (speak[k] >= 2 && pool.length > 1) { badVoices.add(voice); log('voice', voice, 'failing, switching:', String(e.message).slice(0, 120)); }
+      await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
     }
   }
   throw last;
@@ -96,7 +104,7 @@ export async function buildLesson(lesson, dir, speakFn = speak) {
     return silences.get(key);
   };
   const cache = new Map();
-  const speechFiles = await mapLimit(lesson.segments, 4, async (seg, k) => {
+  const speechFiles = await mapLimit(lesson.segments, 8, async (seg, k) => {
     if (seg[0] === 'p') return null;
     const key = seg.join('|');
     if (!cache.has(key)) cache.set(key, (async () => { const f = path.join(dir, 's' + k + '.mp3'); await fs.writeFile(f, await speakFn(seg)); return f; })());
