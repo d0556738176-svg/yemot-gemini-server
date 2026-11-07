@@ -39,7 +39,7 @@ export function selectedResultIndex(text, results = []) {
 
   let best = { index: -1, score: 0 };
   results.forEach((result, index) => {
-    const haystack = normalize((result?.title || '') + ' ' + (result?.channelTitle || ''));
+    const haystack = normalize((result?.title || '') + ' ' + (result?.channelTitle || '') + ' ' + (result?.heTitle || '') + ' ' + (result?.heChannel || ''));
     const score = spoken.reduce((sum, word) => sum + (haystack.includes(word) ? 1 : 0), 0);
     if (score > best.score) best = { index, score };
   });

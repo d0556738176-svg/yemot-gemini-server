@@ -3846,12 +3846,14 @@ async function confirmPlaybackPrompt(video) {
   if (video?.geoLimited) {
     const cached = await Promise.race([lookupCachedYouTubeAudio(String(video.videoId)).catch(() => null), new Promise(r => setTimeout(() => r(null), 2500))]);
     if (!cached?.playbackPaths?.length)
-      return 'בחרת את ' + sanitizeForYemot(video.title) + '.' + GEO_LIMITED_TEXT;
+      return 'בחרת את ' + sanitizeForYemot(video.heTitle || video.title) + '.' + GEO_LIMITED_TEXT;
     video.geoLimited = false; // already saved: it plays without downloading
   }
   const status = await existingPreparationStatus(video);
   const vstatus = videoJobStatusText(video?.videoId);
-  return 'בחרת את ' + sanitizeForYemot(video.title) + '.' + suffix + (status ? ' ' + status : '') + (vstatus ? ' ' + vstatus : '') + ' האם להשמיע את הסרטון הזה? אמור כן או לא. להורדת הסרטון עצמו לתיקיית וידאו, אמור כן לוידאו.';
+  let said = video?.title || '';
+  try { const h = await import('./youtube-title-hebrew.js'); await h.hebrewizeResults([video]); said = h.spokenTitle(video); } catch {}
+  return 'בחרת את ' + sanitizeForYemot(said) + '.' + suffix + (status ? ' ' + status : '') + (vstatus ? ' ' + vstatus : '') + ' האם להשמיע את הסרטון הזה? אמור כן או לא. להורדת הסרטון עצמו לתיקיית וידאו, אמור כן לוידאו.';
 }
 
 // When the caller comes back to a video that is already being prepared (for
@@ -4028,12 +4030,15 @@ async function youtubeCallHandler(call) {
   const isVideoConfirm=(text)=>/(?:^|\s)(?:ל|ב|ה)?(?:ה)?(?:וידאו|וידיאו|וידא|ווידאו|ווידיאו|סרטון מלא)(?:\s|$)/u.test(normalizeConfirm(text));
   const isNoConfirm=(text)=>/^(?:לא|לא תודה|לא רוצה|לא זה|אחר|אחרת)(?:\s|$)/u.test(normalizeConfirm(text));
 
-  function formatResultsPage() {
+  // Results in any language are read in Hebrew (owner, 07.11).
+  async function formatResultsPage() {
     const page=results.slice(resultOffset,resultOffset+5);
     if(!page.length) return 'אין עוד תוצאות זמינות לחיפוש הזה. אמור חיפוש חדש אם תרצה.';
+    try { const { hebrewizeResults } = await import('./youtube-title-hebrew.js'); await hebrewizeResults(page); } catch {}
+    const { spokenTitle, spokenChannel } = await import('./youtube-title-hebrew.js');
     const lines=page.map((v,i) => {
       const n=resultOffset+i+1;
-      return 'תוצאה מספר '+n+': '+sanitizeForYemot(v.title)+'. הערוץ: '+sanitizeForYemot(v.channelTitle)+'.';
+      return 'תוצאה מספר '+n+': '+sanitizeForYemot(spokenTitle(v))+'. הערוץ: '+sanitizeForYemot(spokenChannel(v))+'.';
     });
     resultOffset += page.length;
     return 'מצאתי כמה תוצאות. '+lines.join(' ')+' אמור את מספר התוצאה או את השם שלה. אחרי הבחירה אבקש ממך אישור לפני ההשמעה. אפשר גם לומר עוד לתוצאות נוספות.';
@@ -4302,7 +4307,7 @@ async function youtubeCallHandler(call) {
         }
         nextPrompt=resultOffset>=results.length
           ? 'אין עוד תוצאות לחיפוש הזה ביוטיוב. אמור חיפוש חדש.'
-          : formatResultsPage();
+          : await formatResultsPage();
         continue;
       }
 
@@ -4346,7 +4351,7 @@ async function youtubeCallHandler(call) {
       results=found;
       resultOffset=0;
       nextPrompt=results.length
-        ? formatResultsPage()
+        ? await formatResultsPage()
         : 'לא מצאתי תוצאות מתאימות ביוטיוב. נסה שם, נושא או ערוץ אחר.';
     }
   } catch(error) {
@@ -5181,6 +5186,19 @@ app.listen(port,async()=>{
     await fsm.rm(dir,{recursive:true,force:true}).catch(()=>{});
     if(burned!==null)await p.writeCacheJson(MARK,{at:new Date().toISOString(),out}).catch(()=>{});
   })().catch(e=>console.warn('[BURN_CHECK] failed',String(e?.message||e).slice(0,200)));
+  // 07.11: results in any language read in Hebrew - one live check.
+  if(process.env.YOUTUBE_API_KEY) void (async()=>{
+    const { _pipeline } = await import('./youtube-authorized-playback.js');
+    const MARK='ivr2:/2/selftest/hebrew_results_v1.json';
+    if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
+    const { searchYouTubeVideos } = await import('./youtube-ivr.js');
+    const h=await import('./youtube-title-hebrew.js');
+    const list=(await searchYouTubeVideos('Tesla Roadster flying how it works Engineering Explained',{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'})).slice(0,5);
+    const t=Date.now();await h.hebrewizeResults(list);
+    const spoken=list.map((v,i)=>(i+1)+': '+h.spokenTitle(v)+' | ערוץ: '+h.spokenChannel(v)+' | '+v.videoId+' | '+(v.durationSeconds?Math.round(v.durationSeconds/60)+' דק':''));
+    console.info('[HEBREW_RESULTS_TEST]',JSON.stringify({ms:Date.now()-t,spoken}));
+    if(list.some(v=>v.heTitle))await _pipeline.writeCacheJson(MARK,{at:new Date().toISOString(),spoken}).catch(()=>{});
+  })().catch(e=>console.warn('[HEBREW_RESULTS_TEST] failed',String(e?.message||e).slice(0,200)));
   if(process.env.APIFY_TOKEN&&process.env.DEEPGRAM_API_KEY) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
     const MARK='ivr2:/2/selftest/subtitles_v4.json';
