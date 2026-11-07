@@ -92,3 +92,28 @@ test('conversation provider falls back on quota and stops at the first successfu
  assert.equal(await run([{role:'user',parts:[{text:'שאלה'}]}],true),'תשובה מהמנוע החלופי');
  assert.deepEqual(attempts,[['Groq','openai/gpt-oss-20b'],['Mistral','mistral-small-latest']]);
 });
+
+test('branch 1 uses Aion Labs as a last independent text fallback when configured',async()=>{
+ const source=await fs.readFile(new URL('./server.js',import.meta.url),'utf8');
+ const start=source.indexOf('async function tryBranch1ConversationProviders');
+ const end=source.indexOf('async function generateBranch1WithFallback',start);
+ const env={OPENROUTER_API_KEY:'fixture'};
+ const attempts=[];
+ const run=vm.runInNewContext(source.slice(start,end)+'\ntryBranch1ConversationProviders',{
+  process:{env},console:{info(){},warn(){}},geminiErrorStatus:e=>e.status,
+  branch1FallbackProviderCooldowns:new Map(),branch1SynthCooldownsBig:new Map(),extraFastProviders:()=>[],
+  callCompatibleChatCompletion:async options=>{
+   attempts.push(options.provider);
+   if(options.provider==='OpenRouter') throw Object.assign(Error('quota'),{status:429});
+   assert.equal(options.baseUrl,'https://api.aionlabs.ai/v1');
+   assert.equal(options.model,'aion-labs/aion-3.5-mini');
+   return 'תשובה בעברית';
+  }
+ });
+ const contents=[{role:'user',parts:[{text:'שאלה'}]}];
+ assert.equal(await run(contents,true),'');
+ assert.deepEqual(attempts,['OpenRouter']);
+ env.AIONLABS_API_KEY='fixture';
+ assert.equal(await run(contents,true),'תשובה בעברית');
+ assert.deepEqual(attempts,['OpenRouter','OpenRouter','Aion Labs']);
+});
