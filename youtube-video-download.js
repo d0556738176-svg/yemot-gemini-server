@@ -28,8 +28,17 @@ const JOHNVC = 'johnvc~youtube-download-api';
 const MEMO23 = 'memo23~youtube-video-downloader';
 const ACCOUNT_REFUSAL = new Set([401, 402, 403, 429]);
 
-export function videoQualityFor(durationSec) {
+export function videoQualityFor(durationSec, { subtitles = false } = {}) {
   const m = Number(durationSec) / 60;
+  // With Hebrew lines drawn into the picture the server re-encodes the whole
+  // video (0.15 CPU on the free plan): a smaller picture is several times
+  // faster, so long videos finish in reasonable time (owner, 07.11).
+  if (subtitles) {
+    if (!Number.isFinite(m) || m <= 0) return '480p';
+    if (m <= 15) return '720p';
+    if (m <= 60) return '480p';
+    return '360p';
+  }
   if (!Number.isFinite(m) || m <= 0) return '720p';
   if (m <= 20) return '1080p';
   if (m <= 90) return '720p';
@@ -132,13 +141,22 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
   if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw err('invalid_video', 'Invalid video id');
   const receiptPath = videoReceiptPath(videoId);
   const done = await store.read(receiptPath).catch(() => null);
-  if (done?.state === 'done') return { remote: done.remote, already: true };
+  // video.subtitles: true = Hebrew lines in the picture, false = none (the
+  // caller's answer); undefined (old jobs) = as before (subtitles on).
+  const wantSubs = video.subtitles !== false;
+  if (done?.state === 'done') {
+    const hadSubs = /hebrew/.test(String(done.subtitles || ''));
+    if (!(video.subtitles === true && !hadSubs)) return { remote: done.remote, already: true };
+    // Saved before without subtitles and now asked with them: made again.
+    for (const f of done.files || []) await deps.deleteFile?.(f.remote).catch?.(() => {});
+    log.info?.('[VIDEO] saved earlier without subtitles; making it again with Hebrew subtitles', { videoId, removed: (done.files || []).length });
+  }
   const tokens = apifyTokens(env);
   if (!tokens.length) throw err('apify_not_configured', 'No engine keys');
   const { retrying, coverFor } = await import('./youtube-cover-art.js');
   const facts = await retrying(() => deps.fetchVideoFacts(videoId, env), { ok: x => !!(x && x.title) });
   const durationSec = facts?.durationSeconds || video.durationSeconds || null;
-  const quality = videoQualityFor(durationSec);
+  const quality = videoQualityFor(durationSec, { subtitles: wantSubs && !!deps.burnSubtitles });
   const costs = engineCosts(durationSec);
   let order = Object.entries(costs).sort((a, b) => a[1] - b[1]).map(([a]) => a);
   // A run already going (e.g. before a server restart) is continued, never doubled.
@@ -191,13 +209,13 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
     // Hebrew subtitles when the speech is not Hebrew: embedded as the default
     // subtitle track (streams copied, nothing re-encoded) before any cutting.
     let srcFile = src, subs = null;
-    if (deps.hebrewSubtitles) {
+    if (wantSubs && deps.hebrewSubtitles) {
       subs = await deps.hebrewSubtitles(src, temp).catch(() => null);
       if (subs?.srt) {
         const srt = path.join(temp, 'he.srt'), withSubs = path.join(temp, 'with_subs.mp4');
         await fs.writeFile(srt, subs.srt);
         // First choice: the lines drawn into the picture (shown by every player).
-        const burned = deps.burnSubtitles ? await deps.burnSubtitles(src, subs.srt, temp).catch(() => null) : null;
+        const burned = deps.burnSubtitles ? await deps.burnSubtitles(src, subs.srt, temp, { quality, durationSec }).catch(() => null) : null;
         if (burned) { srcFile = burned; subs = { ...subs, burned: true }; }
         else try {
           await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-i', srt, '-map', '0:v:0', '-map', '0:a:0?', '-map', '1:0', '-c', 'copy', '-c:s', 'mov_text', '-metadata:s:s:0', 'language=heb', '-metadata:s:s:0', 'title=עברית', '-disposition:s:0', 'default', withSubs]);
@@ -269,8 +287,8 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       } catch (e) { log.warn?.('[VIDEO] subtitle file not uploaded (embedded track still in the video)', { message: String(e.message).slice(0, 160) }); }
     }
     const remote = saved[0].remote, size = saved.reduce((a, x) => a + x.bytes, 0);
-    await store.write(receiptPath, { videoId, actor: got.actor, runId: got.runId, state: 'done', remote, files: saved, bytes: size, quality, subtitles: subs?.srt ? 'hebrew' : (subs?.skipped || 'none'), at: new Date().toISOString() });
-    log.info?.('[VIDEO] saved', { videoId, files: saved, quality, engine: got.actor, picture: !!jpeg, subtitles: subs?.srt ? (subs.burned ? 'hebrew_in_picture' : subs.embedded === false ? 'file_only' : 'hebrew_track') : (subs?.skipped || 'none'), uploadMs: Date.now() - t });
+    await store.write(receiptPath, { videoId, actor: got.actor, runId: got.runId, state: 'done', remote, files: saved, bytes: size, quality, subtitles: subs?.srt ? (subs.burned ? 'hebrew_in_picture' : 'hebrew_track') : (wantSubs ? (subs?.skipped || 'none') : 'not_requested'), at: new Date().toISOString() });
+    log.info?.('[VIDEO] saved', { videoId, files: saved, quality, engine: got.actor, picture: !!jpeg, subtitles: subs?.srt ? (subs.burned ? 'hebrew_in_picture' : subs.embedded === false ? 'file_only' : 'hebrew_track') : (wantSubs ? (subs?.skipped || 'none') : 'not_requested'), uploadMs: Date.now() - t });
     return { remote, bytes: size };
   } finally { await fs.rm(temp, { recursive: true, force: true }).catch(() => {}); }
 }

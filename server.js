@@ -3892,16 +3892,24 @@ async function videoPendingUpdate(fn) {
   const list = (await _pipeline.readCacheJson(VIDEO_PENDING).catch(() => null)) || [];
   await _pipeline.writeCacheJson(VIDEO_PENDING, fn(Array.isArray(list) ? list : [])).catch(() => {});
 }
+// The caller's subtitle answer per video, kept in Yemot so a restart resumes
+// the job with the same choice.
+const VIDEO_OPTIONS = 'ivr2:/2/youtubejobs/video_options.json';
 function startYouTubeVideoJob(video) {
   const id = String(video?.videoId || '');
   const existing = youtubeVideoJobs.get(id);
   if (existing && existing.status === 'running') return existing;
-  const state = { status: 'running', startedAt: Date.now(), error: null, remote: null };
+  const state = { status: 'running', startedAt: Date.now(), error: null, remote: null, subtitles: video?.subtitles };
   youtubeVideoJobs.set(id, state);
   const release = playbackAwake.acquire();
   (async () => {
     await videoPendingUpdate(l => [...new Set([...l, id])]);
     const pb = await import('./youtube-authorized-playback.js');
+    {
+      const opts = (await pb._pipeline.readCacheJson(VIDEO_OPTIONS).catch(() => null)) || {};
+      if (typeof video.subtitles === 'boolean') { opts[id] = { subtitles: video.subtitles, at: new Date().toISOString() }; await pb._pipeline.writeCacheJson(VIDEO_OPTIONS, opts).catch(() => {}); }
+      else if (typeof opts[id]?.subtitles === 'boolean') video = { ...video, subtitles: opts[id].subtitles }; // resumed after a restart
+    }
     const cover = await import('./youtube-cover-art.js');
     const { titleFileName } = await import('./youtube-audio-cache.js');
     const { downloadVideoToYemot } = await import('./youtube-video-download.js');
@@ -3926,13 +3934,15 @@ function startYouTubeVideoJob(video) {
         }
         return r;
       },
-      burnSubtitles: async (file, srt, dir) => {
-        // Picture height for the version with the lines drawn in: 720p up to 30
-        // minutes, 480p for longer videos (this server is slow; see youtube-subtitles.js).
-        const facts = await fetchVideoFacts(id, process.env).catch(() => null);
-        const height = Number(facts?.durationSeconds || 0) > 1800 ? 480 : 720;
-        return (await import('./youtube-subtitles.js')).burnSubtitles(file, srt, dir, { ffmpegPath, log: console, height, maxMs: Number(process.env.VIDEO_BURN_MAX_MIN || 240) * 60000 });
+      burnSubtitles: async (file, srt, dir, { quality, durationSec } = {}) => {
+        // The video was already downloaded at the size meant for drawing
+        // (720p / 480p / 360p by length), so nothing is enlarged or shrunk
+        // beyond that. Time allowed grows with the length (at least 1 hour).
+        const height = parseInt(String(quality || '480'), 10) || 480;
+        const maxMs = Math.max(60 * 60000, Math.min(10 * 3600000, (Number(durationSec) || 3600) * 1000 * 3));
+        return (await import('./youtube-subtitles.js')).burnSubtitles(file, srt, dir, { ffmpegPath, log: console, height, maxMs });
       },
+      deleteFile: async remote => { const x = new URL(p.YEMOT_API_BASE + '/FileAction'); x.searchParams.set('token', p.yemotApiKey()); x.searchParams.set('action', 'delete'); x.searchParams.set('what', remote); await fetch(x).catch(() => {}); },
       countSaved: async () => (await import('./download-folders.js')).countSaved('video', { readJson: x => p.readCacheJson(x), writeJson: (x, d) => p.writeCacheJson(x, d) }),
     });
   })().then(r => { state.status = 'ready'; state.remote = r.remote; return videoPendingUpdate(l => l.filter(x => x !== id)); })
@@ -4007,6 +4017,7 @@ async function youtubeCallHandler(call) {
   let resultOffset=0;
   let nextPrompt=null;
   let pendingVideo=null;
+  let pendingSubtitleVideo=null; // asked: add Hebrew subtitles to this video?
   let pendingFallbackVideo=null;
   let transcriptFailAttempts=0;
 
@@ -4094,7 +4105,9 @@ async function youtubeCallHandler(call) {
 
   try {
     while(true) {
-      const basePrompt=pendingVideo
+      const basePrompt=pendingSubtitleVideo
+        ? 'האם להוסיף לסרטון כתובית בעברית? אמור כן או לא. ולסיום ההקלטה הקש סולמית'
+        : pendingVideo
         ? await confirmPlaybackPrompt(pendingVideo)
         : (!results.length
           ? 'אמור מה תרצה לחפש ביוטיוב. אפשר לומר נושא, אדם, ערוץ או שם סרטון. ולסיום ההקלטה הקש סולמית'
@@ -4212,14 +4225,36 @@ async function youtubeCallHandler(call) {
         continue;
       }
 
+      // Owner, 07.11: after "כן לוידאו" always ask whether to add Hebrew
+      // subtitles; only a "yes" adds them. The language is said when known.
+      if(pendingSubtitleVideo) {
+        const said=normalizeConfirm(transcript);
+        const no=isNoConfirm(transcript)||/^(?:בלי|בלי כתובית|בלי כתוביות|לא צריך|אין צורך|ללא)(?:\s|$)/u.test(said);
+        const yes=!no&&(isYesConfirm(transcript)||/^(?:תוסיף|להוסיף|הוסף|עם כתובית|עם כתוביות|כתובית|כתוביות|רוצה|אני רוצה)(?:\s|$)/u.test(said));
+        if(!yes&&!no) { nextPrompt='לא הבנתי. האם להוסיף לסרטון כתובית בעברית? אמור כן או לא.'; continue; }
+        const v={...pendingSubtitleVideo,subtitles:yes}; pendingSubtitleVideo=null;
+        const st=startYouTubeVideoJob(v);
+        console.info('[VIDEO] requested by caller',{videoId:v.videoId,status:st.status,subtitles:yes});
+        nextPrompt=yes
+          ? 'הורדת הווידאו התחילה, עם כתובית בעברית מוטבעת בתוך הסרטון. הסרטון יישמר בתיקיית וידאו עם התמונה והפרטים שלו. סרטון ארוך לוקח יותר זמן, ואין צורך להמתין על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.'
+          : 'הורדת הווידאו התחילה, בלי כתובית. הסרטון יישמר בתיקיית וידאו עם התמונה והפרטים שלו. אין צורך להמתין על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.';
+        continue;
+      }
+
       if(pendingVideo) {
         if(isVideoConfirm(transcript)) {
           const v=pendingVideo; pendingVideo=null;
-          const st=startYouTubeVideoJob(v);
-          console.info('[VIDEO] requested by caller',{videoId:v.videoId,status:st.status});
-          nextPrompt=st.status==='ready'
-            ? 'הווידאו של הסרטון הזה כבר שמור בתיקיית וידאו. אמור חיפוש חדש, או מספר של תוצאה אחרת.'
-            : 'הורדת הווידאו התחילה, והסרטון יישמר בתיקיית וידאו עם התמונה והפרטים שלו. אין צורך להמתין על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.';
+          const running=youtubeVideoJobs.get(String(v.videoId||''));
+          if(running?.status==='running') {
+            nextPrompt='הורדת הווידאו של הסרטון הזה כבר בתהליך, ותישמר בתיקיית וידאו. אמור חיפוש חדש, או מספר של תוצאה אחרת.';
+            continue;
+          }
+          let lang=null;
+          try { const { videoLanguage } = await import('./youtube-video-facts.js'); lang=videoLanguage(await fetchVideoFacts(v.videoId,process.env).catch(()=>null),v.title); } catch {}
+          const said=lang ? (lang.code==='he' ? 'הסרטון בעברית. ' : 'הסרטון בשפה ה'+lang.name+'. ') : '';
+          pendingSubtitleVideo=v;
+          nextPrompt=said+'האם להוסיף לסרטון כתובית בעברית? אמור כן או לא.';
+          console.info('[VIDEO] asking about Hebrew subtitles',{videoId:v.videoId,language:lang?.code||null,declared:!!lang?.declared});
           continue;
         }
         if(isYesConfirm(transcript)) {

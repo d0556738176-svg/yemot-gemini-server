@@ -175,15 +175,26 @@ async function translateGroup(texts, system, env, fetchImpl, log, depth = 0, ctx
   return texts.map(() => null);
 }
 
-export async function translateCues(cues, { env = process.env, fetchImpl = fetch, log = console, batch = 25, system = SYSTEM, maxWaitMs = 10 * 60 * 1000 } = {}) {
-  const out = [];
+export async function translateCues(cues, { env = process.env, fetchImpl = fetch, log = console, batch = 25, system = SYSTEM, maxWaitMs = 10 * 60 * 1000, parallel = Number(env.SUBTITLE_PARALLEL || 3) } = {}) {
   const ctx = { waited: 0, max: maxWaitMs };
+  const groups = [];
+  for (let i = 0; i < cues.length; i += batch) groups.push(i);
+  const results = new Array(groups.length);
+  // A few groups at a time (long videos have hundreds of lines); each group
+  // keeps its own place, so the order and timing never change.
+  let next = 0;
+  const worker = async () => {
+    while (next < groups.length) {
+      const g = next++;
+      const i = groups[g];
+      const part = cues.slice(i, i + batch).map(c => c.text);
+      results[g] = { i, part, he: await translateGroup(part, system, env, fetchImpl, log, 0, ctx) };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(parallel, groups.length)) }, worker));
+  const out = [];
   let ok = 0;
-  for (let i = 0; i < cues.length; i += batch) {
-    const part = cues.slice(i, i + batch).map(c => c.text);
-    const he = await translateGroup(part, system, env, fetchImpl, log, 0, ctx);
-    part.forEach((t, k) => { if (he[k]) ok++; out.push({ ...cues[i + k], text: (he[k] || t).replace(/\s+/g, ' ').trim() }); });
-  }
+  for (const { i, part, he } of results) part.forEach((t, k) => { if (he[k]) ok++; out.push({ ...cues[i + k], text: (he[k] || t).replace(/\s+/g, ' ').trim() }); });
   if (ok < cues.length) log.warn?.('[SUBTITLES] some lines not translated', { translated: ok, of: cues.length });
   return { cues: out, translated: ok };
 }

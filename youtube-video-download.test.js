@@ -28,3 +28,11 @@ test('a start error on one key moves to the next key', async () => {
   assert.equal(got.runId, 'run2');
   assert.ok(calls.some(c => c.startsWith('k2 ')));
 });
+
+test('with Hebrew subtitles the video is fetched at a size the server can redraw quickly', async () => {
+  const { videoQualityFor } = await import('./youtube-video-download.js');
+  assert.equal(videoQualityFor(10 * 60, { subtitles: true }), '720p');
+  assert.equal(videoQualityFor(45 * 60, { subtitles: true }), '480p');
+  assert.equal(videoQualityFor(3 * 3600, { subtitles: true }), '360p');
+  assert.equal(videoQualityFor(10 * 60), '1080p'); // without subtitles: unchanged
+});

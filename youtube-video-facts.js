@@ -25,6 +25,9 @@ export async function fetchVideoFacts(videoId, env = process.env, fetchImpl = fe
     description: item.snippet?.description || null,
     tags: Array.isArray(item.snippet?.tags) ? item.snippet.tags : null,
     categoryId: item.snippet?.categoryId || null,
+    // Spoken language as the channel declared it (often missing).
+    audioLanguage: String(item.snippet?.defaultAudioLanguage || item.snippet?.defaultLanguage || '').toLowerCase() || null,
+    hasCaptions: item.contentDetails?.caption === 'true',
     regionAllowed: Array.isArray(item.contentDetails?.regionRestriction?.allowed) ? item.contentDetails.regionRestriction.allowed : null,
     regionBlocked: Array.isArray(item.contentDetails?.regionRestriction?.blocked) ? item.contentDetails.regionRestriction.blocked : null,
   };
@@ -82,4 +85,19 @@ export function viewsHebrew(views) {
   }
   const b = Math.round(v / 1000000000);
   return 'יש לו בערך ' + (b === 1 ? 'מיליארד' : b + ' מיליארד') + ' צפיות';
+}
+
+// The video's spoken language, as best known before downloading: what the
+// channel declared, else a guess from the title (Hebrew letters -> Hebrew,
+// mostly English words -> English). Returns { code, name } or null.
+const LANG_NAMES = { he: 'עברית', iw: 'עברית', en: 'אנגלית', yi: 'יידיש', ar: 'ערבית', ru: 'רוסית', fr: 'צרפתית', es: 'ספרדית', de: 'גרמנית', it: 'איטלקית', pt: 'פורטוגזית', am: 'אמהרית', uk: 'אוקראינית', zh: 'סינית', ja: 'יפנית', hi: 'הינדית', tr: 'טורקית', nl: 'הולנדית', pl: 'פולנית' };
+export function videoLanguage(facts, title = '') {
+  const declared = String(facts?.audioLanguage || '').split('-')[0];
+  if (declared && LANG_NAMES[declared]) return { code: declared === 'iw' ? 'he' : declared, name: LANG_NAMES[declared], declared: true };
+  const t = String(facts?.title || title || '');
+  const heb = (t.match(/[\u05d0-\u05ea]/g) || []).length, lat = (t.match(/[A-Za-z]/g) || []).length;
+  if (/[\u05d0-\u05ea]/.test(t) && /\b(?:פון|דער|דאס|איז|ניט|אונז|זיין)\b/.test(t)) return { code: 'yi', name: 'יידיש', declared: false };
+  if (heb > lat) return { code: 'he', name: 'עברית', declared: false };
+  if (lat > 8 && heb === 0) return { code: 'en', name: 'אנגלית', declared: false };
+  return null;
 }
