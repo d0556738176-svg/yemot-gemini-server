@@ -5390,7 +5390,7 @@ app.listen(port,async()=>{
     const token = String(process.env.YEMOT_TOKEN || '').trim() || (u && pw ? u + ':' + pw : '');
     if (!token) return;
     const out = {};
-    for (const what of ['ivr2:/ext.ini', 'ivr2:/1/ext.ini', 'ivr2:/3/ext.ini', 'ivr2:/Star/ext.ini']) {
+    for (const what of ['ivr2:/ext.ini', 'ivr2:/1/ext.ini', 'ivr2:/3/ext.ini', 'ivr2:/6/ext.ini', 'ivr2:/7/ext.ini', 'ivr2:/8/ext.ini', 'ivr2:/Star/ext.ini']) {
       const j = await (await fetch('https://www.call2all.co.il/ym/api/GetTextFile?' + new URLSearchParams({ token, what }), { signal: AbortSignal.timeout(15000) })).json().catch(() => null);
       out[what] = String(j?.contents ?? j?.message ?? '').replace(/(password|token|api_key)[^\n]*/gi, '$1=…').slice(0, 600);
     }
