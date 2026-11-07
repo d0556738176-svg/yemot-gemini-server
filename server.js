@@ -5381,6 +5381,8 @@ app.listen(port,async()=>{
     }
   } catch {}
   await loadConversationLog();
+  // Extension 6: build/upload the spoken English course in the background (resumes after restarts).
+  setTimeout(()=>import('./english-lessons.js').then(m=>m.runEnglishCourseJob()).catch(e=>console.warn('[ENGLISH] failed to start',String(e?.message||e).slice(0,200))),45000);
   // What the main menu, extensions 1/3 and the account's star menu are set to
   // (06.11, star = main menu everywhere).
   void (async () => {
