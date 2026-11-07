@@ -88,10 +88,15 @@ export async function transcribeTimed(audioFile, { env = process.env, fetchImpl 
 
 // Backup transcription when Deepgram gives nothing (no credit, outage): Groq's
 // Whisper with word timings. Returns the same shape as transcribeTimed.
-export async function whisperTimed(audioFile, { env = process.env, fetchImpl = fetch, log = console, mime = 'audio/ogg', language } = {}) {
+export async function whisperTimed(audioFile, { env = process.env, fetchImpl = fetch, log = console, mime = 'audio/ogg', language, ffmpegPath = null } = {}) {
   const key = String(env.GROQ_API_KEY || '').trim();
   if (!key) return null;
-  const body = await fs.readFile(audioFile);
+  let body = await fs.readFile(audioFile);
+  if (body.length > 24 * 1024 * 1024 && ffmpegPath) {
+    // The backup service takes up to 25 MB: a small mono copy is made for it.
+    const small = audioFile + '.small.mp3';
+    try { await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', audioFile, '-ac', '1', '-ar', '16000', '-c:a', 'libmp3lame', '-b:a', '24k', small]); body = await fs.readFile(small); mime = 'audio/mpeg'; } catch { /* too large stays */ }
+  }
   if (body.length > 24 * 1024 * 1024) { log.warn?.('[SUBTITLES] backup transcription skipped: audio too large', { bytes: body.length }); return null; }
   for (const model of ['whisper-large-v3', 'whisper-large-v3-turbo']) {
     try {
@@ -150,10 +155,14 @@ async function geminiTranslate(lines, env, fetchImpl, system = SYSTEM) {
 // One group of lines -> Hebrew; a group that fails is split in half and
 // retried, down to single lines, so a long video never keeps English lines.
 async function translateGroup(texts, system, env, fetchImpl, log, depth = 0, ctx = { waited: 0, max: 10 * 60 * 1000 }) {
-  let he = await geminiTranslate(texts, env, fetchImpl, system);
+  // Groq first (07.11: Gemini's free daily quota ran out on a long video and
+  // it is also what extension 1 answers with), Gemini as the backup.
+  const groq = async () => parseLines(await groqChat([{ role: 'system', content: system }, { role: 'user', content: JSON.stringify(texts) }], { env, fetchImpl, maxTokens: 300 + texts.length * 120, timeoutMs: 60000 }), texts.length);
+  let he = await groq();
+  if (!he) he = await geminiTranslate(texts, env, fetchImpl, system);
   for (let tryN = 0; !he && tryN < 2; tryN++) {
-    he = parseLines(await groqChat([{ role: 'system', content: system }, { role: 'user', content: JSON.stringify(texts) }], { env, fetchImpl, maxTokens: 300 + texts.length * 120, timeoutMs: 60000 }), texts.length);
-    if (!he && env.GROQ_API_KEY) await sleep(5000 * (tryN + 1)); // rate limit pacing
+    if (env.GROQ_API_KEY) await sleep(5000 * (tryN + 1)); // rate limit pacing
+    he = await groq();
   }
   if (he) return he;
   if (texts.length > 1 && depth < 6) {
@@ -205,6 +214,11 @@ export async function correctHebrewCues(cues, { env = process.env, fetchImpl = f
   return (await translateCues(cues, { env, fetchImpl, log, system: CORRECT })).cues;
 }
 
+async function audioCodec(ffmpegPath, file) {
+  const info = await new Promise(res => { const c = spawn(ffmpegPath, ['-hide_banner', '-i', file]); let e = ''; c.stderr.on('data', d => { e += d; }); c.on('close', () => res(e)); c.on('error', () => res('')); });
+  return (/Audio: ([a-z0-9]+)/.exec(info) || [])[1] || null;
+}
+
 async function mediaSeconds(ffmpegPath, file) {
   const info = await new Promise(res => { const c = spawn(ffmpegPath, ['-hide_banner', '-i', file]); let e = ''; c.stderr.on('data', d => { e += d; }); c.on('close', () => res(e)); c.on('error', () => res('')); });
   const m = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(info);
@@ -251,7 +265,17 @@ export async function hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath,
 // or null when no service could transcribe it.
 export async function transcribeMedia(videoFile, tempDir, { ffmpegPath, env = process.env, fetchImpl = fetch, log = console, seconds } = {}) {
   seconds = seconds ?? await mediaSeconds(ffmpegPath, videoFile);
+    // The sound is taken out WITHOUT re-encoding when its format is one the
+    // speech services read (07.11: re-encoding an hour of sound took the free
+    // server's whole processor for many minutes next to a video job).
+    const codec = await audioCodec(ffmpegPath, videoFile);
+    const copyAs = { aac: ['m4a', 'audio/mp4'], opus: ['ogg', 'audio/ogg'], vorbis: ['ogg', 'audio/ogg'], mp3: ['mp3', 'audio/mpeg'], flac: ['flac', 'audio/flac'] }[codec];
     const extract = async (name, extra) => {
+      if (copyAs) {
+        const file = path.join(tempDir, name + '.' + copyAs[0]);
+        try { await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', ...extra, '-i', videoFile, '-vn', '-map', '0:a:0', '-c:a', 'copy', file]); return { file, mime: copyAs[1] }; }
+        catch { /* encode below */ }
+      }
       let file = path.join(tempDir, name + '.ogg'), mime = 'audio/ogg';
       try { await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', ...extra, '-i', videoFile, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus', '-b:a', '24k', file]); }
       catch { file = path.join(tempDir, name + '.mp3'); mime = 'audio/mpeg'; await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', ...extra, '-i', videoFile, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libmp3lame', '-b:a', '32k', file]); }
@@ -273,7 +297,7 @@ export async function transcribeMedia(videoFile, tempDir, { ffmpegPath, env = pr
     if (!probe?.tried?.length) {
       // Deepgram unavailable: the backup service does the whole job.
       const full0 = await extract('speech', []);
-      const w = await whisperTimed(full0.file, { env, fetchImpl, log, mime: full0.mime });
+      const w = await whisperTimed(full0.file, { env, fetchImpl, log, mime: full0.mime, ffmpegPath });
       await fs.rm(full0.file, { force: true }).catch(() => {});
       if (!w) return null;
       return { hebrew: /^(he|iw)/.test(w.language), language: w.language, words: w.words, model: w.model, backup: true };
@@ -289,7 +313,7 @@ export async function transcribeMedia(videoFile, tempDir, { ffmpegPath, env = pr
     const setup = hebrew ? { model: 'nova-3', language: 'he' } : (language ? { model: detect.setup.model, language } : detect.setup);
     let tr = await transcribeTimed(full.file, { env, fetchImpl, log, mime: full.mime, setups: [setup] });
     if (!tr?.words?.length && !hebrew) tr = await transcribeTimed(full.file, { env, fetchImpl, log, mime: full.mime });
-    if (!tr?.words?.length) tr = await whisperTimed(full.file, { env, fetchImpl, log, mime: full.mime, language: hebrew ? 'he' : (language || undefined) });
+    if (!tr?.words?.length) tr = await whisperTimed(full.file, { env, fetchImpl, log, mime: full.mime, language: hebrew ? 'he' : (language || undefined), ffmpegPath });
     await fs.rm(full.file, { force: true }).catch(() => {});
     return { hebrew, language, words: tr?.words || [], model: tr?.model || null };
 }
