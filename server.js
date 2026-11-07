@@ -4020,6 +4020,9 @@ async function youtubeCallHandler(call) {
   let nextPrompt=null;
   let pendingVideo=null;
   let pendingSubtitleVideo=null; // asked: add Hebrew subtitles to this video?
+  // Keys (owner, 07.11): after the spoken search, every choice is made with
+  // the keypad; 0 lets the caller say it aloud once instead.
+  let pageStart=0, voiceOnce=false, emptyTaps=0, tapNo=0, keyTranscript=null;
   let pendingFallbackVideo=null;
   let transcriptFailAttempts=0;
 
@@ -4036,12 +4039,10 @@ async function youtubeCallHandler(call) {
     if(!page.length) return 'אין עוד תוצאות זמינות לחיפוש הזה. אמור חיפוש חדש אם תרצה.';
     try { const { hebrewizeResults } = await import('./youtube-title-hebrew.js'); await hebrewizeResults(page); } catch {}
     const { spokenTitle, spokenChannel } = await import('./youtube-title-hebrew.js');
-    const lines=page.map((v,i) => {
-      const n=resultOffset+i+1;
-      return 'תוצאה מספר '+n+': '+sanitizeForYemot(spokenTitle(v))+'. הערוץ: '+sanitizeForYemot(spokenChannel(v))+'.';
-    });
+    pageStart=resultOffset;
+    const lines=page.map((v,i) => 'תוצאה '+(i+1)+': '+sanitizeForYemot(spokenTitle(v))+'. הערוץ: '+sanitizeForYemot(spokenChannel(v))+'.');
     resultOffset += page.length;
-    return 'מצאתי כמה תוצאות. '+lines.join(' ')+' אמור את מספר התוצאה או את השם שלה. אחרי הבחירה אבקש ממך אישור לפני ההשמעה. אפשר גם לומר עוד לתוצאות נוספות.';
+    return 'מצאתי כמה תוצאות. '+lines.join(' ')+' אמור את מספר התוצאה או את השם שלה, או עוד לתוצאות נוספות. אחרי הבחירה אבקש ממך אישור לפני ההשמעה.';
   }
 
   async function playSelected(call, video, playOpts={}) {
@@ -4115,19 +4116,81 @@ async function youtubeCallHandler(call) {
         : pendingVideo
         ? await confirmPlaybackPrompt(pendingVideo)
         : (!results.length
-          ? 'אמור מה תרצה לחפש ביוטיוב. אפשר לומר נושא, אדם, ערוץ או שם סרטון. ולסיום ההקלטה הקש סולמית'
+          ? 'אמור מה תרצה לחפש ביוטיוב. אפשר לומר נושא, אדם, ערוץ או שם סרטון. ולסיום ההקלטה הקש סולמית. לחזרה לתפריט הראשי הקש כוכבית'
           : 'אמור את מספר התוצאה או את השם שלה. אפשר גם לומר עוד או חיפוש חדש. ולסיום ההקלטה הקש סולמית');
       const prompt=nextPrompt||basePrompt;
       nextPrompt=null;
 
-      const recordPath=await call.read(
+      // Which keys mean what in the current step.
+      const keyState=pendingFallbackVideo?'fallback':pendingSubtitleVideo?'subtitles':pendingVideo?'confirm':results.length?'results':null;
+      if(keyState&&!voiceOnce) {
+        const pageCount=Math.max(1,Math.min(5,results.length-pageStart));
+        const hint={
+          fallback:'לאישור הקש 1. לביטול הקש 2.',
+          subtitles:'להוספת כתובית בעברית הקש 1. בלי כתובית הקש 2.',
+          confirm:'להשמעה הקש 1. להורדת הסרטון עצמו לתיקיית וידאו הקש 2. לחזרה לתוצאות הקש 3.',
+          results:'לבחירה הקש את מספר התוצאה, מ 1 עד '+pageCount+'. לתוצאות נוספות הקש סולמית. לחיפוש חדש הקש 7.',
+        }[keyState]+' לאמירה בקול הקש 0. לחזרה לתפריט הראשי הקש כוכבית.';
+        // Spoken instructions ("אמור ...") are replaced by the key instructions.
+        const said=String(prompt).split(/(?<=[.?!])\s+/).filter(x=>!/אמור|אמרו|הקש סולמית/.test(x)).join(' ');
+        const spoken=sanitizeForYemot((said?said+' ':'')+hint);
+        const askedAt=Date.now();
+        let key=String(await call.read(
+          [{type:'text',data:spoken}],
+          'tap',
+          {max_digits:1,min_digits:1,sec_wait:60,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'k'+(++tapNo),timeout:10*60*1000,
+           digits_allowed:['0','1','2','3','4','5','6','7','8','9','*','#']}
+        )||'None').trim();
+        // # = more results. Yemot treats # as "end of input" and may send it as
+        // an empty answer; with a 60 s wait, silence arrives only after the
+        // whole message + 60 s, so an earlier empty answer is a # press.
+        const waited=(Date.now()-askedAt)/1000, messageSec=spoken.length/13;
+        if(key==='None'&&waited<messageSec+45) key='#';
+        console.info('[YouTube IVR] key read',{state:keyState,key,waitedSec:Math.round(waited),messageSec:Math.round(messageSec)});
+        if(key.includes('*')) return call.go_to_folder('/');
+        if(key==='#') {
+          if(keyState==='results') { keyTranscript='עוד'; key=''; }
+          else { nextPrompt=prompt; continue; }
+        }
+        if(keyTranscript) { /* # in the results: more results */ }
+        else if(key==='None'||!key) {
+          if(++emptyTaps>=4) return call.id_list_message([{type:'text',data:'לא נקלטה הקשה. להתראות'}]);
+          nextPrompt=prompt; continue;
+        }
+        emptyTaps=0;
+        if(!keyTranscript) {
+        if(key==='0') { voiceOnce=true; nextPrompt=prompt===basePrompt?null:prompt; continue; }
+        if(keyState==='confirm'&&key==='3') { pendingVideo=null; resultOffset=pageStart; nextPrompt=await formatResultsPage(); continue; }
+        const map={
+          fallback:{'1':'כן','2':'לא'},
+          subtitles:{'1':'כן','2':'לא'},
+          confirm:{'1':'כן','2':'כן לוידאו'},
+          results:{},
+        }[keyState];
+        let tapped=map[key]||null;
+        if(keyState==='results') {
+          if(key==='7') { results=[]; resultOffset=0; pageStart=0; continue; }
+          const k=Number(key);
+          if(k>=1&&k<=pageCount) tapped='תוצאה מספר '+(pageStart+k);
+        }
+        if(!tapped) { nextPrompt='ההקשה '+key+' אינה אחת האפשרויות.'; continue; }
+        console.info('[YouTube IVR] key',{state:keyState,key,as:tapped});
+        keyTranscript=tapped;
+        }
+      }
+      voiceOnce=false;
+      let fromKeys=!!keyTranscript;
+      const recordPath=fromKeys?null:await call.read(
         [{type:'text',data:sanitizeForYemot(prompt)}],
         'record',
         {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000}
       );
-      if(!recordPath||recordPath==='None')
+      if(!fromKeys&&(!recordPath||recordPath==='None'))
         return call.id_list_message([{type:'text',data:'לא נקלטה בקשה. להתראות'}]);
 
+      let transcript;
+      if(fromKeys) { transcript=keyTranscript; keyTranscript=null; }
+      else {
       const audioResponse=await withTimeout(
         yemotApi.download_file('ivr2:'+recordPath),
         REQUEST_TIMEOUT_MS,
@@ -4138,7 +4201,6 @@ async function youtubeCallHandler(call) {
       // (observed live: Deepgram empty + all Gemini fallbacks empty → the outer
       // catch exited extension 2 mid-call). Catch it here, re-prompt, and keep
       // the call in the loop; only after a few failures end gracefully.
-      let transcript;
       try {
         transcript=await transcribePhoneAudio(audioResponse.data);
       } catch(txErr) {
@@ -4154,6 +4216,7 @@ async function youtubeCallHandler(call) {
         if(transcriptFailAttempts>=4) return call.id_list_message([{type:'text',data:'מתקשה לשמוע אותך כרגע. אפשר לנסות שוב בעוד רגע. להתראות.'}]);
         nextPrompt='לא הצלחתי להבין. אמור שוב את הבקשה או את מספר התוצאה.';
         continue;
+      }
       }
       transcriptFailAttempts=0;
 
@@ -4311,7 +4374,11 @@ async function youtubeCallHandler(call) {
         continue;
       }
 
-      const selectedIndex=selectedResultIndex(transcript,results);
+      // A number (said or pressed) means the result on the page just heard;
+      // a pressed key already carries the full position.
+      let selectedIndex=-1;
+      if(!fromKeys) { const pi=selectedResultIndex(transcript,results.slice(pageStart,pageStart+5)); if(pi>=0) selectedIndex=pageStart+pi; }
+      if(selectedIndex<0) selectedIndex=selectedResultIndex(transcript,results);
       if(selectedIndex>=0) {
         pendingVideo=results[selectedIndex];
         nextPrompt=await confirmPlaybackPrompt(pendingVideo);
