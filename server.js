@@ -5187,6 +5187,64 @@ async function runBranch1EndToEndSelfTest(questions=BRANCH1_E2E_QUESTIONS) {
 async function runBranch3SelfTest() {
   await callPersona.run({persona:'female',branch:'3'},()=>runBranch1EndToEndSelfTest(['ספרי לי בקצרה מי את ומה את יכולה לעשות בשבילי','תחפשי באינטרנט מי ראש עיריית ירושלים']));
 }
+// Owner's deep check of extension 3 (08.11): two simulated calls from a test
+// number. Call A: introduction, advice, a follow-up ("the first one"), web
+// searches. Its turns are then saved to memory exactly like a real call, and
+// call B (new call, memory reloaded) asks what was discussed, then more
+// questions. Every question, full answer and time is logged; the test number's
+// memory is wiped at the end. Runs when BRANCH3_DEEP_TEST is set.
+async function runBranch3DeepTest() {
+  const phone='0000000003';
+  const { writeMemory, rememberTurn: remember } = await import('./branch1-memory.js');
+  const wipe=async()=>{
+    await writeMemory(phone,{phone,summary:'',entries:[]}).catch(()=>{});
+    memoryLoadedFor.delete(phone);
+    for(let i=conversationLog.length-1;i>=0;i--) if(conversationLog[i].phone===phone) conversationLog.splice(i,1);
+  };
+  const runCall=async(label,questions)=>{
+    let index=0, askedAt=Date.now(); const turns=[]; const id='deep3-'+label+'-'+Date.now();
+    const call={
+      selfTest:{next:()=>questions[index++]||''},
+      values:{ApiPhone:phone,ApiCallId:id},callId:id,
+      read:async items=>{
+        const text=(Array.isArray(items)?items:[]).map(x=>x?.data||'').join(' ').replace(/\s*¶\s*/g,'. ').trim();
+        if(index>0) {
+          turns.push({time:new Date().toISOString(),callId:id,user:questions[index-1],gemini:text});
+          for(let p=0;p<text.length;p+=1500)
+            console.info('[DEEP3]',JSON.stringify({call:label,step:index,part:p/1500+1,question:p?undefined:questions[index-1],ms:p?undefined:Date.now()-askedAt,chars:p?undefined:text.length,reply:text.slice(p,p+1500)}));
+        }
+        if(index>=questions.length) throw new Error('call was disconnected by the caller');
+        askedAt=Date.now(); return '/deep3.wav';
+      },
+      id_list_message:async()=>{},go_to_folder:async()=>{},hangup:async()=>{}
+    };
+    await callPersona.run({persona:'female',branch:'3'},()=>callHandler(call));
+    return turns;
+  };
+  try {
+    await wipe();
+    const a=await runCall('A',[
+      'שלום, קוראים לי יוסי ואני גר בבית שמש. אני מתכנן טיול משפחתי בצפון בחנוכה עם שלושה ילדים קטנים',
+      'איזה מקומות כדאי לבקר שם עם ילדים קטנים?',
+      'תפרטי לי יותר על המקום הראשון שאמרת',
+      'תחפשי באינטרנט מה מזג האוויר הצפוי בצפת השבוע',
+      'מה שעות הפתיחה של גן החיות התנכי בירושלים'
+    ]);
+    for(const t of a) await remember(phone,t).catch(()=>{});
+    await new Promise(r=>setTimeout(r,4000));
+    memoryLoadedFor.delete(phone);
+    for(let i=conversationLog.length-1;i>=0;i--) if(conversationLog[i].phone===phone) conversationLog.splice(i,1);
+    await runCall('B',[
+      'שלום, את זוכרת איך קוראים לי ועל מה דיברנו בפעם הקודמת?',
+      'ואיפה אמרתי שאני גר?',
+      'תסבירי לי איך עובדת אנרגיה סולרית',
+      'מי ראש הממשלה של ישראל כרגע',
+      'מה ההבדל בין ריבית קבועה לריבית משתנה במשכנתא'
+    ]);
+    console.info('[DEEP3] finished');
+  } catch(e) { console.warn('[DEEP3] crashed',String(e?.stack||e).slice(0,400)); }
+  finally { await wipe(); }
+}
 // Shows whether each web key works (never the keys themselves). The result is
 // cached for hours, so opening this page costs at most one tiny call per provider.
 app.get('/health/providers', rateLimit(6, 60 * 1000, 'provider-health'), async (req,res)=>{
@@ -5434,6 +5492,7 @@ app.listen(port,async()=>{
     if(builtAt && Date.now()-builtAt<Number(process.env.PROVIDER_HEALTH_AFTER_BUILD_MS||20*60*1000)) {
       if(process.env.PROVIDER_HEALTH_ON_BUILD==='on')
         setTimeout(()=>providerHealth({force:true}).catch(e=>console.warn('[WEB_PROVIDERS] health check failed',String(e?.message||e).slice(0,160))),4000);
+      if(process.env.BRANCH3_DEEP_TEST) setTimeout(()=>runBranch3DeepTest(),25000);
       if(String(process.env.BRANCH1_E2E_SELFTEST||'off')==='on') setTimeout(()=>runBranch1EndToEndSelfTest().then(()=>runBranch3SelfTest()).catch(e=>console.warn('[E2E_SELFTEST] crashed',String(e?.message||e).slice(0,200))),20000);
     }
   } catch {}
