@@ -26,6 +26,7 @@ async function runCall(questions,answers,{branch="1"}={}){
   sanitizeForYemot:x=>x,persistConversationEntry:async()=>{},
   logDetailedError:(label,e)=>{throw new Error(label+': '+e.message);},
   answerDailyDateQuestion:()=>'',answerIsraelTimeQuestion:()=>'',knownPrimaryPhoneAnswer:()=>'',branch1Clarification:()=>'',
+  EXT3_ANSWER_STYLE:'ענה בהרחבה. ',RECALL_INSTRUCTION:'',
  };
  for(const name of ['isPhoneNumberRequest','isBusinessHoursRequest','isLocalBusinessDiscoveryRequest','isCorrection','isBranch1WebsiteRequest','isBranch1LocalRequest','isBranch1EventRequest','isVisualContinuationRequest','isWeatherQuestion','isNewsQuestion','isWebsiteCapabilityQuestion','isWebsiteNavigationRequest','isGenericWebsiteRequest','isLongAnswerRequest','isTransitRequest'])context[name]=()=>false;
  context.isMultimodalAnalysisRequest=()=>({any:false});context.extractExplicitHttpUrl=()=>null;context.extractExplicitLocation=()=>({});

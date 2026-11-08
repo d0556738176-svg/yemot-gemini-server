@@ -344,6 +344,13 @@ function withPersona(contents) {
   if(!Array.isArray(first?.parts) || typeof first.parts[0]?.text!=='string') return contents;
   return [{...first,parts:[{...first.parts[0],text:FEMININE_SELF_INSTRUCTION+'\n\n'+first.parts[0].text},...first.parts.slice(1)]},...rest];
 }
+// Extension 3 answers like a thorough expert (owner, 08.11): strongest models
+// first, more time, longer and fuller answers. Extension 1 keeps its fast profile.
+const EXT3_ANSWER_STYLE = 'ענה בהרחבה ובבהירות, כמו מומחה טוב וחם שמסביר בטלפון: קודם התשובה הישירה במשפט אחד, אחר כך הסבר מלא ומסודר עם הפרטים החשובים, דוגמה או טיפ מעשי, ובסוף משפט סיכום. בדרך כלל 6 עד 12 משפטים קצרים וברורים, כל אחד מסתיים בנקודה. בשאלה פשוטה שהתשובה עליה קצרה (שעה, שם, כן או לא) ענה קצר. אל תמציא שמות של מקומות, מחירים, שעות או מספרים שאינך בטוח בהם; אם צריך פרט עדכני, אמור שכדאי לבדוק ושאפשר לבקש ממך לחפש באינטרנט. ';
+const RECALL_INSTRUCTION = 'המתקשר שואל על שיחות קודמות או על עצמו. ענה מתוך ההקשר הקודם בלבד: הזכר את הפרטים שהוא סיפר על עצמו (שם, מקום מגורים, משפחה, תוכניות) וסכם את כל הנושאים העיקריים שדיברתם עליהם, לא רק את השאלה האחרונה. אם פרט לא מופיע בהקשר, אמור בכנות שאינך זוכר אותו. ';
+const EXT3_SYNTH_MS = Number(process.env.EXT3_SYNTH_MS || 12000);
+const EXT3_GEMINI_MS = Number(process.env.EXT3_GEMINI_MS || 8500);
+function isExt3() { return callPersona.getStore()?.branch==='3'; }
 function promptWithPersona(prompt) {
   return callPersona.getStore()?.persona==='female' ? FEMININE_SELF_INSTRUCTION+'\n\n'+prompt : prompt;
 }
@@ -535,7 +542,7 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
      contents.every(item=>Array.isArray(item?.parts)&&item.parts.length&&item.parts.every(part=>typeof part?.text==='string'))) {
     const flat=contents.map(item=>(item.role==='model'?'Assistant: ':'User: ')+item.parts.map(part=>part.text).join('\n')).join('\n\n');
     try {
-      const answer=await raceSynthesis(flat,fastPhone?3200:7000,{gemini:false,maxTokens:fastPhone?700:1400});
+      const answer=await raceSynthesis(flat,fastPhone?3200:7000,{gemini:isExt3(),maxTokens:fastPhone?700:1400});
       if(String(answer||'').trim()) {
         console.info('[BRANCH1 FALLBACK] independent provider answered before Gemini',{fastPhone,chars:String(answer).length});
         return {response:{text:()=>String(answer).trim()}};
@@ -1260,10 +1267,23 @@ function isComedySearchQuestion(transcript) {
 
 function extractWeatherLocation(transcript) {
   const q=String(transcript||'').replace(/[?.,!]/g,' ').replace(/\s+/g,' ').trim();
-  const match=q.match(/(?:ב|של|ל|בעיר)\s+([א-תA-Za-z][א-תA-Za-z' -]{1,35})(?=\s+(?:היום|עכשיו|מחר|למחר|בסוף|בלילה|בבוקר|בערב)|$)/i);
+  // Known places first, longest name first, also when glued to a prefix
+  // ("בצפת", "לבית שמש"): 08.11 "מזג האוויר בצפת השבוע" found no city.
+  const cities=['תל אביב','ירושלים','חיפה','באר שבע','נתניה','כפר סבא','רעננה','הרצליה','פתח תקווה','ראשון לציון','אשדוד','אשקלון','רחובות','מודיעין עילית','מודיעין','אילת','נצרת','עכו','טבריה',
+    'צפת','בית שמש','בני ברק','אלעד','ביתר עילית','קרית גת','קריית גת','קרית שמונה','קריית שמונה','ראש פינה','מטולה','קצרין','עפולה','חדרה','נהריה','כרמיאל','מעלות','בית שאן','זכרון יעקב',
+    'רמת גן','גבעתיים','חולון','בת ים','לוד','רמלה','נס ציונה','יבנה','קרית אונו','אור יהודה','ראש העין','הוד השרון','אריאל','מעלה אדומים','דימונה','ערד','אופקים','נתיבות','שדרות','עמנואל','קרית ספר','רכסים','חצור הגלילית','מירון','קרית מלאכי','גבעת זאב','אפרת','טלזסטון','קרית יערים'];
+  const known=cities.slice().sort((a,b)=>b.length-a.length).find(city=>q.includes(city));
+  if(known) return known;
+  const match=q.match(/(?:ב|של|ל|בעיר)\s+([א-תA-Za-z][א-תA-Za-z' -]{1,35})(?=\s+(?:היום|עכשיו|מחר|למחר|בסוף|בלילה|בבוקר|בערב|השבוע|בשבוע)|$)/i);
   if(match && match[1]) return match[1].trim();
-  const cities=['תל אביב','ירושלים','חיפה','באר שבע','נתניה','כפר סבא','רעננה','הרצליה','פתח תקווה','ראשון לציון','אשדוד','אשקלון','רחובות','מודיעין','אילת','נצרת','עכו','טבריה'];
-  return cities.find(city=>q.includes(city)) || null;
+  // Otherwise the words after "מזג האוויר", without time words and a glued ב/ל.
+  const after=q.match(/(?:מזג\s*(?:ה)?אוויר|תחזית(?:\s+(?:ה)?מזג\s*(?:ה)?אוויר)?)\s+(.+)$/u);
+  if(!after) return null;
+  const stop=/^(?:הצפוי|צפוי|יהיה|היום|מחר|למחר|השבוע|בשבוע|הקרוב|הקרובים|בימים|ימים|עכשיו|כרגע|בעיר|באזור|של|עם|גם|תחפש|תחפשי|באינטרנט|לי|מה|איך|הוא|היא)$/u;
+  const words=after[1].split(' ').filter(w=>!stop.test(w));
+  if(!words.length) return null;
+  const place=words.slice(0,2).join(' ').replace(/^(?:ב|ל|של)(?=[א-ת]{2,})/u,'');
+  return place.length>=2?place:null;
 }
 
 async function answerWeatherDirect(transcript) {
@@ -1285,7 +1305,8 @@ async function answerWeatherDirect(transcript) {
   weatherUrl.searchParams.set('longitude',String(place.longitude));
   weatherUrl.searchParams.set('current','temperature_2m,apparent_temperature,precipitation,rain,weather_code,wind_speed_10m');
   weatherUrl.searchParams.set('daily','weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max');
-  weatherUrl.searchParams.set('forecast_days','2');
+  const wantsWeek=/(?:השבוע|בשבוע|ימים הקרובים|בימים הקרובים|לשבוע|סוף השבוע|בשבת|ביום (?:ראשון|שני|שלישי|רביעי|חמישי|שישי))/u.test(String(transcript||''));
+  weatherUrl.searchParams.set('forecast_days',wantsWeek?'7':'2');
   weatherUrl.searchParams.set('timezone','Asia/Jerusalem');
   const weatherResponse=await withTimeout(fetch(weatherUrl),REQUEST_TIMEOUT_MS,'current weather');
   if(!weatherResponse.ok) throw Object.assign(new Error('Weather HTTP '+weatherResponse.status),{status:503});
@@ -1304,6 +1325,15 @@ async function answerWeatherDirect(transcript) {
   const todayCondition=codes[daily.weather_code?.[0]] || condition;
   if(Number.isFinite(min)&&Number.isFinite(max)) answer+=' לאורך היום צפויות בערך '+min+' עד '+max+' מעלות, ובאופן כללי צפוי '+todayCondition+'.';
   if(Number.isFinite(rainChance)) answer+=' הסיכוי המרבי למשקעים היום הוא כ'+rainChance+' אחוזים.';
+  if(wantsWeek && Array.isArray(daily.time) && daily.time.length>2) {
+    const dayName=d=>new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',weekday:'long'}).format(new Date(d+'T12:00:00'));
+    const days=daily.time.slice(1,7).map((d,i)=>{
+      const k=i+1, lo=Math.round(Number(daily.temperature_2m_min?.[k])), hi=Math.round(Number(daily.temperature_2m_max?.[k]));
+      const rain=Number(daily.precipitation_probability_max?.[k]);
+      return dayName(d)+': '+(codes[daily.weather_code?.[k]]||'')+', '+lo+' עד '+hi+' מעלות'+(Number.isFinite(rain)&&rain>=30?', סיכוי לגשם '+rain+' אחוזים':'');
+    });
+    answer+=' ובימים הקרובים. '+days.join('. ')+'.';
+  }
   return answer;
 }
 async function answerNewsDirect(transcript, historyText='') {
@@ -2446,8 +2476,14 @@ async function readBestPages(question,results,budgetMs=2000){
 // quality=true is used when the caller explicitly asked to search the internet:
 // only the strongest models race (the small fast model is left out) and Gemini,
 // whose Flash model reasons well over long evidence, joins after a short hedge.
-async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate=null,quality=false}={}){
+async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate=null,quality=false,geminiBudgetMs=null}={}){
   prompt=promptWithPersona(prompt);
+  // Extension 3: the strong models start at once, the small fast model is only a
+  // reserve, and the answer gets enough time and length (not for tiny helpers).
+  if(isExt3() && maxTokens>=700) {
+    quality=true; budgetMs=Math.max(budgetMs,EXT3_SYNTH_MS); maxTokens=Math.max(maxTokens,2000);
+    geminiBudgetMs=Math.max(Number(geminiBudgetMs||0),EXT3_GEMINI_MS);
+  }
   // Gemini-only racer (not generateBranch1WithFallback, which would call Groq/OpenRouter a
   // second time) and it honors the shared circuit breaker so a stalled Gemini costs nothing.
   // Gemini is the last resort: it only starts after a short hedge delay, and never if an
@@ -2461,7 +2497,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     }
     if(branch1PrimaryCooldown.isCoolingDown('primary')) throw Object.assign(new Error('Gemini cooling down'),{status:503});
     try {
-      const r=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,true,null,Number(process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS||2200));
+      const r=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,true,geminiBudgetMs?Math.min(geminiBudgetMs,7500):null,Number(geminiBudgetMs||process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS||2200));
       branch1PrimaryCooldown.clear('primary');
       return String(r?.response?.text?.()||'').trim();
     } catch(err) {
@@ -2474,7 +2510,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     // In quality mode the small fast model is a reserve: it joins only if the
     // strong models have not answered after a short wait (they hit free-tier
     // rate limits under load, and the caller must never get raw excerpts).
-    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(process.env.BRANCH1_QUALITY_RESERVE_MS||2500):0},
+    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(isExt3()?(process.env.EXT3_RESERVE_MS||7000):(process.env.BRANCH1_QUALITY_RESERVE_MS||2500)):0},
     {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim(),big:true},
     {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim()},
     ...extraFastProviders(true)
@@ -3580,7 +3616,14 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
       const terms=[...new Set(String(question||'').replace(/[?!.,"׳״']/g,' ').split(/\s+/)
         .map(w=>w.replace(/^[והבלמשכ](?=[\u0590-\u05FF]{3,})/u,'')).filter(w=>w.length>2&&!/^(?:תחפש|תחפשי|חפש|באינטרנט|תגיד|תגידי|לי|מה|מי|איך|היום|עכשיו|את|של|על)$/u.test(w)))];
       const sentences=usable.flatMap(item=>String(item.snippet||'').split(/\s*¶\s*|[.!?]\s+/u).map(x=>x.trim()).filter(x=>x.length>20&&x.length<260));
-      const ranked=sentences.map(text=>({text,score:terms.filter(t=>text.includes(t)).length})).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+      // Generic words (hours, phone, price...) match any page; the sentence must
+      // carry most of the question's distinctive words (08.11: "Biblical Zoo
+      // hours" was answered with a clinic's opening hours).
+      const generic=/^(?:שעות|עות|פתיחה|הפתיחה|כתובת|טלפון|מספר|מחיר|עולה|כמה|איפה|מתי|פתוח|פתוחה|סגור|היום|מחר|השבוע|ישראל)$/u;
+      const key=terms.filter(t=>!generic.test(t));
+      const need=key.length?Math.max(1,Math.ceil(key.length*0.6)):1;
+      const ranked=sentences.map(text=>({text,score:terms.filter(t=>text.includes(t)).length,keyScore:key.filter(t=>text.includes(t)).length}))
+        .filter(x=>x.score>0&&x.keyScore>=need).sort((a,b)=>b.score-a.score);
       if(ranked.length) {
         const picked=[...new Set(ranked.slice(0,2).map(x=>x.text))];
         directExtractiveAnswer=(deepSearch?'לפי מה שמצאתי בחיפוש, ':'לפי מה שמצאתי, ')+picked.join(' ¶ ');
@@ -3620,7 +3663,7 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
         }
         const synthEvidence=evidenceItems.map((x,i)=>
           'מקור '+(i+1)+' ('+String(x.url||'').slice(0,100)+'): '+String(x.title||'').slice(0,120)+'\n'+String(x.snippet||'').slice(0,deepSearch?900:(i<2&&String(x.snippet||'').length>1200?1400:600))).join('\n\n');
-        const synthPrompt=EXCLUSIVE_INSTRUCTION+'\n\nענה לשאלת המתקשר בעברית טבעית וזורמת, כמו בשיחה, '+(deepSearch?'(עד 7 משפטים: קודם התשובה הישירה, אחר כך הפרטים החשובים, ואם המקורות חלוקים ציין זאת)':'(עד 4 משפטים, ואם התבקשו כמה פריטים או סניפים פרט אותם)')+' להקראה בטלפון, על בסיס המקורות בלבד. '+
+        const synthPrompt=EXCLUSIVE_INSTRUCTION+'\n\nענה לשאלת המתקשר בעברית טבעית וזורמת, כמו בשיחה, '+(isExt3()?'(בהרחבה, 5 עד 10 משפטים: קודם התשובה הישירה, אחר כך כל הפרטים החשובים שבמקורות, ואם המקורות חלוקים ציין זאת)':deepSearch?'(עד 7 משפטים: קודם התשובה הישירה, אחר כך הפרטים החשובים, ואם המקורות חלוקים ציין זאת)':'(עד 4 משפטים, ואם התבקשו כמה פריטים או סניפים פרט אותם)')+' להקראה בטלפון, על בסיס המקורות בלבד. '+
           'כעת בישראל: '+israelNowText()+'. ענה בדיוק על מה שנשאל ולא על נושא סמוך. אם המקורות חלקיים, מסור את מה שנתמך בהם והבהר בקצרה מה חסר, ואל תסרב כשיש מידע רלוונטי. '+
           'התחל ישר בתשובה. אם המקורות לא עוסקים בנושא השאלה או שהשאלה נראית כתמלול משובש, אמור שלא הצלחת למצוא ובקש מהמתקשר לחזור על שם הגוף או הנושא. '+
           'מספר טלפון: מסור רק אם הוא מופיע במקור שמתאים לגוף שנשאל עליו, וללא שינוי בספרות או בכוכבית. אל תמציא פרטים שלא במקורות.\n\n'+
@@ -4452,7 +4495,9 @@ async function callHandler(call) {
         const background=recall||typeof callerBackground!=='function'?'':callerBackground(callerPhone,callId);
         const answerPrompt=EXCLUSIVE_INSTRUCTION+'\n\nהשעה והתאריך העדכניים בישראל לפי שעון השרת: '+israelNow+'. אם נשאלת מה השעה או מה התאריך, השתמש בערך הזה במדויק.'+(background?'\n\nרקע משיחות קודמות עם אותו מתקשר (לרקע בלבד: השתמש בו רק אם הוא באמת קשור לשאלה, למשל כשהמתקשר ממשיך נושא קודם או שואל על עצמו; אל תזכיר אותו סתם):\n'+background:'')+'\n\nהקשר קודם של השיחה, לפי הסדר:\n'+(conversationalHistory || 'אין עדיין הקשר קודם.')+'\n\nהשאלה המקורית של המתקשר (אין לשנות את כוונתה):\n'+originalSpokenTranscript+'\nנושא הבקשה הנוכחית: '+userTranscript+'\n\n'+(longAnswer
           ? 'זו בקשה לתשובה ארוכה ומפורטת. אל תקצר ל-1 עד 4 משפטים. בנה תשובה רציפה ומסודרת, בדרך כלל 8 עד 20 פסקאות או משפטים קצרים לפי הצורך, עד כ-'+LONG_ANSWER_MAX_CHARS+' תווים. שמור על רצף טבעי להקראה בטלפון, בלי כותרות טכניות ובלי לחזור על עצמך. '
-          : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. ')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
+          : (!explicitSearchOnly
+            ? EXT3_ANSWER_STYLE
+            : 'ענה בדרך כלל ב-1 עד 4 משפטים קצרים, אבל הרחב אם השאלה באמת דורשת זאת. '))+(recall?RECALL_INSTRUCTION:'')+'החזר אובייקט JSON תקין בלבד עם שדה "answer". התשובה טבעית, אישית, חכמה וזורמת ומתאימה להקראה בטלפון. אם חסר פרט קריטי לעצה, שאל שאלה אחת ממוקדת. אם התמלול אינו ברור, אל תנחש ובקש מהמתקשר לחזור על השאלה.';
         const lookupInstruction=allowExternalLookup?'':'\nבתור הזה לא בוצע חיפוש. אל תטען שבדקת מקורות או תמציא פרטים עדכניים. אם נדרש אימות באינטרנט, בקש מהמתקשר לומר תחפש באינטרנט.';
         const voiceInstruction=explicitSearchOnly?'\nדבר בעברית יומיומית, בלשון זכר ובמשפטים שקל לשמוע בטלפון. התחל ישר בתשובה. אם המתקשר מבקש להמשיך או אומר הפרט הראשון, היעזר במה שאמרת לו קודם. סיים בשאלת המשך קצרה רק כשיש בה תועלת.':'';
         const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt+lookupInstruction+voiceInstruction}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
@@ -4580,7 +4625,12 @@ async function callHandler(call) {
       const providerStatus=geminiErrorStatus(e);
       const deepSearchFallback=isDeepWebSearchRequest(userTranscript) ||
         /לעומק|מחקר מקיף|סקירה מקיפה|בדיקה יסודית|חיפוש מעמיק|חפש באינטרנט/i.test(userTranscript);
-      const eligibleForQuickWebFallback=allowExternalLookup && !!userTranscript && userTranscript.length>=3 &&
+      // Extension 3 looks things up on every turn; when the answer models are
+      // down, a conversational or memory question must not turn into raw search
+      // excerpts (seen 08.11: "where did I say I live" read random web titles).
+      const realLookup=explicitSearchOnly || (!isMemoryRecall(originalSpokenTranscript||userTranscript) &&
+        (shouldForceWebSearch(userTranscript) || /(?:חפש|תחפש|תחפשי|באינטרנט|בגוגל|ברשת)/u.test(userTranscript)));
+      const eligibleForQuickWebFallback=allowExternalLookup && realLookup && !!userTranscript && userTranscript.length>=3 &&
         [408,429,500,502,503,504].includes(providerStatus) &&
         (!isLongAnswerRequest(userTranscript) || deepSearchFallback) &&
         // If a normal web-backed answer fails (including quota or timeout), allow
