@@ -59,6 +59,14 @@ async function ensureIni(what, want) {
   await putText(what, want);
 }
 
+async function ensureIniVerified(what, want) {
+  await ensureIni(what, want);
+  const now = await getText(what);
+  const ok = String(now || '').replace(/\r/g, '').trim() === want.trim();
+  log(what, ok ? 'settings verified' : 'settings NOT kept: ' + JSON.stringify(String(now || '').slice(0, 120)));
+  return ok;
+}
+
 async function uploadAudio(buffer, remotePath, filename, type) {
   const u = new URL(API + '/UploadFile');
   u.searchParams.set('token', token()); u.searchParams.set('path', remotePath);
@@ -115,7 +123,7 @@ export async function buildAudio(segments, dir, musicFile, speakFn = speak) {
   const jingle = path.join(dir, 'jingle.mp3');
   await ffmpeg(['-i', path.join(HERE, 'jingle.mp3'), '-ar', '24000', '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '48k', jingle]);
   const cache = new Map();
-  const files = await mapLimit(segments, 6, async (seg, k) => {
+  const files = await mapLimit(segments, 10, async (seg, k) => {
     if (seg[0] !== 'he' && seg[0] !== 'en') return null;
     const key = seg.join('|');
     if (!cache.has(key)) cache.set(key, (async () => { const f = path.join(dir, 's' + k + '.mp3'); await fs.writeFile(f, await speakFn(seg)); return f; })());
@@ -224,6 +232,9 @@ export async function runCoursesJob() {
           progress.lessons[lesson.n] = { hash: hashOf(lesson.segments, c.music), file: remote, seconds, at: new Date().toISOString() };
           await putText(progressPath, JSON.stringify(progress));
           log(c.id, 'lesson', lesson.n, 'uploaded', { remote, seconds, buildSec: Math.round((Date.now() - t0) / 1000) });
+          // A Yemot folder only exists once it holds a file, so its settings are (re)written and
+          // verified after an upload; before that, an ext.ini written there is not kept.
+          if (!s.iniOk) s.iniOk = await ensureIniVerified(c.folder + '/ext.ini', playIni(c.title));
         } catch (e) {
           log(c.id, 'lesson', lesson.n, 'FAILED', String(e?.message || e).slice(0, 300));
         }
