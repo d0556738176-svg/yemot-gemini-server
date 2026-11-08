@@ -53,14 +53,18 @@ export function parseChannels(text) {
   return out.sort((a, b) => Number(a.key) - Number(b.key));
 }
 
+// BRANCH5_ALWAYS_ON=true: the owner wants the channels open all the time (no on/off).
+const alwaysOn = () => /^(true|1|yes|on)$/i.test(String(process.env.BRANCH5_ALWAYS_ON || ''));
+
 export function isOn(state, now = Date.now()) {
+  if (alwaysOn()) return true;
   if (!state?.on) return false;
   return !state.until || now < Number(state.until);
 }
 
 export function remainingSeconds(state, now = Date.now(), perListenCap = 3 * 3600) {
   if (!isOn(state, now)) return 0;
-  const left = state.until ? Math.floor((Number(state.until) - now) / 1000) : perListenCap;
+  const left = !alwaysOn() && state?.until ? Math.floor((Number(state.until) - now) / 1000) : perListenCap;
   return Math.max(0, Math.min(left, perListenCap));
 }
 
@@ -154,10 +158,15 @@ export async function liveBroadcastHandler(call) {
     if (!ch) continue;
     const secs = remainingSeconds(await loadState());
     if (!secs) continue;
-    log('caller listening', { channel: ch.key, maxSec: secs });
-    // Plays the stream until the switch-off time (or * by the caller); afterwards
-    // Yemot calls back and the caller is back at this channel menu.
-    return call.id_list_message([{ type: 'music_on_hold', data: { musicName: ch.name, maxSec: secs } }]);
+    log('caller listening', { channel: ch.key, name: ch.name, maxSec: secs });
+    // Yemot's documented way to play a stream is a music_on_hold extension, so each
+    // channel gets its own sub-extension /5/<key>. Its time limit is the time left until
+    // the switch-off, and when it ends (or the caller presses *) the caller is back here.
+    const ini = ['type=music_on_hold', 'title=' + ch.title.replace(/[=\n]/g, ' '),
+      'music_on_hold=' + ch.name + ',' + secs, 'music_on_hold_end_goto=/5', ''].join('\n');
+    try { await putText(FOLDER + '/' + ch.key + '/ext.ini', ini); }
+    catch (e) { log('channel setup failed', String(e?.message || e).slice(0, 160)); return call.id_list_message(say('יש תקלה זמנית בערוץ הזה, נסו שוב בעוד רגע'), { prependToNextAction: true }); }
+    return call.go_to_folder('/5/' + ch.key);
   }
 }
 

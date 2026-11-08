@@ -18,3 +18,11 @@ test('on/off and auto-off timer', () => {
   assert.equal(remainingSeconds({ on: true, until: 0 }, now, 3600), 3600);
   assert.equal(remainingSeconds({ on: true, until: now - 5 }, now), 0);
 });
+
+test('always-on mode ignores the switch', () => {
+  process.env.BRANCH5_ALWAYS_ON = 'true';
+  try {
+    assert.equal(isOn({ on: false }), true);
+    assert.equal(remainingSeconds({ on: false, until: 5 }, 1000, 3600), 3600);
+  } finally { delete process.env.BRANCH5_ALWAYS_ON; }
+});
