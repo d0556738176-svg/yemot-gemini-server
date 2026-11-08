@@ -27,7 +27,7 @@ export function isBranch1WebsiteRequest(q, context={}) {
   // turns (the caller asked about the weather in between, or a turn was mis-heard).
   if(context.currentWebsitePages?.length&&/(?:איזה|אילו|תגיד|תקריא|יש)\s*(?:\S+\s+)?(?:קישורים|כישורים)|(?:קישור|כישור)\s*(?:מספר\s*)?(?:\d{1,2}|אחד|אחת|ראשון|שני|שלישי|רביעי|חמישי)|(?:בעמוד|בדף|באתר)\s+(?:הזה|שפתחת|שנפתח)/u.test(q))return true;
   return /https?:\/\/\S+|(?:פתח|תפתח|תיכנס|תכנס|לפתוח|להיכנס).{0,35}(?:אתר|דף|עמוד)|(?:תקרא|תקריא|קרא).{0,25}(?:באתר|מה שכתוב|מה כתוב)/u.test(q) ||
-    !!context.currentWebsitePages?.length && (context.lastRoute==='website'||/חזור לאתר|תחזור לאתר/u.test(q)) && /^(?:כן[, ]*)?(?:תמשיך|המשך|תקרא|תקריא|קרא|מה כתוב|מה ראית|מה יש|תחזור|חזור|עוד|הלאה|דף|עמוד|פתח|תפתח|איזה קישורים|אילו קישורים|תפריט|תעבור)/u.test(q);
+    !!context.currentWebsitePages?.length && (context.lastRoute==='website'||/חזור לאתר|תחזור לאתר/u.test(q)) && /^(?:כן[, ]*)?(?:תמשיך|תמשיכי|המשך|תקרא|תקריא|קרא|מה כתוב|מה ראית|מה יש|תחזור|חזור|עוד|הלאה|דף|עמוד|פתח|תפתח|איזה קישורים|אילו קישורים|תפריט|תעבור)/u.test(q);
 }
 
 export function requestedSiteName(q) {
@@ -92,9 +92,9 @@ export async function answerBranch1Website(q,context,{search,read=readSinglePubl
     }
     if(link)return load(link.url);
     if(number&&!restartAction.test(q) || navigation)return 'לא זיהיתי בוודאות את הקישור שביקשת. אפשר לומר איזה קישורים יש, ואז לבחור מספר.';
-    if(pageReference.test(q)||/תמשיך|המשך|עוד|הלאה|תקרא|תקריא|קרא|מה כתוב|מה ראית|מה יש|תחזור|חזור/u.test(q)) {
+    if(pageReference.test(q)||/תמשיך|תמשיכי|המשך|עוד|הלאה|תקרא|תקריא|קרא|מה כתוב|מה ראית|מה יש|תחזור|חזור/u.test(q)) {
       context.lastRoute='website';
-      const restart=restartAction.test(q)||pageReference.test(q)&&!/(תמשיך|המשך|עוד|הלאה)/u.test(q);
+      const restart=restartAction.test(q)||pageReference.test(q)&&!/(תמשיך|תמשיכי|המשך|עוד|הלאה)/u.test(q);
       logger.info('[BRANCH1 WEBSITE] cached reading',{action:restart?'restart':'continue',host:new URL(current.url).hostname,offset:restart?0:context.currentWebsiteReadOffset||0});
       return websiteChunk(context,restart);
     }
