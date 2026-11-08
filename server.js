@@ -88,8 +88,12 @@ function requireDashboardAuth(req, res, next) {
   next();
 }
 
-const apiKeys = (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '')
-  .split(',').map(k => k.trim()).filter(Boolean);
+// Extra keys may also sit in their own fields (owner's choice, 08.11):
+// GEMINI_API_KEY_3 ... GEMINI_API_KEY_9, added after the list.
+const apiKeys = [...new Set([
+  ...(process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '').split(','),
+  ...[2,3,4,5,6,7,8,9].map(n => process.env['GEMINI_API_KEY_' + n] || '')
+].map(k => k.trim()).filter(Boolean))];
 
 console.log('[Gemini] configured key count:', apiKeys.length);
 
