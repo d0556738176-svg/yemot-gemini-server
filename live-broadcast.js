@@ -161,6 +161,36 @@ export async function liveBroadcastHandler(call) {
   }
 }
 
+// Checks stream links from the server (which can reach any site) and logs which work:
+// playlist status, its variants, and whether a media segment downloads.
+export async function checkStreamUrls(urls) {
+  const get = async u => { const r = await fetch(u, { redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(12000) }); return { r, t: r.ok ? await r.text() : '' }; };
+  const results = [];
+  for (const url of urls) {
+    const out = { url };
+    try {
+      let { r, t } = await get(url);
+      out.status = r.status; out.type = r.headers.get('content-type'); out.final = r.url !== url ? r.url : undefined;
+      out.head = t.split('\n').filter(l => l.trim()).slice(0, 8).join(' | ').slice(0, 400);
+      let base = r.url, lines = t.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      if (t.includes('#EXT-X-STREAM-INF') && lines.length) {
+        const v = new URL(lines[lines.length - 1], base).href; out.variant = v;
+        ({ r, t } = await get(v)); out.variantStatus = r.status; base = r.url;
+        lines = t.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      }
+      if (lines.length) {
+        const seg = await fetch(new URL(lines[lines.length - 1], base).href, { headers: { 'user-agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(12000) });
+        const buf = seg.ok ? await seg.arrayBuffer() : new ArrayBuffer(0);
+        out.segmentStatus = seg.status; out.segmentBytes = buf.byteLength;
+      }
+      out.works = out.status === 200 && (out.segmentBytes || 0) > 1000;
+    } catch (e) { out.error = String(e?.message || e).slice(0, 150); }
+    log('stream check', JSON.stringify(out));
+    results.push(out);
+  }
+  return results;
+}
+
 // Points extension 5 at this handler (production service only) and logs what it was before.
 export async function configureLiveExtension(publicUrl) {
   if (process.env.BRANCH5_LIVE_AUTO_CONFIGURE === 'false' || /staging|test/i.test(process.env.RENDER_SERVICE_NAME || '')) return;
@@ -184,6 +214,8 @@ export async function configureLiveExtension(publicUrl) {
       }
     } catch (e) { log('dir listing failed', String(e?.message || e).slice(0, 120)); }
   }
+  const check = String(process.env.BRANCH5_LIVE_CHECK_URLS || '').split(/\s*,\s*/).filter(Boolean);
+  if (check.length) await checkStreamUrls(check).catch(e => log('stream check failed', String(e?.message || e).slice(0, 120)));
   const channels = await loadChannels();
   const state = await loadState();
   log('ready', { channels: channels.map(c => c.key + ':' + c.name), on: isOn(state), pinSet: !!process.env.BRANCH5_ADMIN_PIN });
