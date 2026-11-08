@@ -4230,15 +4230,60 @@ async function callHandler(call) {
     console.info('[CALL_FLOW] caller_memory_status', { callId: activeKey, callerKnown: callerPhone !== 'לא מזוהה', hasMemory: false });
   }
 
+  // Owner, 08.11: at the start of the call 1 = speak, 2 = type on the phone
+  // keys (Yemot's Hebrew keyboard; the typed text arrives as letters).
+  // No key = speak, so a regular call is not held up.
+  let typingMode=false, typedHintSaid=false, emptyTypedAttempts=0;
+  if(!call.selfTest) {
+    try {
+      const choice=String(await call.read([{type:'text',data:'לשיחה בדיבור הקש 1. להקלדה במקשי הטלפון הקש 2.'}],'tap',
+        {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',
+         digits_allowed:['1','2','*'],timeout:10*60*1000})||'').trim();
+      console.info('[CALL_FLOW] input mode chosen',{callId:activeKey,choice});
+      if(choice.includes('*')) { activeCalls.delete(activeKey); return call.go_to_folder('/'); }
+      typingMode=choice==='2';
+    } catch(modeError) {
+      if(isCallerHangupError(modeError)) { activeCalls.delete(activeKey); return; }
+      if(modeError instanceof ExitError) throw modeError;
+      console.warn('[CALL_FLOW] input mode question failed; speaking',{message:String(modeError?.message||modeError).slice(0,200)});
+    }
+  }
+
   while(true) {
     // IMPORTANT: send the previous answer and request the next turn in ONE read.
     // This avoids ending the Yemot action between turns and keeps the Call object,
     // turnHistory and YouTube result context alive.
     const prompt=nextPrompt || (firstTurn?(openingPrompt || process.env.FIRST_CALL_MESSAGE ||
-      'היי. אני איתך, דבר חופשי.'):
-      'אני איתך. תמשיך.');
+      (typingMode?'היי. אני איתך, הקלד מה שתרצה.':'היי. אני איתך, דבר חופשי.')):
+      (typingMode?'אני איתך. הקלד את ההמשך.':'אני איתך. תמשיך.'));
     firstTurn=false;
     let recordPath;
+    let typedText='';
+    if(typingMode) {
+      // Hebrew keyboard: letters by key presses, # between letters; Yemot's
+      // own menu (finish, hear, delete, change language) handles the rest.
+      // Typing nothing switches the call back to speech.
+      const hint=typedHintSaid?'':' הקלד בעברית במקשי הטלפון, והקש סולמית אחרי כל אות. להחזרה לדיבור סיים בלי להקליד.';
+      typedHintSaid=true;
+      try {
+        typedText=String(await call.read(branch1SpeechItems(prompt+hint),'tap',
+          {min_digits:1,max_digits:'',sec_wait:60,typing_playback_mode:'HebrewKeyboard',allow_empty:true,empty_val:'None',
+           timeout:10*60*1000})||'').trim();
+      } catch(typeError) {
+        if(isCallerHangupError(typeError)) { activeCalls.delete(activeKey); return; }
+        throw typeError;
+      }
+      console.info('[CALL_FLOW] typed text',{callId:activeKey,chars:typedText.length,typed:typedText.slice(0,120)});
+      if(!typedText||typedText==='None'||/^[*#\s]*$/.test(typedText)) {
+        if(++emptyTypedAttempts>=2) {
+          typingMode=false; emptyTypedAttempts=0;
+          nextPrompt='עברנו לדיבור. אמור מה שתרצה.';
+        } else nextPrompt='לא נקלטה הקלדה. הקלד שוב, או סיים שוב בלי להקליד כדי לעבור לדיבור.';
+        continue;
+      }
+      emptyTypedAttempts=0;
+      nextPrompt=null;
+    } else
     try {
       recordPath=await call.read(branch1SpeechItems(prompt),'record',
         {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
@@ -4271,7 +4316,7 @@ async function callHandler(call) {
         throw retryError;
       }
     }
-    if(!recordPath || recordPath==='None') {
+    if(!typedText && (!recordPath || recordPath==='None')) {
       emptyRecordAttempts++;
       if(emptyRecordAttempts < 3) {
         nextPrompt='לא הצלחתי לשמוע אותך. נסה שוב.';
@@ -4293,7 +4338,7 @@ async function callHandler(call) {
       // the caller for the generic 30-second network budget.
       const recordingDownloadTimeoutMs=Math.min(REQUEST_TIMEOUT_MS,
         Math.max(2500,Number(process.env.BRANCH1_RECORDING_DOWNLOAD_TIMEOUT_MS || 6000)));
-      const response=call.selfTest?{data:Buffer.from('selftest')}:await withTimeout(yemotApi.download_file('ivr2:'+recordPath), recordingDownloadTimeoutMs, 'yemotApi.download_file');
+      const response=(call.selfTest||typedText)?{data:Buffer.from('selftest')}:await withTimeout(yemotApi.download_file('ivr2:'+recordPath), recordingDownloadTimeoutMs, 'yemotApi.download_file');
       audioBuffer=response.data;
     } catch(e) {
       logDetailedError('recording download',e);
@@ -4318,8 +4363,9 @@ async function callHandler(call) {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
       const asrMeta={};
-      userTranscript=correctKnownSpeechNames(call.selfTest?call.selfTest.next():await transcribePhoneAudio(audioBuffer,{failFastOnNoSpeech:true,secondOpinion:true,meta:asrMeta}));
-      turnContext.asrConfidence=(asrMeta.confidence===undefined||asrMeta.confidence===null||(asrMeta.weakWords||[]).length)?null:asrMeta.confidence;
+      userTranscript=typedText?typedText:correctKnownSpeechNames(call.selfTest?call.selfTest.next():await transcribePhoneAudio(audioBuffer,{failFastOnNoSpeech:true,secondOpinion:true,meta:asrMeta}));
+      // Typed text is exactly what the caller meant: full confidence.
+      turnContext.asrConfidence=typedText?1:(asrMeta.confidence===undefined||asrMeta.confidence===null||(asrMeta.weakWords||[]).length)?null:asrMeta.confidence;
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length,elapsedMs:Date.now()-turnStartedAt});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
       originalSpokenTranscript=userTranscript;

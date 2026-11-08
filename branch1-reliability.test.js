@@ -94,7 +94,38 @@ test('actual branch1 handler survives a conversation model timeout without searc
   context.callPersona={getStore:()=>({branch:'1'})};
   context.branch1WebSearchSubject=()=>null;
   vm.createContext(context);vm.runInContext(handler+'\nglobalThis.handler=callHandler;',context);
-  await context.handler({read:async items=>{reads++;if(reads===1)return '/audio.wav';assert.match(items[0].data,/יותר מדי זמן/);throw Error('hangup');}});
+  await context.handler({read:async items=>{if(/להקלדה במקשי/.test(items[0]?.data))return '1';reads++;if(reads===1)return '/audio.wav';assert.match(items[0].data,/יותר מדי זמן/);throw Error('hangup');}});
+  assert.equal(fallbacks,0);assert.equal(reads,2);assert.equal(context.activeCalls.size,0);
+});
+
+test('extension 1 typing: key 2 takes the question from the Hebrew phone keyboard, no recording or transcription',async()=>{
+  const source=readFileSync(new URL('./server.js',import.meta.url),'utf8');
+  const handler=source.slice(source.indexOf('async function callHandler(call)'),source.indexOf('\n\n/**\n * Isolated YouTube'));
+  let reads=0,fallbacks=0;
+  const context={...turnContextHelpers,console:{info(){},warn(){},error(){}},Buffer,Date,Intl,process:{env:{ENABLE_AI_OPENING:'false'}},
+    getCallerNumber:()=> 'anonymous',activeCalls:new Map(),conversationLog:[],branch1SpeechItems,
+    isCallerHangupError:e=>e.message==='hangup',geminiErrorStatus:e=>e.status||0,
+    REQUEST_TIMEOUT_MS:30000,withTimeout:async p=>p,yemotApi:{download_file:async()=>{throw Error('no recording expected');}},
+    buildCallHistoryText:async()=>'',transcribePhoneAudio:async()=>{throw Error('no transcription expected');},
+    resolvePendingLookupQuestion:()=>'',resolveBranch1Question,isCorrection,selectRelevantHistoryForTurn:()=>'',
+    branch1Clarification:()=>'',branch1FollowUpHistory:()=>'',isBranch1WebsiteRequest:()=>false,isBranch1LocalRequest:()=>false,isBranch1EventRequest:()=>false,
+    isMultimodalAnalysisRequest:()=>({any:false}),isVisualContinuationRequest:()=>false,
+    answerIsraelTimeQuestion:()=>'',answerDailyDateQuestion:()=>'',EXCLUSIVE_INSTRUCTION:'',LONG_ANSWER_MAX_CHARS:12000,
+    generateBranch1WithFallback:async()=>{throw Object.assign(Error('timeout'),{status:408});},
+    logDetailedError(){},answerWithDirectWebFallback:async(q,h)=>{assert.equal(h,'');fallbacks++;return 'תשובה מהמקורות';},
+    sanitizeForYemot:x=>x,correctKnownSpeechNames:x=>x,rewriteFollowUp:async q=>q,normalizePhone:x=>x,persistConversationEntry:async()=>{},MAX_CONVERSATION_LOG:1000};
+  for(const key of ['isWeatherQuestion','isNewsQuestion','isWebsiteCapabilityQuestion','isWebsiteNavigationRequest','isGenericWebsiteRequest','shouldForceWebSearch','isLongAnswerRequest','isDeepWebSearchRequest','isTransitRequest','isPhoneNumberRequest','isPharmacySearchRequest','isBusinessHoursRequest']) context[key]=()=>false;
+  context.extractExplicitHttpUrl=()=>'';
+  context.callPersona={getStore:()=>({branch:'1'})};
+  context.branch1WebSearchSubject=()=>null;
+  vm.createContext(context);vm.runInContext(handler+'\nglobalThis.handler=callHandler;',context);
+  const modes=[];
+  await context.handler({read:async (items,mode,opts)=>{
+    if(/להקלדה במקשי/.test(items[0]?.data)){modes.push('menu');return '2';}
+    reads++;modes.push(mode+':'+(opts?.typing_playback_mode||''));
+    if(reads===1){assert.match(items.map(x=>x.data).join(' '),/סולמית אחרי כל אות/);return 'מה היתרונות של אנרגיה סולרית';}
+    assert.match(items[0].data,/יותר מדי זמן/);throw Error('hangup');}});
+  assert.deepEqual(modes,['menu','tap:HebrewKeyboard','tap:HebrewKeyboard']);
   assert.equal(fallbacks,0);assert.equal(reads,2);assert.equal(context.activeCalls.size,0);
 });
 

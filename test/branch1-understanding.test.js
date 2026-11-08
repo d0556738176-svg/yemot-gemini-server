@@ -144,7 +144,7 @@ test('branch 3 phone handler reads website, continues, switches topic and routes
   // The handler also uses the turn-context helpers that server.js imports.
   for(const [key,fn] of Object.entries(turnContext)) if(!(key in context)) context[key]=fn;
   vm.createContext(context);vm.runInContext(handler+'\nglobalThis.handler=callHandler;',context);
-  await context.handler({read:async items=>{reads++;if(reads>inputs.length)throw Error('hangup');return '/audio.wav';}});
+  await context.handler({read:async items=>{if(/להקלדה במקשי/.test(items[0]?.data))return '1';reads++;if(reads>inputs.length)throw Error('hangup');return '/audio.wav';}});
   assert.equal(websiteReads,1);assert.equal(eventCalls,5);assert.equal(hoursCalls,1);
   assert.equal(context.conversationLog.length,13);assert.match(context.conversationLog[0].gemini,/טקסט מקורי/);assert.match(context.conversationLog[1].gemini,/המשך/);
   assert.match(context.conversationLog[2].gemini,/מופע לדוגמה/);assert.match(context.conversationLog[3].gemini,/לוח שעות מאומת/);
