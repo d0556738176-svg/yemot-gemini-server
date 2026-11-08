@@ -18,7 +18,7 @@ const EN_VOICE = process.env.ENGLISH_EN_VOICE || 'en-US-AndrewNeural';
 const BUILD_VERSION = 'v2-music';
 const log = (...a) => console.info('[COURSES]', ...a);
 
-const COURSES = [
+export const COURSES = [
   { id: 'english', folder: 'ivr2:/6/1', json: 'course-english.json', music: 'music-english.mp3', title: 'לימוד אנגלית' },
   { id: 'code', folder: 'ivr2:/6/2', json: 'course-code.json', music: 'music-code.mp3', title: 'לימוד תכנות' },
 ];
@@ -151,15 +151,47 @@ export async function buildAudio(segments, dir, musicFile, speakFn = speak) {
   return out;
 }
 
-async function uploadWav(wav, remote, dir) {
+export async function wavToMp3(wav, dir) {
   const mp3 = path.join(dir, 'upload.mp3');
   await ffmpeg(['-i', wav, '-c:a', 'libmp3lame', '-b:a', '32k', mp3]);
-  return uploadAudio(await fs.readFile(mp3), remote, path.basename(remote).replace(/\.wav$/, '.mp3'), 'audio/mpeg');
+  return fs.readFile(mp3);
+}
+async function uploadWav(wav, remote, dir) {
+  return uploadMp3(await wavToMp3(wav, dir), remote);
+}
+const uploadMp3 = (buf, remote) => uploadAudio(buf, remote, path.basename(remote).replace(/\.wav$/, '.mp3'), 'audio/mpeg');
+export function loadCourse(c) {
+  return JSON.parse(readFileSync(path.join(HERE, c.json), 'utf8'));
 }
 
-const hashOf = (segments, music) => createHash('sha1').update(BUILD_VERSION + HE_VOICE + EN_VOICE + music + JSON.stringify(segments)).digest('hex').slice(0, 16);
+// Lessons are built on a separate service (course builder) that other work never redeploys,
+// because this main service is redeployed often and a restart threw away a lesson mid-build.
+// Here we only fetch the finished mp3 (seconds) and upload it. If the builder cannot be
+// reached at all, the lesson is built here as before.
+const BUILDER = (process.env.COURSE_BUILDER_URL || 'https://yemot-course-builder.onrender.com').replace(/\/$/, '');
+async function fetchFromBuilder(c, lesson) {
+  const want = hashOf(lesson.segments, c.music);
+  const deadline = Date.now() + 25 * 60 * 1000;
+  let failures = 0;
+  while (Date.now() < deadline) {
+    try {
+      const r = await fetch(BUILDER + '/lesson?course=' + c.id + '&n=' + lesson.n, { signal: AbortSignal.timeout(90000) });
+      if (r.status === 200 && r.headers.get('x-lesson-hash') === want) return Buffer.from(await r.arrayBuffer());
+      if (r.status === 200) throw new Error('builder has a different version of the lesson');
+      const j = await r.json().catch(() => ({}));
+      if (j.state === 'failed') throw new Error('builder failed: ' + String(j.error || '').slice(0, 160));
+      failures = 0;
+    } catch (e) {
+      if (++failures >= 6) throw e;
+    }
+    await new Promise(r => setTimeout(r, 20000));
+  }
+  throw new Error('builder timeout');
+}
 
-async function withTemp(prefix, fn) {
+export const hashOf = (segments, music) => createHash('sha1').update(BUILD_VERSION + HE_VOICE + EN_VOICE + music + JSON.stringify(segments)).digest('hex').slice(0, 16);
+
+export async function withTemp(prefix, fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   try { return await fn(dir); } finally { await fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
@@ -206,7 +238,7 @@ export async function runCoursesJob() {
     // lessons to play right away instead of one waiting hours for the other to finish.
     const state = [];
     for (const c of COURSES) {
-      const course = JSON.parse(readFileSync(path.join(HERE, c.json), 'utf8'));
+      const course = loadCourse(c);
       const progressPath = c.folder + '/course-progress.txt';
       let progress = {};
       try { progress = JSON.parse((await getText(progressPath)) || '{}'); } catch {}
@@ -223,12 +255,20 @@ export async function runCoursesJob() {
         const t0 = Date.now();
         try {
           const remote = c.folder + '/' + String(lesson.n - 1).padStart(3, '0') + '.wav';
-          const seconds = await withTemp(c.id + '-' + lesson.n + '-', async dir => {
-            const wav = await buildAudio(lesson.segments, dir, c.music);
-            const size = (await fs.stat(wav)).size;
-            await uploadWav(wav, remote, dir);
-            return Math.round(size / 16000);
-          });
+          let seconds;
+          try {
+            const mp3 = await fetchFromBuilder(c, lesson);
+            await uploadMp3(mp3, remote);
+            seconds = Math.round(mp3.length / 4000);
+          } catch (e) {
+            log(c.id, 'lesson', lesson.n, 'builder unavailable, building here:', String(e?.message || e).slice(0, 160));
+            seconds = await withTemp(c.id + '-' + lesson.n + '-', async dir => {
+              const wav = await buildAudio(lesson.segments, dir, c.music);
+              const size = (await fs.stat(wav)).size;
+              await uploadWav(wav, remote, dir);
+              return Math.round(size / 16000);
+            });
+          }
           progress.lessons[lesson.n] = { hash: hashOf(lesson.segments, c.music), file: remote, seconds, at: new Date().toISOString() };
           await putText(progressPath, JSON.stringify(progress));
           log(c.id, 'lesson', lesson.n, 'uploaded', { remote, seconds, buildSec: Math.round((Date.now() - t0) / 1000) });
