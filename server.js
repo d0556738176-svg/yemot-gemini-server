@@ -4024,6 +4024,7 @@ async function youtubeCallHandler(call) {
   // the keypad; 0 lets the caller say it aloud once instead.
   let pageStart=0, voiceOnce=false, emptyTaps=0, tapNo=0, keyTranscript=null;
   let pendingFallbackVideo=null;
+  let searchMode=null, typedOnce=false; // 'voice' | 'type' (owner, 08.11)
   let transcriptFailAttempts=0;
 
   const normalizeConfirm=(text)=>String(text||'').normalize('NFKC').toLowerCase()
@@ -4171,13 +4172,45 @@ async function youtubeCallHandler(call) {
         }[keyState];
         let tapped=map[key]||null;
         if(keyState==='results') {
-          if(key==='7') { results=[]; resultOffset=0; pageStart=0; continue; }
+          if(key==='7') { results=[]; resultOffset=0; pageStart=0; searchMode=null; typedOnce=false; continue; }
           const k=Number(key);
           if(k>=1&&k<=pageCount) tapped='תוצאה מספר '+(pageStart+k);
         }
         if(!tapped) { nextPrompt='ההקשה '+key+' אינה אחת האפשרויות.'; continue; }
         console.info('[YouTube IVR] key',{state:keyState,key,as:tapped});
         keyTranscript=tapped;
+        }
+      }
+      // Owner, 08.11: the search itself by speech (1) or by typing on the
+      // phone keys (2, Yemot's Hebrew keyboard; the text arrives as letters).
+      // No key = speech. The choice holds until a new search (7).
+      if(!keyState&&!keyTranscript) {
+        const said=prompt===basePrompt?'':String(prompt).split(/(?<=[.?!])\s+/).filter(x=>!/אמור|אמרו|הקש סולמית/.test(x)).join(' ');
+        if(!searchMode) {
+          const choice=String(await call.read(
+            [{type:'text',data:sanitizeForYemot((said?said+' ':'')+'לחיפוש ביוטיוב בדיבור הקש 1. לחיפוש בהקלדה במקשי הטלפון הקש 2. לחזרה לתפריט הראשי הקש כוכבית.')}],
+            'tap',
+            {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'m'+(++tapNo),timeout:10*60*1000,
+             digits_allowed:['1','2','*']}
+          )||'None').trim();
+          console.info('[YouTube IVR] search mode',{choice});
+          if(choice.includes('*')) return call.go_to_folder('/');
+          searchMode=choice==='2'?'type':'voice';
+        }
+        if(searchMode==='type') {
+          const typed=String(await call.read(
+            [{type:'text',data:sanitizeForYemot((said&&!typedOnce?said+' ':'')+'הקלד מה לחפש ביוטיוב, בעברית במקשי הטלפון, והקש סולמית אחרי כל אות.')}],
+            'tap',
+            {min_digits:1,max_digits:'',sec_wait:60,typing_playback_mode:'HebrewKeyboard',allow_empty:true,empty_val:'None',val_name:'t'+(++tapNo),timeout:10*60*1000}
+          )||'None').trim();
+          typedOnce=true;
+          console.info('[YouTube IVR] typed search',{chars:typed.length,typed:typed.slice(0,120)});
+          if(typed==='None'||/^[*#\s]*$/.test(typed)) {
+            searchMode='voice';
+            nextPrompt='לא נקלטה הקלדה, אז נחפש בדיבור. אמור מה תרצה לחפש ביוטיוב, ולסיום ההקלטה הקש סולמית.';
+            continue;
+          }
+          keyTranscript=typed;
         }
       }
       voiceOnce=false;
