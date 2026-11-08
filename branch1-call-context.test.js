@@ -28,6 +28,7 @@ async function runCall(questions,answers,{branch="1"}={}){
   answerDailyDateQuestion:()=>'',answerIsraelTimeQuestion:()=>'',knownPrimaryPhoneAnswer:()=>'',branch1Clarification:()=>'',
   EXT3_ANSWER_STYLE:'ענה בהרחבה. ',RECALL_INSTRUCTION:'',
  };
+ {const fn=source.match(/function extractModelAnswer[\s\S]*?\n}\n/)[0];context.extractModelAnswer=vm.runInNewContext('('+fn+')');}
  for(const name of ['isPhoneNumberRequest','isBusinessHoursRequest','isLocalBusinessDiscoveryRequest','isCorrection','isBranch1WebsiteRequest','isBranch1LocalRequest','isBranch1EventRequest','isVisualContinuationRequest','isWeatherQuestion','isNewsQuestion','isWebsiteCapabilityQuestion','isWebsiteNavigationRequest','isGenericWebsiteRequest','isLongAnswerRequest','isTransitRequest'])context[name]=()=>false;
  context.isMultimodalAnalysisRequest=()=>({any:false});context.extractExplicitHttpUrl=()=>null;context.extractExplicitLocation=()=>({});
  const scope=vm.createContext(context);
