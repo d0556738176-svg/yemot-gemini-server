@@ -346,7 +346,7 @@ function withPersona(contents) {
 }
 // Extension 3 answers like a thorough expert (owner, 08.11): strongest models
 // first, more time, longer and fuller answers. Extension 1 keeps its fast profile.
-const EXT3_ANSWER_STYLE = 'ענה בהרחבה ובבהירות, כמו מומחה טוב וחם שמסביר בטלפון: קודם התשובה הישירה במשפט אחד, אחר כך הסבר מלא ומסודר עם הפרטים החשובים, דוגמה או טיפ מעשי, ובסוף משפט סיכום. בדרך כלל 6 עד 12 משפטים קצרים וברורים, כל אחד מסתיים בנקודה. בשאלה פשוטה שהתשובה עליה קצרה (שעה, שם, כן או לא) ענה קצר. אל תמציא שמות של מקומות, מחירים, שעות או מספרים שאינך בטוח בהם; אם צריך פרט עדכני, אמור שכדאי לבדוק ושאפשר לבקש ממך לחפש באינטרנט. ';
+const EXT3_ANSWER_STYLE = 'ענה בהרחבה ובבהירות, כמו מומחה טוב וחם שמסביר בטלפון: קודם התשובה הישירה במשפט אחד, אחר כך הסבר מלא ומסודר עם הפרטים החשובים, דוגמה או טיפ מעשי, ובסוף משפט סיכום. בדרך כלל 6 עד 12 משפטים קצרים וברורים, כל אחד מסתיים בנקודה. בשאלה פשוטה שהתשובה עליה קצרה (שעה, שם, כן או לא) ענה קצר. אל תמציא שמות של מקומות, מחירים, שעות או מספרים שאינך בטוח בהם; כשמבקשים לפרט על מקום, אדם או עסק שהוזכר, מסור רק מה שנאמר עליו קודם במקורות או מה שידוע לך בוודאות, ואם אין לך פרטים מאומתים אמור זאת והצע לחפש באינטרנט. ';
 const RECALL_INSTRUCTION = 'המתקשר שואל על שיחות קודמות או על עצמו. ענה מתוך ההקשר הקודם בלבד: הזכר את הפרטים שהוא סיפר על עצמו (שם, מקום מגורים, משפחה, תוכניות) וסכם את כל הנושאים העיקריים שדיברתם עליהם, לא רק את השאלה האחרונה. אם פרט לא מופיע בהקשר, אמור בכנות שאינך זוכר אותו. ';
 const EXT3_SYNTH_MS = Number(process.env.EXT3_SYNTH_MS || 12000);
 const EXT3_GEMINI_MS = Number(process.env.EXT3_GEMINI_MS || 8500);
@@ -4456,7 +4456,12 @@ async function callHandler(call) {
       const branch1Local=allowExternalLookup && !branch1Website && isBranch1LocalRequest(userTranscript);
       const branch1Events=allowExternalLookup && !branch1Website && isBranch1EventRequest(userTranscript);
       turnContext.lastRoute=branch1Website?'website':branch1Local?'local':branch1Events?'events':youtubeIntent?'youtube':'other';
-      const forcedWebSearch=allowExternalLookup && !conversationOnly && (explicitSearchOnly || shouldForceWebSearch(userTranscript));
+      // Extension 3: recommendations of real places and businesses come from
+      // the web, not from the model's memory (08.11 it invented sites and a
+      // "crater" in the north).
+      const ext3Recommendation=!explicitSearchOnly && !isMemoryRecall(originalSpokenTranscript) &&
+        /(?:מקומות|אטרקציה|אטרקציות|כדאי לבקר|לבקר ב|מסלול|מסלולים|ממליצ|המלצה|המלצות|מומלץ|מומלצים|צימר|צימרים|מלון|מלונות|מסעדה|מסעדות|גן חיות|פארק|שמורה|שמורת|חוף|חופים|מוזיאון|לאן כדאי|לאן ללכת|איפה כדאי)/u.test(userTranscript);
+      const forcedWebSearch=allowExternalLookup && !conversationOnly && (explicitSearchOnly || shouldForceWebSearch(userTranscript) || ext3Recommendation);
       console.info('[BRANCH1_ROUTER]',{
         callId:activeKey,
         route:branch1Website?'website':branch1Local?'local':branch1Events?'events':forcedWebSearch?'web':'conversation',
@@ -4662,6 +4667,25 @@ async function callHandler(call) {
           }
         } catch(fallbackError) {
           console.warn('[CALL_FLOW] quick web fallback unavailable',{callId:activeKey,status:geminiErrorStatus(fallbackError)});
+        }
+      }
+      // Extension 3 looks things up on every turn. When the web had nothing
+      // matching (422), the caller still gets a real answer from the
+      // conversation model, not "say the name again" (08.11: his introduction
+      // "I'm Yossi from Beit Shemesh planning a trip" got that reply).
+      if(!replyText && !explicitSearchOnly && geminiErrorStatus(e)===422 && !e.noSpeech) {
+        try {
+          const convo=currentConversationText(turnHistory)||relevantHistoryText||'';
+          const bg=typeof callerBackground==='function'?callerBackground(callerPhone,callId):'';
+          const prompt=EXCLUSIVE_INSTRUCTION+(bg?'\n\nרקע משיחות קודמות עם המתקשר:\n'+bg:'')+'\n\nהקשר השיחה:\n'+(convo||'אין עדיין.')+
+            '\n\nהמתקשר אמר עכשיו: '+(originalSpokenTranscript||userTranscript)+'\n\n'+EXT3_ANSWER_STYLE+
+            'בחיפוש באינטרנט לא נמצא מקור מתאים, אז אל תמסור שמות מקומות, מחירים או שעות כעובדות; ענה מתוך ידע כללי בלבד, וכשצריך פרט מדויק אמור שלא מצאת מקור מאומת. החזר אובייקט JSON תקין בלבד עם שדה "answer".';
+          const raw=String((await generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true)).response.text()||'').trim();
+          let parsed=null; try { parsed=JSON.parse(raw); } catch { const m=raw.match(/\{[\s\S]*\}/); if(m) { try { parsed=JSON.parse(m[0]); } catch {} } }
+          replyText=String(parsed?.answer||(raw.startsWith('{')?'':raw)).trim();
+          if(replyText) console.info('[CALL_FLOW] ext3 conversation answer after empty search',{callId:activeKey,chars:replyText.length});
+        } catch(convoError) {
+          console.warn('[CALL_FLOW] ext3 conversation answer after empty search failed',{callId:activeKey,status:geminiErrorStatus(convoError)});
         }
       }
       if(!replyText && e.noSpeech) replyText='לא שמעתי אותך בבירור. אמור שוב בבקשה';
