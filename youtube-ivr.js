@@ -37,6 +37,8 @@ async function fetchJson(url, fetchImpl, timeoutMs) {
     if (!response.ok) {
       const error = new Error('YouTube search failed with HTTP ' + response.status);
       error.status = response.status === 403 ? 502 : response.status;
+      error.httpStatus = response.status;
+      error.reason = String(data?.error?.errors?.[0]?.reason || data?.error?.status || '');
       throw error;
     }
     return data;
@@ -45,7 +47,42 @@ async function fetchJson(url, fetchImpl, timeoutMs) {
   }
 }
 
-export async function searchYouTubeVideos(query, {
+// Every YouTube key the owner configured: YOUTUBE_API_KEY, YOUTUBE_BACKUP_API_KEY
+// and extra fields YOUTUBE_API_KEY_2 ... YOUTUBE_API_KEY_9. One key allows
+// about 100 searches a day (each search costs 100 of its 10,000 daily units).
+export function youtubeKeysFrom(env = process.env, first = '') {
+  return [...new Set([first, env.YOUTUBE_API_KEY, env.YOUTUBE_BACKUP_API_KEY,
+    ...[2, 3, 4, 5, 6, 7, 8, 9].map(n => env['YOUTUBE_API_KEY_' + n])]
+    .map(k => String(k || '').trim()).filter(Boolean))];
+}
+const exhaustedYouTubeKeys = new Map();
+
+/**
+ * Searches with the first key whose daily quota is not used up; a key that
+ * answers 403 (quota / not allowed) or 429 rests for an hour and the next key
+ * is tried, so search keeps working when one key's quota runs out.
+ */
+export async function searchYouTubeVideos(query, options = {}) {
+  const keys = youtubeKeysFrom(process.env, options.apiKey);
+  if (!keys.length) return searchYouTubeVideosWithKey(query, options);
+  const now = Date.now();
+  const usable = keys.filter(k => !(exhaustedYouTubeKeys.get(k) > now));
+  const order = usable.length ? usable : keys;
+  let lastError = null;
+  for (let i = 0; i < order.length; i++) {
+    try {
+      return await searchYouTubeVideosWithKey(query, { ...options, apiKey: order[i] });
+    } catch (error) {
+      lastError = error;
+      if (![403, 429].includes(error?.httpStatus)) throw error;
+      exhaustedYouTubeKeys.set(order[i], now + 60 * 60 * 1000);
+      console.warn('[YouTube IVR] search key unavailable; trying next key', { key: keys.indexOf(order[i]) + 1, of: keys.length, status: error.httpStatus, reason: error.reason });
+    }
+  }
+  throw lastError;
+}
+
+async function searchYouTubeVideosWithKey(query, {
   apiKey = process.env.YOUTUBE_API_KEY,
   regionCode = process.env.YOUTUBE_REGION_CODE || 'IL',
   fetchImpl = fetch,

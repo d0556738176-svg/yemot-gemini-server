@@ -7,7 +7,7 @@ import { YemotRouter, ExitError } from 'yemot-router2';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { tavily } from '@tavily/core';
 import YemotApi from 'yemot-api';
-import { searchYouTubeVideos } from './youtube-ivr.js';
+import { searchYouTubeVideos, youtubeKeysFrom } from './youtube-ivr.js';
 import { selectedResultIndex, isMoreResultsRequest, isFreshYouTubeSearch } from './youtube-selection.js';
 import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
@@ -5149,6 +5149,7 @@ app.listen(port,async()=>{
   console.log('server running on port '+port);
   // Report how many Apify accounts are configured (count only — never values),
   // so multi-account fallback can be verified in the logs.
+  console.info('[YouTube IVR] youtube search keys configured',{count:youtubeKeysFrom(process.env).length});
   console.info('[YouTube IVR] apify accounts configured',{count:apifyTokens().length});
   console.info('[YouTube IVR] apify completion webhook',{configured:!!apifyWebhookQuery(process.env,'abcdefghijk')});
   // (One-time recoveries of three October 2026 videos were removed on 04.11:
