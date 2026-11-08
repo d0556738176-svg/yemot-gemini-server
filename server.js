@@ -290,7 +290,7 @@ function sanitizeForYemot(text) {
     .replace(/https?:\/\/\S+/gi, ' ')
     // Units the phone voice reads wrongly (08.11: "17 C", "20 קמ״ש", "9:00‑19:00").
     .replace(/(\d)\s*°\s*[CcС](?![A-Za-z])/g, '$1 מעלות').replace(/(\d)\s*°/g, '$1 מעלות').replace(/(\d)\s+[CС](?![A-Za-z])/g, '$1 מעלות')
-    .replace(/קמ[״"']ש/g, 'קילומטר לשעה').replace(/(\d)\s*%/g, '$1 אחוז')
+    .replace(/קמ[״"']ש/g, 'קילומטר לשעה').replace(/ש[״"'](?:ח|ק)(?![\u0590-\u05FF])/g, 'שקלים').replace(/(\d)\s*%/g, '$1 אחוז')
     .replace(/[\u2010-\u2015\u2212]/g, '-')
     .replace(/(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/g, '$1 עד $2')
     .replace(/(\d)\.(\d)/g, '$1 נקודה $2')
@@ -356,10 +356,26 @@ function withPersona(contents) {
 // Extension 3 answers like a thorough expert (owner, 08.11): strongest models
 // first, more time, longer and fuller answers. Extension 1 keeps its fast profile.
 const EXT3_ANSWER_STYLE = 'ענה בהרחבה ובבהירות, כמו מומחה טוב וחם שמסביר בטלפון: קודם התשובה הישירה במשפט אחד, אחר כך הסבר מלא ומסודר עם הפרטים החשובים, דוגמה או טיפ מעשי, ובסוף משפט סיכום. בדרך כלל 6 עד 12 משפטים קצרים וברורים, כל אחד מסתיים בנקודה. בשאלה פשוטה שהתשובה עליה קצרה (שעה, שם, כן או לא) ענה קצר. אל תמציא שמות של מקומות, מחירים, שעות או מספרים שאינך בטוח בהם; כשמבקשים לפרט על מקום, אדם או עסק שהוזכר, מסור רק מה שנאמר עליו קודם במקורות או מה שידוע לך בוודאות, ואם אין לך פרטים מאומתים אמור זאת והצע לחפש באינטרנט. ';
-const RECALL_INSTRUCTION = 'המתקשר שואל על שיחות קודמות או על עצמו. ענה מתוך ההקשר הקודם בלבד: הזכר את הפרטים שהוא סיפר על עצמו (שם, מקום מגורים, משפחה, תוכניות) וסכם את כל הנושאים העיקריים שדיברתם עליהם, לא רק את השאלה האחרונה. אם פרט לא מופיע בהקשר, אמור בכנות שאינך זוכר אותו. ';
+const RECALL_INSTRUCTION = 'המתקשר שואל על שיחות קודמות או על עצמו. ענה מתוך ההקשר הקודם בלבד, ובדיוק על מה שנשאל: כשהוא שואל פרט אחד (איפה אני גר, מה שמי, מה המלצת לי) ענה עליו במשפט או שניים בלי לסכם שוב את כל השיחה; רק כשהוא שואל מה דיברנו או מה אתה זוכר עליי, הזכר את הפרטים שסיפר על עצמו (שם, מקום מגורים, משפחה, תוכניות) וסכם את הנושאים העיקריים. אם פרט לא מופיע בהקשר, אמור בכנות שאינך זוכר אותו. ';
 const EXT3_SYNTH_MS = Number(process.env.EXT3_SYNTH_MS || 12000);
 const EXT3_GEMINI_MS = Number(process.env.EXT3_GEMINI_MS || 8500);
 function isExt3() { return callPersona.getStore()?.branch==='3'; }
+// The answer models are asked for {"answer": "..."} but often return plain text,
+// fenced JSON or JSON cut off at the token limit. Any readable answer is kept
+// (08.11: a 717-character plain answer was thrown away as "unclear question").
+function extractModelAnswer(raw) {
+  const text=String(raw||'').trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim();
+  if(!text) return '';
+  const tryParse=t=>{ try { const o=JSON.parse(t); return typeof o?.answer==='string'?o.answer:null; } catch { return null; } };
+  let out=tryParse(text);
+  if(out==null) { const m=text.match(/\{[\s\S]*\}/); if(m) out=tryParse(m[0]); }
+  if(out==null) {
+    const m=text.match(/"answer"\s*:\s*"([\s\S]*?)(?:"\s*(?:,|\})|$)/i);
+    if(m) out=m[1].replace(/\\n/g,' ').replace(/\\"/g,'"');
+  }
+  if(out==null && !/^\s*[\[{]/.test(text)) out=text;
+  return String(out||'').trim();
+}
 function promptWithPersona(prompt) {
   return callPersona.getStore()?.persona==='female' ? FEMININE_SELF_INSTRUCTION+'\n\n'+prompt : prompt;
 }
@@ -2475,7 +2491,7 @@ async function readBestPages(question,results,budgetMs=2000){
     const extracted=await extractPages(urls,{extractDepth:'basic',timeout:Math.ceil(budgetMs/1000)},budgetMs,'evidence page extraction');
     return (Array.isArray(extracted.results)?extracted.results:[]).map(page=>({
       title:String(page.title||''),url:String(page.url||''),
-      snippet:String(page.rawContent||page.content||'').trim().slice(0,3000)
+      snippet:String(page.rawContent||page.content||'').trim().slice(0,5000)
     })).filter(x=>x.snippet.length>80);
   } catch(e) {
     console.warn('[EVIDENCE] page read unavailable',{status:geminiErrorStatus(e)});
@@ -3668,6 +3684,12 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
         if(isPhoneNumberRequest(question) && !evidenceItems.some(x=>PHONE_IN_TEXT.test(String(x.title||'')+' '+String(x.snippet||'')))) {
           const pages=await readBestPages(question,unique,1900);
           if(pages.length) evidenceItems=[...pages,...evidenceItems];
+        } else if(/(?:שעות|פתוח|פתוחה|נסגר|נפתח|מתי)/u.test(question) && !evidenceItems.some(x=>/\d{1,2}:\d{2}/.test(String(x.snippet||'')))
+          || /(?:מחיר|עולה|עלות|כניסה|כרטיס)/u.test(question) && !evidenceItems.some(x=>/(?:₪|שקל|ש״ח|ש"ח|\d+\s*ש)/u.test(String(x.snippet||'')))) {
+          // Hours or prices asked, but no snippet holds them (08.11: Biblical Zoo
+          // hours answered "the sources don't show the hours"): read the pages.
+          const pages=await readBestPages(question,unique,Number(process.env.BRANCH1_DEEP_READ_MS||2600));
+          if(pages.length) evidenceItems=[...pages,...evidenceItems];
         } else if(deepSearch && evidenceItems.reduce((n,x)=>n+String(x.snippet||'').length,0)<2400) {
           // Explicit internet search with thin snippets: read the two best pages
           // themselves so the answer rests on the source text, not on a teaser.
@@ -4131,7 +4153,9 @@ function contextualizeSearchQuestion(question, historyText='') {
   const explicitTarget=/(בית מרקחת|סופר\s*[-־]?\s*פארם|כללית|מכבי|מאוחדת|לאומית|בנק|דיסקונט|הפועלים|לאומי|דואר|רמי לוי|שופרסל|נתניה|בית שמש|ירושלים|רעננה|תל אביב|חיפה|אשדוד|פתח תקווה|באר שבע|רחובות|מודיעין|היום|עכשיו)/i.test(q);
   if(correction || explicitTarget) return q;
   const shortFollowUp=q.length<=110 && /^(?:(?:כן|נכון|בדיוק|טוב|אז|בסדר|אוקיי|אוקי)[, ]*)*(?:תבדוק|בדוק|תחפש|חפש|תמצא|תברר|בדוק לי|תבדוק לי|תבדוק עבורי|באתר הרשמי|אתר רשמי|פרטים נוספים|יותר פרטים|תמשיך|ומה לגבי|ומה עם|כמה זה עולה|מה המחיר|מתי הם פתוחים|מתי פתוח|מה השעות|שעות פתיחה|תביא את הפרטים|תן לי את הפרטים|תבדוק את זה)/i.test(q);
-  const vagueReference=q.length<=110 && /(שלהם|שלהן|שלו|שלה|של הסניף|של הבנק|של האירוע|של המופע|של הכרטיסים|האתר הרשמי|באתר הרשמי|תבדוק את זה|תבדוק עבורי)/i.test(q);
+  // Whole words only: 08.11 "שלושה ילדים" matched "שלו" and glued the caller's
+  // whole introduction onto a new question.
+  const vagueReference=q.length<=110 && /(?<![\u0590-\u05FF])(שלהם|שלהן|שלו|שלה|של הסניף|של הבנק|של האירוע|של המופע|של הכרטיסים|האתר הרשמי|באתר הרשמי|תבדוק את זה|תבדוק עבורי)(?![\u0590-\u05FF])/i.test(q);
   if(!shortFollowUp && !vagueReference) return q;
   const turns=[...historyText.matchAll(/מתקשר:\s*([^\n]*)/g)].map(m=>String(m[1]||'').trim());
   const prior=turns.reverse().find(x=>x.length>=8 && !/^(כן|לא|תודה|אוקיי|אוקי|מעולה|בדיוק)[.!? ]*$/i.test(x));
@@ -4248,9 +4272,14 @@ async function ext3StandaloneQuestion(question, turnHistory=[]) {
   if(!recent) return '';
   const prompt='הנה סוף שיחה טלפונית ושאלת המשך של המתקשר. שכתב את שאלת ההמשך לשאלת חיפוש עצמאית וברורה בעברית, שמובנת בלי השיחה: '+
     'הוסף את הנושא, המקום והזמן מתוך השיחה, וכשהמתקשר אומר "הראשון", "השני", "המקום הזה" וכדומה, כתוב את השם המדויק של הפריט מתוך התשובה הקודמת. '+
-    'אל תענה על השאלה. החזר רק את השאלה המשוכתבת בשורה אחת.\n\n'+recent+'\n\nשאלת ההמשך: '+question;
+    'שמור בדיוק על המועד והעונה שנאמרו בשיחה (למשל חנוכה, פסח, החורף) ואל תחליף אותם. אל תענה על השאלה. החזר רק את השאלה המשוכתבת בשורה אחת.\n\n'+recent+'\n\nשאלת ההמשך: '+question;
   try {
-    const out=String(await raceSynthesis(prompt,Number(process.env.EXT3_REWRITE_MS||3000),{gemini:false,maxTokens:300})||'').trim().split('\n')[0].replace(/^["'“”]+|["'“”]+$/g,'').trim();
+    const out=String(await raceSynthesis(prompt,Number(process.env.EXT3_REWRITE_MS||3500),{gemini:false,maxTokens:300,quality:true})||'').trim().split('\n')[0].replace(/^["'“”]+|["'“”]+$/g,'').trim();
+    // A season or holiday that nobody said is a rewrite error (08.11: "בחנוכה"
+    // came back as "באביב"); such a rewrite is dropped.
+    const said=recent+' '+question;
+    const invented=(out.match(/(?:חנוכה|פסח|סוכות|פורים|שבועות|ראש השנה|קיץ|חורף|אביב|סתיו)/gu)||[]).some(w=>!said.includes(w));
+    if(invented) { console.warn('[EXT3] standalone rewrite changed the time; ignored',{to:out.slice(0,160)}); return ''; }
     if(out.length>=4 && out.length<=260) { console.info('[EXT3] standalone question',{from:question.slice(0,100),to:out.slice(0,160)}); return out; }
   } catch(e) { console.warn('[EXT3] standalone rewrite unavailable',{status:geminiErrorStatus(e)}); }
   return '';
@@ -4258,7 +4287,9 @@ async function ext3StandaloneQuestion(question, turnHistory=[]) {
 
 async function answerBranch1Web(question, historyText='', turnContext=null) {
   const run=async q=>{
-    const contextual=contextualizeSearchQuestion(q,historyText);
+    // An extension-3 follow-up already rewritten as a standalone question must
+    // not get the previous utterance glued on again.
+    const contextual=turnContext?.ext3Standalone?q:contextualizeSearchQuestion(q,historyText);
     const deep=isDeepWebSearchRequest(contextual);
     // Retrieval is the answer path, not merely a prelude to another model call.
     // Normal phone lookups return source-grounded evidence immediately; explicit
@@ -4501,9 +4532,10 @@ async function callHandler(call) {
         !turnContext.currentWebsiteUrl && !(turnContext.youtubeResults||[]).length && !isBranch1WebsiteRequest(userTranscript,turnContext) &&
         /(?:^|[\s,])(?:שם|לשם|משם|באזור|המקום|המקומות|הראשון|הראשונה|השני|השנייה|השלישי|השלישית|האחרון|האחרונה|הזה|הזאת|הזו|אותו|אותה|עליו|עליה|תפרט|תפרטי|תרחיב|תרחיבי|עוד פרטים|יותר על)(?=$|[\s?.!,])/u.test(userTranscript);
       const ext3Elaboration=ext3PointsBack && !!turnContext.ext3LastWeb && /(?:תפרט|תפרטי|תרחיב|תרחיבי|ספר לי עוד|ספרי לי עוד|עוד פרטים|יותר על)/u.test(userTranscript);
+      turnContext.ext3Standalone=false;
       if(ext3PointsBack) {
         const standalone=await ext3StandaloneQuestion(userTranscript,turnHistory);
-        if(standalone) userTranscript=standalone;
+        if(standalone) { userTranscript=standalone; turnContext.ext3Standalone=true; }
       }
       // Extension 3: recommendations of real places and businesses come from
       // the web, not from the model's memory (08.11 it invented sites and a
@@ -4560,17 +4592,7 @@ async function callHandler(call) {
         const lookupInstruction=allowExternalLookup?'':'\nבתור הזה לא בוצע חיפוש. אל תטען שבדקת מקורות או תמציא פרטים עדכניים. אם נדרש אימות באינטרנט, בקש מהמתקשר לומר תחפש באינטרנט.';
         const voiceInstruction=explicitSearchOnly?'\nדבר בעברית יומיומית, בלשון זכר ובמשפטים שקל לשמוע בטלפון. התחל ישר בתשובה. אם המתקשר מבקש להמשיך או אומר הפרט הראשון, היעזר במה שאמרת לו קודם. סיים בשאלת המשך קצרה רק כשיש בה תועלת.':'';
         const firstPass=(await generateBranch1WithFallback([{role:'user',parts:[{text:answerPrompt+lookupInstruction+voiceInstruction}]}],false,!longAnswer,longAnswer?LONG_ANSWER_TIMEOUT_MS:null)).response.text().trim();
-        let parsedTurn=null;
-        try { parsedTurn=JSON.parse(firstPass); } catch { const match=firstPass.match(/\{[\s\S]*\}/); if(match) { try { parsedTurn=JSON.parse(match[0]); } catch {} } }
-        if(parsedTurn && typeof parsedTurn.answer==='string') {
-          replyText=parsedTurn.answer.trim();
-        } else {
-          const cleaned=String(firstPass||'').trim();
-          const answerMatch=cleaned.match(/"answer"\s*:\s*"([\s\S]*?)"\s*(?:,|})/i);
-          if(answerMatch && answerMatch[1]) replyText=answerMatch[1].replace(/\\\\n/g,' ').replace(/\\\\\"/g,'"').trim();
-          else if(cleaned && cleaned.length<700) replyText=cleaned;
-          else replyText='לא הצלחתי להבין את השאלה בבירור. נא לחזור עליה בבקשה';
-        }
+        replyText=extractModelAnswer(firstPass)||'לא הצלחתי להבין את השאלה בבירור. נא לחזור עליה בבקשה';
         console.info('[CALL_FLOW] gemini_answer_ok', { callId: activeKey, chars: replyText.length, transcriptReady: !!userTranscript });
       } else {
         console.info('[CALL_FLOW] direct_data_path_skip_initial_gemini', { callId: activeKey });
@@ -4729,10 +4751,13 @@ async function callHandler(call) {
           const bg=typeof callerBackground==='function'?callerBackground(callerPhone,callId):'';
           const prompt=EXCLUSIVE_INSTRUCTION+(bg?'\n\nרקע משיחות קודמות עם המתקשר:\n'+bg:'')+'\n\nהקשר השיחה:\n'+(convo||'אין עדיין.')+
             '\n\nהמתקשר אמר עכשיו: '+(originalSpokenTranscript||userTranscript)+'\n\n'+EXT3_ANSWER_STYLE+
-            'בחיפוש באינטרנט לא נמצא מקור מתאים, אז אל תמסור שמות מקומות, מחירים או שעות כעובדות; ענה מתוך ידע כללי בלבד, וכשצריך פרט מדויק אמור שלא מצאת מקור מאומת. החזר אובייקט JSON תקין בלבד עם שדה "answer".';
+            'בחיפוש באינטרנט לא נמצא מקור מתאים, אז אל תמסור שמות מקומות, מחירים או שעות כעובדות; ענה מתוך ידע כללי בלבד, וכשצריך פרט מדויק אמור שלא מצאת מקור מאומת. '+
+            // 08.11: without sources the models invented a "fortress", snow parks and a crater in the north.
+            (/(?:מקומות|אטרקציה|אטרקציות|כדאי לבקר|לבקר ב|מסלול|ממליצ|המלצ|מומלץ|צימר|מלון|מסעד|גן חיות|פארק|שמור|חוף|מוזיאון|לאן|איפה כדאי)/u.test(userTranscript)
+              ?'זו בקשה להמלצה על מקומות: אל תזכיר אף שם של מקום, אתר, עסק או מסלול. תן עצות כלליות ומועילות לבחירה (מה לחפש, למה לשים לב, איך לתכנן), ובסוף הצע לחפש באינטרנט אם יגיד אזור או סוג מקום מדויק יותר. ':'')+
+            'החזר אובייקט JSON תקין בלבד עם שדה "answer".';
           const raw=String((await generateBranch1WithFallback([{role:'user',parts:[{text:prompt}]}],false,true)).response.text()||'').trim();
-          let parsed=null; try { parsed=JSON.parse(raw); } catch { const m=raw.match(/\{[\s\S]*\}/); if(m) { try { parsed=JSON.parse(m[0]); } catch {} } }
-          replyText=String(parsed?.answer||(raw.startsWith('{')?'':raw)).trim();
+          replyText=extractModelAnswer(raw);
           if(replyText) console.info('[CALL_FLOW] ext3 conversation answer after empty search',{callId:activeKey,chars:replyText.length});
         } catch(convoError) {
           console.warn('[CALL_FLOW] ext3 conversation answer after empty search failed',{callId:activeKey,status:geminiErrorStatus(convoError)});
