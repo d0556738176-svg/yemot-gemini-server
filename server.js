@@ -1,3 +1,4 @@
+import { geminiKeysFrom } from './gemini-keys.js';
 import { progressAnnouncement } from './youtube-playback-progress.js';
 import { playbackAwake } from './playback-awake.js';
 import express from 'express';
@@ -89,8 +90,9 @@ function requireDashboardAuth(req, res, next) {
   next();
 }
 
-const apiKeys = (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '')
-  .split(',').map(k => k.trim()).filter(Boolean);
+// Extra keys may also sit in their own fields (owner's choice, 08.11):
+// GEMINI_API_KEY_2 ... GEMINI_API_KEY_9, added after the list.
+const apiKeys = geminiKeysFrom(process.env);
 
 console.log('[Gemini] configured key count:', apiKeys.length);
 

@@ -5,6 +5,7 @@
 // a fallback, in numbered batches so timing never drifts), and returned as
 // SRT text to embed as a default Hebrew subtitle track. Never throws: on any
 // failure the video is saved without subtitles.
+import { geminiKeysFrom } from './gemini-keys.js';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -134,7 +135,7 @@ function parseLines(text, n) {
 const SYSTEM = 'אתה מתרגם כתוביות לעברית. תקבל מערך JSON של שורות כתוביות ממוספרות מסרטון. תרגם כל שורה לעברית טבעית, קצרה וברורה, בשפה נקייה ומכובדת, בהתאם להקשר של השורות הסמוכות. שמות אנשים ומקומות כתוב בעברית. החזר רק מערך JSON של מחרוזות באותו אורך ובאותו סדר בדיוק, בלי הסברים.';
 
 async function geminiTranslate(lines, env, fetchImpl, system = SYSTEM) {
-  const keys = String(env.GEMINI_API_KEYS || env.GEMINI_API_KEY || '').split(',').map(x => x.trim()).filter(Boolean);
+  const keys = geminiKeysFrom(env);
   const models = [...new Set(String(env.SUBTITLE_GEMINI_MODELS || env.GEMINI_MODELS || '').split(',').concat(['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash']).map(x => x.trim()).filter(Boolean))];
   for (const model of models) for (const key of keys) {
     try {
@@ -228,7 +229,7 @@ async function mediaSeconds(ffmpegPath, file) {
 // Hebrew subtitles already burned into the picture? A few frames are shown to
 // Gemini. Unknown (no key / no answer) counts as "no".
 export async function hasBurnedHebrewSubtitles(videoFile, tempDir, { ffmpegPath, env = process.env, fetchImpl = fetch, seconds, onSeen }) {
-  const keys = String(env.GEMINI_API_KEYS || env.GEMINI_API_KEY || '').split(',').map(x => x.trim()).filter(Boolean);
+  const keys = geminiKeysFrom(env);
   if (!keys.length || !seconds) return null;
   const parts = [];
   for (const f of [0.2, 0.4, 0.6, 0.8]) {
