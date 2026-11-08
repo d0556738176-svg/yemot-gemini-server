@@ -194,6 +194,9 @@ export async function runCoursesJob() {
     for (const c of COURSES) await ensureIni(c.folder + '/ext.ini', playIni(c.title));
     await removeOldCourse().catch(e => log('old course cleanup failed', String(e.message).slice(0, 200)));
 
+    // Both courses are built side by side (one lesson of each in turn), so each extension has
+    // lessons to play right away instead of one waiting hours for the other to finish.
+    const state = [];
     for (const c of COURSES) {
       const course = JSON.parse(readFileSync(path.join(HERE, c.json), 'utf8'));
       const progressPath = c.folder + '/course-progress.txt';
@@ -202,7 +205,13 @@ export async function runCoursesJob() {
       progress.lessons ||= {};
       const todo = course.lessons.filter(l => progress.lessons[l.n]?.hash !== hashOf(l.segments, c.music));
       log(c.id + ':', course.lessons.length, 'lessons;', todo.length, 'to build');
-      for (const lesson of todo) {
+      state.push({ c, course, progress, progressPath, todo });
+    }
+    while (state.some(s => s.todo.length)) {
+      for (const s of state) {
+        const lesson = s.todo.shift();
+        if (!lesson) continue;
+        const { c, progress, progressPath } = s;
         const t0 = Date.now();
         try {
           const remote = c.folder + '/' + String(lesson.n - 1).padStart(3, '0') + '.wav';
@@ -219,6 +228,8 @@ export async function runCoursesJob() {
           log(c.id, 'lesson', lesson.n, 'FAILED', String(e?.message || e).slice(0, 300));
         }
       }
+    }
+    for (const { c, course, progress } of state) {
       const done = course.lessons.filter(l => progress.lessons[l.n]?.hash === hashOf(l.segments, c.music)).length;
       log(c.id + ' finished:', done, 'of', course.lessons.length, 'lessons are in', c.folder);
     }
