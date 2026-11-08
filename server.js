@@ -1401,8 +1401,9 @@ ${raw}
 אל תציג כותרת כאילו אומתה ממקור מסוים אלא אם שם המקור מצורף לנתון.
 התשובה צריכה להיות ממוקדת, עם משפט או שניים לכל נושא, ובלי הקדמות ארוכות.`;
     const synthesisTimeoutMs=Number(process.env.NEWS_SYNTHESIS_TIMEOUT_MS||6000);
-    const result=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,true,synthesisTimeoutMs);
-    const answer=String(result?.response?.text?.()||'').trim();
+    // All answer models race (Gemini alone was often busy and the caller got
+    // a raw list of headlines).
+    const answer=String(await raceSynthesis(prompt,synthesisTimeoutMs,{maxTokens:900})||'').trim();
     if(answer) return answer;
   } catch(e) {
     console.warn('[News] fast synthesis unavailable; returning current headlines',{status:geminiErrorStatus(e),message:String(e?.message||e).slice(0,300)});
@@ -2481,7 +2482,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
   // Extension 3: the strong models start at once, the small fast model is only a
   // reserve, and the answer gets enough time and length (not for tiny helpers).
   if(isExt3() && maxTokens>=700) {
-    quality=true; budgetMs=Math.max(budgetMs,EXT3_SYNTH_MS); maxTokens=Math.max(maxTokens,2000);
+    quality=true; budgetMs=Math.max(budgetMs,EXT3_SYNTH_MS); maxTokens=Math.max(maxTokens,1500);
     geminiBudgetMs=Math.max(Number(geminiBudgetMs||0),EXT3_GEMINI_MS);
   }
   // Gemini-only racer (not generateBranch1WithFallback, which would call Groq/OpenRouter a
@@ -2492,7 +2493,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
   const othersConfigured=Boolean((process.env.GROQ_API_KEY||'').trim()||(process.env.OPENROUTER_API_KEY||'').trim()||extraFastProviders(true).length);
   const racers=gemini?[(async()=>{
     if(othersConfigured) {
-      await new Promise(r=>setTimeout(r,Number(quality?(process.env.BRANCH1_QUALITY_GEMINI_HEDGE_MS||700):(process.env.BRANCH1_GEMINI_HEDGE_MS||1800))));
+      await new Promise(r=>setTimeout(r,Number(isExt3()?(process.env.EXT3_GEMINI_HEDGE_MS||2500):quality?(process.env.BRANCH1_QUALITY_GEMINI_HEDGE_MS||700):(process.env.BRANCH1_GEMINI_HEDGE_MS||1800))));
       if(raceDone) throw Object.assign(new Error('Gemini not needed'),{status:499});
     }
     if(branch1PrimaryCooldown.isCoolingDown('primary')) throw Object.assign(new Error('Gemini cooling down'),{status:503});
@@ -2512,7 +2513,10 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     // rate limits under load, and the caller must never get raw excerpts).
     {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(isExt3()?(process.env.EXT3_RESERVE_MS||7000):(process.env.BRANCH1_QUALITY_RESERVE_MS||2500)):0},
     {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim(),big:true},
-    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim()},
+    // Extension 3 staggers the backups instead of firing every provider at
+    // once: one strong answer per turn, so the free per-minute quotas last the
+    // whole call (08.11: all providers were rate-limited by the second call).
+    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),delayMs:isExt3()?Number(process.env.EXT3_OPENROUTER_DELAY_MS||4500):0},
     ...extraFastProviders(true)
   ]) {
     if(!provider.apiKey) continue;
@@ -4668,6 +4672,10 @@ async function callHandler(call) {
         'מצטער הייתה תקלה זמנית בעיבוד השאלה אפשר לנסות שוב';
     }
 
+    // Source labels are for the model, not for the caller's ear ("מקור 1",
+    // a closing list of web addresses).
+    replyText=String(replyText||'').replace(/\s*[(,]?\s*(?:לפי\s+|ב)?מקור\s+\d+\s*[),]?/gu,' ')
+      .replace(/[.\s]*מקורות?\s*[:,][^¶\n]{0,200}$/u,'.');
     replyText=sanitizeForYemot(replyText)||'מצטער לא הצלחתי לנסח תשובה נסה שוב';
     if(replyText.length>LONG_ANSWER_MAX_CHARS) {
       console.warn('[CALL_FLOW] long_answer_trimmed',{callId:activeKey,chars:replyText.length,max:LONG_ANSWER_MAX_CHARS});
@@ -5264,6 +5272,8 @@ async function runBranch3DeepTest() {
             console.info('[DEEP3]',JSON.stringify({call:label,step:index,part:p/1500+1,question:p?undefined:questions[index-1],ms:p?undefined:Date.now()-askedAt,chars:p?undefined:text.length,reply:text.slice(p,p+1500)}));
         }
         if(index>=questions.length) throw new Error('call was disconnected by the caller');
+        // A real caller listens and speaks between turns (~10 s).
+        await new Promise(r=>setTimeout(r,Number(process.env.DEEP3_PAUSE_MS||10000)));
         askedAt=Date.now(); return '/deep3.wav';
       },
       id_list_message:async()=>{},go_to_folder:async()=>{},hangup:async()=>{}
