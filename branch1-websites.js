@@ -18,6 +18,7 @@ function extractedPageLinks(page) {
 }
 
 export function isBranch1WebsiteRequest(q, context={}) {
+  if(context.pendingWebsiteUrl && /^(?:תמשיכי|תמשיך|המשך|תנסי שוב|תנסה שוב|נסי שוב|נסה שוב)(?:[\s,.!?]|$)/u.test(String(q||'').trim())) return true;
   if(context.websiteClarification&&/^(?:כן|נכון|בדיוק|לא)(?:\s|[,.!?]|$)/u.test(q))return true;
   const concreteReference=/(?:הדף|העמוד|האתר|הדפים|העמודים)|(?:מה\s+שכתוב|מה\s+כתוב).{0,12}(?:שם|שמה)/u.test(q);
   if((context.currentWebsitePages?.length||context.pendingWebsiteUrl)&&pageReference.test(q)&&(context.lastRoute==='website'||concreteReference))return true;
