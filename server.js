@@ -288,6 +288,11 @@ function sanitizeForYemot(text) {
   // into its own spoken item, which gives a natural pause and a falling tone.
   return String(text)
     .replace(/https?:\/\/\S+/gi, ' ')
+    // Units the phone voice reads wrongly (08.11: "17 C", "20 קמ״ש", "9:00‑19:00").
+    .replace(/(\d)\s*°\s*[CcС](?![A-Za-z])/g, '$1 מעלות').replace(/(\d)\s*°/g, '$1 מעלות').replace(/(\d)\s+[CС](?![A-Za-z])/g, '$1 מעלות')
+    .replace(/קמ[״"']ש/g, 'קילומטר לשעה').replace(/(\d)\s*%/g, '$1 אחוז')
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/g, '$1 עד $2')
     .replace(/(\d)\.(\d)/g, '$1 נקודה $2')
     .replace(/\r?\n+/g, ' ¶ ')
     .replace(/[.!?;:…]+(?=\s|$|["“”'’)])/g, m => (m.includes('?') ? '?' : '') + ' ¶ ')
@@ -3674,7 +3679,11 @@ async function answerWithDirectWebFallback(question, historyText='', turnContext
         const synthPrompt=EXCLUSIVE_INSTRUCTION+'\n\nענה לשאלת המתקשר בעברית טבעית וזורמת, כמו בשיחה, '+(isExt3()?'(בהרחבה, 5 עד 10 משפטים: קודם התשובה הישירה, אחר כך כל הפרטים החשובים שבמקורות, ואם המקורות חלוקים ציין זאת)':deepSearch?'(עד 7 משפטים: קודם התשובה הישירה, אחר כך הפרטים החשובים, ואם המקורות חלוקים ציין זאת)':'(עד 4 משפטים, ואם התבקשו כמה פריטים או סניפים פרט אותם)')+' להקראה בטלפון, על בסיס המקורות בלבד. '+
           'כעת בישראל: '+israelNowText()+'. ענה בדיוק על מה שנשאל ולא על נושא סמוך. אם המקורות חלקיים, מסור את מה שנתמך בהם והבהר בקצרה מה חסר, ואל תסרב כשיש מידע רלוונטי. '+
           'התחל ישר בתשובה. אם המקורות לא עוסקים בנושא השאלה או שהשאלה נראית כתמלול משובש, אמור שלא הצלחת למצוא ובקש מהמתקשר לחזור על שם הגוף או הנושא. '+
-          'מספר טלפון: מסור רק אם הוא מופיע במקור שמתאים לגוף שנשאל עליו, וללא שינוי בספרות או בכוכבית. אל תמציא פרטים שלא במקורות.\n\n'+
+          'מספר טלפון: מסור רק אם הוא מופיע במקור שמתאים לגוף שנשאל עליו, וללא שינוי בספרות או בכוכבית. אל תמציא פרטים שלא במקורות. '+
+          'אל תזכיר שמות של אתרים, מקורות או מדריכים ואל תאמר "לפי אתר" או "המקור מציין", אלא אם המתקשר שאל מאיפה המידע: פשוט מסור את העובדות. '+
+          'כששואלים על אזור מסוים (למשל הצפון או עיר), כלול רק מקומות שהמקורות מראים בבירור שנמצאים באותו אזור, והשמט כל מקום אחר. '+
+          'כשמקורות סותרים, מסור את הנתון מהמקור הרשמי או העדכני ביותר והוסף בקצרה שכדאי לוודא, בלי לנתח את הסתירה בקול. '+
+          'טמפרטורה אמור במילה מעלות (לא C), מהירות רוח בקילומטר לשעה, ותאריכים ושעות בצורה שקל לשמוע.\n\n'+
           'השאלה: '+question+'\n\nמקורות:\n'+synthEvidence;
         const raced=await raceSynthesis(synthPrompt,synthBudgetMs,{validate:groundedValidator(synthEvidence+' '+israelNowText()),quality:deepSearch,maxTokens:deepSearch?1100:700});
         const synthAnswer=sanitizeForYemot(String(raced||'').trim());
@@ -5348,24 +5357,33 @@ async function runBranch3DeepTest() {
   };
   try {
     await wipe();
-    const a=await runCall('A',[
+    // DEEP3_QUESTIONS (JSON {"A":[...],"B":[...]}) replaces the default script.
+    let script=null; try { script=JSON.parse(process.env.DEEP3_QUESTIONS||'null'); } catch {}
+    const A=Array.isArray(script?.A)&&script.A.length?script.A:[
       'שלום, קוראים לי יוסי ואני גר בבית שמש. אני מתכנן טיול משפחתי בצפון בחנוכה עם שלושה ילדים קטנים',
       'איזה מקומות כדאי לבקר שם עם ילדים קטנים?',
       'תפרטי לי יותר על המקום הראשון שאמרת',
+      'וכמה עולה הכניסה לשם?',
       'תחפשי באינטרנט מה מזג האוויר הצפוי בצפת השבוע',
-      'מה שעות הפתיחה של גן החיות התנכי בירושלים'
-    ]);
+      'מה שעות הפתיחה של גן החיות התנכי בירושלים',
+      'תסבירי לי בהרחבה ובפירוט איך עובד מנוע של מכונית',
+      'ומה ההבדל בינו לבין מנוע חשמלי?'
+    ];
+    const B=Array.isArray(script?.B)&&script.B.length?script.B:[
+      'שלום, את זוכרת איך קוראים לי ועל מה דיברנו בפעם הקודמת?',
+      'ואיפה אמרתי שאני גר?',
+      'מה היה המקום הראשון שהמלצת לי בשיחה הקודמת?',
+      'מי ראש הממשלה של ישראל כרגע',
+      'תחפשי באינטרנט מה שער הדולר היום',
+      'ספרי לי משהו מעניין שלא ידעתי',
+      'מה ההבדל בין ריבית קבועה לריבית משתנה במשכנתא'
+    ];
+    const a=await runCall('A',A);
     for(const t of a) await remember(phone,t).catch(()=>{});
     await new Promise(r=>setTimeout(r,4000));
     memoryLoadedFor.delete(phone);
     for(let i=conversationLog.length-1;i>=0;i--) if(conversationLog[i].phone===phone) conversationLog.splice(i,1);
-    await runCall('B',[
-      'שלום, את זוכרת איך קוראים לי ועל מה דיברנו בפעם הקודמת?',
-      'ואיפה אמרתי שאני גר?',
-      'תסבירי לי איך עובדת אנרגיה סולרית',
-      'מי ראש הממשלה של ישראל כרגע',
-      'מה ההבדל בין ריבית קבועה לריבית משתנה במשכנתא'
-    ]);
+    await runCall('B',B);
     console.info('[DEEP3] finished');
   } catch(e) { console.warn('[DEEP3] crashed',String(e?.stack||e).slice(0,400)); }
   finally { await wipe(); }
