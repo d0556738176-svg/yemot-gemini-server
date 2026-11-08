@@ -172,6 +172,18 @@ export async function configureLiveExtension(publicUrl) {
     log('setting extension 5; previous ext.ini:', JSON.stringify(String(before || '').replace(/(password|token|api_key)[^\n]*/gi, '$1=…').slice(0, 400)));
     await putText(FOLDER + '/ext.ini', want);
   }
+  // One-time look at where Yemot keeps account-level settings (names only), to find
+  // whether internet-broadcast definitions live in a file the server can write.
+  if (process.env.BRANCH5_LIVE_DISCOVER !== 'off') {
+    try {
+      for (const p of ['ivr2:/', 'ivr2:/MusicOnHold', 'ivr2:/music_on_hold']) {
+        const r = await fetch(API + '/GetIVR2Dir?' + new URLSearchParams({ token: token(), path: p }), { signal: AbortSignal.timeout(10000) });
+        const j = await r.json().catch(() => null);
+        const names = [...(j?.dirs || []), ...(j?.files || []), ...(j?.ini || [])].map(x => x?.name || x?.what || '').filter(Boolean);
+        log('dir', p, j?.responseStatus, JSON.stringify(names).slice(0, 900));
+      }
+    } catch (e) { log('dir listing failed', String(e?.message || e).slice(0, 120)); }
+  }
   const channels = await loadChannels();
   const state = await loadState();
   log('ready', { channels: channels.map(c => c.key + ':' + c.name), on: isOn(state), pinSet: !!process.env.BRANCH5_ADMIN_PIN });
