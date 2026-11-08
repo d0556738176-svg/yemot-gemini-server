@@ -2813,7 +2813,26 @@ function parseJinaMarkdownResults(markdown){
   }
   return dedupeSearchResults(results);
 }
+const ext3SearchCache=new Map();
+const EXT3_SEARCH_CACHE_TTL_MS=30000;
+const EXT3_SEARCH_CACHE_MAX_ENTRIES=100;
+
 async function searchWebDirect(query, options={}) {
+  const q=String(query||'').trim();
+  if(!q || !isExt3()) return searchWebDirectUncached(query,options);
+  const key=JSON.stringify([q,Boolean(options.deep)]);
+  const cached=ext3SearchCache.get(key);
+  if(cached && cached.expiresAt>Date.now()) return cached.results.map(item=>({...item}));
+  ext3SearchCache.delete(key);
+  const results=await searchWebDirectUncached(q,options);
+  if(results.length) {
+    ext3SearchCache.set(key,{expiresAt:Date.now()+EXT3_SEARCH_CACHE_TTL_MS,results:results.map(item=>({...item}))});
+    if(ext3SearchCache.size>EXT3_SEARCH_CACHE_MAX_ENTRIES) ext3SearchCache.delete(ext3SearchCache.keys().next().value);
+  }
+  return results;
+}
+
+async function searchWebDirectUncached(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
   const timeoutMs=Number(options.timeoutMs||DIRECT_WEB_QUERY_TIMEOUT_MS);
@@ -2853,9 +2872,20 @@ async function searchWebDirect(query, options={}) {
   const runSecondary=async()=>{
     const {provider,results}=await searchSecondary(q,{timeoutMs:Math.min(Math.max(timeoutMs,2500),4000)});
     console.info('[DIRECT_WEB] secondary engine answered',{provider,query:q.slice(0,140),results:results.length});
-    return results.map(item=>({...item,url:normalizeSearchHref(item.url)})).filter(item=>item.title&&item.url);
+    const usable=results.map(item=>({...item,url:normalizeSearchHref(item.url)})).filter(item=>item.title&&item.url);
+    if(!usable.length) throw Object.assign(new Error('Secondary engine returned no usable results'),{status:502});
+    return usable;
   };
-  {
+  if(isExt3() && secondaryAvailable) {
+    try { return await runSecondary(); }
+    catch(e) {
+      console.warn('[DIRECT_WEB] branch 3 secondary engines unavailable',{status:geminiErrorStatus(e)});
+    }
+    try { return await runTavily(); }
+    catch(e) {
+      console.warn('[DIRECT_WEB] branch 3 Tavily unavailable; using public fallbacks',{status:geminiErrorStatus(e)});
+    }
+  } else {
     const hedgeMs=Number(process.env.BRANCH1_SEARCH_HEDGE_MS||(deepSearch?2200:1300));
     let secondaryStarted=null;
     const tavilyAttempt=runTavily();
