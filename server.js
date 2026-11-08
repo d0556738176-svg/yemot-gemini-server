@@ -2695,6 +2695,9 @@ async function answerBusinessHoursDirect(transcript) {
       console.warn('[BUSINESS_HOURS] synthesis unavailable; using deterministic answer',{status:geminiErrorStatus(e)});
     }
   }
+  if(isExt3() && !directHoursAnswer.startsWith('מצאתי באתר הרשמי')) {
+    return 'לא מצאתי שעות פתיחה מאומתות לסניף שביקשת. אם יש לך את כתובת עמוד הסניף, אוכל לנסות לפתוח אותו.';
+  }
   return directHoursAnswer;
 
 }
