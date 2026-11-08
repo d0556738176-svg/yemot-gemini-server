@@ -4518,7 +4518,7 @@ async function callHandler(call) {
       turnContext.lastRoute=branch1Website?'website':branch1Local?'local':branch1Events?'events':youtubeIntent?'youtube':'other';
       // Extension 3 follow-ups that point back are made standalone first, and a
       // request for more details after a web answer is answered from the web too.
-      const ext3PointsBack=!explicitSearchOnly && allowExternalLookup && turnHistory.length>0 && !isMemoryRecall(originalSpokenTranscript) &&
+      const ext3PointsBack=isExt3() && !explicitSearchOnly && allowExternalLookup && turnHistory.length>0 && !isMemoryRecall(originalSpokenTranscript) &&
         !turnContext.currentWebsiteUrl && !(turnContext.youtubeResults||[]).length && !isBranch1WebsiteRequest(userTranscript,turnContext) &&
         /(?:^|[\s,])(?:שם|לשם|משם|באזור|המקום|המקומות|הראשון|הראשונה|השני|השנייה|השלישי|השלישית|האחרון|האחרונה|הזה|הזאת|הזו|אותו|אותה|עליו|עליה|תפרט|תפרטי|תרחיב|תרחיבי|עוד פרטים|יותר על)(?=$|[\s?.!,])/u.test(userTranscript);
       const ext3Elaboration=ext3PointsBack && !!turnContext.ext3LastWeb && /(?:תפרט|תפרטי|תרחיב|תרחיבי|ספר לי עוד|ספרי לי עוד|עוד פרטים|יותר על)/u.test(userTranscript);
@@ -4529,7 +4529,7 @@ async function callHandler(call) {
       // Extension 3: recommendations of real places and businesses come from
       // the web, not from the model's memory (08.11 it invented sites and a
       // "crater" in the north).
-      const ext3Recommendation=!explicitSearchOnly && !isMemoryRecall(originalSpokenTranscript) &&
+      const ext3Recommendation=isExt3() && !explicitSearchOnly && !isMemoryRecall(originalSpokenTranscript) &&
         /(?:מקומות|אטרקציה|אטרקציות|כדאי לבקר|לבקר ב|מסלול|מסלולים|ממליצ|המלצה|המלצות|מומלץ|מומלצים|צימר|צימרים|מלון|מלונות|מסעדה|מסעדות|גן חיות|פארק|שמורה|שמורת|חוף|חופים|מוזיאון|לאן כדאי|לאן ללכת|איפה כדאי)/u.test(userTranscript);
       const forcedWebSearch=allowExternalLookup && !conversationOnly && (explicitSearchOnly || shouldForceWebSearch(userTranscript) || ext3Recommendation || ext3Elaboration);
       turnContext.ext3LastWeb=forcedWebSearch||branch1Local||branch1Events||branch1Website;
@@ -4568,7 +4568,10 @@ async function callHandler(call) {
         replyText='לפני רגע שאלת: '+asked[0]+'.'+(asked[1]?' ולפני זה: '+asked[1]+'.':'')+(asked[2]?' ובהתחלה: '+asked[2]+'.':'');
         console.info('[CALL_FLOW] within-call recall answered from this call',{callId:activeKey,turns:asked.length});
       }
-      if(!directDataRequest && !withinCallRecall) {
+      const ext3Introduction=isExt3() && /^(?:(?:שלום|היי|ספרי לי(?: בקצרה)?)\s*[,.:]?\s*)?(?:מי את(?: ומה את יכולה לעשות בשבילי)?|מה את יכולה לעשות(?: בשבילי)?)[?.!\s]*$/u.test(originalSpokenTranscript.trim());
+      if(ext3Introduction) {
+        replyText='אני העוזרת של שלוחה שלוש. אפשר לבקש ממני לחפש מידע עדכני, לקרוא עמוד ציבורי או להרחיב על תשובה קודמת.';
+      } else if(!directDataRequest && !withinCallRecall) {
         const longAnswer=isLongAnswerRequest(userTranscript);
         const recall=typeof isMemoryRecall==='function'&&isMemoryRecall(originalSpokenTranscript);
         const conversationalHistory=recall?(relevantHistoryText||currentConversationText(turnHistory)):(currentConversationText(turnHistory)||relevantHistoryText);
@@ -5338,7 +5341,12 @@ async function runBranch1EndToEndSelfTest(questions=BRANCH1_E2E_QUESTIONS) {
 // Extension 3 shares the engine; one conversational turn checks that it answers
 // and speaks about itself in the feminine.
 async function runBranch3SelfTest() {
-  await callPersona.run({persona:'female',branch:'3'},()=>runBranch1EndToEndSelfTest(['ספרי לי בקצרה מי את ומה את יכולה לעשות בשבילי','תחפשי באינטרנט מי ראש עיריית ירושלים']));
+  await callPersona.run({persona:'female',branch:'3'},()=>runBranch1EndToEndSelfTest([
+    'ספרי לי בקצרה מי את ומה את יכולה לעשות בשבילי',
+    'מה שעות הפתיחה של סופר פארם בקניון עזריאלי בתל אביב לכל יום בשבוע',
+    'תפתחי את https://shop.super-pharm.co.il/branches/branchPage?code=61',
+    'תמשיכי לקרוא מהדף'
+  ]));
 }
 // Owner's deep check of extension 3 (08.11): two simulated calls from a test
 // number. Call A: introduction, advice, a follow-up ("the first one"), web
