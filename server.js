@@ -4209,6 +4209,15 @@ async function understandPhoneQuestion(question, historyText='', turnContext=nul
     });
     let fixed=String(answer||'').trim().split('\n')[0].replace(/^["'“”]+|["'“”]+$/g,'').trim();
     if(!fixed || fixed.length<2 || fixed.length>original.length*2+40) return original;
+    // A repair fixes misheard words; it never drops most of the question
+    // (08.11: "מה שעות הפתיחה של גן החיות התנכי בירושלים" came back as
+    // "מה שעות הפתיחה של ג" and the caller got a mall's hours).
+    const words=t=>String(t).replace(/[^\p{L}\p{N}\s]/gu,' ').split(/\s+/).filter(w=>w.length>2);
+    const kept=words(original).filter(w=>fixed.includes(w)||fixed.includes(w.slice(1))).length;
+    if(fixed.length<original.length*0.7 || kept<Math.ceil(words(original).length*0.5)) {
+      console.warn('[BRANCH1_QUERY_REPAIR] repair dropped words; using original',{from:original.slice(0,120),to:fixed.slice(0,120)});
+      return original;
+    }
     if(fixed!==original) console.info('[BRANCH1_QUERY_REPAIR] question repaired',{from:original.slice(0,120),to:fixed.slice(0,120)});
     return fixed;
   } catch(e) {
