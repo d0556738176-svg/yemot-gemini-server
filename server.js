@@ -4217,6 +4217,23 @@ async function understandPhoneQuestion(question, historyText='', turnContext=nul
   }
 }
 
+// Extension 3: a follow-up that points back ("there", "the first one",
+// "tell me more") becomes a standalone search question with the topic and the
+// exact item name from the previous answer (08.11: "which places there" lost
+// "the north" and found Miami; "the first one" was then invented).
+async function ext3StandaloneQuestion(question, turnHistory=[]) {
+  const recent=turnHistory.slice(-2).map(t=>'מתקשר: '+String(t.user||'').slice(0,300)+'\nתשובה: '+String(t.assistant||'').slice(0,1200)).join('\n\n');
+  if(!recent) return '';
+  const prompt='הנה סוף שיחה טלפונית ושאלת המשך של המתקשר. שכתב את שאלת ההמשך לשאלת חיפוש עצמאית וברורה בעברית, שמובנת בלי השיחה: '+
+    'הוסף את הנושא, המקום והזמן מתוך השיחה, וכשהמתקשר אומר "הראשון", "השני", "המקום הזה" וכדומה, כתוב את השם המדויק של הפריט מתוך התשובה הקודמת. '+
+    'אל תענה על השאלה. החזר רק את השאלה המשוכתבת בשורה אחת.\n\n'+recent+'\n\nשאלת ההמשך: '+question;
+  try {
+    const out=String(await raceSynthesis(prompt,Number(process.env.EXT3_REWRITE_MS||3000),{gemini:false,maxTokens:300})||'').trim().split('\n')[0].replace(/^["'“”]+|["'“”]+$/g,'').trim();
+    if(out.length>=4 && out.length<=260) { console.info('[EXT3] standalone question',{from:question.slice(0,100),to:out.slice(0,160)}); return out; }
+  } catch(e) { console.warn('[EXT3] standalone rewrite unavailable',{status:geminiErrorStatus(e)}); }
+  return '';
+}
+
 async function answerBranch1Web(question, historyText='', turnContext=null) {
   const run=async q=>{
     const contextual=contextualizeSearchQuestion(q,historyText);
@@ -4456,12 +4473,23 @@ async function callHandler(call) {
       const branch1Local=allowExternalLookup && !branch1Website && isBranch1LocalRequest(userTranscript);
       const branch1Events=allowExternalLookup && !branch1Website && isBranch1EventRequest(userTranscript);
       turnContext.lastRoute=branch1Website?'website':branch1Local?'local':branch1Events?'events':youtubeIntent?'youtube':'other';
+      // Extension 3 follow-ups that point back are made standalone first, and a
+      // request for more details after a web answer is answered from the web too.
+      const ext3PointsBack=!explicitSearchOnly && allowExternalLookup && turnHistory.length>0 && !isMemoryRecall(originalSpokenTranscript) &&
+        !turnContext.currentWebsiteUrl && !(turnContext.youtubeResults||[]).length && !isBranch1WebsiteRequest(userTranscript,turnContext) &&
+        /(?:^|[\s,])(?:שם|לשם|משם|באזור|המקום|המקומות|הראשון|הראשונה|השני|השנייה|השלישי|השלישית|האחרון|האחרונה|הזה|הזאת|הזו|אותו|אותה|עליו|עליה|תפרט|תפרטי|תרחיב|תרחיבי|עוד פרטים|יותר על)(?=$|[\s?.!,])/u.test(userTranscript);
+      const ext3Elaboration=ext3PointsBack && !!turnContext.ext3LastWeb && /(?:תפרט|תפרטי|תרחיב|תרחיבי|ספר לי עוד|ספרי לי עוד|עוד פרטים|יותר על)/u.test(userTranscript);
+      if(ext3PointsBack) {
+        const standalone=await ext3StandaloneQuestion(userTranscript,turnHistory);
+        if(standalone) userTranscript=standalone;
+      }
       // Extension 3: recommendations of real places and businesses come from
       // the web, not from the model's memory (08.11 it invented sites and a
       // "crater" in the north).
       const ext3Recommendation=!explicitSearchOnly && !isMemoryRecall(originalSpokenTranscript) &&
         /(?:מקומות|אטרקציה|אטרקציות|כדאי לבקר|לבקר ב|מסלול|מסלולים|ממליצ|המלצה|המלצות|מומלץ|מומלצים|צימר|צימרים|מלון|מלונות|מסעדה|מסעדות|גן חיות|פארק|שמורה|שמורת|חוף|חופים|מוזיאון|לאן כדאי|לאן ללכת|איפה כדאי)/u.test(userTranscript);
-      const forcedWebSearch=allowExternalLookup && !conversationOnly && (explicitSearchOnly || shouldForceWebSearch(userTranscript) || ext3Recommendation);
+      const forcedWebSearch=allowExternalLookup && !conversationOnly && (explicitSearchOnly || shouldForceWebSearch(userTranscript) || ext3Recommendation || ext3Elaboration);
+      turnContext.ext3LastWeb=forcedWebSearch||branch1Local||branch1Events||branch1Website;
       console.info('[BRANCH1_ROUTER]',{
         callId:activeKey,
         route:branch1Website?'website':branch1Local?'local':branch1Events?'events':forcedWebSearch?'web':'conversation',
