@@ -358,7 +358,14 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
   // Sources leave less room for the conversation: the whole request must stay
   // small enough for the free fast models (they refuse big ones with 413).
   const ask = async (instruction, extra = '', { maxTokens = 1800, budgetMs = 13000, lesson = lessonRef, ctx = context } = {}) => {
-    const raw = await deps.llm(answerPrompt({ context: ctx, utterance, plan, now, instruction, extra, lesson }), { budgetMs, maxTokens });
+    let raw;
+    try { raw = await deps.llm(answerPrompt({ context: ctx, utterance, plan, now, instruction, extra, lesson }), { budgetMs, maxTokens }); }
+    catch (e) {
+      // Every model busy (free per-minute limits): one more try, smaller, a moment later.
+      log.warn?.('[EXT3_BRAIN] answer models busy; one smaller retry', { status: e?.status || 0 });
+      await new Promise(r => setTimeout(r, deps.retryPauseMs ?? 2500));
+      raw = await deps.llm(answerPrompt({ context: smallContext.slice(-1500), utterance, plan, now, instruction, extra: String(extra || '').slice(0, 3000), lesson }), { budgetMs: 9000, maxTokens: Math.min(maxTokens, 1000) });
+    }
     const a = extractAnswer(raw);
     if (!a) throw Object.assign(new Error('empty answer'), { status: 502 });
     return a;
@@ -445,7 +452,15 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
       return 'מקור ' + (i + 1) + ': ' + clip(r.title, 120) + ' (' + String(r.url).replace(/^https?:\/\//, '').slice(0, 60) + ')\n' + body;
     }).join('\n\n').slice(0, 6500);
     log.info?.('[EXT3_BRAIN] web research', { queries, results: results.length, pagesRead: pages.length, sourceChars: sourceText.length });
-    const reply = await ask('המתקשר צריך מידע עדכני ומדויק. לפניך מקורות אמיתיים מהאינטרנט שנאספו ונקראו עכשיו לשאלה הזאת בלבד. אל תערבבי בתשובה מידע מתשובות קודמות בשיחה שאינו קשור לשאלה הזאת. ענה בהרחבה ובפירוט רק לפי המקורות: עובדות, מספרים, שמות ותאריכים בדיוק כפי שכתובים בהם. כשהמקורות סותרים, אמרי זאת. כשהמקורות לא עונים על חלק מהשאלה, אמרי שלא מצאת את החלק הזה. אל תקריאי כתובות אתרים ואל תאמרי "מקור 1".', 'מקורות:\n' + sourceText, { maxTokens: 1800, budgetMs: 14000, ctx: smallContext });
+    const reply = await ask('המתקשר צריך מידע עדכני ומדויק. לפניך מקורות אמיתיים מהאינטרנט שנאספו ונקראו עכשיו לשאלה הזאת בלבד. אל תערבבי בתשובה מידע מתשובות קודמות בשיחה שאינו קשור לשאלה הזאת. ענה בהרחבה ובפירוט רק לפי המקורות: עובדות, מספרים, שמות ותאריכים בדיוק כפי שכתובים בהם. כשהמקורות סותרים, אמרי זאת. כשהמקורות לא עונים על חלק מהשאלה, אמרי שלא מצאת את החלק הזה. אל תקריאי כתובות אתרים ואל תאמרי "מקור 1".', 'מקורות:\n' + sourceText, { maxTokens: 1800, budgetMs: 14000, ctx: smallContext })
+      .catch(e => {
+        log.warn?.('[EXT3_BRAIN] web answer not written; saying what was found', { status: e?.status || 0 });
+        const seenHost = new Set();
+        const bits = results.filter(r => { const h = String(r.url).replace(/^https?:\/\//, '').split('/')[0]; if (seenHost.has(h)) return false; seenHost.add(h); return clip(r.snippet, 30).length > 25; })
+          .slice(0, 2).map(r => clip(r.snippet, 230));
+        return bits.length ? 'לפי מה שמצאתי עכשיו באינטרנט: ' + bits.join(' ועוד מקור כותב: ') + ' זה בקצרה, כי מנועי הניסוח עמוסים ברגע זה. אם תשאל שוב בעוד דקה, אפרט יותר.' : '';
+      });
+    if (!reply) throw Object.assign(new Error('nothing to say'), { status: 503 });
     return { intent: plan.intent, reply };
   }
 

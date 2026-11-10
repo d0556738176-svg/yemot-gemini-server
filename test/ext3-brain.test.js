@@ -71,7 +71,7 @@ test('findVideos returns only real, safe results with real lengths', async () =>
 const now = 'יום שלישי';
 const baseDeps = (llmAnswers, extra = {}) => {
   const prompts = [];
-  return { prompts, deps: { env, log: { info() {}, warn() {} }, llm: async (p, o) => { prompts.push({ p, o }); const a = llmAnswers.shift(); if (a instanceof Error) throw a; return a; }, webSearch: async () => [], ...extra } };
+  return { prompts, deps: { env, retryPauseMs: 0, log: { info() {}, warn() {} }, llm: async (p, o) => { prompts.push({ p, o }); const a = llmAnswers.shift(); if (a instanceof Error) throw a; return a; }, webSearch: async () => [], ...extra } };
 };
 
 test('video recommendation names only a video that really exists', async () => {
@@ -173,4 +173,15 @@ test('without own YouTube keys the extension-2 keys are used', async () => {
   const out = await findVideos(['x y'], { env: {}, proxy });
   assert.deepEqual(calls, ['search', 'videos']);
   assert.equal(out[0].videoId, 'ddddddddddd');
+});
+
+test('busy models: a smaller retry, and web never answers with unrelated junk', async () => {
+  const { deps } = baseDeps(['{"intent":"web","search":"שער היורו"}', new Error('busy'), new Error('busy')], {
+    webSearch: async () => [{ title: 'בנק ישראל', url: 'https://boi.org.il/a', snippet: 'השער היציג של היורו היום הוא 3.65 שקלים חדשים לפי בנק ישראל.' }]
+  });
+  const r = await ext3Turn({ utterance: 'מה שער היורו היום', now }, deps);
+  assert.match(r.reply, /3\.65/);
+  const b = baseDeps(['{"intent":"chat"}', new Error('busy'), '{"answer":"תשובה אחרי המתנה"}']);
+  const r2 = await ext3Turn({ utterance: 'ספרי לי על ירושלים', now }, b.deps);
+  assert.equal(r2.reply, 'תשובה אחרי המתנה');
 });

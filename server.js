@@ -2556,7 +2556,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     ...extraFastProviders(true),
     // Owner, 10.11: Groq counts each model's free quota separately, so more
     // strong models on the same key = more answers before "rate limited".
-    ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?1500+i*800:0}))
+    ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?4000+i*800:0}))
   ]) {
     if(!provider.apiKey) continue;
     racers.push((provider.delayMs?new Promise(r=>setTimeout(r,provider.delayMs)).then(()=>{ if(raceDone) throw Object.assign(new Error('not needed'),{status:499}); }):Promise.resolve()).then(()=>callCompatibleChatCompletion({
