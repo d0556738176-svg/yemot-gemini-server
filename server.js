@@ -4846,6 +4846,29 @@ async function dubStatusOf(videoId) {
 // keeps talking with the caller meanwhile; it asks for the status every turn
 // and plays the phone files itself when they are ready. Only callers that
 // hold EXT3_MEDIA_SECRET (set on both services) may use it.
+// Owner, 10.11: extension 3 uses this service's YouTube keys (all of them,
+// rotated) when its own run out. Only search/videos reads, same secret.
+app.get('/api/ext3/youtube/:kind', rateLimit(240, 60 * 1000, 'ext3-youtube'), async (req, res) => {
+  const secret = String(process.env.EXT3_MEDIA_SECRET || '');
+  if (!secret || String(req.query.secret || '') !== secret) return res.status(403).json({ ok: false });
+  const kind = req.params.kind;
+  if (!['search', 'videos'].includes(kind)) return res.status(400).json({ ok: false });
+  const { youtubeKeysFrom } = await import('./youtube-ivr.js');
+  const allowed = ['part', 'q', 'type', 'maxResults', 'safeSearch', 'regionCode', 'relevanceLanguage', 'videoDuration', 'id'];
+  let last = 503;
+  for (const key of youtubeKeysFrom(process.env)) {
+    const u = new URL('https://www.googleapis.com/youtube/v3/' + kind);
+    for (const k of allowed) if (req.query[k] !== undefined) u.searchParams.set(k, String(req.query[k]).slice(0, 600));
+    u.searchParams.set('key', key);
+    try {
+      const r = await fetch(u, { signal: AbortSignal.timeout(6000) });
+      if (r.status === 403 || r.status === 429) { last = r.status; continue; }
+      return res.status(r.status).json(await r.json().catch(() => ({})));
+    } catch { last = 504; }
+  }
+  res.status(503).json({ ok: false, status: last });
+});
+
 app.get('/api/ext3/media', rateLimit(240, 60 * 1000, 'ext3-media'), async (req, res) => {
   const secret = String(process.env.EXT3_MEDIA_SECRET || '');
   if (!secret || String(req.query.secret || '') !== secret) return res.status(403).json({ ok: false });
