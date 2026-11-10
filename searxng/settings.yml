@@ -16,7 +16,7 @@ general:
   instance_name: "yemot-search"
 search:
   safe_search: 2
-  default_lang: "he"
+  default_lang: "all"
   formats:
     - html
     - json
