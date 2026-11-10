@@ -728,7 +728,7 @@ async function coverPolicy(){
   if(r)coverPolicyCache=policy; // not tested yet: ask again next song
   return policy;
 }
-async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=>{}, consent=false) {
+async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=>{}, consent=false, local=null) {
   const id=String(videoId||'').trim();
   if(!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'authorized-audio-'));
@@ -741,7 +741,14 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     // datacenter block). Falls through to the older paths only if it fails.
     let apifyOk = false;
     let sourceTitle = null;
-    if (isApifyConfigured(process.env)) {
+    // Owner, 10.11: "כן לוידאו" already downloaded the video; its sound is
+    // used as the source here, so the phone audio costs no second download.
+    if (local?.file) {
+      await fs.copyFile(local.file, source);
+      sourceTitle = local.title || null;
+      apifyOk = true;
+      console.info('[YouTube IVR] phone audio made from the downloaded video (no second download)', { videoId: id });
+    } else if (isApifyConfigured(process.env)) {
       try {
         ({ title: sourceTitle } = await downloadApifySource(id, source, signal, onProgress, consent));
         apifyOk = true;
@@ -850,7 +857,7 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
   // orphan work keeps running on the free instance after the call gave up.
   const report=event=>{try{options?.onProgress?.(event);}catch{ /* Progress must never interrupt audio preparation. */ }};
   const releaseAwake=playbackAwake.acquire();
-  const job=build(id,fallbackUrl,options?.signal,report,consent).finally(()=>{
+  const job=build(id,fallbackUrl,options?.signal,report,consent,options?.localSource?{file:options.localSource,title:options.title}:null).finally(()=>{
     activeJobs.delete(jobKey);
     releaseAwake();
   });

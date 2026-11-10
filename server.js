@@ -3948,6 +3948,12 @@ function startYouTubeVideoJob(video) {
       },
       deleteFile: async remote => { const x = new URL(p.YEMOT_API_BASE + '/FileAction'); x.searchParams.set('token', p.yemotApiKey()); x.searchParams.set('action', 'delete'); x.searchParams.set('what', remote); await fetch(x).catch(() => {}); },
       countSaved: async () => (await import('./download-folders.js')).countSaved('video', { readJson: x => p.readCacheJson(x), writeJson: (x, d) => p.writeCacheJson(x, d) }),
+      // Owner, 10.11: the same download also becomes the phone audio.
+      phoneAudioFromFile: async (file, { title } = {}) => {
+        const cached = await Promise.race([lookupCachedYouTubeAudio(id).catch(() => null), new Promise(r => setTimeout(() => r(null), 4000))]);
+        if (cached?.playbackPaths?.length) return { already: true, playbackPaths: cached.playbackPaths };
+        return downloadAuthorizedAudioToYemot(id, { localSource: file, title });
+      },
     });
   })().then(r => { state.status = 'ready'; state.remote = r.remote; return videoPendingUpdate(l => l.filter(x => x !== id)); })
     .catch(e => {
@@ -4012,6 +4018,19 @@ function startYouTubePlaybackJob(video, opts = {}) {
  * Isolated YouTube IVR flow. Results live only in this call's async context.
  * Uses the same raw-recording -> Gemini transcription convention as the main robot.
  */
+async function readExt3Handoff(phone) {
+  const digits=String(phone||'').replace(/[^0-9]/g,'');
+  if(digits.length<5) return null;
+  const { _pipeline } = await import('./youtube-authorized-playback.js');
+  const remote='ivr2:/2/youtubejobs/handoff/'+digits+'.json';
+  const data=await Promise.race([_pipeline.readCacheJson(remote).catch(()=>null),new Promise(r=>setTimeout(()=>r(null),3000))]);
+  if(!data||!/^[A-Za-z0-9_-]{11}$/.test(String(data.videoId||''))) return null;
+  // Used once: deleted now, whether fresh or stale.
+  try { const x=new URL(_pipeline.YEMOT_API_BASE+'/FileAction'); x.searchParams.set('token',_pipeline.yemotApiKey()); x.searchParams.set('action','delete'); x.searchParams.set('what',remote); void fetch(x,{signal:AbortSignal.timeout(8000)}).catch(()=>{}); } catch {}
+  if(Date.now()-Date.parse(data.at||0)>30*60*1000) return null;
+  return data;
+}
+
 async function youtubeCallHandler(call) {
   // Branch 2 stays isolated from the main AI conversation.
   // A result selection is remembered and playback starts only after a clear
@@ -4028,6 +4047,22 @@ async function youtubeCallHandler(call) {
   let pendingFallbackVideo=null;
   let searchMode=null, typedOnce=false; // 'voice' | 'type' (owner, 08.11)
   let transcriptFailAttempts=0;
+
+  // Owner, 10.11: extension 3 recommended a video and the caller asked to
+  // hear or download it; it waits here, already selected, for the usual
+  // confirmation (1 = play, 2 = video). Read once, then deleted.
+  try {
+    const handed=await readExt3Handoff(getCallerNumber(call));
+    if(handed) {
+      pendingVideo={videoId:handed.videoId,title:handed.title||'',channelTitle:handed.channelTitle||'',durationSeconds:Number(handed.durationSec)||null,publishedAt:null};
+      searchMode='voice';
+      const confirmText=await confirmPlaybackPrompt(pendingVideo);
+      if(pendingVideo?.geoLimited) pendingVideo=null;
+      nextPrompt='הסרטון שבחרת בשלוחה 3 מחכה לך כאן. '+(handed.mode==='video'&&pendingVideo?'ביקשת להוריד את הווידאו: בחר הורדת וידאו, והשמע להשמעה בטלפון יוכן מאותה הורדה. ':'')+confirmText;
+      console.info('[EXT3_HANDOFF] video received from extension 3',{videoId:handed.videoId,mode:handed.mode||'audio'});
+    }
+  } catch(handoffError) { console.warn('[EXT3_HANDOFF] could not read',{message:String(handoffError?.message||handoffError).slice(0,160)}); }
+
 
   const normalizeConfirm=(text)=>String(text||'').normalize('NFKC').toLowerCase()
     .replace(/[.,!?;:״"'׳]/g,' ').replace(/\s+/g,' ').trim();
@@ -4341,8 +4376,8 @@ async function youtubeCallHandler(call) {
         const st=startYouTubeVideoJob(v);
         console.info('[VIDEO] requested by caller',{videoId:v.videoId,status:st.status,subtitles:yes});
         nextPrompt=yes
-          ? 'הורדת הווידאו התחילה, עם כתובית בעברית מוטבעת בתוך הסרטון. הסרטון יישמר בתיקיית וידאו עם התמונה והפרטים שלו. סרטון ארוך לוקח יותר זמן, ואין צורך להמתין על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.'
-          : 'הורדת הווידאו התחילה, בלי כתובית. הסרטון יישמר בתיקיית וידאו עם התמונה והפרטים שלו. אין צורך להמתין על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.';
+          ? 'הורדת הווידאו התחילה, עם כתובית בעברית מוטבעת בתוך הסרטון. הסרטון יישמר בתיקיית וידאו עם התמונה והפרטים שלו, ומאותה הורדה יוכן גם השמע להשמעה בטלפון. סרטון ארוך לוקח יותר זמן, ואין צורך להמתין על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.'
+          : 'הורדת הווידאו התחילה, בלי כתובית. הסרטון יישמר בתיקיית וידאו עם התמונה והפרטים שלו, ומאותה הורדה יוכן גם השמע להשמעה בטלפון. אין צורך להמתין על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.';
         continue;
       }
 

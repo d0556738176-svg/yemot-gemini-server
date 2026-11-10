@@ -1,6 +1,7 @@
 // "כן לוידאו": the video itself (picture + sound) saved to the top-level
 // Yemot folder וידאו, with the YouTube picture as cover and all its details. Nothing is
-// played on the phone and no audio copies are made for this request.
+// played during the call; since 10.11 the same downloaded file also becomes
+// the phone audio (see phoneAudioFromFile below), with no second download.
 //
 // Engine choice, from the engines' own price lists (read 04.11):
 //   johnvc  - $0.000011 per video minute at ANY resolution (+$0.00001 start)
@@ -205,6 +206,23 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       const h = createHash('sha256');
       await new Promise((res, rej) => createReadStream(src).on('data', d => h.update(d)).on('end', res).on('error', rej));
       if (h.digest('hex') !== got.item.sha256.toLowerCase()) throw err('video_transfer_failed', 'Video file checksum mismatch');
+    }
+    // Owner, 10.11: the same download also becomes the phone audio (played in
+    // extension 2, listed in 7, FLAC copy in אודיו), so nothing is paid twice.
+    // Only the sound track is kept (copied as is; re-encoded losslessly if the
+    // container refuses), so the disk never holds the whole video twice.
+    if (deps.phoneAudioFromFile) {
+      const base = path.join(os.tmpdir(), 'video-audio-' + videoId + '-' + Date.now());
+      let copy = base + '.m4a';
+      try {
+        try { await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-vn', '-map', '0:a:0', '-c:a', 'copy', copy]); }
+        catch { await fs.rm(copy, { force: true }).catch(() => {}); copy = base + '.flac'; await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-vn', '-map', '0:a:0', '-c:a', 'flac', copy]); }
+        const file = copy;
+        void Promise.resolve().then(() => deps.phoneAudioFromFile(file, { title: facts?.title || video.title || got.item?.title }))
+          .then(r => log.info?.('[VIDEO] phone audio ready from the same download', { videoId, files: r?.playbackPaths?.length || 0, already: !!r?.already }))
+          .catch(e => log.warn?.('[VIDEO] phone audio from the video not made', { videoId, message: String(e?.message || e).slice(0, 160) }))
+          .finally(() => fs.rm(file, { force: true }).catch(() => {}));
+      } catch (e) { log.warn?.('[VIDEO] sound track not taken for phone audio', { videoId, message: String(e?.message || e).slice(0, 120) }); await fs.rm(copy, { force: true }).catch(() => {}); }
     }
     // Hebrew subtitles when the speech is not Hebrew: embedded as the default
     // subtitle track (streams copied, nothing re-encoded) before any cutting.
