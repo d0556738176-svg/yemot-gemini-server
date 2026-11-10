@@ -53,7 +53,7 @@ export async function writeMemory(phone, data, { env = process.env, fetchImpl = 
 // Folds the oldest turns into the written summary (language model, fast
 // provider first). Without a model the oldest turns are kept as short lines.
 export async function summarize(previousSummary, turns, { env = process.env, fetchImpl = fetch } = {}) {
-  const lines = turns.map(t => 'מתקשר: ' + String(t.user || '').slice(0, 300) + '\nתשובה: ' + String(t.gemini || '').slice(0, 300)).join('\n');
+  const lines = turns.map(t => 'מתקשר: ' + String(t.user || '').slice(0, 300) + '\nתשובה: ' + String(t.gemini || '').slice(0, 300) + (t.ref?.type === 'video' ? '\n(סרטון שהומלץ: "' + String(t.ref.title || '').slice(0, 150) + '")' : '')).join('\n');
   const out = await groqChat([
     { role: 'system', content: 'אתה מנהל זיכרון של עוזר טלפוני. כתוב סיכום עדכני וקצר בעברית (עד 15 שורות) של כל מה שחשוב לזכור על המתקשר משיחות קודמות: מי הוא, מה ביקש, העדפות, נושאים פתוחים, פרטים שמסר ותשובות חשובות שקיבל. שלב את הסיכום הקודם עם השיחות החדשות. אל תמציא.' },
     { role: 'user', content: 'סיכום קודם:\n' + (previousSummary || 'אין') + '\n\nשיחות נוספות:\n' + lines }], { env, fetchImpl, maxTokens: 700, timeoutMs: 20000 });
@@ -69,7 +69,9 @@ export function rememberTurn(phone, entry, opts = {}) {
   const prev = chains.get(key) || Promise.resolve();
   const job = prev.then(async () => {
     const mem = (await readMemory(phone, opts)) || { phone: key, summary: '', entries: [] };
-    mem.entries.push({ time: entry.time, callId: entry.callId, user: entry.user, gemini: entry.gemini });
+    // ref: the item the turn was about (e.g. the exact video recommended), so
+    // "play it" / "what was its name" work in a later call too.
+    mem.entries.push({ time: entry.time, callId: entry.callId, user: entry.user, gemini: entry.gemini, ...(entry.ref ? { ref: entry.ref } : {}) });
     if (mem.entries.length > SUMMARIZE_AT) {
       const old = mem.entries.splice(0, mem.entries.length - KEEP_TURNS);
       mem.summary = await summarize(mem.summary, old, opts);

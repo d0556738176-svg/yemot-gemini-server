@@ -8,6 +8,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { searchSerper, searchLangSearch } from './web-providers.js';
+import { ext3Turn } from './ext3-brain.js';
 import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
@@ -251,7 +253,7 @@ async function loadCallerMemory(phone) {
   if (mem.summary) callerSummaries.set(key, String(mem.summary));
   const have = new Set(conversationLog.filter(x => x.phone === key).map(x => x.time + '|' + x.user));
   const add = (mem.entries || []).filter(e => e && e.user && !have.has(e.time + '|' + e.user))
-    .map((e, i) => ({ id: 'mem-' + i + '-' + Date.parse(e.time || 0), time: e.time, phone: key, callId: String(e.callId || ''), user: e.user, gemini: e.gemini || '' }));
+    .map((e, i) => ({ id: 'mem-' + i + '-' + Date.parse(e.time || 0), time: e.time, phone: key, callId: String(e.callId || ''), user: e.user, gemini: e.gemini || '', ...(e.ref ? { ref: e.ref } : {}) }));
   conversationLog.unshift(...add);
   console.info('[MEMORY] caller memory loaded', { turns: add.length, summary: !!mem.summary, ms: Date.now() - t });
 }
@@ -831,15 +833,17 @@ async function transcribeWithDeepgram(audioBuffer, overrideKey='', meta={}) {
 
   const bytes=Buffer.isBuffer(audioBuffer)?audioBuffer:Buffer.from(audioBuffer);
   const mimeType=(process.env.YEMOT_AUDIO_MIME_TYPE||detectAudioMime(bytes)||'audio/wav').trim();
-  const vocabulary=(process.env.DEEPGRAM_KEYTERMS ||
+  // Extension 3 (10.11): the business names below made Deepgram "hear"
+  // "בנק איגוד", "סופר פארם", "משרד הבריאות" in sentences that never said them.
+  const vocabulary=isExt3()?String(process.env.EXT3_DEEPGRAM_KEYTERMS||'יוטיוב,YouTube,סרטון,וידאו,תכנות,פייתון,Python,גוגל,Google,אינטרנט').split(',').map(x=>x.trim()).filter(Boolean):(process.env.DEEPGRAM_KEYTERMS ||
     'יוטיוב,YouTube,גוגל,Google,ChatGPT,GPT,Gemini,גמיני,ג׳מיני,ימות,ימות המשיח,רנולד,רנולד שוורצנגר,Deepgram,Render,Supabase,API,אילן גוזל,רעננה,סופר פארם,בנק הפועלים,בנק דיסקונט,בנק לאומי,בנק מזרחי טפחות,מכבי,כללית,מאוחדת,לאומית')
     .split(',').map(x=>x.trim()).filter(Boolean);
   // Always-on Israeli service names that phone callers ask about (kept even when
   // DEEPGRAM_KEYTERMS is overridden in the environment). Misheard names such as
   // "בת פגי" for "בנק פאגי" led to unrelated search results.
-  for(const term of ['בנק פאגי','פאגי','בנק איגוד','בנק יהב','בנק הדואר','בנק מסד','הבנק הבינלאומי','בנק אוצר החייל','בנק ירושלים','ביטוח לאומי','בזק','פרטנר','סלקום','פלאפון','הוט','יס','מגן דוד אדום','משטרה'])
+  if(!isExt3()) for(const term of ['בנק פאגי','פאגי','בנק איגוד','בנק יהב','בנק הדואר','בנק מסד','הבנק הבינלאומי','בנק אוצר החייל','בנק ירושלים','ביטוח לאומי','בזק','פרטנר','סלקום','פלאפון','הוט','יס','מגן דוד אדום','משטרה'])
     if(!vocabulary.includes(term)) vocabulary.push(term);
-  for(const term of lexiconKeyterms(60)) if(!vocabulary.includes(term)) vocabulary.push(term);
+  if(!isExt3()) for(const term of lexiconKeyterms(60)) if(!vocabulary.includes(term)) vocabulary.push(term);
   vocabulary.splice(100);
 
   const url=new URL('https://api.deepgram.com/v1/listen');
@@ -4214,7 +4218,8 @@ function correctKnownSpeechNames(text) {
   const before=out;
   for(const [pattern,replacement] of KNOWN_SPEECH_NAME_FIXES) out=out.replace(pattern,replacement);
   out=out.replace(/(בנק פאגי)(\s+בנק פאגי)+/g,'$1').replace(/\s{2,}/g,' ').trim();
-  if(typeof fuzzyCorrectEntities==='function') out=fuzzyCorrectEntities(out);
+  // Extension 3 talks about anything; forcing words into business names did harm there.
+  if(typeof fuzzyCorrectEntities==='function' && !isExt3()) out=fuzzyCorrectEntities(out);
   if(out!==before) console.info('[SPEECH_NAME_FIX] corrected known name',{from:before.slice(0,120),to:out.slice(0,120)});
   return out;
 }
@@ -4324,6 +4329,59 @@ async function extractBranch1Page(url, timeoutMs=2500) {
 }
 
 const branch1Search=createBranch1Search(searchWebDirect);
+
+// ---------- Extension 3 brain wiring (ext3-brain.js) ----------
+// Several search engines at once (Tavily/secondary race, Google via Serper,
+// LangSearch), merged: one answer is built from more of the web.
+async function ext3WebSearch(q,{timeoutMs=4500}={}) {
+  const settled=await Promise.allSettled([
+    searchWebDirect(q,{timeoutMs}),
+    process.env.SERPER_API_KEY?searchSerper(q,{timeoutMs,count:8}):Promise.resolve([]),
+    process.env.LANGSEARCH_API_KEY?searchLangSearch(q,{timeoutMs,count:6}):Promise.resolve([])
+  ]);
+  const seen=new Set(), out=[];
+  for(const s of settled) for(const r of (s.status==='fulfilled'&&Array.isArray(s.value)?s.value:[])) {
+    const url=normalizeSearchHref(String(r.url||'').trim()); const key=url.replace(/[#?].*$/,'');
+    if(!url||!r.title||seen.has(key)) continue; seen.add(key); out.push({title:String(r.title),url,snippet:String(r.snippet||r.content||'')});
+  }
+  return out.slice(0,12);
+}
+async function runExt3Brain(utterance, phone, callId, turnHistory, now) {
+  const key=normalizePhone(phone);
+  const prior=key!=='לא מזוהה'?conversationLog.filter(x=>normalizePhone(x.phone)===key&&x.user&&String(x.callId||'')!==String(callId||'')).slice(-12):[];
+  const summary=key!=='לא מזוהה'?String(callerSummaries.get(key)||''):'';
+  return ext3Turn({utterance,summary,prior,current:turnHistory,now},{
+    llm:(prompt,{budgetMs=12000,maxTokens=1500,planner=false}={})=>planner
+      ? raceSynthesis(prompt,budgetMs,{maxTokens:Math.min(maxTokens,600),gemini:true,geminiBudgetMs:2500})
+      : raceSynthesis(prompt,budgetMs,{maxTokens,quality:true}),
+    webSearch:ext3WebSearch,
+    readPages:(urls,opts)=>readPages(urls,{timeoutMs:opts?.timeoutMs||5500,hedgeMs:1500}),
+    videoDescription:async id=>{
+      const k=(process.env.YOUTUBE_API_KEY||'').trim(); if(!k) return '';
+      const u=new URL('https://www.googleapis.com/youtube/v3/videos'); u.searchParams.set('part','snippet'); u.searchParams.set('id',id); u.searchParams.set('key',k);
+      const j=await (await fetch(u,{signal:AbortSignal.timeout(4000)})).json().catch(()=>null);
+      return String(j?.items?.[0]?.snippet?.description||'');
+    },
+    log:console
+  });
+}
+// The video waits for this caller in extension 2 (that service reads and
+// deletes it when he arrives). Kept in the Yemot account, like the memory.
+async function writeExt2Handoff(phone, data) {
+  const digits=String(normalizePhone(phone)||'').replace(/[^0-9]/g,'');
+  if(digits.length<5) return false;
+  const u=String(process.env.YEMOT_API_USERNAME||'').trim(), pw=String(process.env.YEMOT_API_PASSWORD||'').trim();
+  const token=String(process.env.YEMOT_TOKEN||'').trim()||(u&&pw?u+':'+pw:'');
+  if(!token) return false;
+  const url=new URL('https://www.call2all.co.il/ym/api/UploadFile');
+  url.searchParams.set('token',token); url.searchParams.set('path','ivr2:/2/youtubejobs/handoff/'+digits+'.json');
+  url.searchParams.set('convertAudio','0'); url.searchParams.set('autoNumbering','false');
+  const form=new FormData();
+  form.append('file',new Blob([JSON.stringify({...data,phone:digits,at:new Date().toISOString(),from:'ext3'})],{type:'application/json'}),'handoff.json');
+  const r=await fetch(url,{method:'POST',body:form,signal:AbortSignal.timeout(8000)});
+  const j=await r.json().catch(()=>null);
+  return r.ok&&j?.responseStatus==='OK';
+}
 
 async function callHandler(call) {
   const explicitSearchOnly=callPersona.getStore()?.branch!=='3';
@@ -4476,6 +4534,7 @@ async function callHandler(call) {
     let originalSpokenTranscript='';
     let relevantHistoryText='';
     let allowExternalLookup=!explicitSearchOnly;
+    turnContext.ext3Ref=null; turnContext.ext3Handoff=null;
     try {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
@@ -4486,6 +4545,21 @@ async function callHandler(call) {
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length,elapsedMs:Date.now()-turnStartedAt});
       if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
       originalSpokenTranscript=userTranscript;
+      // Extension 3 (owner, 10.11): one grounded turn pipeline (ext3-brain.js).
+      // On any failure the older routing below still answers.
+      let ext3Done=false;
+      if(!explicitSearchOnly && String(process.env.EXT3_BRAIN||'on')!=='off') {
+        const fixed=answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
+        if(fixed) { replyText=fixed; ext3Done=true; }
+        else try {
+          const r=await runExt3Brain(userTranscript,callerPhone,callId,turnHistory,israelNow);
+          if(r?.reply) { replyText=r.reply; turnContext.ext3Ref=r.ref||null; turnContext.ext3Handoff=r.handoff||null; ext3Done=true; }
+        } catch(brainError) {
+          console.warn('[EXT3_BRAIN] turn failed; using the older routing',{status:geminiErrorStatus(brainError),message:String(brainError?.message||brainError).slice(0,160)});
+        }
+      }
+      ext3route: {
+      if(ext3Done) break ext3route;
       const searchSubject=explicitSearchOnly?branch1WebSearchSubject(originalSpokenTranscript):null;
       allowExternalLookup=!explicitSearchOnly || searchSubject!==null;
       if(searchSubject==='') {
@@ -4701,6 +4775,7 @@ async function callHandler(call) {
           } else throw searchError;
         }
       }
+      } // ext3route
     } catch(e) {
       logDetailedError('Gemini processing',e);
       const providerStatus=geminiErrorStatus(e);
@@ -4786,7 +4861,8 @@ async function callHandler(call) {
       console.info('[REPLY_PREVIEW]',{callId:activeKey,question:String(userTranscript).slice(0,100),reply:String(replyText).slice(0,300)});
     }
     const entry={id:Date.now()+'-'+conversationLog.length,time:new Date().toISOString(),
-      phone:normalizePhone(callerPhone),callId:String(callId||''),user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript) || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText};
+      phone:normalizePhone(callerPhone),callId:String(callId||''),user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript) || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText,
+      ...(turnContext.ext3Ref?{ref:turnContext.ext3Ref}:{})};
     if(!call.selfTest) conversationLog.push(entry);
     if(conversationLog.length>MAX_CONVERSATION_LOG)
       conversationLog.splice(0,conversationLog.length-MAX_CONVERSATION_LOG);
@@ -4800,9 +4876,21 @@ async function callHandler(call) {
         callId:activeKey,status:geminiErrorStatus(err),message:String(err?.message||err).slice(0,180)
       }));
     if(userTranscript) {
-      turnHistory.push({user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript),assistant:replyText,resolvedQuestion:userTranscript});
-      if(turnHistory.length>8) turnHistory.shift();
+      turnHistory.push({user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript),assistant:replyText,resolvedQuestion:userTranscript,
+        ...(turnContext.ext3Ref?{ref:turnContext.ext3Ref}:{})});
+      if(turnHistory.length>12) turnHistory.shift();
     }
+    // Extension 3 -> extension 2: the chosen video waits there for this caller.
+    if(turnContext.ext3Handoff && !call.selfTest) {
+      const saved=await writeExt2Handoff(callerPhone,turnContext.ext3Handoff).catch(e=>{ console.warn('[EXT3_HANDOFF] not saved',{message:String(e?.message||e).slice(0,160)}); return false; });
+      if(saved) {
+        console.info('[EXT3_HANDOFF] caller sent to extension 2',{callId:activeKey,videoId:turnContext.ext3Handoff.videoId,mode:turnContext.ext3Handoff.mode});
+        activeCalls.delete(activeKey);
+        call.id_list_message(branch1SpeechItems(replyText),{prependToNextAction:true});
+        return call.go_to_folder('/2');
+      }
+      replyText='לא הצלחתי להעביר את הסרטון לשלוחת יוטיוב כרגע. אפשר להיכנס לשלוחה 2 ולחפש בה את '+sanitizeForYemot(turnContext.ext3Handoff.title)+'.';
+    } else if(turnContext.ext3Handoff && call.selfTest) console.info('[EXT3_HANDOFF] selftest would send to extension 2',{videoId:turnContext.ext3Handoff.videoId,mode:turnContext.ext3Handoff.mode});
     console.info('[CALL_FLOW] yemot_handoff_start', { callId: activeKey, chars: replyText.length, elapsedMs:Date.now()-turnStartedAt });
     // Do NOT call id_list_message here. It normally exits the action unless it is
     // queued with prependToNextAction. Instead, put the answer directly into the
