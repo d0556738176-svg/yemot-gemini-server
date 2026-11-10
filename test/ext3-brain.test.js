@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildContext, activeVideo, parsePlan, heuristicPlan, isSafeVideo, parseIsoDuration, spokenDuration, ext3Turn, findVideos } from '../ext3-brain.js';
+import { parseKeyOptions, buildContext, activeVideo, parsePlan, heuristicPlan, isSafeVideo, parseIsoDuration, spokenDuration, ext3Turn, findVideos } from '../ext3-brain.js';
 
 const clown = { type: 'video', videoId: 'abcdefghijk', title: 'The Killer Clown Case That Fooled Everyone', channelTitle: 'Real Channel', durationSec: 1740, viewCount: 120000 };
 
@@ -145,8 +145,24 @@ test('web answers are built from pages actually read', async () => {
   assert.match(prompts[1].p, /השער היציג/);
 });
 
-test('the answer prompt never invites pressing keys', async () => {
+test('choices are offered in the one format the call understands', async () => {
   const { deps, prompts } = baseDeps(['{"intent":"chat"}', '{"answer":"x"}']);
   await ext3Turn({ utterance: 'תלמדי אותי תכנות', now }, deps);
-  assert.match(prompts[1].p, /אף פעם אל תבקש מהמתקשר להקיש/);
+  assert.match(prompts[1].p, /הקש 1/);
+});
+
+test('numbered choices in an answer become real keys', () => {
+  assert.deepEqual(parseKeyOptions('ללימוד קוד הקש 1, ללימוד פריסה הקש 2, ולתרגול הקש 3.'), { 1: 'ללימוד קוד', 2: 'ללימוד פריסה', 3: 'לתרגול' });
+  assert.deepEqual(parseKeyOptions('הקש 1 ללימוד קוד, הקש 2 ללימוד בסיס נתונים'), { 1: 'ללימוד קוד', 2: 'ללימוד בסיס נתונים' });
+  assert.deepEqual(parseKeyOptions('אפשרויות: 1. משתנים. 2. לולאות.'), { 1: 'משתנים', 2: 'לולאות' });
+  assert.equal(parseKeyOptions('השעה 1 בצהריים'), null);
+});
+
+test('a pressed key continues with that choice, not the menu again', async () => {
+  const { deps, prompts } = baseDeps(['{"answer":"נתחיל בלימוד פריסה"}']);
+  const current = [{ user: 'תלמדי אותי', assistant: 'ללימוד קוד הקש 1, ללימוד פריסה הקש 2' }];
+  const r = await ext3Turn({ utterance: 'בחרתי באפשרות 2: ללימוד פריסה', current, now }, deps);
+  assert.equal(r.reply, 'נתחיל בלימוד פריסה');
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0].p, /המשיכי בדיוק משם/);
 });

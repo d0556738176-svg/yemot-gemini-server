@@ -9,7 +9,7 @@ import { YemotRouter, ExitError } from 'yemot-router2';
 import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
-import { ext3Turn } from './ext3-brain.js';
+import { ext3Turn, parseKeyOptions, spokenDuration } from './ext3-brain.js';
 import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
@@ -4367,6 +4367,68 @@ async function runExt3Brain(utterance, phone, callId, turnHistory, now) {
     log:console
   });
 }
+// ---------- Extension 3 <-> extension 2 media (owner, 10.11) ----------
+// Extension 3 asks the extension-2 service to download, keeps talking with
+// the caller meanwhile, announces when the file is ready, plays it here and
+// then the conversation simply goes on.
+async function ext2Media(job,{start=false,timeoutMs=8000}={}) {
+  const secret=String(process.env.EXT3_MEDIA_SECRET||'').trim();
+  if(!secret) return null;
+  const base=String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'');
+  const u=new URL(base+'/api/ext3/media');
+  for(const [k,v] of Object.entries({secret,videoId:job.videoId,mode:job.mode||'audio',title:job.title||'',channel:job.channelTitle||'',duration:job.durationSec||'',start:start?'1':'0'})) u.searchParams.set(k,String(v));
+  try {
+    const r=await fetch(u,{signal:AbortSignal.timeout(timeoutMs)});
+    const j=await r.json().catch(()=>null);
+    return r.ok&&j?.ok?j:null;
+  } catch { return null; }
+}
+// Called once per turn: what changed in this call's downloads, to be said.
+async function ext3MediaNotes(media) {
+  const notes=[];
+  await Promise.all([...media.values()].map(async job=>{
+    if(job.done) return;
+    const st=await ext2Media(job,{start:!!job.needsStart,timeoutMs:3500});
+    if(!st) {
+      if(Date.now()-job.since>4*60*1000 && !job.unreachableSaid) { job.unreachableSaid=true; notes.push('שירות ההורדות לא עונה כרגע, אז ההכנה של '+job.title+' מתעכבת. אפשר להמשיך לדבר, ואנסה שוב.'); }
+      return;
+    }
+    job.needsStart=false;
+    if(st.audio?.status==='ready'&&st.audio.paths?.length) job.paths=st.audio.paths;
+    if(job.mode==='video') {
+      if(st.video?.status==='ready'&&!job.videoSaid) { job.videoSaid=true; notes.push('הווידאו של '+job.title+' נשמר בתיקיית וידאו.'); }
+      if(st.video?.status==='failed'&&!job.failSaid) { job.failSaid=true; job.done=true; notes.push('הורדת הווידאו של '+job.title+' לא הצליחה. אפשר לנסות שוב בשלוחה 2.'); }
+    } else if(st.audio?.status==='failed'&&!job.failSaid) { job.failSaid=true; job.done=true; notes.push('ההכנה של '+job.title+' לא הצליחה. אפשר לנסות שוב, או לחפש אותו בשלוחה 2.'); }
+    if(job.paths&&!job.readySaid) { job.readySaid=true; notes.push('הקובץ של '+job.title+' מוכן. כשתרצה לשמוע אותו, אמור תשמיעי לי אותו.'); }
+    if(job.readySaid&&(job.mode!=='video'||job.videoSaid)) job.done=true;
+  }));
+  return notes.length?'ועוד הודעה: '+notes.join(' '):'';
+}
+// "Play it": ready -> plays here now; otherwise the download starts and the
+// conversation goes on. Returns false when the extension-2 service cannot be
+// reached at all (the caller is then sent to extension 2 as before).
+async function ext3StartOrPlay(h, media) {
+  let job=media.get(h.videoId);
+  const askedBefore=!!job;
+  if(!job) { job={...h,since:Date.now()}; media.set(h.videoId,job); }
+  if(h.mode==='video'&&job.mode!=='video') { job.mode='video'; job.done=false; job.videoSaid=false; }
+  const st=await ext2Media(job,{start:true,timeoutMs:9000});
+  if(!st) {
+    if(!process.env.EXT3_MEDIA_SECRET) { media.delete(h.videoId); return {handoff:true}; }
+    job.needsStart=true;
+    return {reply:'אני מעירה עכשיו את שירות ההורדות ומתחילה להכין את '+job.title+'. זה יכול לקחת כמה דקות. בינתיים אפשר להמשיך לדבר על כל דבר שתרצה, ואודיע לך כשהקובץ מוכן.'};
+  }
+  if(st.audio?.status==='ready'&&st.audio.paths?.length) job.paths=st.audio.paths;
+  if(job.paths&&h.mode!=='video') {
+    job.readySaid=true; job.done=true;
+    return {reply:'משמיעה עכשיו את '+job.title+(job.durationSec?', שאורכו '+spokenDuration(job.durationSec):'')+'. כשהקטע ייגמר נמשיך לדבר.',play:{paths:job.paths,durationSec:job.durationSec||0}};
+  }
+  const stage=st.audio?.stage;
+  if(askedBefore&&h.mode!=='video') return {reply:'הקובץ של '+job.title+' עוד בהכנה, '+(Date.now()-job.since<90000?'רק התחיל לפני רגע':'זה כבר בתהליך')+'. ברגע שהוא מוכן אודיע לך, ובינתיים אפשר להמשיך לדבר.'};
+  return {reply:(h.mode==='video'?'התחלתי להוריד את הווידאו של ':'התחלתי להכין את ')+job.title+(h.mode==='video'?', ומאותה הורדה יוכן גם השמע להשמעה בטלפון':'')+
+    '. זה לוקח כמה דקות'+(stage&&stage!=='checking'?' וזה כבר בתהליך':'')+'. בינתיים אפשר להמשיך לדבר על כל דבר שתרצה, ואודיע לך ברגע שהקובץ מוכן.'};
+}
+
 // The video waits for this caller in extension 2 (that service reads and
 // deletes it when he arrives). Kept in the Yemot account, like the memory.
 async function writeExt2Handoff(phone, data) {
@@ -4399,6 +4461,8 @@ async function callHandler(call) {
   let feedbackPending=false;
   const turnHistory=[];
   const turnContext={youtubeResults:[],currentWebsiteUrl:null,currentWebsitePages:[],currentWebsitePageIndex:0,currentWebsiteReadOffset:0};
+  // Extension 3: downloads running for this call, and a file to play next.
+  const callMedia=new Map(); let pendingPlay=null;
   if(typeof loadCallerMemory==='function') await loadCallerMemory(callerPhone);
   if (process.env.ENABLE_AI_OPENING !== 'false' && callerPhone !== 'לא מזוהה' && conversationLog.some(x=>x.phone===callerPhone)) {
     openingPrompt=await buildOpeningForCaller(callerPhone,explicitSearchOnly);
@@ -4462,8 +4526,35 @@ async function callHandler(call) {
       nextPrompt=null;
     } else
     try {
-      recordPath=await call.read(branch1SpeechItems(prompt),'record',
-        {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
+      // Owner, 10.11: "ללימוד קוד הקש 1, ללימוד פריסה הקש 2" - the call now
+      // really waits for that key (while the answer is read and a few seconds
+      // after), and the key becomes the caller's choice. No key = speak.
+      const keyOptions=(typeof isExt3==='function'&&isExt3())&&!call.selfTest&&!pendingPlay?parseKeyOptions(prompt):null;
+      if(keyOptions) {
+        let pressed='';
+        try {
+          pressed=String(await call.read(branch1SpeechItems(prompt),'tap',
+            {max_digits:1,min_digits:1,sec_wait:7,typing_playback_mode:'No',allow_empty:true,empty_val:'None',
+             digits_allowed:[...Object.keys(keyOptions),'*'],timeout:10*60*1000})||'').trim();
+        } catch(keyError) {
+          if(isCallerHangupError(keyError)) { activeCalls.delete(activeKey); return; }
+          throw keyError;
+        }
+        console.info('[EXT3_KEYS] choice',{callId:activeKey,options:Object.keys(keyOptions).join(','),pressed});
+        if(pressed.includes('*')) { activeCalls.delete(activeKey); return call.go_to_folder('/'); }
+        if(keyOptions[pressed]) typedText='בחרתי באפשרות '+pressed+': '+keyOptions[pressed];
+      }
+      if(!typedText) {
+        let items=branch1SpeechItems(keyOptions?'אפשר גם לדבר. אני מקשיבה.':prompt), waitMs=10*60*1000;
+        if(pendingPlay) {
+          items=[...items,...pendingPlay.paths.map(f=>({type:'file',data:String(f)})),{type:'text',data:'הקטע הסתיים. אפשר להמשיך לדבר על כל דבר.'}];
+          waitMs+=Math.round((Number(pendingPlay.durationSec)||3600)*1000*1.3);
+          console.info('[EXT3_MEDIA] playing in the call',{callId:activeKey,files:pendingPlay.paths.length});
+          pendingPlay=null;
+        }
+        recordPath=await call.read(items,'record',
+          {min_length:1,max_length:60,no_confirm_menu:true,timeout:waitMs});
+      }
     } catch(readError) {
       // A caller hang-up is not a TTS failure. Do not issue a second Yemot
       // response after the call has already ended (which can cause
@@ -4496,7 +4587,9 @@ async function callHandler(call) {
     if(!typedText && (!recordPath || recordPath==='None')) {
       emptyRecordAttempts++;
       if(emptyRecordAttempts < 3) {
-        nextPrompt='לא הצלחתי לשמוע אותך. נסה שוב.';
+        const mediaNote=callMedia.size?await ext3MediaNotes(callMedia).catch(()=>''):'';
+        nextPrompt=mediaNote?mediaNote.replace(/^ועוד הודעה: /,'')+' ואפשר להמשיך לדבר.':'לא הצלחתי לשמוע אותך. נסה שוב.';
+        if(mediaNote) emptyRecordAttempts=0;
         continue;
       }
       activeCalls.delete(activeKey);
@@ -4556,6 +4649,11 @@ async function callHandler(call) {
         else try {
           const r=await runExt3Brain(userTranscript,callerPhone,callId,turnHistory,israelNow);
           if(r?.reply) { replyText=r.reply; turnContext.ext3Ref=r.ref||null; turnContext.ext3Handoff=r.handoff||null; ext3Done=true; if(call.selfTest) call.selfTest.lastRef=r.ref||null; }
+          if(r?.handoff && !call.selfTest) {
+            const m=await ext3StartOrPlay(r.handoff,callMedia);
+            if(!m.handoff) { turnContext.ext3Handoff=null; replyText=m.reply; if(m.play) pendingPlay=m.play; }
+            console.info('[EXT3_MEDIA] play request',{callId:activeKey,videoId:r.handoff.videoId,mode:r.handoff.mode,playsNow:!!m.play,handoff:!!m.handoff});
+          }
         } catch(brainError) {
           console.warn('[EXT3_BRAIN] turn failed; using the older routing',{status:geminiErrorStatus(brainError),message:String(brainError?.message||brainError).slice(0,160)});
         }
@@ -4898,6 +4996,11 @@ async function callHandler(call) {
     // queued with prependToNextAction. Instead, put the answer directly into the
     // next read: Yemot will play the answer and immediately collect the next turn.
     // This keeps the same phone call and the same in-memory conversation context.
+    // Extension 3: a download that finished meanwhile is announced after the answer.
+    if(callMedia.size && !pendingPlay) {
+      const mediaNote=await ext3MediaNotes(callMedia).catch(()=>'');
+      if(mediaNote) { replyText=replyText+' ¶ '+mediaNote; console.info('[EXT3_MEDIA] announced',{callId:activeKey}); }
+    }
     nextPrompt=replyText;
     feedbackPending=asksForFeedback(replyText);
     console.info('[CALL_FLOW] next_turn_armed', {

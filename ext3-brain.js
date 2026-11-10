@@ -145,6 +145,7 @@ const VIDEO_WORD = /(?:סרטון|סרטונים|סרט|הרצאה|וידאו|ו
 export function heuristicPlan(utterance, { video = null } = {}) {
   const u = String(utterance || '').trim();
   const base = { standalone: u, search: u, ytHe: u.replace(YT_WORD, ' ').replace(/\s+/g, ' ').trim(), ytEn: '', minMinutes: 0, maxMinutes: 0, play: /(?:להוריד|תוריד|הורד).{0,20}(?:וידאו|וידיאו|סרטון עצמו)|כן לוידאו/u.test(u) ? 'video' : 'audio', continueOffer: false };
+  if (/^בחרתי באפשרות/u.test(u)) return { ...base, intent: 'chat', continueOffer: true };
   if (/^(?:כן|כן בבקשה|בטח|בוודאי|תמשיכי|תמשיך|המשיכי|נמשיך|אחת|אחד|1|יאללה|סבבה|אוקיי|אוקי)[.!? ]*$/u.test(u)) return { ...base, intent: 'chat', continueOffer: true };
   if (/(?:זוכר|זוכרת|דיברנו|אמרתי לך|שאלתי אותך|בפעם הקודמת|בשיחה הקודמת)/u.test(u) && !VIDEO_WORD.test(u)) return { ...base, intent: 'recall' };
   if (video && /(?:תשמיע|תשמיעי|להשמיע|תפעיל|תפעילי|לשמוע את|תוריד|תורידי|להוריד)/u.test(u)) return { ...base, intent: 'video_play' };
@@ -260,7 +261,7 @@ function candidatesText(videos) {
 export const PHONE_STYLE = [
   'את מדברת בטלפון, בעברית טבעית, חמה וזורמת, כמו מומחית אמיתית שאוהבת להסביר. התשובה מוקראת בקול, אז בלי סימני עיצוב, בלי רשימות עם כוכביות, בלי קוד מוקלד ובלי קישורים.',
   'ענה בהרחבה ובפירוט מלא: קודם תשובה ישירה, אחר כך הסבר עשיר ומסודר עם הפרטים החשובים, דוגמאות ותובנות, ובסוף משפט סיכום או שאלת המשך אחת שמקדמת את השיחה. בדרך כלל 10 עד 20 משפטים. רק לשאלה שהתשובה עליה באמת קצרה (שעה, שם, כן או לא) ענה קצר.',
-  'אף פעם אל תבקש מהמתקשר להקיש על מקש, כי בשיחה הזאת אין תפריט מקשים: כשאת מציעה המשך, אמור לו לומר "כן" או לומר מה הוא רוצה.',
+  'כשאת מציעה למתקשר לבחור בין כמה אפשרויות, מספרי אותן בפורמט קבוע: "לנושא הראשון הקש 1, לנושא השני הקש 2", עד 6 אפשרויות, ואמרי שאפשר גם לומר את המספר. המקשים האלה באמת עובדים בשיחה. כשהמתקשר בחר אפשרות, התחילי מיד את מה שבחר, בפירוט, בלי לחזור על הרשימה.',
   'אל תמציא שמות, מספרים, מחירים, תאריכים, סרטונים, ערוצים או ציטוטים. כשאינך בטוחה בפרט, אמור זאת בפשטות.'
 ].join(' ');
 
@@ -451,3 +452,29 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
 }
 
 export { HE_NUMBER_WORDS };
+
+/**
+ * Numbered choices in a reply ("ללימוד קוד הקש 1, ללימוד פריסה הקש 2"):
+ * { '1': 'ללימוד קוד', '2': 'ללימוד פריסה' }, or null when there are none.
+ * The call then really waits for a key, and the key becomes the choice.
+ */
+export function parseKeyOptions(text) {
+  const t = String(text || '').replace(/\s*¶\s*/g, '. ');
+  const out = {};
+  const clean = x => String(x || '').replace(/^[\s,.:;\-–]+|[\s,.:;\-–]+$/g, '').replace(/^(?:ו|או\s+)/u, '').trim().slice(0, 90);
+  // "הקש 1 ל<label>"
+  for (const m of t.matchAll(/(?:הקש|הקישו|לחץ|לחצו)\s*([1-9])(?!\d)\s*(?:-|–)?\s*(ל[^,.;:?!]{2,90})/gu)) if (!/(?:הקש|לחץ)/u.test(m[2])) out[m[1]] ||= clean(m[2]);
+  // "<label> הקש 1" / "<label> - לחץ 1"
+  for (const m of t.matchAll(/([^,.;:?!]{2,90}?)\s*(?:,|-|–)?\s*(?:הקש|הקישו|הקישי|לחץ|לחצו|לחצי|הקשה על|מקש)\s*(?:על\s*)?(?:מקש\s*)?([1-9])(?!\d)/gu)) {
+    const label = clean(m[1]);
+    if (label && !/(?:הקש|לחץ)/u.test(label) && !/^(?:אפשר|ניתן|כדי|אם)$/.test(label)) out[m[2]] ||= label;
+  }
+  // "אפשרות 1: <label>" / numbered list "1. <label>"
+  const listed = {};
+  for (const m of t.matchAll(/(?:^|[.?!:]\s+|אפשרות\s+)([1-6])\s*[.):,]\s*([^.?!]{3,90})/gu)) listed[m[1]] ||= clean(m[2]);
+  if (Object.keys(listed).length >= 2 && listed['1'] && listed['2']) for (const [k, v] of Object.entries(listed)) out[k] ||= v;
+  const keys = Object.keys(out);
+  if (!keys.length) return null;
+  // A lone "press 1" with nothing else is still a real choice.
+  return out;
+}
