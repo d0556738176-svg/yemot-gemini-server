@@ -5592,6 +5592,8 @@ async function runBranch3SelfTest() {
 // memory is wiped at the end. Runs when BRANCH3_DEEP_TEST is set.
 async function runBranch3DeepTest() {
   const phone='0000000003';
+  // The link to the extension-2 media service (status only, nothing downloaded).
+  { const st=await ext2Media({videoId:'dQw4w9WgXcQ'},{timeoutMs:60000}).catch(()=>null); console.info('[DEEP3] ext2 media link',JSON.stringify(st?{ok:true,audio:st.audio?.status,video:st.video?.status}:{ok:false})); }
   const { writeMemory, rememberTurn: remember } = await import('./branch1-memory.js');
   const wipe=async()=>{
     await writeMemory(phone,{phone,summary:'',entries:[]}).catch(()=>{});
