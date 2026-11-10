@@ -344,6 +344,8 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
     plan = parsePlan(await deps.llm(plannerPrompt({ context: smallContext, utterance, now, video }), { budgetMs: 4500, maxTokens: 400, planner: true }));
   } catch (e) { log.warn?.('[EXT3_BRAIN] planner unavailable; using rules', { status: e?.status || 0 }); }
   if (!plan) plan = rules;
+  // "a long video" means a long one even when no minutes were said.
+  if ((plan.intent === 'video_find' || plan.intent === 'video_play') && !plan.minMinutes && /(?:ארוך|ארוכה|ארוכים|מלא|שעה)/u.test(utterance)) plan.minMinutes = /שעה/u.test(utterance) ? 40 : 20;
   // Asked about "the video" but none is on record: what was said is in the
   // conversation text, so it is a memory question, never a new search.
   if (!video && plan.intent === 'video_about') plan.intent = 'recall';

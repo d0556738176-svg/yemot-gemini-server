@@ -510,6 +510,9 @@ console.info('[BRANCH1 FALLBACK] independent provider configuration', {
   openRouterModel: (process.env.OPENROUTER_MODEL || 'openrouter/free').trim()
 });
 console.info('[BRANCH1 FALLBACK] extra providers configured',{names:extraFastProviders().map(x=>x.name)});
+// Which models this Groq key may use (names only), for choosing GROQ_EXTRA_MODELS.
+if((process.env.GROQ_API_KEY||'').trim()) fetch('https://api.groq.com/openai/v1/models',{headers:{authorization:'Bearer '+process.env.GROQ_API_KEY.trim()},signal:AbortSignal.timeout(8000)})
+  .then(r=>r.json()).then(j=>console.info('[GROQ] models available',(j.data||[]).map(m=>m.id).join(','))).catch(()=>{});
 // Branch 1 should stop repeatedly calling a provider after quota/overload failures.
 // This is deliberately isolated from the primary/backup call handlers for other branches.
 const branch1PrimaryCooldown = createCooldownRegistry({quotaMs:180000, transientMs:45000});
@@ -2550,7 +2553,10 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     // once: one strong answer per turn, so the free per-minute quotas last the
     // whole call (08.11: all providers were rate-limited by the second call).
     {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),delayMs:isExt3()?Number(process.env.EXT3_OPENROUTER_DELAY_MS||4500):0},
-    ...extraFastProviders(true)
+    ...extraFastProviders(true),
+    // Owner, 10.11: Groq counts each model's free quota separately, so more
+    // strong models on the same key = more answers before "rate limited".
+    ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?1500+i*800:0}))
   ]) {
     if(!provider.apiKey) continue;
     racers.push((provider.delayMs?new Promise(r=>setTimeout(r,provider.delayMs)).then(()=>{ if(raceDone) throw Object.assign(new Error('not needed'),{status:499}); }):Promise.resolve()).then(()=>callCompatibleChatCompletion({
