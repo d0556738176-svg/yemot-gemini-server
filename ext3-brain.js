@@ -190,7 +190,15 @@ export function youtubeKeys(env = process.env) {
     .map(k => String(k || '').trim()).filter(Boolean))];
 }
 const restingKeys = new Map();
-async function youtubeGet(path, params, { env = process.env, fetchImpl = fetch, timeoutMs = 6000 } = {}) {
+async function youtubeGet(path, params, opts = {}) {
+  try { return await youtubeGetOwn(path, params, opts); }
+  catch (e) {
+    // Own keys missing or used up: the extension-2 service's keys (rotated there).
+    if (opts.proxy && e?.status === 503) return opts.proxy(path, params);
+    throw e;
+  }
+}
+async function youtubeGetOwn(path, params, { env = process.env, fetchImpl = fetch, timeoutMs = 6000 } = {}) {
   const keys = youtubeKeys(env).filter(k => (restingKeys.get(k) || 0) < Date.now());
   if (!keys.length) throw Object.assign(new Error('No YouTube key available'), { status: 503 });
   let last;
@@ -211,12 +219,12 @@ async function youtubeGet(path, params, { env = process.env, fetchImpl = fetch, 
 const decode = s => String(s || '').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
 /** Real search + real details (length, views, date). Never invents anything. */
-export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, env, fetchImpl, regionCode = 'IL' } = {}) {
+export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, env, fetchImpl, proxy, regionCode = 'IL' } = {}) {
   const qs = [...new Set((queries || []).map(q => String(q || '').trim()).filter(q => q.length >= 2))].slice(0, 3);
   const duration = minMinutes >= 20 ? 'long' : (maxMinutes && maxMinutes <= 4) ? 'short' : (minMinutes >= 4 && (!maxMinutes || maxMinutes <= 20)) ? 'medium' : 'any';
   const lists = await Promise.allSettled(qs.map(q => youtubeGet('search', {
     part: 'snippet', q, type: 'video', maxResults: 15, safeSearch: 'strict', regionCode, relevanceLanguage: /[a-z]/i.test(q) && !/[֐-׿]/.test(q) ? 'en' : 'he', videoDuration: duration
-  }, { env, fetchImpl })));
+  }, { env, fetchImpl, proxy })));
   const seen = new Set(), ids = [];
   for (const l of lists) for (const it of (l.status === 'fulfilled' ? l.value.items || [] : [])) {
     const id = it?.id?.videoId;
@@ -227,7 +235,7 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, env,
     if (failed) throw failed.reason;
     return [];
   }
-  const details = await youtubeGet('videos', { part: 'snippet,contentDetails,statistics', id: ids.slice(0, 45).join(',') }, { env, fetchImpl });
+  const details = await youtubeGet('videos', { part: 'snippet,contentDetails,statistics', id: ids.slice(0, 45).join(',') }, { env, fetchImpl, proxy });
   let videos = (details.items || []).map(v => ({
     videoId: v.id,
     title: decode(v.snippet?.title),
@@ -353,7 +361,7 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
   if (plan.intent === 'video_play') {
     let v = video;
     if (!v || (plan.ytHe && !/(?:אותו|אותה|הזה|הזאת|שהמלצת|שאמרת|שדיברנו)/u.test(utterance) && plan.ytHe.length > 8 && !String(v.title).includes(plan.ytHe))) {
-      const found = await (deps.findVideos || findVideos)([plan.ytHe, plan.ytEn], { minMinutes: plan.minMinutes, maxMinutes: plan.maxMinutes, env: deps.env, fetchImpl: deps.fetchImpl }).catch(() => []);
+      const found = await (deps.findVideos || findVideos)([plan.ytHe, plan.ytEn], { minMinutes: plan.minMinutes, maxMinutes: plan.maxMinutes, env: deps.env, fetchImpl: deps.fetchImpl, proxy: deps.youtubeProxy }).catch(() => []);
       if (found[0]) v = videoRef(found[0]);
     }
     if (!v) return { intent: plan.intent, reply: 'עוד לא בחרנו סרטון מסוים. ספר לי איזה סרטון אתה רוצה לשמוע, ואמצא לך אותו ביוטיוב.' };
@@ -369,7 +377,7 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
   if (plan.intent === 'video_find') {
     const queries = [plan.ytHe || plan.standalone || utterance, plan.ytEn].filter(Boolean);
     let found = [];
-    try { found = await (deps.findVideos || findVideos)(queries, { minMinutes: plan.minMinutes, maxMinutes: plan.maxMinutes, env: deps.env, fetchImpl: deps.fetchImpl }); }
+    try { found = await (deps.findVideos || findVideos)(queries, { minMinutes: plan.minMinutes, maxMinutes: plan.maxMinutes, env: deps.env, fetchImpl: deps.fetchImpl, proxy: deps.youtubeProxy }); }
     catch (e) { log.warn?.('[EXT3_BRAIN] YouTube search failed', { status: e?.status || 0, message: String(e?.message || e).slice(0, 120) }); }
     if (!found.length) return { intent: plan.intent, reply: 'חיפשתי ביוטיוב ולא מצאתי סרטון שמתאים בדיוק למה שביקשת. אפשר לתאר לי במילים אחרות את הנושא, או לומר אם חשוב לך שיהיה בעברית או באורך מסוים, ואחפש שוב.' };
     const instruction = 'המתקשר ביקש המלצה על סרטון. לפניך רשימת סרטונים אמיתיים שנמצאו עכשיו ביוטיוב, עם הכותרת המדויקת, הערוץ, האורך בדקות, מספר הצפיות והתיאור. ' +

@@ -4394,6 +4394,15 @@ async function runExt3Brain(utterance, phone, callId, turnHistory, now) {
       ? raceSynthesis(prompt,budgetMs,{maxTokens:Math.min(maxTokens,600),gemini:true,geminiBudgetMs:2500})
       : raceSynthesis(prompt,budgetMs,{maxTokens,quality:true}),
     webSearch:(q,o)=>ext3WebSearch(q,{timeoutMs:Math.min(o?.timeoutMs||3500,3500)}),
+    youtubeProxy:async(kind,params)=>{
+      const secret=String(process.env.EXT3_MEDIA_SECRET||'').trim(); if(!secret) throw Object.assign(new Error('no proxy'),{status:503});
+      const u=new URL(String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'')+'/api/ext3/youtube/'+kind);
+      for(const [k,v] of Object.entries({...params,secret})) u.searchParams.set(k,String(v));
+      const r=await fetch(u,{signal:AbortSignal.timeout(9000)});
+      if(!r.ok) throw Object.assign(new Error('YouTube proxy HTTP '+r.status),{status:r.status});
+      console.info('[EXT3_BRAIN] YouTube through the extension-2 keys',{kind});
+      return r.json();
+    },
     readPages:(urls,opts)=>readPages(urls,{timeoutMs:Math.min(opts?.timeoutMs||4500,4500),hedgeMs:1200}),
     videoDescription:async id=>{
       const k=(process.env.YOUTUBE_API_KEY||'').trim(); if(!k) return '';

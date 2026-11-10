@@ -166,3 +166,11 @@ test('a pressed key continues with that choice, not the menu again', async () =>
   assert.equal(prompts.length, 1);
   assert.match(prompts[0].p, /המשיכי בדיוק משם/);
 });
+
+test('without own YouTube keys the extension-2 keys are used', async () => {
+  const calls = [];
+  const proxy = async (kind, params) => { calls.push(kind); return kind === 'search' ? { items: [{ id: { videoId: 'ddddddddddd' } }] } : { items: [{ id: 'ddddddddddd', snippet: { title: 'Real one', channelTitle: 'C' }, contentDetails: { duration: 'PT30M' }, statistics: { viewCount: '5' } }] }; };
+  const out = await findVideos(['x y'], { env: {}, proxy });
+  assert.deepEqual(calls, ['search', 'videos']);
+  assert.equal(out[0].videoId, 'ddddddddddd');
+});
