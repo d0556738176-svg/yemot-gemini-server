@@ -4842,6 +4842,35 @@ async function dubStatusOf(videoId) {
   if (r?.state === 'running' && !live) return { state: 'stale' }; // a restart: it will be resumed
   return r || null;
 }
+// Owner, 10.11: extension 3 (the main server) starts a download here and
+// keeps talking with the caller meanwhile; it asks for the status every turn
+// and plays the phone files itself when they are ready. Only callers that
+// hold EXT3_MEDIA_SECRET (set on both services) may use it.
+app.get('/api/ext3/media', rateLimit(240, 60 * 1000, 'ext3-media'), async (req, res) => {
+  const secret = String(process.env.EXT3_MEDIA_SECRET || '');
+  if (!secret || String(req.query.secret || '') !== secret) return res.status(403).json({ ok: false });
+  const videoId = String(req.query.videoId || '');
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return res.status(400).json({ ok: false, error: 'bad_video' });
+  const mode = req.query.mode === 'video' ? 'video' : 'audio';
+  const video = { videoId, title: String(req.query.title || '').slice(0, 200), channelTitle: String(req.query.channel || '').slice(0, 120), durationSeconds: Number(req.query.duration) || null };
+  try {
+    const cached = await Promise.race([lookupCachedYouTubeAudio(videoId).catch(() => null), new Promise(r => setTimeout(() => r(null), 3000))]);
+    let audio = cached?.playbackPaths?.length ? { status: 'ready', paths: cached.playbackPaths } : (youtubePlaybackJobs.get(videoId) || null);
+    let vjob = youtubeVideoJobs.get(videoId) || null;
+    if (req.query.start === '1') {
+      if (mode === 'video' && (!vjob || vjob.status === 'failed')) vjob = startYouTubeVideoJob({ ...video });
+      // The phone audio: from the video's own download when a video was asked
+      // (made by that job), otherwise its own audio download.
+      if (mode === 'audio' && (!audio || audio.status === 'failed')) audio = startYouTubePlaybackJob(video);
+    }
+    const audioOut = audio ? { status: audio.status, paths: audio.status === 'ready' ? audio.paths : null, stage: audio.progress?.stage || null, error: audio.error ? String(audio.error?.code || audio.error?.message || audio.error).slice(0, 80) : null } : { status: 'none' };
+    const videoOut = vjob ? { status: vjob.status, error: vjob.error ? String(vjob.error).slice(0, 80) : null } : { status: 'none' };
+    res.json({ ok: true, videoId, audio: audioOut, video: videoOut });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e).slice(0, 120) });
+  }
+});
+
 app.get('/yemot-media', async (req, res) => {
   try {
     const { handleMediaKey } = await import('./branch2-media-keys.js');
