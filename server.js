@@ -5596,8 +5596,9 @@ async function runBranch3SelfTest() {
 // call B (new call, memory reloaded) asks what was discussed, then more
 // questions. Every question, full answer and time is logged; the test number's
 // memory is wiped at the end. Runs when BRANCH3_DEEP_TEST is set.
+let deepBad=0;
 async function runBranch3DeepTest() {
-  const phone='0000000003';
+  const phone='0000000003'; deepBad=0;
   // The link to the extension-2 media service (status only, nothing downloaded).
   { const st=await ext2Media({videoId:'dQw4w9WgXcQ'},{timeoutMs:60000}).catch(()=>null); console.info('[DEEP3] ext2 media link',JSON.stringify(st?{ok:true,audio:st.audio?.status,video:st.video?.status}:{ok:false})); }
   const { writeMemory, rememberTurn: remember } = await import('./branch1-memory.js');
@@ -5615,6 +5616,7 @@ async function runBranch3DeepTest() {
         const text=(Array.isArray(items)?items:[]).map(x=>x?.data||'').join(' ').replace(/\s*¶\s*/g,'. ').trim();
         if(index>0) {
           turns.push({time:new Date().toISOString(),callId:id,user:questions[index-1],gemini:text,...(call.selfTest.lastRef?{ref:call.selfTest.lastRef}:{})});
+          if(text.length<2||/מנוע התשובות אינו זמין|תקלה זמנית|לא שמעתי אותך/.test(text)) deepBad++;
           call.selfTest.lastRef=null;
           for(let p=0;p<text.length;p+=1500)
             console.info('[DEEP3]',JSON.stringify({call:label,step:index,part:p/1500+1,question:p?undefined:questions[index-1],ms:p?undefined:Date.now()-askedAt,chars:p?undefined:text.length,reply:text.slice(p,p+1500)}));
@@ -5660,7 +5662,8 @@ async function runBranch3DeepTest() {
     await runCall('B',B);
     console.info('[DEEP3] finished');
     // Owner, 10.11: a ring (צינתוק) to the owner's phone once the check passed.
-    if(process.env.NOTIFY_TZINTUK_PHONE) await sendOwnerTzintuk(process.env.NOTIFY_TZINTUK_PHONE);
+    console.info('[DEEP3] failed turns',deepBad);
+    if(process.env.NOTIFY_TZINTUK_PHONE&&deepBad===0) await sendOwnerTzintuk(process.env.NOTIFY_TZINTUK_PHONE);
   } catch(e) { console.warn('[DEEP3] crashed',String(e?.stack||e).slice(0,400)); }
   finally { await wipe(); }
 }
