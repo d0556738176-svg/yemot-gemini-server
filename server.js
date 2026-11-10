@@ -491,7 +491,11 @@ function extraFastProviders(fastPhone=true){
   const defs=[
     ['Mistral','https://api.mistral.ai/v1','MISTRAL_API_KEY','MISTRAL_MODEL','mistral-small-latest'],
     ['Cerebras','https://api.cerebras.ai/v1','CEREBRAS_API_KEY','CEREBRAS_MODEL','gpt-oss-120b'],
-    ['SambaNova','https://api.sambanova.ai/v1','SAMBANOVA_API_KEY','SAMBANOVA_MODEL','gpt-oss-120b']
+    ['SambaNova','https://api.sambanova.ai/v1','SAMBANOVA_API_KEY','SAMBANOVA_MODEL','gpt-oss-120b'],
+    // Owner, 10.11: more free capacity (keys added in Render when available).
+    ['Groq2','https://api.groq.com/openai/v1','GROQ_BACKUP_API_KEY','GROQ_BACKUP_MODEL','openai/gpt-oss-120b'],
+    ['ZAI','https://api.z.ai/api/paas/v4','ZAI_API_KEY','ZAI_MODEL','glm-4.5-flash'],
+    ['Cohere','https://api.cohere.ai/compatibility/v1','COHERE_API_KEY','COHERE_MODEL','command-a-03-2025']
   ];
   return defs.map(([name,baseUrl,keyEnv,modelEnv,defModel])=>({
     name,baseUrl,apiKey:(process.env[keyEnv]||'').trim(),model:(process.env[modelEnv]||defModel).trim(),
@@ -4333,13 +4337,46 @@ const branch1Search=createBranch1Search(searchWebDirect);
 // ---------- Extension 3 brain wiring (ext3-brain.js) ----------
 // Several search engines at once (Tavily/secondary race, Google via Serper,
 // LangSearch), merged: one answer is built from more of the web.
+// Our own free meta-search (SearXNG on Render): one query goes to many public
+// engines (Google, Bing, DuckDuckGo, Brave, Mojeek, Wikipedia...) at once.
+async function searchSearxng(q,{timeoutMs=4000}={}) {
+  const base=String(process.env.SEARXNG_URL||'').replace(/\/+$/,'');
+  if(!base) return [];
+  const u=new URL(base+'/search'); u.searchParams.set('q',q); u.searchParams.set('format','json'); u.searchParams.set('language','all'); u.searchParams.set('safesearch','2');
+  const r=await fetch(u,{signal:AbortSignal.timeout(timeoutMs),headers:{'Accept':'application/json'}});
+  if(!r.ok) throw Object.assign(new Error('SearXNG HTTP '+r.status),{status:r.status});
+  const j=await r.json();
+  const out=(j.results||[]).slice(0,12).map(x=>({title:String(x.title||''),url:String(x.url||''),snippet:String(x.content||''),engines:x.engines}));
+  console.info('[SEARXNG] results',{count:out.length,engines:[...new Set(out.flatMap(x=>x.engines||[]))].slice(0,8)});
+  return out;
+}
+// A free service sleeps when idle; an extension-3 call wakes it at once, so it
+// is up by the time the first question needs the web.
+let searxngWokenAt=0;
+function wakeSearxng() {
+  const base=String(process.env.SEARXNG_URL||'').replace(/\/+$/,'');
+  if(!base||Date.now()-searxngWokenAt<5*60*1000) return;
+  searxngWokenAt=Date.now();
+  fetch(base+'/healthz',{signal:AbortSignal.timeout(90000)}).catch(()=>{});
+}
+// Exa (free monthly credit, no card): its own index, returns page text too.
+async function searchExa(q,{timeoutMs=4000}={}) {
+  const key=String(process.env.EXA_API_KEY||'').trim(); if(!key) return [];
+  const r=await fetch('https://api.exa.ai/search',{method:'POST',signal:AbortSignal.timeout(timeoutMs),headers:{'x-api-key':key,'content-type':'application/json'},
+    body:JSON.stringify({query:q,numResults:6,contents:{text:{maxCharacters:1500}}})});
+  if(!r.ok) throw Object.assign(new Error('Exa HTTP '+r.status),{status:r.status});
+  const j=await r.json();
+  return (j.results||[]).map(x=>({title:String(x.title||''),url:String(x.url||''),snippet:String(x.text||'').slice(0,1500)}));
+}
 async function ext3WebSearch(q,{timeoutMs=4500}={}) {
   // Each engine gets the same short window; a slow one is simply left out.
   const capped=p=>Promise.race([p,new Promise(r=>setTimeout(()=>r([]),timeoutMs).unref?.())]);
   const settled=await Promise.allSettled([
     capped(searchWebDirect(q,{timeoutMs:Math.min(timeoutMs,3500)})),
     process.env.SERPER_API_KEY?capped(searchSerper(q,{timeoutMs,count:8})):Promise.resolve([]),
-    process.env.LANGSEARCH_API_KEY?capped(searchLangSearch(q,{timeoutMs,count:6})):Promise.resolve([])
+    process.env.LANGSEARCH_API_KEY?capped(searchLangSearch(q,{timeoutMs,count:6})):Promise.resolve([]),
+    process.env.SEARXNG_URL?capped(searchSearxng(q,{timeoutMs})):Promise.resolve([]),
+    process.env.EXA_API_KEY?capped(searchExa(q,{timeoutMs})):Promise.resolve([])
   ]);
   const seen=new Set(), out=[];
   for(const s of settled) for(const r of (s.status==='fulfilled'&&Array.isArray(s.value)?s.value:[])) {
@@ -4463,6 +4500,7 @@ async function callHandler(call) {
   const turnContext={youtubeResults:[],currentWebsiteUrl:null,currentWebsitePages:[],currentWebsitePageIndex:0,currentWebsiteReadOffset:0};
   // Extension 3: downloads running for this call, and a file to play next.
   const callMedia=new Map(); let pendingPlay=null;
+  if(typeof isExt3==='function'&&isExt3()) { wakeSearxng(); if(process.env.EXT3_MEDIA_SECRET) fetch(String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'')+'/health',{signal:AbortSignal.timeout(90000)}).catch(()=>{}); }
   if(typeof loadCallerMemory==='function') await loadCallerMemory(callerPhone);
   if (process.env.ENABLE_AI_OPENING !== 'false' && callerPhone !== 'לא מזוהה' && conversationLog.some(x=>x.phone===callerPhone)) {
     openingPrompt=await buildOpeningForCaller(callerPhone,explicitSearchOnly);
