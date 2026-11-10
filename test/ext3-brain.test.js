@@ -101,13 +101,38 @@ test('questions about the chosen video use its real data; "play it" hands off to
   assert.equal(r3.handoff.mode, 'video');
 });
 
-test('when the planner is down the rules still pick the right path', async () => {
-  const { deps } = baseDeps([new Error('down'), '{"answer":"שלב שני בשיעור"}']);
+test('"yes" continues the lesson without spending a planner call', async () => {
+  const { deps, prompts } = baseDeps(['{"answer":"שלב שני בשיעור"}']);
   const current = [{ user: 'אני רוצה ללמוד תכנות', assistant: 'שלב ראשון... רוצה שנמשיך?', ref: { type: 'lesson', topic: 'תכנות', step: 1 } }];
   const r = await ext3Turn({ utterance: 'כן', current, now }, deps);
   assert.equal(r.intent, 'chat');
   assert.equal(r.ref.step, 2);
   assert.equal(r.reply, 'שלב שני בשיעור');
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0].p, /המשיכי בדיוק משם/);
+});
+
+test('when the planner is down the rules still pick the right path', async () => {
+  const { deps } = baseDeps([new Error('down'), '{"answer":"מנוע סילון דוחס אוויר"}']);
+  const r = await ext3Turn({ utterance: 'תסבירי לי איך עובד מנוע סילון', now }, deps);
+  assert.equal(r.intent, 'chat');
+  assert.equal(r.reply, 'מנוע סילון דוחס אוויר');
+});
+
+test('asked about "the video" with none on record: a memory answer, not a new search', async () => {
+  let searched = false;
+  const { deps } = baseDeps(['{"intent":"video_about"}', '{"answer":"המלצתי על הסרטון X"}'], { findVideos: async () => { searched = true; return []; } });
+  const r = await ext3Turn({ utterance: 'מה היה השם של הסרטון שהמלצת לי', now }, deps);
+  assert.equal(r.intent, 'recall');
+  assert.equal(searched, false);
+});
+
+test('"play it" is audio unless a video download is asked', async () => {
+  const current = [{ user: 'x', assistant: 'y', ref: clown }];
+  const a = baseDeps([]); const r1 = await ext3Turn({ utterance: 'תשמיעי לי אותו', current, now }, a.deps);
+  assert.equal(r1.handoff.mode, 'audio');
+  const b = baseDeps([]); const r2 = await ext3Turn({ utterance: 'תורידי לי את הווידאו שלו', current, now }, b.deps);
+  assert.equal(r2.handoff.mode, 'video');
 });
 
 test('web answers are built from pages actually read', async () => {

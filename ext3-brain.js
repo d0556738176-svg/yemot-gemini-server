@@ -243,7 +243,7 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, env,
   if (minMinutes) videos = videos.filter(v => v.durationSec >= minMinutes * 60 * 0.75);
   if (maxMinutes) videos = videos.filter(v => v.durationSec <= maxMinutes * 60 * 1.25);
   // Relevance order from YouTube, nudged by popularity.
-  videos.sort((a, b) => (order.get(a.videoId) - order.get(b.videoId)) - 2 * (Math.log10(b.viewCount + 10) - Math.log10(a.viewCount + 10)));
+  videos.sort((a, b) => (order.get(a.videoId) - order.get(b.videoId)) - 4 * (Math.log10(b.viewCount + 10) - Math.log10(a.viewCount + 10)));
   return videos.slice(0, 10);
 }
 
@@ -325,11 +325,19 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
   const smallContext = buildContext({ summary, prior, current, maxChars: 2600 });
   let plan = null;
   const t0 = Date.now();
-  try {
+  const rules = heuristicPlan(utterance, { video });
+  const sure = rules.continueOffer || (video && ['video_play', 'video_about'].includes(rules.intent));
+  if (sure) plan = rules;
+  else try {
     plan = parsePlan(await deps.llm(plannerPrompt({ context: smallContext, utterance, now, video }), { budgetMs: 4500, maxTokens: 400, planner: true }));
   } catch (e) { log.warn?.('[EXT3_BRAIN] planner unavailable; using rules', { status: e?.status || 0 }); }
-  if (!plan) plan = heuristicPlan(utterance, { video });
-  if (!video && (plan.intent === 'video_about')) plan.intent = 'video_find';
+  if (!plan) plan = rules;
+  // Asked about "the video" but none is on record: what was said is in the
+  // conversation text, so it is a memory question, never a new search.
+  if (!video && plan.intent === 'video_about') plan.intent = 'recall';
+  // A video download only when the caller said so (the planner guessed
+  // "video" for a plain "play it").
+  plan.play = /(?:להוריד|תוריד|תורידי|הורד|הורדה|הורדת).{0,25}(?:וידאו|וידיאו|ווידאו|סרטון עצמו|הסרטון)|(?:וידאו|וידיאו|ווידאו).{0,15}(?:להוריד|תוריד|תורידי)|כן לוידאו/u.test(utterance) ? 'video' : 'audio';
   log.info?.('[EXT3_BRAIN] plan', { intent: plan.intent, standalone: plan.standalone.slice(0, 140), search: plan.search.slice(0, 100), yt: plan.ytHe.slice(0, 80), ms: Date.now() - t0 });
 
   // Sources leave less room for the conversation: the whole request must stay
@@ -364,7 +372,7 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
     catch (e) { log.warn?.('[EXT3_BRAIN] YouTube search failed', { status: e?.status || 0, message: String(e?.message || e).slice(0, 120) }); }
     if (!found.length) return { intent: plan.intent, reply: 'חיפשתי ביוטיוב ולא מצאתי סרטון שמתאים בדיוק למה שביקשת. אפשר לתאר לי במילים אחרות את הנושא, או לומר אם חשוב לך שיהיה בעברית או באורך מסוים, ואחפש שוב.' };
     const instruction = 'המתקשר ביקש המלצה על סרטון. לפניך רשימת סרטונים אמיתיים שנמצאו עכשיו ביוטיוב, עם הכותרת המדויקת, הערוץ, האורך בדקות, מספר הצפיות והתיאור. ' +
-      'בחרי את הסרטון המתאים ביותר לבקשה (ואפשר להזכיר עוד אחד או שניים כחלופה). אסור להמליץ על סרטון שאינו ברשימה, ואסור לשנות את הכותרת, הערוץ או האורך. ' +
+      'בחרי את הסרטון המתאים ביותר לבקשה: קודם שיתאים בדיוק לנושא, לסוג, לשפה ולאורך שביקש, ובין המתאימים עדיף סרטון איכותי ופופולרי עם הרבה צפיות (ואפשר להזכיר עוד אחד או שניים כחלופה). אסור להמליץ על סרטון שאינו ברשימה, ואסור לשנות את הכותרת, הערוץ או האורך. ' +
       'בתשובה אמרי את הכותרת המדויקת כפי שהיא, ואם היא בשפה זרה גם תרגום שלה לעברית, את שם הערוץ, את האורך ואת מספר הצפיות, ותארי על מה הסרטון רק לפי התיאור שלו, בלי להמציא תוכן. ' +
       'סיימי בכך שאפשר לומר "תשמיעי לי אותו" כדי לשמוע אותו בשלוחת יוטיוב, או "תורידי את הווידאו". ' +
       'החזר JSON בלבד בצורה {"pick":מספר i של הסרטון הנבחר,"answer":"התשובה למתקשר"}.';
@@ -411,7 +419,7 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
     let pages = [];
     if (deps.readPages) {
       const urls = results.slice(0, 4).map(r => r.url).filter(u => !/youtube\.com|youtu\.be|facebook\.com|instagram\.com|tiktok\.com/i.test(u)).slice(0, 3);
-      pages = await Promise.race([deps.readPages(urls, { timeoutMs: 5500 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 6500).unref?.())]);
+      pages = await Promise.race([deps.readPages(urls, { timeoutMs: 5500 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 5200).unref?.())]);
     }
     const byUrl = new Map(pages.map(p => [String(p.url || '').replace(/[#?].*$/, ''), p]));
     let budget = 5200;

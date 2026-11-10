@@ -4334,10 +4334,12 @@ const branch1Search=createBranch1Search(searchWebDirect);
 // Several search engines at once (Tavily/secondary race, Google via Serper,
 // LangSearch), merged: one answer is built from more of the web.
 async function ext3WebSearch(q,{timeoutMs=4500}={}) {
+  // Each engine gets the same short window; a slow one is simply left out.
+  const capped=p=>Promise.race([p,new Promise(r=>setTimeout(()=>r([]),timeoutMs).unref?.())]);
   const settled=await Promise.allSettled([
-    searchWebDirect(q,{timeoutMs}),
-    process.env.SERPER_API_KEY?searchSerper(q,{timeoutMs,count:8}):Promise.resolve([]),
-    process.env.LANGSEARCH_API_KEY?searchLangSearch(q,{timeoutMs,count:6}):Promise.resolve([])
+    capped(searchWebDirect(q,{timeoutMs:Math.min(timeoutMs,3500)})),
+    process.env.SERPER_API_KEY?capped(searchSerper(q,{timeoutMs,count:8})):Promise.resolve([]),
+    process.env.LANGSEARCH_API_KEY?capped(searchLangSearch(q,{timeoutMs,count:6})):Promise.resolve([])
   ]);
   const seen=new Set(), out=[];
   for(const s of settled) for(const r of (s.status==='fulfilled'&&Array.isArray(s.value)?s.value:[])) {
@@ -4354,8 +4356,8 @@ async function runExt3Brain(utterance, phone, callId, turnHistory, now) {
     llm:(prompt,{budgetMs=12000,maxTokens=1500,planner=false}={})=>planner
       ? raceSynthesis(prompt,budgetMs,{maxTokens:Math.min(maxTokens,600),gemini:true,geminiBudgetMs:2500})
       : raceSynthesis(prompt,budgetMs,{maxTokens,quality:true}),
-    webSearch:ext3WebSearch,
-    readPages:(urls,opts)=>readPages(urls,{timeoutMs:opts?.timeoutMs||5500,hedgeMs:1500}),
+    webSearch:(q,o)=>ext3WebSearch(q,{timeoutMs:Math.min(o?.timeoutMs||3500,3500)}),
+    readPages:(urls,opts)=>readPages(urls,{timeoutMs:Math.min(opts?.timeoutMs||4500,4500),hedgeMs:1200}),
     videoDescription:async id=>{
       const k=(process.env.YOUTUBE_API_KEY||'').trim(); if(!k) return '';
       const u=new URL('https://www.googleapis.com/youtube/v3/videos'); u.searchParams.set('part','snippet'); u.searchParams.set('id',id); u.searchParams.set('key',k);
@@ -4553,7 +4555,7 @@ async function callHandler(call) {
         if(fixed) { replyText=fixed; ext3Done=true; }
         else try {
           const r=await runExt3Brain(userTranscript,callerPhone,callId,turnHistory,israelNow);
-          if(r?.reply) { replyText=r.reply; turnContext.ext3Ref=r.ref||null; turnContext.ext3Handoff=r.handoff||null; ext3Done=true; }
+          if(r?.reply) { replyText=r.reply; turnContext.ext3Ref=r.ref||null; turnContext.ext3Handoff=r.handoff||null; ext3Done=true; if(call.selfTest) call.selfTest.lastRef=r.ref||null; }
         } catch(brainError) {
           console.warn('[EXT3_BRAIN] turn failed; using the older routing',{status:geminiErrorStatus(brainError),message:String(brainError?.message||brainError).slice(0,160)});
         }
@@ -5454,7 +5456,8 @@ async function runBranch3DeepTest() {
       read:async items=>{
         const text=(Array.isArray(items)?items:[]).map(x=>x?.data||'').join(' ').replace(/\s*¶\s*/g,'. ').trim();
         if(index>0) {
-          turns.push({time:new Date().toISOString(),callId:id,user:questions[index-1],gemini:text});
+          turns.push({time:new Date().toISOString(),callId:id,user:questions[index-1],gemini:text,...(call.selfTest.lastRef?{ref:call.selfTest.lastRef}:{})});
+          call.selfTest.lastRef=null;
           for(let p=0;p<text.length;p+=1500)
             console.info('[DEEP3]',JSON.stringify({call:label,step:index,part:p/1500+1,question:p?undefined:questions[index-1],ms:p?undefined:Date.now()-askedAt,chars:p?undefined:text.length,reply:text.slice(p,p+1500)}));
         }
