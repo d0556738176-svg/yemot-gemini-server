@@ -5653,8 +5653,22 @@ async function runBranch3DeepTest() {
     for(let i=conversationLog.length-1;i>=0;i--) if(conversationLog[i].phone===phone) conversationLog.splice(i,1);
     await runCall('B',B);
     console.info('[DEEP3] finished');
+    // Owner, 10.11: a ring (צינתוק) to the owner's phone once the check passed.
+    if(process.env.NOTIFY_TZINTUK_PHONE) await sendOwnerTzintuk(process.env.NOTIFY_TZINTUK_PHONE);
   } catch(e) { console.warn('[DEEP3] crashed',String(e?.stack||e).slice(0,400)); }
   finally { await wipe(); }
+}
+async function sendOwnerTzintuk(phones) {
+  try {
+    const u=String(process.env.YEMOT_API_USERNAME||'').trim(), pw=String(process.env.YEMOT_API_PASSWORD||'').trim();
+    const token=String(process.env.YEMOT_TOKEN||'').trim()||(u&&pw?u+':'+pw:'');
+    if(!token) { console.warn('[TZINTUK] no Yemot token'); return; }
+    const url=new URL('https://www.call2all.co.il/ym/api/RunTzintuk');
+    url.searchParams.set('token',token); url.searchParams.set('phones',String(phones).replace(/[^0-9,]/g,'')); url.searchParams.set('TzintukTimeOut','15');
+    const r=await fetch(url,{signal:AbortSignal.timeout(15000)});
+    const j=await r.json().catch(()=>null);
+    console.info('[TZINTUK] sent',{status:r.status,response:j?.responseStatus||null,message:String(j?.message||'').slice(0,120)});
+  } catch(e) { console.warn('[TZINTUK] failed',String(e?.message||e).slice(0,160)); }
 }
 // Shows whether each web key works (never the keys themselves). The result is
 // cached for hours, so opening this page costs at most one tiny call per provider.
