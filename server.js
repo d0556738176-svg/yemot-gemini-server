@@ -2563,7 +2563,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
       provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
       messages:[{role:'user',content:prompt}],timeoutMs:Math.max(1200,budgetMs-300),
       maxTokens,cooldowns:provider.big?branch1SynthCooldownsBig:branch1SynthCooldowns,cooldownMs:15000
-    })).then(text=>{ if(!String(text||'').trim()) throw new Error('empty'); return String(text).trim(); })
+    })).then(text=>{ text=String(text||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim(); if(!text) throw new Error('empty'); return text; })
       .catch(err=>{ console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
   }
   const checked=validate?racers.map(r=>r.then(text=>{
