@@ -118,7 +118,7 @@ export function plannerPrompt({ context, utterance, now, video }) {
 }
 
 export function parsePlan(text) {
-  const s = String(text || '');
+  const s = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '');
   const m = s.match(/\{[\s\S]*\}/);
   if (!m) return null;
   let j;
@@ -300,8 +300,9 @@ export function answerPrompt({ context, utterance, plan, now, instruction, extra
   ].filter(x => x !== '').join('\n');
 }
 
+const noThinking = t => String(t || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 export function extractAnswer(raw) {
-  const s = String(raw || '').trim();
+  const s = noThinking(raw);
   const m = s.match(/\{[\s\S]*\}/);
   if (m) { try { const j = JSON.parse(m[0]); if (typeof j.answer === 'string' && j.answer.trim()) return j.answer.trim(); } catch {} }
   const loose = s.match(/"answer"\s*:\s*"([\s\S]*?)"\s*}?\s*$/);
