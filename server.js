@@ -33,6 +33,11 @@ import { fuzzyCorrectEntities, lexiconKeyterms, ENTITY_LEXICON } from './speech-
 import { branch1Clarification, branch1FollowUpHistory, filterBranch1Results, createBranch1Search, resolveBranch1Question, isCorrection, isBranch1LocalRequest, isBranch1EventRequest, answerBranch1Local, answerBranch1Events, branch1SpeechItems } from './branch1-reliability.js';
 
 const app = express();
+// Graceful deploys (owner, 11.11: a call got "אין מענה" when a deploy replaced
+// the server mid-answer). Count the requests in flight; on SIGTERM keep
+// answering them, then exit.
+let inFlight=0, draining=false;
+app.use((req,res,next)=>{ inFlight++; let done=false; const end=()=>{ if(!done){ done=true; inFlight--; } }; res.on('finish',end); res.on('close',end); next(); });
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: true, limit: '64kb' }));
@@ -4627,7 +4632,26 @@ async function callHandler(call) {
   // keys (Yemot's Hebrew keyboard; the typed text arrives as letters).
   // No key = speak, so a regular call is not held up.
   let typingMode=false, typedHintSaid=false, emptyTypedAttempts=0;
-  if(!call.selfTest) {
+  // A call that began on the previous server (a deploy replaced it): Yemot
+  // sends every value of the call so far. Continue from there instead of
+  // starting over, and never reuse an old value as a new answer.
+  let resumeRecording='', resumed=false;
+  {
+    const q=(call?.req?.method==='POST'?call?.req?.body:call?.req?.query)||{};
+    const idx=Object.keys(q).map(k=>/^val_(\d+)$/.exec(k)).filter(Boolean).map(m=>Number(m[1]));
+    if(!call.selfTest && idx.length) {
+      resumed=true;
+      let n=Math.max(...idx);
+      const last=[].concat(q['val_'+n]).pop();
+      if(/\.(?:wav|mp3)$/i.test(String(last||''))) resumeRecording=String(last);
+      const read=call.read.bind(call);
+      call.read=(m,mode,o={})=>read(m,mode,{...o,val_name:o.val_name||('val_'+(++n))});
+      firstTurn=false;
+      if(!resumeRecording) nextPrompt='סליחה על ההפסקה הקצרה, השרת התעדכן. אפשר להמשיך, מה רצית לומר?';
+      console.info('[CALL_FLOW] call resumed after a server update',{callId:activeKey,values:idx.length,withRecording:!!resumeRecording});
+    }
+  }
+  if(!call.selfTest && !resumed) {
     try {
       const choice=String(await call.read([{type:'text',data:'לשיחה בדיבור הקש 1. להקלדה במקשי הטלפון הקש 2.'}],'tap',
         {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',
@@ -4652,7 +4676,8 @@ async function callHandler(call) {
     firstTurn=false;
     let recordPath;
     let typedText='';
-    if(typingMode) {
+    if(resumeRecording) { recordPath=resumeRecording; resumeRecording=''; }
+    else if(typingMode) {
       // Hebrew keyboard: letters by key presses, # between letters; Yemot's
       // own menu (finish, hear, delete, change language) handles the rest.
       // Typing nothing switches the call back to speech.
@@ -4681,7 +4706,7 @@ async function callHandler(call) {
       // Owner, 10.11: "ללימוד קוד הקש 1, ללימוד פריסה הקש 2" - the call now
       // really waits for that key (while the answer is read and a few seconds
       // after), and the key becomes the caller's choice. No key = speak.
-      const keyOptions=(typeof brainBranch==='function'&&brainBranch())&&!call.selfTest&&!pendingPlay?parseKeyOptions(prompt):null;
+      const keyOptions=!recordPath&&(typeof brainBranch==='function'&&brainBranch())&&!call.selfTest&&!pendingPlay?parseKeyOptions(prompt):null;
       if(keyOptions) {
         let pressed='';
         try {
@@ -4696,7 +4721,7 @@ async function callHandler(call) {
         if(pressed.includes('*')) { activeCalls.delete(activeKey); return call.go_to_folder('/'); }
         if(keyOptions[pressed]) typedText='בחרתי באפשרות '+pressed+': '+keyOptions[pressed];
       }
-      if(!typedText) {
+      if(!typedText && !recordPath) {
         let items=branch1SpeechItems(keyOptions?(brainBranch()==='1'?'אפשר גם לדבר. אני מקשיב.':'אפשר גם לדבר. אני מקשיבה.'):prompt), waitMs=10*60*1000;
         if(pendingPlay) {
           items=[...items,...pendingPlay.paths.map(f=>({type:'file',data:String(f)})),{type:'text',data:'הקטע הסתיים. אפשר להמשיך לדבר על כל דבר.'}];
@@ -6055,6 +6080,16 @@ async function configureYemotStructure() {
 process.on('unhandledRejection',(reason)=>{if(!(reason instanceof ExitError)) logDetailedError('Unhandled Rejection',reason)});
 process.on('uncaughtException',(err)=>{if(!(err instanceof ExitError)) logDetailedError('Uncaught Exception',err)});
 const port=process.env.PORT||3000;
+process.on('SIGTERM',()=>{
+  if(draining) return; draining=true;
+  console.info('[SHUTDOWN] new version is live; finishing the answers in progress',{inFlight});
+  const t0=Date.now();
+  const tick=setInterval(()=>{
+    // Yemot holds a request open while the answer is prepared (up to ~25 s);
+    // Render allows 30 s after SIGTERM.
+    if(inFlight<=0||Date.now()-t0>27000) { clearInterval(tick); console.info('[SHUTDOWN] done',{left:inFlight,ms:Date.now()-t0}); process.exit(0); }
+  },250);
+});
 app.listen(port,async()=>{
   console.log('server running on port '+port);
   // Check every web key once right after a new build, so each deploy leaves a
