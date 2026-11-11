@@ -276,3 +276,18 @@ test('article search skips section pages and uses the site he named', async () =
   const r = await ext3Turn({ utterance: 'תקריאי לי כתבה מחזקת מאתר הידברות', now }, deps);
   assert.equal(r.ref.url, 'https://www.hidabroot.org/article/99999');
 });
+
+test('a song by the same artist is not taken for the one he named', async () => {
+  const current = [{ user: 'x', assistant: 'y', ref: { type: 'video', videoId: 'eyneotieyne', title: 'אושר כהן ונועה קירל - אין אותי', channelTitle: 'Osher Cohen Music', durationSec: 240 } }];
+  const found = { videoId: 'downdowndow', title: 'אושר כהן - דאון', channelTitle: 'Osher Cohen', durationSec: 190, viewCount: 5, description: '' };
+  const { deps } = baseDeps([], { findVideos: async () => [found] });
+  const r = await ext3Turn({ utterance: 'תשמיעי לי את אושר כהן דאון', current, now }, deps);
+  assert.equal(r.confirm.videoId, 'downdowndow');
+});
+
+test('a standing rule gets a clear acknowledgement and is returned', async () => {
+  const { deps } = baseDeps(['{"intent":"chat","instruction":"לא לדבר על פוליטיקה"}']);
+  const r = await ext3Turn({ utterance: 'מעכשיו אל תדברי איתי על פוליטיקה בכלל', now }, deps);
+  assert.match(r.reply, /אקפיד/);
+  assert.equal(r.instruction, 'לא לדבר על פוליטיקה');
+});

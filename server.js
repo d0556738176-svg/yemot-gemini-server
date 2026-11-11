@@ -4394,6 +4394,34 @@ async function ext3WebSearch(q,{timeoutMs=4500}={}) {
   }
   return out.slice(0,12);
 }
+// Page readers first; when all of them are busy or cooling down, the page is
+// fetched directly and its text taken from the HTML.
+function htmlToText(html) {
+  let h=String(html||'');
+  const art=h.match(/<article[\s\S]*?<\/article>/i); if(art&&art[0].length>1500) h=art[0];
+  h=h.replace(/<(script|style|noscript|svg|nav|header|footer|form|aside)[\s\S]*?<\/\1>/gi,' ')
+     .replace(/<\/(p|div|h[1-6]|li|br|section)>/gi,'\n').replace(/<br\s*\/?>/gi,'\n').replace(/<[^>]+>/g,' ')
+     .replace(/&nbsp;/g,' ').replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&#(\d+);/g,(m,n)=>String.fromCharCode(Number(n)));
+  return h.split('\n').map(l=>l.replace(/\s+/g,' ').trim()).filter(Boolean).join('\n');
+}
+async function directReadPage(url,timeoutMs=6000) {
+  const r=await fetch(url,{signal:AbortSignal.timeout(timeoutMs),headers:{'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36','accept-language':'he,en;q=0.8'}});
+  if(!r.ok) throw Object.assign(new Error('HTTP '+r.status),{status:r.status});
+  const html=await r.text();
+  const title=(html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)||html.match(/<title[^>]*>([^<]+)/i)||[])[1]||'';
+  return {url,title:htmlToText(title),content:htmlToText(html),provider:'direct'};
+}
+async function ext3ReadPages(urls,opts={}) {
+  const timeoutMs=Math.min(opts?.timeoutMs||4500,6000);
+  const got=await readPages(urls,{timeoutMs:Math.min(timeoutMs,4500),hedgeMs:1200}).catch(()=>[]);
+  const have=new Set(got.map(p=>String(p.url||'').replace(/[#?].*$/,'')));
+  const missing=(urls||[]).filter(u=>!have.has(String(u).replace(/[#?].*$/,'')));
+  if(!missing.length) return got;
+  const direct=await Promise.allSettled(missing.map(u=>directReadPage(u,timeoutMs)));
+  const extra=direct.filter(x=>x.status==='fulfilled'&&x.value.content.length>300).map(x=>x.value);
+  if(extra.length) console.info('[EXT3_BRAIN] pages read directly',{count:extra.length});
+  return [...got,...extra];
+}
 async function runExt3Brain(utterance, phone, callId, turnHistory, now, media='') {
   const key=normalizePhone(phone);
   const prior=key!=='לא מזוהה'?conversationLog.filter(x=>normalizePhone(x.phone)===key&&x.user&&String(x.callId||'')!==String(callId||'')).slice(-12):[];
@@ -4413,7 +4441,7 @@ async function runExt3Brain(utterance, phone, callId, turnHistory, now, media=''
       console.info('[EXT3_BRAIN] YouTube through the extension-2 keys',{kind});
       return r.json();
     },
-    readPages:(urls,opts)=>readPages(urls,{timeoutMs:Math.min(opts?.timeoutMs||4500,4500),hedgeMs:1200}),
+    readPages:(urls,opts)=>ext3ReadPages(urls,opts),
     videoDescription:async id=>{
       const k=(process.env.YOUTUBE_API_KEY||'').trim(); if(!k) return '';
       const u=new URL('https://www.googleapis.com/youtube/v3/videos'); u.searchParams.set('part','snippet'); u.searchParams.set('id',id); u.searchParams.set('key',k);
