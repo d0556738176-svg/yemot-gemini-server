@@ -243,3 +243,36 @@ test('official sites rank before news and social pages', async () => {
   assert.equal(sourceRank('https://www.ynet.co.il/x'), 1);
   assert.equal(sourceRank('https://www.facebook.com/x'), 3);
 });
+
+test('a new name beats the old video even when the planner points at the old one', async () => {
+  const prior = [{ user: 'x', assistant: 'y', ref: clown }];
+  let asked = null;
+  const found = { videoId: 'downdowndow', title: 'אושר כהן - דאון', channelTitle: 'Osher Cohen', durationSec: 190, viewCount: 5, description: '' };
+  const { deps } = baseDeps(['{"intent":"video_play","yt_he":"","instruction":"המתקשר מבקש להאזין לסרטון"}'], { findVideos: async q => { asked = q; return [found]; } });
+  const r = await ext3Turn({ utterance: 'תשמיעי לי את אושר כהן דאון', prior, now }, deps);
+  assert.equal(r.confirm.videoId, 'downdowndow');
+  assert.match(asked[0], /דאון/);
+  assert.equal(r.instruction, undefined);
+});
+
+test('stuck: a numbered list becomes real key options', async () => {
+  const { numberedToKeys, parseKeyOptions } = await import('../ext3-brain.js');
+  const k = parseKeyOptions(numberedToKeys('נושאים, 1, משתנים, 2, תנאים, 3, לולאות'));
+  assert.deepEqual(Object.keys(k), ['1', '2', '3']);
+  assert.match(k['3'], /ללולאות/);
+});
+
+test('stray Chinese words are removed from a Hebrew answer', async () => {
+  const { deps } = baseDeps(['{"intent":"chat"}', '{"answer":"לא אדבר על זה בשיחות未来的 שלך"}']);
+  const r = await ext3Turn({ utterance: 'תסבירי לי משהו על חשמל', now }, deps);
+  assert.doesNotMatch(r.reply, /[　-鿿]/);
+});
+
+test('article search skips section pages and uses the site he named', async () => {
+  const { deps } = baseDeps(['{"intent":"read_page","search":"כתבה מחזקת הידברות"}'], {
+    webSearch: async () => [{ title: 'חדשות היום', url: 'https://www.hidabroot.org/news', snippet: '' }, { title: 'כתבה מאתר אחר', url: 'https://other.co.il/article/77777', snippet: '' }, { title: 'הכוח של אמונה', url: 'https://www.hidabroot.org/article/99999', snippet: '' }],
+    readPages: async urls => urls.map(u => ({ url: u, content: Array.from({ length: 20 }, (_, i) => 'משפט ' + i + ' על כוחה של האמונה בחיי היום יום של כל יהודי.').join('\n') }))
+  });
+  const r = await ext3Turn({ utterance: 'תקריאי לי כתבה מחזקת מאתר הידברות', now }, deps);
+  assert.equal(r.ref.url, 'https://www.hidabroot.org/article/99999');
+});

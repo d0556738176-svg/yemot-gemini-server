@@ -340,7 +340,23 @@ export function answerPrompt({ context, utterance, plan, now, instruction, extra
 
 // Owner, 11.11: when the talk goes in circles, stop guessing and let him
 // choose with keys.
-export const STUCK_RULE = 'נראה שאנחנו לא מבינים אחד את השני, או שהמתקשר חוזר על אותה בקשה. אל תנחשי שוב ואל תחזרי על התשובה הקודמת. אמרי במשפט אחד מה הבנת שהוא מבקש, ואז הציעי 2 עד 4 אפשרויות ברורות ושונות במקשים, בפורמט הקבוע (למשל "לשיר בודד חדש הקש 1, לרשימת השירים החדשים של השבוע הקש 2, לחיפוש אחר הקש 3"). כשהוא יקיש, תמשיכי בדיוק לפי בחירתו.';
+export const STUCK_RULE = 'נראה שאנחנו לא מבינים אחד את השני, או שהמתקשר חוזר על אותה בקשה או מבקש לבחור במקשים. אל תנחשי שוב ואל תחזרי על התשובה הקודמת. אמרי במשפט אחד מה הבנת שהוא מבקש, ואז הציעי 2 עד 5 אפשרויות ברורות ושונות במקשים. כל אפשרות חייבת להיאמר בדיוק בצורה "ל<שם האפשרות> הקש <מספר>", למשל "ללימוד משתנים הקש 1, ללימוד תנאים הקש 2, ללימוד לולאות הקש 3". בלי רשימה ממוספרת ובלי "בחרי מספר". פני אליו בלשון זכר. כשהוא יקיש, תמשיכי בדיוק לפי בחירתו.';
+// Safety net: a numbered list ("1, משתנים, 2, תנאים") becomes real key options
+// ("למשתנים הקש 1, לתנאים הקש 2") so the call can wait for the key.
+export function numberedToKeys(text) {
+  const t = String(text || '');
+  const parts = t.split(/(?:^|[,.:;]\s*|\s)([1-9])\s*[,.:)\-]\s+/u);
+  if (parts.length < 5) return t;
+  const intro = parts[0].trim(), opts = [];
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    if (Number(parts[i]) !== opts.length + 1) break;
+    const label = parts[i + 1].split(/[,.]/)[0].trim().split(/\s+/).slice(0, 4).join(' ');
+    if (label.length < 2) break;
+    opts.push('ל' + label + ' הקש ' + parts[i]);
+  }
+  if (opts.length < 2) return t;
+  return (intro ? intro.replace(/[,:]\s*$/, '') + '. ' : '') + opts.join(', ') + '. אפשר גם לומר את המספר.';
+}
 const FRUSTRATED = /(?:כבר אמרתי|אמרתי לך|אמרתי כבר|לא הבנת|את לא מבינה|לא מבינה אותי|למה את מתבלבלת|התבלבלת|לא זה|לא לזה|לא התכוונתי|לא ביקשתי|שוב פעם|עוד פעם אני|כמה פעמים|10 פעמים|עשר פעמים|תני לי לבחור|תפריט|במקשים)/u;
 function words(t) { return new Set(String(t || '').replace(/[^\u0590-\u05FFa-zA-Z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2)); }
 function similar(a, b) { const A = words(a), B = words(b); if (A.size < 2 || B.size < 2) return false; let n = 0; for (const w of A) if (B.has(w)) n++; return n / Math.min(A.size, B.size) >= 0.6; }
@@ -359,6 +375,8 @@ export function extractAnswer(raw) {
   if (loose) return loose[1].replace(/\\n/g, ' ').replace(/\\"/g, '"').trim();
   return s.replace(/^```(?:json)?|```$/g, '').trim();
 }
+// Weak models sometimes slip a Chinese or Cyrillic word into Hebrew.
+function cleanScript(t) { return String(t || '').replace(/[\u3000-\u9fff\uac00-\ud7af\u0400-\u04ff]+/g, '').replace(/\s{2,}/g, ' ').trim(); }
 
 // Words that mean "the next step" in a lesson.
 function looksLikeLessonRequest(text) {
@@ -425,7 +443,11 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
   } catch (e) { log.warn?.('[EXT3_BRAIN] planner unavailable; using rules', { status: e?.status || 0 }); }
   if (!plan) plan = rules;
   // A standing instruction said in plain words is kept even when the planner missed it.
-  if (!plan.instruction && /(?:אל תדברי|אל תדבר|תפסיקי לדבר על|אל תספרי|אני לא רוצה שתדברי|מעכשיו|מהיום והלאה|תמיד ת|אף פעם אל|תזכרי ש|תזכור ש)/u.test(utterance)) plan.instruction = utterance.trim().slice(0, 200);
+  // Only when he really said a standing rule (the planner sometimes fills the
+  // field with a description of the request).
+  const ruleWords = /(?:אל תדברי|אל תדבר|תפסיקי לדבר|תפסיק לדבר|אל תספרי|אל תזכירי|אני לא רוצה שתדברי|אני לא רוצה שתזכירי|מעכשיו|מהיום והלאה|מהיום ת|תמיד ת|אף פעם אל|אף פעם לא|תזכרי ש|תזכור ש|בפעם הבאה ש|תדברי איתי ב|תדברי אליי ב|תפני אליי)/u.test(utterance);
+  if (!ruleWords) plan.instruction = '';
+  else if (!plan.instruction) plan.instruction = utterance.trim().slice(0, 200);
   if ((plan.intent === 'video_find' || plan.intent === 'video_play') && !plan.minMinutes && /(?:ארוך|ארוכה|ארוכים|מלא|שעה)/u.test(utterance)) plan.minMinutes = /שעה/u.test(utterance) ? 40 : 20;
   if ((plan.intent === 'video_find' || plan.intent === 'video_play') && !plan.maxMinutes && /(?:שיר בודד|סינגל|שיר אחד|לא סט|בלי סט|לא רוצה סט)/u.test(utterance)) plan.maxMinutes = 8;
   if (!video && plan.intent === 'video_about') plan.intent = 'recall';
@@ -446,7 +468,7 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
       await new Promise(r => setTimeout(r, deps.retryPauseMs ?? 3000));
       raw = await deps.llm(answerPrompt({ ...common, context: smallContext.slice(-1500), extra: String(extra || '').slice(0, 3000) }), { budgetMs: 10000, maxTokens: Math.min(maxTokens, 1000) });
     }
-    const a = extractAnswer(raw).replace(/^answer\s*[:¶]?\s*/i, '');
+    const a = cleanScript(extractAnswer(raw).replace(/^answer\s*[:¶]?\s*/i, ''));
     if (!a) throw Object.assign(new Error('empty answer'), { status: 502 });
     return a;
   };
@@ -460,7 +482,10 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
     // downloaded here: he hears the full title first and chooses with a key.
     let v = null;
     const pointsAtIt = /(?:אותו|אותה|הזה|הזאת|את זה|שלו|שלה|שהמלצת|שאמרת|שדיברנו|שמצאת)/u.test(utterance);
-    const named = plan.ytHe && plan.ytHe.length >= 3 ? plan.ytHe : '';
+    // His own words name the target first (the planner sometimes fills in the
+    // video already on record instead of the new name he said).
+    const ownName = !pointsAtIt && rules.intent === 'video_play' && rules.ytHe && rules.ytHe.length >= 3 ? rules.ytHe : '';
+    const named = ownName || (plan.ytHe && plan.ytHe.length >= 3 ? plan.ytHe : '');
     const overlap = (a, b) => { const A = words(a), B = words(b); let n = 0; for (const w of A) if (B.has(w)) n++; return A.size ? n / A.size : 0; };
     if (video && (!named || pointsAtIt || overlap(named, video.title) >= 0.5)) v = video;
     else if (named) {
@@ -519,18 +544,35 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
   if (plan.intent === 'read_page') {
     // Continue the article already being read, or find the one he asked for.
     let url = article?.url || '', title = article?.title || '', from = article && plan.continueOffer ? Number(article.pos) || 0 : 0;
+    let text = '';
     if (!article || !plan.continueOffer) {
       const q = plan.search || plan.standalone || utterance;
-      const found = await deps.webSearch(q, { timeoutMs: 4500 }).catch(() => []);
-      const wantedSite = (q.match(/(?:הידברות|hidabroot)/i) ? 'hidabroot' : q.match(/(?:ynet|וויינט|ווינט)/i) ? 'ynet' : q.match(/(?:כיכר השבת|kikar)/i) ? 'kikar' : q.match(/(?:בחדרי חרדים|bhol)/i) ? 'bhol' : '');
-      const pagesOnly = (found || []).filter(r => r.url && !/(?:youtube|facebook|instagram|tiktok)\./i.test(r.url) && String(r.url).replace(/^https?:\/\/[^/]+\/?/, '').length > 8);
-      const best = pagesOnly.find(r => wantedSite && String(r.url).includes(wantedSite)) || pagesOnly[0];
-      if (!best) return out({ reply: 'לא מצאתי כתבה מתאימה לקריאה. אפשר לומר לי את שם הכתבה או את הנושא שלה במילים אחרות, ואחפש שוב.' });
-      url = best.url; title = best.title; from = 0;
+      const site = /(?:הידברות|hidabroot)/i.test(q + utterance) ? 'hidabroot.org' : /(?:ynet|וויינט|ווינט)/i.test(q + utterance) ? 'ynet.co.il' : /(?:כיכר השבת|kikar)/i.test(q + utterance) ? 'kikar.co.il' : /(?:בחדרי חרדים|bhol)/i.test(q + utterance) ? 'bhol.co.il' : '';
+      const topic = q.replace(/(?:תקריאי|תקריא|לי|כתבה|מאמר|מאתר|באתר|מהאתר|הידברות|ynet|כיכר השבת|בחדרי חרדים|את)/giu, ' ').replace(/\s+/g, ' ').trim();
+      const queries = [...new Set([site ? (topic || 'כתבה') + ' site:' + site : '', site ? (topic || 'כתבה') + ' ' + site.split('.')[0] : '', q].filter(Boolean))];
+      const sets = await Promise.allSettled(queries.map(x => deps.webSearch(x, { timeoutMs: 4500 })));
+      const seen = new Set();
+      // A real article page: on the site he named when he named one, with a
+      // deep path (not the home page or a section like "news today").
+      const looksLikeArticle = u => { const path = String(u).replace(/^https?:\/\/[^/]+/, ''); return /\d{3,}/.test(path) || path.split('/').filter(Boolean).some(x => x.length > 25); };
+      const cands = sets.flatMap(x => x.status === 'fulfilled' ? x.value || [] : []).filter(r => {
+        if (!r?.url || seen.has(r.url)) return false; seen.add(r.url);
+        return !/(?:youtube|facebook|instagram|tiktok)\./i.test(r.url) && (!site || String(r.url).includes(site)) && looksLikeArticle(r.url);
+      }).slice(0, 3);
+      if (!cands.length) return out({ reply: 'לא מצאתי' + (site ? ' באתר ' + site : '') + ' כתבה מתאימה לקריאה. אפשר לומר לי את שם הכתבה או את הנושא שלה, למשל כתבה על אמונה או על שלום בית, ואחפש שוב.' });
+      const pages = deps.readPages ? await Promise.race([deps.readPages(cands.map(c => c.url), { timeoutMs: 7000 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 8000).unref?.())]) : [];
+      for (const c of cands) {
+        const pg = (pages || []).find(x => String(x.url || '').replace(/[#?].*$/, '') === String(c.url).replace(/[#?].*$/, ''));
+        const tx = readableArticle(pg?.content || '');
+        if (tx.length >= 200) { url = c.url; title = pg?.title || c.title; text = tx; break; }
+      }
+      if (!text) return out({ reply: 'מצאתי את הכתבה ' + clip(cands[0].title, 120) + ', אבל לא הצלחתי לקרוא את התוכן שלה כרגע. אפשר לנסות שוב בעוד רגע, או לבקש כתבה אחרת.' });
+      from = 0;
+    } else {
+      const pages = deps.readPages ? await Promise.race([deps.readPages([url], { timeoutMs: 7000 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 8000).unref?.())]) : [];
+      text = readableArticle(pages[0]?.content || '');
+      if (text.length < 200) return out({ ref: article, reply: 'לא הצלחתי לקרוא כרגע את המשך הכתבה ' + clip(title, 120) + '. אפשר לומר תמשיכי שוב בעוד רגע.' });
     }
-    const pages = deps.readPages ? await Promise.race([deps.readPages([url], { timeoutMs: 7000 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 8000).unref?.())]) : [];
-    const text = readableArticle(pages[0]?.content || '');
-    if (text.length < 200) return out({ reply: 'מצאתי את הכתבה ' + clip(title, 120) + ', אבל לא הצלחתי לקרוא את התוכן שלה כרגע. אפשר לנסות שוב בעוד רגע, או לבקש כתבה אחרת.' });
     const { part, next, done } = articleChunk(text, from);
     const opening = from === 0 ? 'הנה הכתבה ' + clip(title, 140) + ', מאתר ' + hostOf(url) + '. ' : '';
     return out({
@@ -573,7 +615,7 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
     }).join('\n\n').slice(0, 6500);
     log.info?.('[EXT3_BRAIN] web research', { queries, results: results.length, pagesRead: pages.length, official: results.filter(r => sourceRank(r.url) === 0).length, sourceChars: sourceText.length });
     const verify = 'בדיקת אמינות לפני שאת עונה: השווי בין המקורות. כשהם סותרים, העדיפי את האתר הרשמי, אחריו את המקור העדכני ביותר, ואמרי במפורש על איזה מקור את מתבססת ("לפי האתר הרשמי של כללית"). אל תצטטי שני מקורות סותרים בלי להכריע או להסביר. ' +
-      (hours ? 'זו שאלה על שעות פתיחה: מצאי את שעות היום הנוכחי (' + now + '), חשבי בעצמך לפי השעה עכשיו האם המקום פתוח או סגור ברגע זה ועד מתי, ואמרי את זה בתחילת התשובה בבירור. אם אין שעות מפורשות ליום הזה, אמרי שאין לך שעות מאומתות להיום והציעי להתקשר למקום, עם מספר הטלפון אם מופיע. ' : '');
+      (hours ? 'זו שאלה על שעות פתיחה, ולכן כאן עני ממוקד וקצר יחסית (5 עד 8 משפטים) גם אם בדרך כלל את מרחיבה: האם פתוח עכשיו ועד מתי, השעות של היום ושל מחר, הכתובת והטלפון. בלי עצות שלא נשאלו. אם הסניף שמופיע במקורות נמצא בעיר או בשכונה אחרת ממה שהמתקשר אמר, אמרי איזה סניף מצאת ושאלי אם לזה התכוון. זו שאלה על שעות פתיחה: מצאי את שעות היום הנוכחי (' + now + '), חשבי בעצמך לפי השעה עכשיו האם המקום פתוח או סגור ברגע זה ועד מתי, ואמרי את זה בתחילת התשובה בבירור. אם אין שעות מפורשות ליום הזה, אמרי שאין לך שעות מאומתות להיום והציעי להתקשר למקום, עם מספר הטלפון אם מופיע. ' : '');
     const reply = await ask('המתקשר צריך מידע עדכני ומדויק. לפניך מקורות אמיתיים מהאינטרנט שנאספו ונקראו עכשיו לשאלה הזאת בלבד. אל תערבבי בתשובה מידע מתשובות קודמות שאינו קשור לשאלה הזאת. ' + verify + 'ענה בהרחבה ובפירוט רק לפי המקורות: עובדות, מספרים, שמות ותאריכים בדיוק כפי שכתובים בהם. כשהמקורות לא עונים על חלק מהשאלה, אמרי שלא מצאת את החלק הזה. אל תקריאי כתובות אתרים ואל תאמרי "מקור 1".', 'מקורות:\n' + sourceText, { maxTokens: 1800, budgetMs: 14000, ctx: smallContext })
       .catch(e => {
         log.warn?.('[EXT3_BRAIN] web answer not written; saying what was found', { status: e?.status || 0 });
@@ -587,14 +629,15 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
   }
 
   if (plan.intent === 'recall') {
-    const reply = await ask('המתקשר שואל על שיחות קודמות או על עצמו. ענה רק מתוך הקשר השיחה והסיכום. כשהוא שואל פרט אחד, ענה עליו בפשטות. כשהוא שואל מה דיברנו, סכמי את הנושאים העיקריים לפי הסדר, עם הפרטים החשובים (למשל שם מדויק של סרטון שהומלץ). אם פרט לא מופיע, אמרי בכנות שאינך זוכרת אותו.', '', { maxTokens: 1000, budgetMs: 10000 });
+    const reply = await ask('המתקשר שואל על שיחות קודמות או על עצמו. ענה רק מתוך הקשר השיחה, הסיכום וההוראות הקבועות שלו. פני אליו בלשון זכר ובגוף שני ("ביקשת ממני ש..."), במשפטים שלמים וברורים. כשהוא שואל פרט אחד, ענה עליו בפשטות. כשהוא שואל מה דיברנו, סכמי את הנושאים העיקריים לפי הסדר, עם הפרטים החשובים (למשל שם מדויק של סרטון שהומלץ). אם פרט לא מופיע, אמרי בכנות שאינך זוכרת אותו.', '', { maxTokens: 1000, budgetMs: 10000 });
     return out({ reply });
   }
 
   // chat (talk, explanation, teaching, continuing an offer, a new standing instruction)
   const lessonWanted = looksLikeLessonRequest(utterance) || (plan.continueOffer && lessonRef);
-  const reply = await ask('את עוזרת חכמה ונבונה בטלפון, עם ידע רחב בכל תחום. עני על מה שהמתקשר אמר עכשיו, בהמשך טבעי לשיחה.' +
+  let reply = await ask('את עוזרת חכמה ונבונה בטלפון, עם ידע רחב בכל תחום. עני על מה שהמתקשר אמר עכשיו, בהמשך טבעי לשיחה.' +
     (plan.instruction ? ' המתקשר נתן עכשיו הוראה קבועה: "' + plan.instruction + '". אשרי בקצרה ובחום שתזכרי ותקיימי אותה מעכשיו, והמשיכי בהתאם.' : ''), '', { maxTokens: 2000, budgetMs: 13000 });
+  if (stuck && !parseKeyOptions(reply)) reply = numberedToKeys(reply);
   let ref = null;
   if (lessonWanted) {
     const topic = lessonRef?.topic || lessonTopic(utterance) || lessonTopic(plan.standalone) || 'הנושא שביקש';
