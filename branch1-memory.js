@@ -64,10 +64,32 @@ export async function summarize(previousSummary, turns, { env = process.env, fet
 
 // Serialized per caller so two quick answers never overwrite each other.
 const chains = new Map();
+function serialized(key, fn) {
+  const prev = chains.get(key) || Promise.resolve();
+  const job = prev.then(fn);
+  const tail = job.catch(() => {});
+  chains.set(key, tail);
+  void tail.then(() => { if (chains.get(key) === tail) chains.delete(key); });
+  return job;
+}
+// Standing instructions the caller gave ("don't talk about X", "always ...").
+// Kept beside the turns; the newest 20, a repeat replaces the older copy.
+export function rememberPreference(phone, text, opts = {}) {
+  const key = String(phone || '');
+  const t = String(text || '').trim().slice(0, 220);
+  if (!t) return Promise.resolve(false);
+  return serialized(key, async () => {
+    const mem = (await readMemory(phone, opts)) || { phone: key, summary: '', entries: [] };
+    const prefs = (Array.isArray(mem.prefs) ? mem.prefs : []).filter(p => String(p.text || p) !== t);
+    prefs.push({ text: t, time: new Date().toISOString() });
+    mem.prefs = prefs.slice(-20);
+    mem.updatedAt = new Date().toISOString();
+    return writeMemory(phone, mem, opts);
+  });
+}
 export function rememberTurn(phone, entry, opts = {}) {
   const key = String(phone || '');
-  const prev = chains.get(key) || Promise.resolve();
-  const job = prev.then(async () => {
+  return serialized(key, async () => {
     const mem = (await readMemory(phone, opts)) || { phone: key, summary: '', entries: [] };
     // ref: the item the turn was about (e.g. the exact video recommended), so
     // "play it" / "what was its name" work in a later call too.
@@ -79,8 +101,4 @@ export function rememberTurn(phone, entry, opts = {}) {
     mem.updatedAt = new Date().toISOString();
     return writeMemory(phone, mem, opts);
   });
-  const tail = job.catch(() => {});
-  chains.set(key, tail);
-  void tail.then(() => { if (chains.get(key) === tail) chains.delete(key); });
-  return job;
 }

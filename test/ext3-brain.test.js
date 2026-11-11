@@ -94,11 +94,11 @@ test('questions about the chosen video use its real data; "play it" hands off to
   assert.match(a.prompts[1].p, /29 דקות/);
   const b = baseDeps(['{"intent":"video_play","standalone":"להשמיע את הסרטון","play":"audio"}']);
   const r2 = await ext3Turn({ utterance: 'תשמיעי לי אותו', current, now }, b.deps);
-  assert.equal(r2.handoff.videoId, 'abcdefghijk');
-  assert.equal(r2.handoff.mode, 'audio');
+  assert.equal(r2.confirm.videoId, 'abcdefghijk');
+  assert.equal(r2.confirm.mode, 'audio');
   const c = baseDeps(['{"intent":"video_play","play":"video"}']);
   const r3 = await ext3Turn({ utterance: 'תורידי את הווידאו', current, now }, c.deps);
-  assert.equal(r3.handoff.mode, 'video');
+  assert.equal(r3.confirm.mode, 'video');
 });
 
 test('"yes" continues the lesson without spending a planner call', async () => {
@@ -130,9 +130,9 @@ test('asked about "the video" with none on record: a memory answer, not a new se
 test('"play it" is audio unless a video download is asked', async () => {
   const current = [{ user: 'x', assistant: 'y', ref: clown }];
   const a = baseDeps([]); const r1 = await ext3Turn({ utterance: 'תשמיעי לי אותו', current, now }, a.deps);
-  assert.equal(r1.handoff.mode, 'audio');
+  assert.equal(r1.confirm.mode, 'audio');
   const b = baseDeps([]); const r2 = await ext3Turn({ utterance: 'תורידי לי את הווידאו שלו', current, now }, b.deps);
-  assert.equal(r2.handoff.mode, 'video');
+  assert.equal(r2.confirm.mode, 'video');
 });
 
 test('web answers are built from pages actually read', async () => {
@@ -184,4 +184,62 @@ test('busy models: a smaller retry, and web never answers with unrelated junk', 
   const b = baseDeps(['{"intent":"chat"}', new Error('busy'), '{"answer":"תשובה אחרי המתנה"}']);
   const r2 = await ext3Turn({ utterance: 'ספרי לי על ירושלים', now }, b.deps);
   assert.equal(r2.reply, 'תשובה אחרי המתנה');
+});
+
+test('play: never downloads, says the full title and offers keys 1/2/3', async () => {
+  const current = [{ user: 'x', assistant: 'y', ref: clown }];
+  const { deps } = baseDeps([]);
+  const r = await ext3Turn({ utterance: 'תשמיעי לי אותו', current, now }, deps);
+  assert.equal(r.handoff, undefined);
+  assert.ok(r.confirm);
+  assert.match(r.reply, /The Killer Clown Case That Fooled Everyone/);
+  assert.match(r.reply, /קובץ שמע הקש 1/);
+  assert.match(r.reply, /וידאו הקש 2/);
+  assert.match(r.reply, /לביטול והמשך השיחה הקש 3/);
+});
+
+test('play by name searches the named song, not the old active video', async () => {
+  const current = [{ user: 'x', assistant: 'y', ref: clown }];
+  let asked = null;
+  const found = { videoId: 'zzzzzzzzzzz', title: 'אושר כהן - דאון', channelTitle: 'Osher Cohen', durationSec: 200, viewCount: 1000, description: '' };
+  const { deps } = baseDeps([], { findVideos: async q => { asked = q; return [found]; } });
+  const r = await ext3Turn({ utterance: 'תשמיעי לי את אושר כהן דאון', current, now }, deps);
+  assert.equal(r.confirm.videoId, 'zzzzzzzzzzz');
+  assert.match(asked[0], /אושר כהן/);
+  assert.doesNotMatch(asked[0], /תשמיעי/);
+});
+
+test('status and cancel questions are flagged for the server, no model call', async () => {
+  const a = baseDeps([]); const r1 = await ext3Turn({ utterance: 'מה מצב ההורדה?', now }, a.deps);
+  assert.equal(r1.mediaStatus, true); assert.equal(a.prompts.length, 0);
+  const b = baseDeps([]); const r2 = await ext3Turn({ utterance: 'לא, תעצור, אני לא רוצה שיוריד', now }, b.deps);
+  assert.equal(r2.cancel, true); assert.equal(b.prompts.length, 0);
+});
+
+test('an article is read in parts and "continue" reads the next part', async () => {
+  const body = Array.from({ length: 60 }, (_, i) => 'זה משפט מספר ' + i + ' בכתבה המחזקת על אמונה ובטחון בבורא עולם.').join('\n');
+  const { deps } = baseDeps(['{"intent":"read_page","search":"כתבה מחזקת הידברות"}'], {
+    webSearch: async () => [{ title: 'כתבה מחזקת', url: 'https://www.hidabroot.org/article/12345', snippet: '' }],
+    readPages: async () => [{ url: 'https://www.hidabroot.org/article/12345', content: body }]
+  });
+  const r1 = await ext3Turn({ utterance: 'תקריאי לי כתבה מחזקת מאתר הידברות', now }, deps);
+  assert.equal(r1.ref.type, 'article');
+  assert.match(r1.reply, /hidabroot\.org/);
+  assert.match(r1.reply, /משפט מספר 0/);
+  const r2 = await ext3Turn({ utterance: 'תמשיכי', now, current: [{ user: 'a', assistant: r1.reply, ref: r1.ref }] }, deps);
+  assert.ok(r2.ref.pos > r1.ref.pos);
+  assert.doesNotMatch(r2.reply, /משפט מספר 0 /);
+});
+
+test('a standing instruction is returned so it can be kept', async () => {
+  const { deps } = baseDeps(['{"intent":"chat"}', '{"answer":"בסדר, לא אדבר על זה"}']);
+  const r = await ext3Turn({ utterance: 'מעכשיו אל תדברי איתי על פוליטיקה', now }, deps);
+  assert.match(r.instruction, /פוליטיקה/);
+});
+
+test('official sites rank before news and social pages', async () => {
+  const { sourceRank } = await import('../ext3-brain.js');
+  assert.equal(sourceRank('https://www.clalit.co.il/he/x'), 0);
+  assert.equal(sourceRank('https://www.ynet.co.il/x'), 1);
+  assert.equal(sourceRank('https://www.facebook.com/x'), 3);
 });

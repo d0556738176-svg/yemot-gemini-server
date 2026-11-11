@@ -1,7 +1,7 @@
 import { isConversationalReference, currentConversationText, resolveLookupContinuation, isYouTubeTechnicalDiscussion, mayUseYouTubeSearch, asksForFeedback } from './branch1-turn-context.js';
 import { isBranch1WebsiteRequest, answerBranch1Website } from './branch1-websites.js';
 import express from 'express';
-import { readMemory, rememberTurn } from './branch1-memory.js';
+import { readMemory, rememberTurn, rememberPreference } from './branch1-memory.js';
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -241,6 +241,8 @@ async function loadConversationLog() {
 // Callers whose saved memory was already loaded into this server instance.
 const memoryLoadedFor = new Set();
 const callerSummaries = new Map();
+// Standing instructions per caller ("don't talk about..."), kept across calls.
+const callerPrefs = new Map();
 // Loads the caller's saved conversations (Yemot storage) at the start of a
 // call. Bounded: a slow storage read never delays the call by more than ~2.5s.
 async function loadCallerMemory(phone) {
@@ -251,6 +253,7 @@ async function loadCallerMemory(phone) {
   if (!mem) { console.info('[MEMORY] no saved memory for caller', { ms: Date.now() - t }); return; }
   memoryLoadedFor.add(key);
   if (mem.summary) callerSummaries.set(key, String(mem.summary));
+  if (Array.isArray(mem.prefs) && mem.prefs.length) callerPrefs.set(key, mem.prefs.map(p => String(p?.text || p || '')).filter(Boolean));
   const have = new Set(conversationLog.filter(x => x.phone === key).map(x => x.time + '|' + x.user));
   const add = (mem.entries || []).filter(e => e && e.user && !have.has(e.time + '|' + e.user))
     .map((e, i) => ({ id: 'mem-' + i + '-' + Date.parse(e.time || 0), time: e.time, phone: key, callId: String(e.callId || ''), user: e.user, gemini: e.gemini || '', ...(e.ref ? { ref: e.ref } : {}) }));
@@ -4391,11 +4394,12 @@ async function ext3WebSearch(q,{timeoutMs=4500}={}) {
   }
   return out.slice(0,12);
 }
-async function runExt3Brain(utterance, phone, callId, turnHistory, now) {
+async function runExt3Brain(utterance, phone, callId, turnHistory, now, media='') {
   const key=normalizePhone(phone);
   const prior=key!=='לא מזוהה'?conversationLog.filter(x=>normalizePhone(x.phone)===key&&x.user&&String(x.callId||'')!==String(callId||'')).slice(-12):[];
   const summary=key!=='לא מזוהה'?String(callerSummaries.get(key)||''):'';
-  return ext3Turn({utterance,summary,prior,current:turnHistory,now},{
+  const prefs=key!=='לא מזוהה'?(callerPrefs.get(key)||[]):[];
+  return ext3Turn({utterance,summary,prior,current:turnHistory,now,prefs,media},{
     llm:(prompt,{budgetMs=12000,maxTokens=1500,planner=false}={})=>planner
       ? raceSynthesis(prompt,budgetMs,{maxTokens:Math.min(maxTokens,600),gemini:true,geminiBudgetMs:2500})
       : raceSynthesis(prompt,budgetMs,{maxTokens,quality:true}),
@@ -4438,9 +4442,9 @@ async function ext2Media(job,{start=false,timeoutMs=8000}={}) {
 // Called once per turn: what changed in this call's downloads, to be said.
 async function ext3MediaNotes(media) {
   const notes=[];
-  await Promise.all([...media.values()].map(async job=>{
-    if(job.done) return;
-    const st=await ext2Media(job,{start:!!job.needsStart,timeoutMs:3500});
+  await Promise.all(ext3Jobs(media).map(async job=>{
+    if(!job||typeof job!=='object'||!job.videoId||job.done||job.cancelled||job.needsStart) return;
+    const st=await ext2Media(job,{timeoutMs:3500});
     if(!st) {
       if(Date.now()-job.since>4*60*1000 && !job.unreachableSaid) { job.unreachableSaid=true; notes.push('שירות ההורדות לא עונה כרגע, אז ההכנה של '+job.title+' מתעכבת. אפשר להמשיך לדבר, ואנסה שוב.'); }
       return;
@@ -4456,20 +4460,64 @@ async function ext3MediaNotes(media) {
   }));
   return notes.length?'ועוד הודעה: '+notes.join(' '):'';
 }
-// "Play it": ready -> plays here now; otherwise the download starts and the
-// conversation goes on. Returns false when the extension-2 service cannot be
-// reached at all (the caller is then sent to extension 2 as before).
+// The extension-2 service sleeps when idle and can take a few minutes to wake.
+// One background loop per call keeps knocking (every ~10s, up to ~4 min) and
+// starts every waiting download as soon as it answers.
+function ext3WakeLoop(media) {
+  if(media.waking) return;
+  media.waking=true;
+  const base=String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'');
+  const until=Date.now()+4*60*1000;
+  (async()=>{
+    while(Date.now()<until) {
+      const waiting=[...media.values()].filter(j=>j&&j.needsStart&&!j.cancelled);
+      if(!waiting.length) break;
+      await fetch(base+'/health',{signal:AbortSignal.timeout(20000)}).catch(()=>null);
+      for(const job of waiting) {
+        const st=await ext2Media(job,{start:true,timeoutMs:15000});
+        if(st) { job.needsStart=false; job.startedAt=Date.now(); console.info('[EXT3_MEDIA] download service awake; started',{videoId:job.videoId,mode:job.mode}); }
+      }
+      if(![...media.values()].some(j=>j&&j.needsStart&&!j.cancelled)) break;
+      await new Promise(r=>setTimeout(r,10000));
+    }
+    media.waking=false;
+  })().catch(()=>{ media.waking=false; });
+}
+function ext3Jobs(media) { return [...media.values()].filter(j=>j&&typeof j==='object'&&j.videoId); }
+// What the caller hears when he asks "what's the state of the download".
+// Only measured facts from the download service, never an invented percentage.
+async function ext3MediaStatusReply(media) {
+  const jobs=ext3Jobs(media).filter(j=>!j.cancelled);
+  if(!jobs.length) return 'כרגע אני לא מורידה שום קובץ. אם תרצה, ספר לי איזה שיר או סרטון, אמצא אותו, אומר לך את שמו המלא, ותבחר אם להוריד.';
+  const parts=[];
+  for(const job of jobs) {
+    if(job.paths) { parts.push('הקובץ של '+job.title+' מוכן. כדי לשמוע אותו אמור תשמיעי לי אותו.'); continue; }
+    if(job.needsStart) { parts.push('שירות ההורדות עדיין מתעורר, ואני ממשיכה לנסות להתחיל את '+job.title+' כל כמה שניות. ברגע שהוא יענה ההורדה תתחיל.'); continue; }
+    const st=await ext2Media(job,{timeoutMs:6000});
+    if(!st) { parts.push('שירות ההורדות לא ענה לי ברגע זה לגבי '+job.title+'. אני אנסה שוב, ואודיע כשהקובץ מוכן.'); continue; }
+    if(st.audio?.status==='ready'&&st.audio.paths?.length) { job.paths=st.audio.paths; parts.push('הקובץ של '+job.title+' מוכן. כדי לשמוע אותו אמור תשמיעי לי אותו.'); continue; }
+    if(st.audio?.status==='failed'||st.video?.status==='failed') { parts.push('ההורדה של '+job.title+' לא הצליחה.'); continue; }
+    const min=Number(st.audio?.minutes ?? st.video?.minutes);
+    parts.push('ההורדה של '+job.title+(job.mode==='video'?', כווידאו וגם כקובץ שמע מאותה הורדה,':'')+' עדיין בתהליך'+(Number.isFinite(min)?(min<1?', היא התחילה לפני פחות מדקה':', כבר '+min+' דקות'):'')+'. '+(st.audio?.spoken?st.audio.spoken+' ':'')+'אודיע לך ברגע שהקובץ מוכן.');
+  }
+  return parts.join(' ')+' בינתיים אפשר להמשיך לדבר על כל דבר.';
+}
+// Only after the caller confirmed the exact title and chose 1 (audio) or 2
+// (video + phone audio from the same download). Ready -> plays now;
+// otherwise the download starts (waking the service if needed) and the
+// conversation goes on.
 async function ext3StartOrPlay(h, media) {
   let job=media.get(h.videoId);
-  const askedBefore=!!job;
-  if(!job) { job={...h,since:Date.now()}; media.set(h.videoId,job); }
+  const askedBefore=!!job&&!job.cancelled;
+  if(!job||job.cancelled) { job={...h,since:Date.now()}; media.set(h.videoId,job); }
   if(h.mode==='video'&&job.mode!=='video') { job.mode='video'; job.done=false; job.videoSaid=false; }
-  const st=await ext2Media(job,{start:true,timeoutMs:9000});
+  const st=await ext2Media(job,{start:true,timeoutMs:12000});
   if(!st) {
     if(!process.env.EXT3_MEDIA_SECRET) { media.delete(h.videoId); return {handoff:true}; }
-    job.needsStart=true;
-    return {reply:'אני מעירה עכשיו את שירות ההורדות ומתחילה להכין את '+job.title+'. זה יכול לקחת כמה דקות. בינתיים אפשר להמשיך לדבר על כל דבר שתרצה, ואודיע לך כשהקובץ מוכן.'};
+    job.needsStart=true; ext3WakeLoop(media);
+    return {reply:'שירות ההורדות היה במנוחה, ואני מעירה אותו עכשיו. אני ממשיכה לנסות לבד כל כמה שניות, וברגע שהוא יענה תתחיל ההורדה של '+job.title+(h.mode==='video'?' כווידאו, ומאותה הורדה גם קובץ שמע להשמעה בטלפון':'')+'. זה יכול לקחת כמה דקות. בינתיים אפשר להמשיך לדבר על כל דבר, ואודיע לך כשהקובץ מוכן.'};
   }
+  job.needsStart=false;
   if(st.audio?.status==='ready'&&st.audio.paths?.length) job.paths=st.audio.paths;
   if(job.paths&&h.mode!=='video') {
     job.readySaid=true; job.done=true;
@@ -4477,8 +4525,27 @@ async function ext3StartOrPlay(h, media) {
   }
   const stage=st.audio?.stage;
   if(askedBefore&&h.mode!=='video') return {reply:'הקובץ של '+job.title+' עוד בהכנה, '+(Date.now()-job.since<90000?'רק התחיל לפני רגע':'זה כבר בתהליך')+'. ברגע שהוא מוכן אודיע לך, ובינתיים אפשר להמשיך לדבר.'};
-  return {reply:(h.mode==='video'?'התחלתי להוריד את הווידאו של ':'התחלתי להכין את ')+job.title+(h.mode==='video'?', ומאותה הורדה יוכן גם השמע להשמעה בטלפון':'')+
+  return {reply:(h.mode==='video'?'התחלתי להוריד את הווידאו של ':'התחלתי להוריד כקובץ שמע את ')+job.title+(h.mode==='video'?', ומאותה הורדה יוכן גם קובץ שמע באיכות הטובה ביותר להשמעה בטלפון, בלי הורדה נוספת':'')+
     '. זה לוקח כמה דקות'+(stage&&stage!=='checking'?' וזה כבר בתהליך':'')+'. בינתיים אפשר להמשיך לדבר על כל דבר שתרצה, ואודיע לך ברגע שהקובץ מוכן.'};
+}
+// The caller's answer to "audio 1, video 2, cancel 3": a key press (arrives
+// as "בחרתי באפשרות N"), the number said aloud, or the words. Anything else
+// returns '' and the conversation simply goes on.
+function ext3ConfirmChoice(text) {
+  const t=String(text||'').replace(/[.,!?]/g,' ').replace(/\s+/g,' ').trim();
+  const end='(?=$|\\s)';
+  const m=t.match(/בחרתי באפשרות\s*([123])/u); if(m) return m[1]==='1'?'audio':m[1]==='2'?'video':'cancel';
+  if(t.split(' ').length>7) return '';
+  if(t.split(' ').length<=3&&new RegExp('^(?:(?:הקשתי|בחרתי|אני בוחר|אני רוצה|תורידי|תוריד|אז|כן)\\s+)?(?:3|שלוש|שלושה|ביטול|לבטל|תבטלי|תבטל|לא|לא תודה|לא צריך|עזבי|עזוב)'+end,'u').test(t)) return 'cancel';
+  if(new RegExp('^(?:(?:הקשתי|בחרתי|אני בוחר|אני רוצה|תורידי|תוריד|להוריד|אז|כן)\\s+)?(?:(?:את\\s+)?ה?)?(?:2|שתיים|שתים|שניים|וידאו|ווידאו|וידיאו|הווידאו|הוידאו|קובץ וידאו)'+end,'u').test(t)) return 'video';
+  if(new RegExp('^(?:(?:הקשתי|בחרתי|אני בוחר|אני רוצה|תורידי|תוריד|להוריד|אז)\\s+)?(?:1|אחת|אחד|שמע|קובץ שמע|אודיו|רק שמע|כן|כן בבקשה|בטח|תורידי|תוריד)'+end,'u').test(t)) return 'audio';
+  return '';
+}
+// "This call's downloads" in one line, for the brain (so it never invents a status).
+function ext3MediaLine(media, pendingConfirm) {
+  const bits=ext3Jobs(media).filter(j=>!j.cancelled).map(j=>j.title+' ('+(j.mode==='video'?'וידאו ושמע':'שמע')+', '+(j.paths?'מוכן':j.needsStart?'מחכה שהשירות יתעורר':'בהורדה')+')');
+  if(pendingConfirm) bits.push('מחכה לבחירה של המתקשר אם להוריד את '+pendingConfirm.title);
+  return bits.join('; ');
 }
 
 // The video waits for this caller in extension 2 (that service reads and
@@ -4514,7 +4581,7 @@ async function callHandler(call) {
   const turnHistory=[];
   const turnContext={youtubeResults:[],currentWebsiteUrl:null,currentWebsitePages:[],currentWebsitePageIndex:0,currentWebsiteReadOffset:0};
   // Extension 3: downloads running for this call, and a file to play next.
-  const callMedia=new Map(); let pendingPlay=null;
+  const callMedia=new Map(); let pendingPlay=null; let pendingConfirm=null;
   if(typeof isExt3==='function'&&isExt3()) { wakeSearxng(); if(process.env.EXT3_MEDIA_SECRET) fetch(String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'')+'/health',{signal:AbortSignal.timeout(90000)}).catch(()=>{}); }
   if(typeof loadCallerMemory==='function') await loadCallerMemory(callerPhone);
   if (process.env.ENABLE_AI_OPENING !== 'false' && callerPhone !== 'לא מזוהה' && conversationLog.some(x=>x.phone===callerPhone)) {
@@ -4696,19 +4763,55 @@ async function callHandler(call) {
       // Extension 3 (owner, 10.11): one grounded turn pipeline (ext3-brain.js).
       // On any failure the older routing below still answers.
       let ext3Done=false;
-      if(!explicitSearchOnly && String(process.env.EXT3_BRAIN||'on')!=='off') {
+      if(!explicitSearchOnly && String(process.env.EXT3_BRAIN||'on')!=='off' && typeof runExt3Brain==='function') {
         const fixed=answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
         if(fixed) { replyText=fixed; ext3Done=true; }
-        else try {
-          const r=await runExt3Brain(userTranscript,callerPhone,callId,turnHistory,israelNow);
-          if(r?.reply) { replyText=r.reply; turnContext.ext3Ref=r.ref||null; turnContext.ext3Handoff=r.handoff||null; ext3Done=true; if(call.selfTest) call.selfTest.lastRef=r.ref||null; }
-          if(r?.handoff && !call.selfTest) {
-            const m=await ext3StartOrPlay(r.handoff,callMedia);
-            if(!m.handoff) { turnContext.ext3Handoff=null; replyText=m.reply; if(m.play) pendingPlay=m.play; }
-            console.info('[EXT3_MEDIA] play request',{callId:activeKey,videoId:r.handoff.videoId,mode:r.handoff.mode,playsNow:!!m.play,handoff:!!m.handoff});
+        else if(pendingConfirm && ext3ConfirmChoice(userTranscript)) {
+          // He heard the exact title and chose: 1 audio, 2 video (+ audio from
+          // the same download), 3 cancel. Nothing was downloaded before this.
+          const choice=ext3ConfirmChoice(userTranscript), c=pendingConfirm; pendingConfirm=null;
+          console.info('[EXT3_MEDIA] confirmation',{callId:activeKey,videoId:c.videoId,choice});
+          if(choice==='cancel') replyText='ביטלתי, ולא הורדתי כלום. על מה תרצה שנמשיך לדבר?';
+          else if(call.selfTest) replyText='בחרת '+(choice==='video'?'וידאו':'קובץ שמע')+' עבור '+c.title+'.';
+          else { const m=await ext3StartOrPlay({...c,mode:choice},callMedia); replyText=m.handoff?'שירות ההורדות לא מוגדר כרגע. אפשר להוריד את '+c.title+' בשלוחה 2.':m.reply; if(m.play) pendingPlay=m.play; }
+          turnContext.ext3Ref={type:'video',videoId:c.videoId,title:c.title,channelTitle:c.channelTitle,durationSec:c.durationSec};
+          if(call.selfTest) call.selfTest.lastConfirmChoice=choice;
+          ext3Done=true;
+        }
+        else {
+          if(pendingConfirm) { console.info('[EXT3_MEDIA] confirmation dropped: caller moved on',{callId:activeKey}); pendingConfirm=null; }
+          let r=null, lastError=null;
+          for(let attempt=0;attempt<2&&!r?.reply&&!r?.mediaStatus&&!r?.cancel;attempt++) {
+            if(attempt) await new Promise(res=>setTimeout(res,2500));
+            try { r=await runExt3Brain(userTranscript,callerPhone,callId,turnHistory,israelNow,ext3MediaLine(callMedia,null)); }
+            catch(brainError) { lastError=brainError; console.warn('[EXT3_BRAIN] turn failed',{attempt,status:geminiErrorStatus(brainError),message:String(brainError?.message||brainError).slice(0,160)}); }
           }
-        } catch(brainError) {
-          console.warn('[EXT3_BRAIN] turn failed; using the older routing',{status:geminiErrorStatus(brainError),message:String(brainError?.message||brainError).slice(0,160)});
+          if(r?.instruction && normalizePhone(callerPhone)!=='לא מזוהה') {
+            const key=normalizePhone(callerPhone), list=(callerPrefs.get(key)||[]).filter(x=>x!==r.instruction);
+            list.push(r.instruction); callerPrefs.set(key,list.slice(-20));
+            void rememberPreference(key,r.instruction).catch(()=>{});
+            console.info('[EXT3_BRAIN] standing instruction kept',{callId:activeKey,chars:r.instruction.length});
+            if(call.selfTest) call.selfTest.lastInstruction=r.instruction;
+          }
+          if(r?.mediaStatus) { replyText=await ext3MediaStatusReply(callMedia); ext3Done=true; }
+          else if(r?.cancel) {
+            const running=ext3Jobs(callMedia).filter(j=>!j.cancelled&&!j.done);
+            for(const j of running) { j.cancelled=true; j.needsStart=false; }
+            replyText=running.length?'בסדר, עצרתי. לא אשמיע ולא אודיע לך על '+running.map(j=>j.title).join(' ועל ')+'. על מה תרצה שנמשיך?':'בסדר, אני לא מורידה כלום. על מה תרצה שנמשיך לדבר?';
+            ext3Done=true;
+          }
+          else if(r?.reply) {
+            replyText=r.reply; turnContext.ext3Ref=r.ref||null; ext3Done=true;
+            if(call.selfTest) call.selfTest.lastRef=r.ref||null;
+            if(r.confirm) { pendingConfirm=r.confirm; if(call.selfTest) call.selfTest.lastConfirm=r.confirm; console.info('[EXT3_MEDIA] asking to confirm before download',{callId:activeKey,videoId:r.confirm.videoId}); }
+          }
+          else {
+            // No fallback to the older routing here (it answered with unrelated
+            // headlines): an honest short line, and the caller can just ask again.
+            console.warn('[EXT3_BRAIN] no answer after a retry',{callId:activeKey,status:geminiErrorStatus(lastError)});
+            replyText='סליחה, מנועי התשובות עמוסים ממש ברגע זה ולא הצלחתי לנסח תשובה טובה. אפשר לחזור על השאלה בעוד כמה שניות, ואענה לך במלואה.';
+            ext3Done=true;
+          }
         }
       }
       ext3route: {
@@ -5604,7 +5707,7 @@ async function runBranch3DeepTest() {
   const { writeMemory, rememberTurn: remember } = await import('./branch1-memory.js');
   const wipe=async()=>{
     await writeMemory(phone,{phone,summary:'',entries:[]}).catch(()=>{});
-    memoryLoadedFor.delete(phone);
+    memoryLoadedFor.delete(phone); callerPrefs.delete(phone);
     for(let i=conversationLog.length-1;i>=0;i--) if(conversationLog[i].phone===phone) conversationLog.splice(i,1);
   };
   const runCall=async(label,questions)=>{
@@ -5616,8 +5719,9 @@ async function runBranch3DeepTest() {
         const text=(Array.isArray(items)?items:[]).map(x=>x?.data||'').join(' ').replace(/\s*¶\s*/g,'. ').trim();
         if(index>0) {
           turns.push({time:new Date().toISOString(),callId:id,user:questions[index-1],gemini:text,...(call.selfTest.lastRef?{ref:call.selfTest.lastRef}:{})});
-          if(text.length<2||/מנוע התשובות אינו זמין|תקלה זמנית|לא שמעתי אותך/.test(text)) deepBad++;
-          call.selfTest.lastRef=null;
+          if(text.length<2||/מנוע התשובות אינו זמין|תקלה זמנית|לא שמעתי אותך|מנועי התשובות עמוסים/.test(text)) deepBad++;
+          const st=call.selfTest; if(st.lastConfirm||st.lastConfirmChoice||st.lastInstruction) console.info('[DEEP3] flags',JSON.stringify({call:label,step:index,confirm:st.lastConfirm?st.lastConfirm.title:undefined,choice:st.lastConfirmChoice,instruction:st.lastInstruction}));
+          st.lastRef=null; st.lastConfirm=null; st.lastConfirmChoice=null; st.lastInstruction=null;
           for(let p=0;p<text.length;p+=1500)
             console.info('[DEEP3]',JSON.stringify({call:label,step:index,part:p/1500+1,question:p?undefined:questions[index-1],ms:p?undefined:Date.now()-askedAt,chars:p?undefined:text.length,reply:text.slice(p,p+1500)}));
         }
@@ -5657,7 +5761,7 @@ async function runBranch3DeepTest() {
     const a=await runCall('A',A);
     for(const t of a) await remember(phone,t).catch(()=>{});
     await new Promise(r=>setTimeout(r,4000));
-    memoryLoadedFor.delete(phone);
+    memoryLoadedFor.delete(phone); callerPrefs.delete(phone);
     for(let i=conversationLog.length-1;i>=0;i--) if(conversationLog[i].phone===phone) conversationLog.splice(i,1);
     await runCall('B',B);
     console.info('[DEEP3] finished');
