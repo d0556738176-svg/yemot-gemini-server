@@ -4838,8 +4838,10 @@ async function callHandler(call) {
         else {
           if(pendingConfirm) { console.info('[EXT3_MEDIA] confirmation dropped: caller moved on',{callId:activeKey}); pendingConfirm=null; }
           let r=null, lastError=null;
+          const brainStart=Date.now();
           for(let attempt=0;attempt<2&&!r?.reply&&!r?.mediaStatus&&!r?.cancel;attempt++) {
-            if(attempt) await new Promise(res=>setTimeout(res,2500));
+            // A second try only while the caller has not waited too long.
+            if(attempt) { if(Date.now()-brainStart>12000) break; await new Promise(res=>setTimeout(res,1500)); }
             try { r=await runExt3Brain(userTranscript,callerPhone,callId,turnHistory,israelNow,ext3MediaLine(callMedia,null)); }
             catch(brainError) { lastError=brainError; console.warn('[EXT3_BRAIN] turn failed',{attempt,status:geminiErrorStatus(brainError),message:String(brainError?.message||brainError).slice(0,160)}); }
           }

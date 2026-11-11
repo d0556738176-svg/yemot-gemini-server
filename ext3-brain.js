@@ -580,7 +580,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     const v = found[pick];
     if (!reply || !reply.includes(v.title.slice(0, Math.min(20, v.title.length)))) {
       reply = 'מצאתי לך ביוטיוב את הסרטון ' + v.title + ', בערוץ ' + v.channelTitle + '. אורכו ' + spokenDuration(v.durationSec) + (spokenViews(v.viewCount) ? ', ויש לו ' + spokenViews(v.viewCount) : '') + '. ' +
-        (v.description ? 'לפי התיאור שלו: ' + clip(v.description, 220) + ' ' : '') +
+        (v.description && !/(?:@|www|\.com|טלפון|הופעות|יחסי ציבור|אינסטגרם|פייסבוק|instagram|facebook|ניהול|הזמנות|לפרטים)/i.test(clip(v.description, 220)) ? 'לפי התיאור שלו: ' + clip(v.description, 220) + ' ' : '') +
         'אם תרצה לשמוע או להוריד אותו, אמור תשמיעי לי אותו.';
     }
     return out({ ref: videoRef(v), reply });
@@ -687,6 +687,11 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   }
 
   if (plan.intent === 'recall') {
+    // "What did I ask you not to talk about?" is answered from the saved rules
+    // themselves, with no model needed.
+    const list = (prefs || []).map(x => String(x || '').trim()).filter(Boolean);
+    if (list.length && /(?:ביקשתי|הוראה|הוראות|כללים|אמרתי לך ש?לא|ש?לא תדבר|ש?לא תדברי|מה אסור)/u.test(utterance))
+      return out({ reply: 'ביקשת ממני: ' + list.slice(-5).map(x => x.replace(/[.!]+$/, '')).join('. וגם: ') + '. ואני מקפיד על זה.' });
     const reply = await ask('המתקשר שואל על שיחות קודמות או על עצמו. ענה רק מתוך הקשר השיחה, הסיכום וההוראות הקבועות שלו. פני אליו בלשון זכר ובגוף שני ("ביקשת ממני ש..."), במשפטים שלמים וברורים. כשהוא שואל פרט אחד, ענה עליו בפשטות. כשהוא שואל מה דיברנו, סכמי את הנושאים העיקריים לפי הסדר, עם הפרטים החשובים (למשל שם מדויק של סרטון שהומלץ). אם פרט לא מופיע, אמרי בכנות שאינך זוכרת אותו.', '', { maxTokens: 1000, budgetMs: 10000 });
     return out({ reply });
   }
