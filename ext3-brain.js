@@ -286,6 +286,7 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, rece
     const ALT = /(?:קריוקי|karaoke|cover|קאבר|lyrics|lyric video|מילים|instrumental|פלייבק|playback|remix|רמיקס|\b8d\b|slowed|sped up|נייטקור|nightcore|tiktok|טיקטוק)/iu;
     const askedAlt = ALT.test((queries || []).join(' '));
     const alt = v => (!askedAlt && ALT.test(v.title)) ? 8 : 0;
+    if (!askedAlt && videos.some(v => !ALT.test(v.title))) videos = videos.filter(v => !ALT.test(v.title));
     videos.sort((a, b) => (rank.get(a.videoId) + alt(a) - rank.get(b.videoId) - alt(b)) - 4 * (Math.log10(b.viewCount + 10) - Math.log10(a.viewCount + 10)));
   }
   return videos.slice(0, 10);
@@ -420,9 +421,14 @@ export function articleChunk(text, from = 0, size = 1800) {
   if (end < t.length) { const dot = t.lastIndexOf('.', end); if (dot > from + size * 0.5) end = dot + 1; }
   return { part: t.slice(from, end).trim(), next: end, done: end >= t.length };
 }
+// Where an article page stops being the article (player menus, "more articles", comments).
+const ARTICLE_END = /(?:subtitles settings|Text Color|Beginning of dialog window|כתבות נוספות|עוד כתבות|עוד בנושא|כתבות קשורות|מומלצים|הכי נקראים|תגובות הגולשים|הוסיפו תגובה|הוספת תגובה|לכל הכתבות|שתפו את הכתבה|קראו עוד)/i;
 function readableArticle(text) {
-  return String(text || '').replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, ' ')
-    .split(/\n+/).filter(l => l.trim().length > 40 && !/(?:cookie|קוקיז|הרשמה לניוזלטר|כל הזכויות שמורות|תגובות|שתפו|share|לחצו כאן)/i.test(l)).join('\n');
+  let t = String(text || '');
+  const cut = t.search(ARTICLE_END);
+  if (cut > 400) t = t.slice(0, cut);
+  return t.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, ' ')
+    .split(/\n+/).filter(l => l.trim().length > 40 && !l.split(/\s+/).some(w => w.length > 24) && !/(?:cookie|קוקיז|הרשמה לניוזלטר|כל הזכויות שמורות|תגובות|שתפו|share|לחצו כאן)/i.test(l)).join('\n');
 }
 
 /**
@@ -563,7 +569,9 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
     if (!article || !plan.continueOffer) {
       const q = plan.search || plan.standalone || utterance;
       const site = /(?:הידברות|hidabroot)/i.test(q + utterance) ? 'hidabroot.org' : /(?:ynet|וויינט|ווינט)/i.test(q + utterance) ? 'ynet.co.il' : /(?:כיכר השבת|kikar)/i.test(q + utterance) ? 'kikar.co.il' : /(?:בחדרי חרדים|bhol)/i.test(q + utterance) ? 'bhol.co.il' : '';
-      const topic = q.replace(/(?:תקריאי|תקריא|לי|כתבה|מאמר|מאתר|באתר|מהאתר|הידברות|ynet|כיכר השבת|בחדרי חרדים|את)/giu, ' ').replace(/\s+/g, ' ').trim();
+      let topic = q.replace(/(?:תקריאי|תקריא|לי|כתבה|מאמר|מאתר|באתר|מהאתר|הידברות|ynet|כיכר השבת|בחדרי חרדים|את)/giu, ' ').replace(/\s+/g, ' ').trim();
+      // A generic wish ("something uplifting") becomes a real topic to search for.
+      if (!topic || /^(?:מחזקת|מחזק|מעניינת|מעניין|טובה|יפה|חדשה|נחמדה)$/u.test(topic)) topic = 'כתבה מחזקת על אמונה ובטחון';
       const queries = [...new Set([site ? (topic || 'כתבה') + ' site:' + site : '', site ? (topic || 'כתבה') + ' ' + site.split('.')[0] : '', q].filter(Boolean))];
       const sets = await Promise.allSettled(queries.map(x => deps.webSearch(x, { timeoutMs: 4500 })));
       const seen = new Set();
