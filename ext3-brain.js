@@ -319,6 +319,23 @@ export const PHONE_STYLE = [
   'אל תמציא שמות, מספרים, מחירים, תאריכים, סרטונים, ערוצים או ציטוטים. כשאינך בטוחה בפרט, אמור זאת בפשטות.'
 ].join(' ');
 
+// Extension 1 speaks as a man and answers briefly; extension 3 as a woman, at length.
+const MALE_SELF = [['מורידה','מוריד'],['מעירה','מעיר'],['ממשיכה','ממשיך'],['משמיעה','משמיע'],['מקשיבה','מקשיב'],['מכינה','מכין'],['יכולה','יכול'],['בטוחה','בטוח'],['זוכרת','זוכר'],['ממליצה','ממליץ'],['יודעת','יודע'],['מבינה','מבין'],['מחפשת','מחפש'],['מצטערת','מצטער'],['שמחה לעזור','שמח לעזור'],['מנסה שוב','מנסה שוב']];
+export function toMaleSelf(text) {
+  let t = String(text || '');
+  for (const [f, m] of MALE_SELF) t = t.replace(new RegExp('(?<![\\u0590-\\u05FF])' + f + '(?![\\u0590-\\u05FF])', 'gu'), m);
+  return t;
+}
+export function voiceRule(voice = 'female') {
+  return voice === 'male' ? 'חשוב: אתה עוזר גבר בטלפון. דבר על עצמך תמיד בלשון זכר (אני מוצא, אני מוריד, אני ממליץ, הבנתי), גם אם ההוראות למעלה כתובות בלשון נקבה.' : '';
+}
+export function lengthRule(brief = false, utterance = '') {
+  if (!brief) return '';
+  return /(?:בהרחבה|בפירוט|תפרט|תפרטי|תרחיב|תרחיבי|לעומק|באריכות|תסביר לי הכל|הכל על)/u.test(utterance)
+    ? 'כלל אורך שגובר על כל הוראה אחרת: המתקשר ביקש פירוט, אז ענה מפורט אבל ממוקד, עד 12 משפטים.'
+    : 'כלל אורך שגובר על כל הוראה אחרת למעלה: ענה בקצרה, 2 עד 4 משפטים ברורים וישר לעניין, עם הפרט החשוב ביותר (מספר, שעה, שם) בהתחלה. אל תרחיב אלא אם המתקשר מבקש "בהרחבה" או "תפרט". כשאתה מציע אפשרויות במקשים, אמור אותן במלואן גם בתשובה קצרה.';
+}
+
 export function teachingRule(lesson) {
   return 'כשהמתקשר רוצה ללמוד נושא (למשל תכנות), את המורה שלו כאן בטלפון: מלמדת שיעור אמיתי בשלבים, מסבירה מושג אחד או שניים בכל פעם בדוגמאות מהחיים, מתארת קוד במילים (למשל "כותבים פְּרִינְט, פותחים סוגריים...") ולא מפנה לאתרים, לקורסים או לסרטונים. בסוף כל שלב שאלי אם להמשיך לשלב הבא. ' +
     (lesson ? 'כרגע יש שיעור פעיל: ' + refLine(lesson) + '. אם המתקשר אומר כן או תמשיכי, המשיכי ישר לשלב הבא שלו בלי לחזור על ההקדמה. ' : '');
@@ -330,7 +347,7 @@ export function prefsBlock(prefs = []) {
   return list.length ? 'הוראות קבועות שהמתקשר נתן לך. חובה לקיים אותן תמיד, בכל תשובה, גם בשיחות הבאות:\n- ' + list.join('\n- ') : '';
 }
 
-export function answerPrompt({ context, utterance, plan, now, instruction, extra = '', lesson = null, prefs = [], media = '', stuck = false }) {
+export function answerPrompt({ context, utterance, plan, now, instruction, extra = '', lesson = null, prefs = [], media = '', stuck = false, voice = 'female', brief = false }) {
   return [
     instruction,
     PHONE_STYLE,
@@ -348,6 +365,8 @@ export function answerPrompt({ context, utterance, plan, now, instruction, extra
     'המתקשר אמר עכשיו: ' + utterance,
     plan?.standalone && plan.standalone !== utterance ? 'הכוונה שלו: ' + plan.standalone : '',
     '',
+    voiceRule(voice),
+    lengthRule(brief, utterance),
     'החזר אובייקט JSON תקין בלבד עם שדה "answer".'
   ].filter(x => x !== '').join('\n');
 }
@@ -446,7 +465,11 @@ function readableArticle(text) {
  *       findVideos(queries, opts) (defaults to the real one above)
  *       log
  */
-export async function ext3Turn({ utterance, summary = '', prior = [], current = [], now = '', prefs = [], media = '' }, deps) {
+export async function ext3Turn(input, deps) {
+  const r = await ext3TurnInner(input, deps);
+  return input.voice === 'male' && r && r.reply ? { ...r, reply: toMaleSelf(r.reply) } : r;
+}
+async function ext3TurnInner({ utterance, summary = '', prior = [], current = [], now = '', prefs = [], media = '', voice = 'female', brief = false }, deps) {
   const log = deps.log || console;
   const video = activeVideo(current, prior);
   const lessonRef = activeLesson(current);
@@ -487,7 +510,8 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
   // small enough for the free fast models (they refuse big ones with 413).
   const ask = async (instruction, extra = '', { maxTokens = 1800, budgetMs = 13000, lesson = lessonRef, ctx = context } = {}) => {
     let raw;
-    const common = { utterance, plan, now, instruction, lesson, prefs, media, stuck };
+    const common = { utterance, plan, now, instruction, lesson, prefs, media, stuck, voice, brief };
+    if (brief && !/(?:בהרחבה|בפירוט|תפרט|תרחיב|לעומק|באריכות)/u.test(utterance)) maxTokens = Math.min(maxTokens, 700);
     try { raw = await deps.llm(answerPrompt({ ...common, context: ctx, extra }), { budgetMs, maxTokens }); }
     catch (e) {
       // Every model busy (free per-minute limits): one more try, smaller, a moment later.
@@ -547,7 +571,7 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
       'החזר JSON בלבד בצורה {"pick":מספר i של הסרטון הנבחר,"answer":"התשובה למתקשר"}.';
     let pick = 0, reply = '';
     try {
-      const raw = await deps.llm(answerPrompt({ context: smallContext, utterance, plan, now, instruction, prefs, extra: 'סרטונים שנמצאו:\n' + candidatesText(found.slice(0, 8)) }), { budgetMs: 12000, maxTokens: 1400 });
+      const raw = await deps.llm(answerPrompt({ context: smallContext, utterance, plan, now, instruction, prefs, voice, brief, extra: 'סרטונים שנמצאו:\n' + candidatesText(found.slice(0, 8)) }), { budgetMs: 12000, maxTokens: 1400 });
       const m = noThinking(raw).match(/\{[\s\S]*\}/);
       const j = m ? JSON.parse(m[0]) : null;
       if (Number.isInteger(j?.pick) && found[j.pick]) pick = j.pick;

@@ -9,7 +9,7 @@ import { YemotRouter, ExitError } from 'yemot-router2';
 import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
-import { ext3Turn, parseKeyOptions, spokenDuration } from './ext3-brain.js';
+import { ext3Turn, parseKeyOptions, spokenDuration, toMaleSelf } from './ext3-brain.js';
 import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
@@ -365,6 +365,9 @@ const RECALL_INSTRUCTION = 'המתקשר שואל על שיחות קודמות �
 const EXT3_SYNTH_MS = Number(process.env.EXT3_SYNTH_MS || 12000);
 const EXT3_GEMINI_MS = Number(process.env.EXT3_GEMINI_MS || 8500);
 function isExt3() { return callPersona.getStore()?.branch==='3'; }
+// The grounded turn brain (ext3-brain.js) serves extension 3 (woman's voice,
+// full answers) and extension 1 (its own man's voice, short answers).
+function brainBranch() { const b=callPersona.getStore()?.branch; if(b==='3') return '3'; if((!b||b==='1')&&String(process.env.EXT1_BRAIN||'on')!=='off') return '1'; return ''; }
 // The answer models are asked for {"answer": "..."} but often return plain text,
 // fenced JSON or JSON cut off at the token limit. Any readable answer is kept
 // (08.11: a 717-character plain answer was thrown away as "unclear question").
@@ -4427,7 +4430,8 @@ async function runExt3Brain(utterance, phone, callId, turnHistory, now, media=''
   const prior=key!=='לא מזוהה'?conversationLog.filter(x=>normalizePhone(x.phone)===key&&x.user&&String(x.callId||'')!==String(callId||'')).slice(-12):[];
   const summary=key!=='לא מזוהה'?String(callerSummaries.get(key)||''):'';
   const prefs=key!=='לא מזוהה'?(callerPrefs.get(key)||[]):[];
-  return ext3Turn({utterance,summary,prior,current:turnHistory,now,prefs,media},{
+  const ext1=typeof brainBranch==='function'&&brainBranch()==='1';
+  return ext3Turn({utterance,summary,prior,current:turnHistory,now,prefs,media,voice:ext1?'male':'female',brief:ext1},{
     llm:(prompt,{budgetMs=12000,maxTokens=1500,planner=false}={})=>planner
       ? raceSynthesis(prompt,budgetMs,{maxTokens:Math.min(maxTokens,600),gemini:true,geminiBudgetMs:2500})
       : raceSynthesis(prompt,budgetMs,{maxTokens,quality:true}),
@@ -4610,7 +4614,7 @@ async function callHandler(call) {
   const turnContext={youtubeResults:[],currentWebsiteUrl:null,currentWebsitePages:[],currentWebsitePageIndex:0,currentWebsiteReadOffset:0};
   // Extension 3: downloads running for this call, and a file to play next.
   const callMedia=new Map(); let pendingPlay=null; let pendingConfirm=null;
-  if(typeof isExt3==='function'&&isExt3()) { wakeSearxng(); if(process.env.EXT3_MEDIA_SECRET) fetch(String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'')+'/health',{signal:AbortSignal.timeout(90000)}).catch(()=>{}); }
+  if(typeof brainBranch==='function'&&brainBranch()) { wakeSearxng(); if(process.env.EXT3_MEDIA_SECRET) fetch(String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'')+'/health',{signal:AbortSignal.timeout(90000)}).catch(()=>{}); }
   if(typeof loadCallerMemory==='function') await loadCallerMemory(callerPhone);
   if (process.env.ENABLE_AI_OPENING !== 'false' && callerPhone !== 'לא מזוהה' && conversationLog.some(x=>x.phone===callerPhone)) {
     openingPrompt=await buildOpeningForCaller(callerPhone,explicitSearchOnly);
@@ -4677,7 +4681,7 @@ async function callHandler(call) {
       // Owner, 10.11: "ללימוד קוד הקש 1, ללימוד פריסה הקש 2" - the call now
       // really waits for that key (while the answer is read and a few seconds
       // after), and the key becomes the caller's choice. No key = speak.
-      const keyOptions=(typeof isExt3==='function'&&isExt3())&&!call.selfTest&&!pendingPlay?parseKeyOptions(prompt):null;
+      const keyOptions=(typeof brainBranch==='function'&&brainBranch())&&!call.selfTest&&!pendingPlay?parseKeyOptions(prompt):null;
       if(keyOptions) {
         let pressed='';
         try {
@@ -4693,7 +4697,7 @@ async function callHandler(call) {
         if(keyOptions[pressed]) typedText='בחרתי באפשרות '+pressed+': '+keyOptions[pressed];
       }
       if(!typedText) {
-        let items=branch1SpeechItems(keyOptions?'אפשר גם לדבר. אני מקשיבה.':prompt), waitMs=10*60*1000;
+        let items=branch1SpeechItems(keyOptions?(brainBranch()==='1'?'אפשר גם לדבר. אני מקשיב.':'אפשר גם לדבר. אני מקשיבה.'):prompt), waitMs=10*60*1000;
         if(pendingPlay) {
           items=[...items,...pendingPlay.paths.map(f=>({type:'file',data:String(f)})),{type:'text',data:'הקטע הסתיים. אפשר להמשיך לדבר על כל דבר.'}];
           waitMs+=Math.round((Number(pendingPlay.durationSec)||3600)*1000*1.3);
@@ -4791,7 +4795,7 @@ async function callHandler(call) {
       // Extension 3 (owner, 10.11): one grounded turn pipeline (ext3-brain.js).
       // On any failure the older routing below still answers.
       let ext3Done=false;
-      if(!explicitSearchOnly && String(process.env.EXT3_BRAIN||'on')!=='off' && typeof runExt3Brain==='function') {
+      if((!explicitSearchOnly || (typeof brainBranch==='function'&&brainBranch()==='1')) && String(process.env.EXT3_BRAIN||'on')!=='off' && typeof runExt3Brain==='function') {
         const fixed=answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
         if(fixed) { replyText=fixed; ext3Done=true; }
         else if(pendingConfirm && ext3ConfirmChoice(userTranscript)) {
@@ -4842,6 +4846,7 @@ async function callHandler(call) {
           }
         }
       }
+      if(ext3Done && typeof brainBranch==='function' && brainBranch()==='1') replyText=toMaleSelf(replyText);
       ext3route: {
       if(ext3Done) break ext3route;
       const searchSubject=explicitSearchOnly?branch1WebSearchSubject(originalSpokenTranscript):null;
@@ -5760,7 +5765,9 @@ async function runBranch3DeepTest() {
       },
       id_list_message:async()=>{},go_to_folder:async()=>{},hangup:async()=>{}
     };
-    await callPersona.run({persona:'female',branch:'3'},()=>callHandler(call));
+    // DEEP3_BRANCH=1 runs the same script as extension 1 (its man's voice, short answers).
+    const b=String(process.env.DEEP3_BRANCH||'3')==='1'?'1':'3';
+    await callPersona.run({persona:b==='1'?'male':'female',branch:b},()=>callHandler(call));
     return turns;
   };
   try {
