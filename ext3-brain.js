@@ -435,7 +435,7 @@ function readableArticle(text) {
   const cut = t.search(ARTICLE_END);
   if (cut > 400) t = t.slice(0, cut);
   return t.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, ' ')
-    .split(/\n+/).filter(l => l.trim().length > 40 && !l.split(/\s+/).some(w => w.length > 24) && !/(?:cookie|קוקיז|הרשמה לניוזלטר|כל הזכויות שמורות|תגובות|שתפו|share|לחצו כאן)/i.test(l)).join('\n');
+    .split(/\n+/).filter((l, i, all) => all.indexOf(l) === i).filter(l => l.trim().length > 40 && !l.split(/\s+/).some(w => w.length > 24) && !/(?:cookie|קוקיז|הרשמה לניוזלטר|כל הזכויות שמורות|תגובות|שתפו|share|לחצו כאן)/i.test(l)).join('\n');
 }
 
 /**
@@ -594,7 +594,8 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
       for (const c of cands) {
         const pg = (pages || []).find(x => String(x.url || '').replace(/[#?].*$/, '') === String(c.url).replace(/[#?].*$/, ''));
         const tx = readableArticle(pg?.content || '');
-        if (tx.length >= 200) { url = c.url; title = pg?.title || c.title; text = tx; break; }
+        // A real article, not a video page with one caption line.
+        if (tx.length >= 700) { url = c.url; title = pg?.title || c.title; text = tx; break; }
       }
       if (!text) return out({ reply: 'מצאתי את הכתבה ' + clip(cands[0].title, 120) + ', אבל לא הצלחתי לקרוא את התוכן שלה כרגע. אפשר לנסות שוב בעוד רגע, או לבקש כתבה אחרת.' });
       from = 0;
