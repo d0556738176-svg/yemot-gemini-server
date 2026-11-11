@@ -84,5 +84,11 @@ export async function setupHashCallback() {
     log('main menu: # now opens the callback (was', JSON.stringify(curMain.slice(0, 200)) + ')');
   }
   const now = await getText('ivr2:/ext.ini');
-  log('verified', { mainMenu: String(now || '').replace(/\r/g, '').trim(), hash: String(await getText('ivr2:/Hash/ext.ini') || '').replace(/\r/g, '').trim() });
+  const rawHash = await api('GetTextFile', { what: 'ivr2:/Hash/ext.ini' });
+  const dir = await api('GetIVR2Dir', { path: 'ivr2:/Hash' });
+  log('verified', {
+    mainMenu: String(now || '').replace(/\r/g, '').trim(),
+    hash: JSON.stringify(rawHash).replace(/"token":"[^"]*"/, '').slice(0, 300),
+    hashFolder: JSON.stringify({ status: dir?.responseStatus, msg: dir?.message, files: (dir?.files || []).map(f => f.name), ini: dir?.ini }).slice(0, 500),
+  });
 }
