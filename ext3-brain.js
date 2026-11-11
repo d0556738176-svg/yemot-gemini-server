@@ -281,7 +281,13 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, rece
   // Relevance order from YouTube, nudged by popularity (or newest / most viewed when asked).
   if (order === 'date') videos.sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
   else if (order === 'views') videos.sort((a, b) => b.viewCount - a.viewCount);
-  else videos.sort((a, b) => (rank.get(a.videoId) - rank.get(b.videoId)) - 4 * (Math.log10(b.viewCount + 10) - Math.log10(a.viewCount + 10)));
+  else {
+    // The original song first: karaoke, covers, lyric and remix uploads only when he asked for one.
+    const ALT = /(?:קריוקי|karaoke|cover|קאבר|lyrics|lyric video|מילים|instrumental|פלייבק|playback|remix|רמיקס|\b8d\b|slowed|sped up|נייטקור|nightcore|tiktok|טיקטוק)/iu;
+    const askedAlt = ALT.test((queries || []).join(' '));
+    const alt = v => (!askedAlt && ALT.test(v.title)) ? 8 : 0;
+    videos.sort((a, b) => (rank.get(a.videoId) + alt(a) - rank.get(b.videoId) - alt(b)) - 4 * (Math.log10(b.viewCount + 10) - Math.log10(a.viewCount + 10)));
+  }
   return videos.slice(0, 10);
 }
 
@@ -398,6 +404,10 @@ const WEAK = /(?:facebook\.com|instagram\.com|tiktok\.com|pinterest\.|quora\.com
 export function sourceRank(url) { const u = String(url || ''); return OFFICIAL.test(u) ? 0 : NEWS.test(u) ? 1 : WEAK.test(u) ? 3 : 2; }
 function hostOf(url) { return String(url || '').replace(/^https?:\/\//, '').split('/')[0].replace(/^www\./, ''); }
 
+// The text of articles being read in this server, so "continue" goes on from
+// exactly the same text (a second read may extract the page differently).
+const articleCache = new Map();
+function cacheArticle(url, text) { articleCache.delete(url); articleCache.set(url, text); while (articleCache.size > 40) articleCache.delete(articleCache.keys().next().value); }
 export function activeArticle(current = []) {
   for (let i = (current || []).length - 1; i >= Math.max(0, current.length - 3); i--) if (current[i]?.ref?.type === 'article') return current[i].ref;
   return null;
@@ -447,7 +457,11 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
   // field with a description of the request).
   const ruleWords = /(?:אל תדברי|אל תדבר|תפסיקי לדבר|תפסיק לדבר|אל תספרי|אל תזכירי|אני לא רוצה שתדברי|אני לא רוצה שתזכירי|מעכשיו|מהיום והלאה|מהיום ת|תמיד ת|אף פעם אל|אף פעם לא|תזכרי ש|תזכור ש|בפעם הבאה ש|תדברי איתי ב|תדברי אליי ב|תפני אליי)/u.test(utterance);
   if (!ruleWords) plan.instruction = '';
-  else if (!plan.instruction) plan.instruction = utterance.trim().slice(0, 200);
+  else {
+    if (!plan.instruction) plan.instruction = utterance.trim().slice(0, 200);
+    // "From now on don't talk about X" is a rule, not a cancel or a search.
+    if (['cancel', 'media_status'].includes(plan.intent) || (plan.intent === 'web' && !/(?:תחפשי|תחפש|באינטרנט|ברשת)/u.test(utterance))) plan.intent = 'chat';
+  }
   if ((plan.intent === 'video_find' || plan.intent === 'video_play') && !plan.minMinutes && /(?:ארוך|ארוכה|ארוכים|מלא|שעה)/u.test(utterance)) plan.minMinutes = /שעה/u.test(utterance) ? 40 : 20;
   if ((plan.intent === 'video_find' || plan.intent === 'video_play') && !plan.maxMinutes && /(?:שיר בודד|סינגל|שיר אחד|לא סט|בלי סט|לא רוצה סט)/u.test(utterance)) plan.maxMinutes = 8;
   if (!video && plan.intent === 'video_about') plan.intent = 'recall';
@@ -559,7 +573,7 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
       const cands = sets.flatMap(x => x.status === 'fulfilled' ? x.value || [] : []).filter(r => {
         if (!r?.url || seen.has(r.url)) return false; seen.add(r.url);
         return !/(?:youtube|facebook|instagram|tiktok)\./i.test(r.url) && (!site || String(r.url).includes(site)) && looksLikeArticle(r.url);
-      }).slice(0, 3);
+      }).sort((a, b) => (/\/article\//.test(b.url) ? 1 : 0) - (/\/article\//.test(a.url) ? 1 : 0)).slice(0, 3);
       if (!cands.length) return out({ reply: 'לא מצאתי' + (site ? ' באתר ' + site : '') + ' כתבה מתאימה לקריאה. אפשר לומר לי את שם הכתבה או את הנושא שלה, למשל כתבה על אמונה או על שלום בית, ואחפש שוב.' });
       const pages = deps.readPages ? await Promise.race([deps.readPages(cands.map(c => c.url), { timeoutMs: 7000 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 8000).unref?.())]) : [];
       for (const c of cands) {
@@ -569,11 +583,14 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
       }
       if (!text) return out({ reply: 'מצאתי את הכתבה ' + clip(cands[0].title, 120) + ', אבל לא הצלחתי לקרוא את התוכן שלה כרגע. אפשר לנסות שוב בעוד רגע, או לבקש כתבה אחרת.' });
       from = 0;
+    } else if (articleCache.has(url)) {
+      text = articleCache.get(url);
     } else {
       const pages = deps.readPages ? await Promise.race([deps.readPages([url], { timeoutMs: 7000 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 8000).unref?.())]) : [];
       text = readableArticle(pages[0]?.content || '');
       if (text.length < 200) return out({ ref: article, reply: 'לא הצלחתי לקרוא כרגע את המשך הכתבה ' + clip(title, 120) + '. אפשר לומר תמשיכי שוב בעוד רגע.' });
     }
+    cacheArticle(url, text);
     const { part, next, done } = articleChunk(text, from);
     const opening = from === 0 ? 'הנה הכתבה ' + clip(title, 140) + ', מאתר ' + hostOf(url) + '. ' : '';
     return out({
@@ -617,7 +634,7 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
     log.info?.('[EXT3_BRAIN] web research', { queries, results: results.length, pagesRead: pages.length, official: results.filter(r => sourceRank(r.url) === 0).length, sourceChars: sourceText.length });
     const verify = 'בדיקת אמינות לפני שאת עונה: השווי בין המקורות. כשהם סותרים, העדיפי את האתר הרשמי, אחריו את המקור העדכני ביותר, ואמרי במפורש על איזה מקור את מתבססת ("לפי האתר הרשמי של כללית"). אל תצטטי שני מקורות סותרים בלי להכריע או להסביר. ' +
       (hours ? 'זו שאלה על שעות פתיחה, ולכן כאן עני ממוקד וקצר יחסית (5 עד 8 משפטים) גם אם בדרך כלל את מרחיבה: האם פתוח עכשיו ועד מתי, השעות של היום ושל מחר, הכתובת והטלפון. בלי עצות שלא נשאלו. כתבי שעות תמיד מהמוקדמת למאוחרת, למשל משמונה בבוקר עד אחת בצהריים. אם אין לך התאמה ודאית למקום שביקש, אמרי זאת בשני משפטים ושאלי באיזו עיר הוא נמצא, בלי לפרט נתונים לא ודאיים. אם הסניף שמופיע במקורות נמצא בעיר או בשכונה אחרת ממה שהמתקשר אמר, אמרי איזה סניף מצאת ושאלי אם לזה התכוון. זו שאלה על שעות פתיחה: מצאי את שעות היום הנוכחי (' + now + '), חשבי בעצמך לפי השעה עכשיו האם המקום פתוח או סגור ברגע זה ועד מתי, ואמרי את זה בתחילת התשובה בבירור. אם אין שעות מפורשות ליום הזה, אמרי שאין לך שעות מאומתות להיום והציעי להתקשר למקום, עם מספר הטלפון אם מופיע. ' : '');
-    const reply = await ask('המתקשר צריך מידע עדכני ומדויק. לפניך מקורות אמיתיים מהאינטרנט שנאספו ונקראו עכשיו לשאלה הזאת בלבד. אל תערבבי בתשובה מידע מתשובות קודמות שאינו קשור לשאלה הזאת. ' + verify + 'ענה בהרחבה ובפירוט רק לפי המקורות: עובדות, מספרים, שמות ותאריכים בדיוק כפי שכתובים בהם. כשהמקורות לא עונים על חלק מהשאלה, אמרי שלא מצאת את החלק הזה. אל תקריאי כתובות אתרים ואל תאמרי "מקור 1".', 'מקורות:\n' + sourceText, { maxTokens: 1800, budgetMs: 14000, ctx: smallContext })
+    const reply = await ask('המתקשר צריך מידע עדכני ומדויק. לפניך מקורות אמיתיים מהאינטרנט שנאספו ונקראו עכשיו לשאלה הזאת בלבד. אל תערבבי בתשובה מידע מתשובות קודמות שאינו קשור לשאלה הזאת. ' + verify + (hours ? 'ענה ממוקד ובבהירות, רק לפי המקורות:' : 'ענה בהרחבה ובפירוט רק לפי המקורות:') + ' עובדות, מספרים, שמות ותאריכים בדיוק כפי שכתובים בהם. כשהמקורות לא עונים על חלק מהשאלה, אמרי שלא מצאת את החלק הזה. אל תקריאי כתובות אתרים ואל תאמרי "מקור 1".', 'מקורות:\n' + sourceText, { maxTokens: hours ? 700 : 1800, budgetMs: 14000, ctx: smallContext })
       .catch(e => {
         log.warn?.('[EXT3_BRAIN] web answer not written; saying what was found', { status: e?.status || 0 });
         const seenHost = new Set();

@@ -291,3 +291,11 @@ test('a standing rule gets a clear acknowledgement and is returned', async () =>
   assert.match(r.reply, /אקפיד/);
   assert.equal(r.instruction, 'לא לדבר על פוליטיקה');
 });
+
+test('"from now on don\'t talk about X" is a rule, not a cancel', async () => {
+  const { deps } = baseDeps(['{"intent":"cancel"}']);
+  const r = await ext3Turn({ utterance: 'מעכשיו אל תדברי איתי על פוליטיקה בכלל', now }, deps);
+  assert.equal(r.cancel, undefined);
+  assert.match(r.instruction, /פוליטיקה/);
+  assert.match(r.reply, /אקפיד/);
+});
