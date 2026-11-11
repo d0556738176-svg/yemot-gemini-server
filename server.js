@@ -4886,8 +4886,12 @@ app.get('/api/ext3/media', rateLimit(240, 60 * 1000, 'ext3-media'), async (req, 
       // (made by that job), otherwise its own audio download.
       if (mode === 'audio' && (!audio || audio.status === 'failed')) audio = startYouTubePlaybackJob(video);
     }
-    const audioOut = audio ? { status: audio.status, paths: audio.status === 'ready' ? audio.paths : null, stage: audio.progress?.stage || null, error: audio.error ? String(audio.error?.code || audio.error?.message || audio.error).slice(0, 80) : null } : { status: 'none' };
-    const videoOut = vjob ? { status: vjob.status, error: vjob.error ? String(vjob.error).slice(0, 80) : null } : { status: 'none' };
+    // spoken: the measured stage in words (never an estimated percentage).
+    const audioOut = audio ? { status: audio.status, paths: audio.status === 'ready' ? audio.paths : null, stage: audio.progress?.stage || null,
+      spoken: audio.status === 'running' ? (progressAnnouncement(audio.progress || {}, {}, Date.now())?.text || null) : null,
+      minutes: audio.startedAt ? Math.floor((Date.now() - audio.startedAt) / 60000) : null,
+      error: audio.error ? String(audio.error?.code || audio.error?.message || audio.error).slice(0, 80) : null } : { status: 'none' };
+    const videoOut = vjob ? { status: vjob.status, minutes: vjob.startedAt ? Math.floor((Date.now() - vjob.startedAt) / 60000) : null, error: vjob.error ? String(vjob.error).slice(0, 80) : null } : { status: 'none' };
     res.json({ ok: true, videoId, audio: audioOut, video: videoOut });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e).slice(0, 120) });
