@@ -299,3 +299,17 @@ test('"from now on don\'t talk about X" is a rule, not a cancel', async () => {
   assert.match(r.instruction, /פוליטיקה/);
   assert.match(r.reply, /אקפיד/);
 });
+
+test('a named song keeps its own versions, original first', async () => {
+  const { findVideos } = await import('../ext3-brain.js');
+  const items = [
+    { id: 'aaaaaaaaaaa', snippet: { title: 'אושר כהן - דאון (קריוקי פסנתר)', channelTitle: 'k' }, contentDetails: { duration: 'PT4M' }, statistics: { viewCount: '100' } },
+    { id: 'bbbbbbbbbbb', snippet: { title: 'אושר כהן - הכלה של המדינה', channelTitle: 'o' }, contentDetails: { duration: 'PT4M' }, statistics: { viewCount: '9000000' } },
+    { id: 'ccccccccccc', snippet: { title: 'אושר כהן - דאון', channelTitle: 'o' }, contentDetails: { duration: 'PT3M' }, statistics: { viewCount: '50000' } },
+    { id: 'ddddddddddd', snippet: { title: 'אושר כהן - דאון (Remix)', channelTitle: 'dj' }, contentDetails: { duration: 'PT4M' }, statistics: { viewCount: '80000' } }
+  ];
+  const fetchImpl = async url => ({ ok: true, json: async () => String(url).includes('/search') ? { items: items.map(i => ({ id: { videoId: i.id } })) } : { items } });
+  const found = await findVideos(['אושר כהן דאון'], { env: { YOUTUBE_API_KEY: 'k' }, fetchImpl });
+  assert.equal(found[0].videoId, 'ccccccccccc');
+  assert.ok(!found.some(v => v.videoId === 'bbbbbbbbbbb'));
+});

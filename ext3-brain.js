@@ -286,6 +286,13 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, rece
     const ALT = /(?:קריוקי|karaoke|cover|קאבר|lyrics|lyric video|מילים|instrumental|פלייבק|playback|remix|רמיקס|\b8d\b|slowed|sped up|נייטקור|nightcore|tiktok|טיקטוק)/iu;
     const askedAlt = ALT.test((queries || []).join(' '));
     const alt = v => (!askedAlt && ALT.test(v.title)) ? 8 : 0;
+    // When he named a song, the titles that carry all of his words come first
+    // ("אושר כהן דאון" -> the versions of "דאון"), and among those the original.
+    const STOP = new Set(['שיר', 'השיר', 'של', 'את', 'לי', 'סרטון', 'הסרטון', 'בבקשה', 'קליפ', 'הקליפ']);
+    const qWords = String((queries || [])[0] || '').replace(/[^\u0590-\u05FFa-zA-Z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 1 && !STOP.has(w));
+    const fit = v => { if (!qWords.length) return 0; const t = String(v.title || '').toLowerCase(); return qWords.filter(w => t.includes(w.toLowerCase())).length / qWords.length; };
+    const best = Math.max(0, ...videos.map(fit));
+    if (qWords.length && qWords.length <= 6 && best >= 0.99) videos = videos.filter(v => fit(v) >= 0.99);
     if (!askedAlt && videos.some(v => !ALT.test(v.title))) videos = videos.filter(v => !ALT.test(v.title));
     videos.sort((a, b) => (rank.get(a.videoId) + alt(a) - rank.get(b.videoId) - alt(b)) - 4 * (Math.log10(b.viewCount + 10) - Math.log10(a.viewCount + 10)));
   }
@@ -422,7 +429,7 @@ export function articleChunk(text, from = 0, size = 1800) {
   return { part: t.slice(from, end).trim(), next: end, done: end >= t.length };
 }
 // Where an article page stops being the article (player menus, "more articles", comments).
-const ARTICLE_END = /(?:subtitles settings|Text Color|Beginning of dialog window|כתבות נוספות|עוד כתבות|עוד בנושא|כתבות קשורות|מומלצים|הכי נקראים|תגובות הגולשים|הוסיפו תגובה|הוספת תגובה|לכל הכתבות|שתפו את הכתבה|קראו עוד)/i;
+const ARTICLE_END = /(?:תגיות ועדכונים|תגיות:|subtitles settings|Text Color|Beginning of dialog window|כתבות נוספות|עוד כתבות|עוד בנושא|כתבות קשורות|מומלצים|הכי נקראים|תגובות הגולשים|הוסיפו תגובה|הוספת תגובה|לכל הכתבות|שתפו את הכתבה|קראו עוד)/i;
 function readableArticle(text) {
   let t = String(text || '');
   const cut = t.search(ARTICLE_END);
@@ -668,7 +675,11 @@ export async function ext3Turn({ utterance, summary = '', prior = [], current = 
   const lessonWanted = looksLikeLessonRequest(utterance) || (plan.continueOffer && lessonRef);
   let reply = await ask('את עוזרת חכמה ונבונה בטלפון, עם ידע רחב בכל תחום. עני על מה שהמתקשר אמר עכשיו, בהמשך טבעי לשיחה.' +
     (plan.instruction ? ' המתקשר נתן עכשיו הוראה קבועה: "' + plan.instruction + '". אשרי בקצרה ובחום שתזכרי ותקיימי אותה מעכשיו, והמשיכי בהתאם.' : ''), '', { maxTokens: 2000, budgetMs: 13000 });
-  if (stuck && !parseKeyOptions(reply)) reply = numberedToKeys(reply);
+  if (stuck) {
+    // Keys must be clear: one short line and the options, nothing garbled around them.
+    const keys = parseKeyOptions(reply) || parseKeyOptions(numberedToKeys(reply));
+    if (keys) reply = 'בסדר, נבחר במקשים. ' + Object.entries(keys).map(([k, label]) => (/^ל/u.test(label) ? label : 'ל' + label) + ' הקש ' + k).join(', ') + '. אפשר גם לומר את המספר.';
+  }
   let ref = null;
   if (lessonWanted) {
     const topic = lessonRef?.topic || lessonTopic(utterance) || lessonTopic(plan.standalone) || 'הנושא שביקש';
