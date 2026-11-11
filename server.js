@@ -6065,6 +6065,8 @@ app.listen(port,async()=>{
   await loadConversationLog();
   // Extension 6: learning menu (1 English, 2 programming); lessons are built/uploaded in the background and resume after restarts.
   setTimeout(()=>import('./courses.js').then(m=>m.runCoursesJob()).catch(e=>console.warn('[ENGLISH] failed to start',String(e?.message||e).slice(0,200))),45000);
+  // # in the main menu: the system calls the caller back (11.11).
+  setTimeout(()=>import('./hash-callback.js').then(m=>m.setupHashCallback()).catch(e=>console.warn('[HASH_CALLBACK] failed',String(e?.message||e).slice(0,200))),15000);
   // What the main menu, extensions 1/3 and the account's star menu are set to
   // (06.11, star = main menu everywhere).
   void (async () => {
