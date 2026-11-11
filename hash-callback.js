@@ -75,6 +75,15 @@ export async function setupHashCallback() {
     } catch (e) { log('message upload failed; Yemot default message stays', String(e?.message || e).slice(0, 200)); }
   }
 
+  // On a fresh account the folder appears only with the first file in it, so
+  // the settings are checked again (and written again) after the upload.
+  for (let i = 0; i < 3; i++) {
+    if (String(await getText('ivr2:/Hash/ext.ini') || '').replace(/\r/g, '').trim() === HASH_INI.trim()) break;
+    await putText('ivr2:/Hash/ext.ini', HASH_INI);
+    log('callback folder settings written again');
+    await new Promise(r => setTimeout(r, 2000));
+  }
+
   // Main menu last, so # never points at a folder that is not ready.
   const curMain = await getText('ivr2:/ext.ini');
   if (curMain === null) return log('could not read the main menu settings; # left unchanged');
