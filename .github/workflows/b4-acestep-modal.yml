@@ -44,11 +44,13 @@ jobs:
         id: prep
         run: |
           mkdir -p out
-          # Tolerate pasting mistakes: surrounding spaces/newlines, quotes, or the
-          # two values swapped. Only prefixes and lengths are ever reported.
-          ID="$(printf '%s' "$RAW_MODAL_ID" | tr -d '[:space:]"' )"
-          SEC="$(printf '%s' "$RAW_MODAL_SECRET" | tr -d '[:space:]"' )"
-          case "$ID" in as-*) case "$SEC" in ak-*) T="$ID"; ID="$SEC"; SEC="$T";; esac;; esac
+          # Tolerate pasting mistakes: Modal shows the token as a whole
+          # "modal token set --token-id ak-... --token-secret as-..." command,
+          # so pull the ak-/as- values out of whatever was pasted into either
+          # secret. Only prefixes and lengths are ever reported.
+          ALL="$RAW_MODAL_ID $RAW_MODAL_SECRET"
+          ID="$(printf '%s' "$ALL" | grep -oE 'ak-[A-Za-z0-9]+' | head -1 || true)"
+          SEC="$(printf '%s' "$ALL" | grep -oE 'as-[A-Za-z0-9]+' | head -1 || true)"
           printf '{"id_prefix":"%s","id_len":%d,"secret_prefix":"%s","secret_len":%d}\n' \
             "${ID:0:3}" "${#ID}" "${SEC:0:3}" "${#SEC}" > out/token-shape.json
           if [ -n "$ID" ]; then echo "::add-mask::$ID"; fi
