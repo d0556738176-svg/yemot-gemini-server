@@ -10,7 +10,7 @@ token = os.environ.get("HF_TOKEN") or None
 space = os.environ.get("SPACE", "ACE-Step/Ace-Step-v1.5")
 t0 = time.time()
 try:
-    c = Client(space, hf_token=token, verbose=False)
+    c = Client(space, token=token, verbose=False)
     info = c.view_api(return_format="dict", print_info=False)
     with open(os.path.join(OUT, "api.json"), "w") as f:
         json.dump(info, f, ensure_ascii=False, indent=1, default=str)
