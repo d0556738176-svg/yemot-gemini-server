@@ -4541,7 +4541,12 @@ function ext2Wake(reason='') {
   ext2WakeInFlight=(async()=>{
     let st=await direct().catch(()=>0);
     let via='direct';
-    if(st!==200) { via='outside'; st=await outside().catch(()=>0); if(st===200) { await new Promise(r=>setTimeout(r,1500)); const again=await direct().catch(()=>0); if(again) st=again; } }
+    if(st!==200) {
+      // Wake from outside, then wait for it to come up (a cold start takes
+      // about 20-60 s; until then Render keeps answering 429).
+      via='outside'; void outside().catch(()=>0);
+      for(let i=0;i<24&&st!==200;i++) { await new Promise(r=>setTimeout(r,i?4000:6000)); st=await direct().catch(()=>0); }
+    }
     const ok=st===200;
     if(ok) ext2LastWakeOk=Date.now();
     console.info('[EXT2_WAKE]',{reason,via,status:st,ms:Date.now()-t0});
