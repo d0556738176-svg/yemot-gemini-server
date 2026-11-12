@@ -9,6 +9,7 @@ import { YemotRouter, ExitError } from 'yemot-router2';
 import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
+import { keySlots, keysFor, withKeys, keyReport } from './key-slots.js';
 import { ext3Turn, parseKeyOptions, spokenDuration, toMaleSelf } from './ext3-brain.js';
 import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
@@ -99,7 +100,8 @@ function requireDashboardAuth(req, res, next) {
 // GEMINI_API_KEY_3 ... GEMINI_API_KEY_9, added after the list.
 const apiKeys = [...new Set([
   ...(process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '').split(','),
-  ...[2,3,4,5,6,7,8,9].map(n => process.env['GEMINI_API_KEY_' + n] || '')
+  ...[2,3,4,5,6,7,8,9].map(n => process.env['GEMINI_API_KEY_' + n] || ''),
+  process.env.GEMINI_BACKUP_API_KEY || ''
 ].map(k => k.trim()).filter(Boolean))];
 
 console.log('[Gemini] configured key count:', apiKeys.length);
@@ -508,10 +510,21 @@ function extraFastProviders(fastPhone=true){
     ['ZAI','https://api.z.ai/api/paas/v4','ZAI_API_KEY','ZAI_MODEL','glm-4.5-flash'],
     ['Cohere','https://api.cohere.ai/compatibility/v1','COHERE_API_KEY','COHERE_MODEL','command-a-03-2025']
   ];
-  return defs.map(([name,baseUrl,keyEnv,modelEnv,defModel])=>({
-    name,baseUrl,apiKey:(process.env[keyEnv]||'').trim(),model:(process.env[modelEnv]||defModel).trim(),
-    timeoutMs:Number(process.env[name.toUpperCase()+'_TIMEOUT_MS']||(fastPhone?1800:6500))
-  })).filter(x=>x.apiKey);
+  // Owner, 12.11: replacement fields. Every key field X_API_KEY also has
+  // X_BACKUP_API_KEY and X_API_KEY_2 .. _9; each extra key is one more racer
+  // with its own free quota. Groq's and OpenRouter's first key race elsewhere.
+  const out=[];
+  for(const [name,baseUrl,keyEnv,modelEnv,defModel] of defs) {
+    const base=keyEnv==='GROQ_BACKUP_API_KEY'?null:keyEnv;
+    if(!base) continue;
+    keySlots(base).forEach((s,i)=>out.push({name:i?name+(i+1):name,baseUrl,apiKey:s.key,model:(process.env[modelEnv]||defModel).trim(),
+      timeoutMs:Number(process.env[name.toUpperCase()+'_TIMEOUT_MS']||(fastPhone?1800:6500))}));
+  }
+  keySlots('GROQ_API_KEY').slice(1).forEach((s,i)=>out.push({name:'Groq'+(i+2),baseUrl:'https://api.groq.com/openai/v1',apiKey:s.key,
+    model:(process.env.GROQ_BACKUP_MODEL||'openai/gpt-oss-120b').trim(),timeoutMs:Number(process.env.GROQ2_TIMEOUT_MS||(fastPhone?1800:6500))}));
+  keySlots('OPENROUTER_API_KEY').slice(1).forEach((s,i)=>out.push({name:'OpenRouter'+(i+2),baseUrl:'https://openrouter.ai/api/v1',apiKey:s.key,
+    model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),timeoutMs:Number(process.env.OPENROUTER_TIMEOUT_MS||(fastPhone?2500:7000))}));
+  return out;
 }
  // Log configuration presence only; never print or partially reveal API keys.
 console.info('[BRANCH1 FALLBACK] independent provider configuration', {
@@ -4378,11 +4391,13 @@ function wakeSearxng() {
 }
 // Exa (free monthly credit, no card): its own index, returns page text too.
 async function searchExa(q,{timeoutMs=4000}={}) {
-  const key=String(process.env.EXA_API_KEY||'').trim(); if(!key) return [];
-  const r=await fetch('https://api.exa.ai/search',{method:'POST',signal:AbortSignal.timeout(timeoutMs),headers:{'x-api-key':key,'content-type':'application/json'},
-    body:JSON.stringify({query:q,numResults:6,contents:{text:{maxCharacters:1500}}})});
-  if(!r.ok) throw Object.assign(new Error('Exa HTTP '+r.status),{status:r.status});
-  const j=await r.json();
+  if(!keysFor('EXA_API_KEY').length) return [];
+  const j=await withKeys('EXA_API_KEY',async key=>{
+    const r=await fetch('https://api.exa.ai/search',{method:'POST',signal:AbortSignal.timeout(timeoutMs),headers:{'x-api-key':key,'content-type':'application/json'},
+      body:JSON.stringify({query:q,numResults:6,contents:{text:{maxCharacters:1500}}})});
+    if(!r.ok) throw Object.assign(new Error('Exa HTTP '+r.status+' '+(await r.text().catch(()=>'')).slice(0,120)),{status:r.status});
+    return r.json();
+  },{label:'Exa'});
   return (j.results||[]).map(x=>({title:String(x.title||''),url:String(x.url||''),snippet:String(x.text||'').slice(0,1500)}));
 }
 async function ext3WebSearch(q,{timeoutMs=4500}={}) {
@@ -4390,10 +4405,10 @@ async function ext3WebSearch(q,{timeoutMs=4500}={}) {
   const capped=p=>Promise.race([p,new Promise(r=>setTimeout(()=>r([]),timeoutMs).unref?.())]);
   const settled=await Promise.allSettled([
     capped(searchWebDirect(q,{timeoutMs:Math.min(timeoutMs,3500)})),
-    process.env.SERPER_API_KEY?capped(searchSerper(q,{timeoutMs,count:8})):Promise.resolve([]),
-    process.env.LANGSEARCH_API_KEY?capped(searchLangSearch(q,{timeoutMs,count:6})):Promise.resolve([]),
+    keysFor('SERPER_API_KEY').length?capped(searchSerper(q,{timeoutMs,count:8})):Promise.resolve([]),
+    keysFor('LANGSEARCH_API_KEY').length?capped(searchLangSearch(q,{timeoutMs,count:6})):Promise.resolve([]),
     process.env.SEARXNG_URL?capped(searchSearxng(q,{timeoutMs})):Promise.resolve([]),
-    process.env.EXA_API_KEY?capped(searchExa(q,{timeoutMs})):Promise.resolve([])
+    keysFor('EXA_API_KEY').length?capped(searchExa(q,{timeoutMs})):Promise.resolve([])
   ]);
   const seen=new Set(), out=[];
   for(const s of settled) for(const r of (s.status==='fulfilled'&&Array.isArray(s.value)?s.value:[])) {
@@ -6103,6 +6118,8 @@ app.listen(port,async()=>{
       if(process.env.PROVIDER_HEALTH_ON_BUILD==='on')
         setTimeout(()=>providerHealth({force:true}).catch(e=>console.warn('[WEB_PROVIDERS] health check failed',String(e?.message||e).slice(0,160))),4000);
       if(process.env.BRANCH3_DEEP_TEST) setTimeout(()=>runBranch3DeepTest(),25000);
+      // Which key fields are set and whether each key works (names and statuses only).
+      if(String(process.env.KEY_REPORT||'').trim()==='on') setTimeout(()=>keyReport().catch(e=>console.warn('[KEY_REPORT] failed',String(e?.message||e).slice(0,160))),8000);
       if(String(process.env.BRANCH1_E2E_SELFTEST||'off')==='on') setTimeout(()=>runBranch1EndToEndSelfTest().then(()=>runBranch3SelfTest()).catch(e=>console.warn('[E2E_SELFTEST] crashed',String(e?.message||e).slice(0,200))),20000);
     }
   } catch {}

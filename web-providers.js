@@ -3,6 +3,7 @@
 // header, and is skipped when the key is missing. Keys are never logged.
 import { tavily } from '@tavily/core';
 import { createCooldownRegistry } from './provider-cooldowns.js';
+import { keysFor, withKeys } from './key-slots.js';
 
 // Keys pasted into a dashboard sometimes carry quotes, a "Bearer " prefix or a
 // line break; any of these makes the provider reject an otherwise valid key.
@@ -75,7 +76,8 @@ function normalizeResults(items, limit = 8) {
 // ---------- Tavily (primary key, then backup key) ----------
 
 export function tavilyKeys() {
-  return [...new Set([env('TAVILY_API_KEY'), env('TAVILY_BACKUP_API_KEY')].filter(Boolean))];
+  // TAVILY_API_KEY, TAVILY_BACKUP_API_KEY and TAVILY_API_KEY_2 .. _9.
+  return keysFor('TAVILY_API_KEY');
 }
 
 /**
@@ -120,25 +122,21 @@ export function tavilyClient() {
 // ---------- Secondary search providers ----------
 
 export async function searchLangSearch(query, { timeoutMs = 3500, count = 6 } = {}) {
-  const key = env('LANGSEARCH_API_KEY');
-  if (!key) throw Object.assign(new Error('LangSearch key not configured'), { status: 412 });
-  const data = await fetchJson('https://api.langsearch.com/v1/web-search', {
+  const data = await withKeys('LANGSEARCH_API_KEY', key => fetchJson('https://api.langsearch.com/v1/web-search', {
     method: 'POST', timeoutMs, label: 'LangSearch',
     headers: { authorization: 'Bearer ' + key },
     body: { query: String(query).slice(0, 400), freshness: 'noLimit', summary: true, count }
-  });
+  }), { label: 'LangSearch' });
   const items = data?.data?.webPages?.value || data?.webPages?.value || [];
   return normalizeResults(items.map(x => ({ title: x.name, url: x.url, snippet: x.summary || x.snippet })), count);
 }
 
 export async function searchSerper(query, { timeoutMs = 3500, count = 8 } = {}) {
-  const key = env('SERPER_API_KEY');
-  if (!key) throw Object.assign(new Error('Serper key not configured'), { status: 412 });
-  const data = await fetchJson('https://google.serper.dev/search', {
+  const data = await withKeys('SERPER_API_KEY', key => fetchJson('https://google.serper.dev/search', {
     method: 'POST', timeoutMs, label: 'Serper',
     headers: { 'x-api-key': key },
     body: { q: String(query).slice(0, 400), gl: 'il', hl: 'iw', num: count }
-  });
+  }), { label: 'Serper' });
   const items = [];
   // Google's answer box and knowledge panel often hold the exact phone number,
   // address or hours a caller asked for, so they go first.
@@ -164,7 +162,7 @@ export async function searchSerper(query, { timeoutMs = 3500, count = 8 } = {}) 
  * "<name> אתר רשמי"; the knowledge panel names the organization's own site.
  */
 export async function findOfficialWebsite(name, { timeoutMs = 2500 } = {}) {
-  const key = env('SERPER_API_KEY');
+  const key = keysFor('SERPER_API_KEY')[0] || '';
   const q = String(name || '').trim();
   if (!key || !q) return null;
   // The plain name (no "official site" words) is what Google ranks best. Signals,
@@ -218,7 +216,7 @@ const SECONDARY_SEARCH = [
 ];
 
 export function configuredSecondarySearch() {
-  return SECONDARY_SEARCH.filter(([, keyName]) => env(keyName)).map(([name]) => name);
+  return SECONDARY_SEARCH.filter(([, keyName]) => keysFor(keyName).length).map(([name]) => name);
 }
 
 /**
@@ -234,7 +232,7 @@ const inFlight = new Map();
 export async function searchSecondary(query, { timeoutMs = 3500 } = {}) {
   const racers = [];
   for (const [name, keyName, run] of SECONDARY_SEARCH) {
-    if (!env(keyName)) continue;
+    if (!keysFor(keyName).length) continue;
     const id = 'search:' + name;
     if (cooldowns.isCoolingDown(id)) continue;
     if ((inFlight.get(name) || 0) >= (MAX_IN_FLIGHT[name] || 2)) continue;
