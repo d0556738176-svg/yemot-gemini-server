@@ -23,15 +23,15 @@ export const COURSES = [
   { id: 'code', folder: 'ivr2:/6/2', json: 'course-code.json', music: 'music-code.mp3', title: 'לימוד תכנות' },
 ];
 
-// Same keys as extension 7; * goes back to the learning menu (the previous menu).
+// Same keys as extension 7: * = Yemot's star menu (playlist settings), 0 = main menu (owner, 12.11).
 const playIni = title => ['type=playfile', 'title=' + title, 'start=min', 'control_play6=plus', 'control_play4=minus',
   'control_play5=wait', 'control_play1=seconds_plus', 'control_play3=seconds_minus', 'control_play7=minut_plus_amount1',
-  'minut_plus_amount1=180000', 'control_play*=go_to_folder', 'playfile_control_play_*_goto=/6',
+  'minut_plus_amount1=180000', 'control_play0=go_to_folder', 'playfile_control_play_0_goto=/',
   'save_last_play=yes', 'last_play_auto=yes', ''].join('\n');
 const MENU_INI = ['type=menu', 'title=לימוד', ''].join('\n');
 const MENU_SEGMENTS = [['jingle'], ['he', 'ברוך הבא לשלוחת הלימוד!'], ['p', 0.5],
   ['he', 'ללימוד אנגלית וקריאה באנגלית, הקש אחת.'], ['p', 0.4], ['he', 'ללימוד תכנות, מאפס ועד מתכנת של ממש, הקש שתיים.'], ['p', 0.4],
-  ['he', 'בכל שלוחה, השיעורים ממשיכים מהמקום שבו עצרת. לחזרה לתפריט הקודם, הקש כוכבית.'], ['p', 2]];
+  ['he', 'בכל שלוחה, השיעורים ממשיכים מהמקום שבו עצרת. בתוך השיעורים, לחזרה לתפריט הראשי הקש אפס.'], ['p', 2]];
 
 function token() {
   const t = String(process.env.YEMOT_TOKEN || '').trim();

@@ -6123,13 +6123,14 @@ app.listen(port,async()=>{
       out[what] = String(j?.contents ?? j?.message ?? '').replace(/(password|token|api_key)[^\n]*/gi, '$1=…').slice(0, 600);
     }
     console.info('[STAR] extension settings', JSON.stringify(out));
-    // The account's star menu (where Yemot itself sends a *) goes to the main
-    // menu. Previous setting: type=menu_star.
-    const want = 'type=go_to_folder\ngo_to_folder=/\n';
-    if (!/type=go_to_folder/.test(out['ivr2:/Star/ext.ini'] || '')) {
+    // The account's star menu is Yemot's own star menu again (playlist
+    // settings), as it was before 06.11 (owner, 12.11); in playback
+    // extensions 0 returns to the main menu instead.
+    const want = 'type=menu_star\n';
+    if (!/type=menu_star/.test(out['ivr2:/Star/ext.ini'] || '')) {
       const r = await (await fetch('https://www.call2all.co.il/ym/api/UploadTextFile', { method: 'POST', body: new URLSearchParams({ token, what: 'ivr2:/Star/ext.ini', contents: want }), signal: AbortSignal.timeout(15000) })).json().catch(e => ({ message: String(e) }));
       const back = await (await fetch('https://www.call2all.co.il/ym/api/GetTextFile?' + new URLSearchParams({ token, what: 'ivr2:/Star/ext.ini' }))).json().catch(() => null);
-      console.info('[STAR] star menu now goes to the main menu', { ok: r?.responseStatus === 'OK', now: String(back?.contents || '').trim() });
+      console.info('[STAR] star menu restored to the Yemot star menu', { ok: r?.responseStatus === 'OK', now: String(back?.contents || '').trim() });
     }
   })().catch(() => {});
   // Durable caller memory: one round trip at start proves the Yemot storage works.
