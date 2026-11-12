@@ -96,7 +96,8 @@ jobs:
           echo "${{ steps.deploy.outputs.url }}" > out/url.txt
           echo "${{ github.run_id }} ${{ github.sha }} $(date -u +%FT%TZ)" > out/run.txt
           # Keep logs short and free of any token text.
-          [ -f out/deploy.log ] && tail -n 80 out/deploy.log | grep -viE 'token|secret' > out/deploy-tail.log; rm -f out/deploy.log
+          if [ -f out/deploy.log ]; then tail -n 80 out/deploy.log | grep -viE 'token_secret|as-[A-Za-z0-9]{8}' > out/deploy-tail.log || true; fi
+          rm -f out/deploy.log
           cd out
           git init -q
           git config user.name "b4-bot"
