@@ -4463,6 +4463,18 @@ async function ext3Library() {
     return items;
   } catch(e) { console.warn('[EXT3_LIBRARY] not readable',String(e?.message||e).slice(0,100)); return ext3LibCache.items; }
 }
+// Today's headlines (Google News through Serper), newest first.
+async function ext3NewsSearch(q,{timeoutMs=4000}={}) {
+  if(!keysFor('SERPER_API_KEY').length) return [];
+  const query=String(q||'').replace(/(?:מה|תגידי|תגיד|לי|את|ה?חדשות|היום|עכשיו|בבקשה|מבזק|מבזקים|כותרות|קורה|קרה|בארץ)\s*/gu,' ').trim();
+  const j=await withKeys('SERPER_API_KEY',async key=>{
+    const r=await fetch('https://google.serper.dev/news',{method:'POST',signal:AbortSignal.timeout(timeoutMs),headers:{'x-api-key':key,'content-type':'application/json'},
+      body:JSON.stringify({q:query||'חדשות ישראל',gl:'il',hl:'iw',num:15,tbs:'qdr:d'})});
+    if(!r.ok) throw Object.assign(new Error('Serper news HTTP '+r.status+' '+(await r.text().catch(()=>'')).slice(0,100)),{status:r.status});
+    return r.json();
+  },{label:'Serper news'});
+  return (j?.news||[]).map(x=>({title:String(x.title||''),snippet:String(x.snippet||''),source:String(x.source||''),date:String(x.date||''),url:String(x.link||'')})).filter(x=>x.title);
+}
 async function runExt3Brain(utterance, phone, callId, turnHistory, now, media='') {
   const key=normalizePhone(phone);
   const prior=key!=='לא מזוהה'?conversationLog.filter(x=>normalizePhone(x.phone)===key&&x.user&&String(x.callId||'')!==String(callId||'')).slice(-12):[];
@@ -4471,6 +4483,7 @@ async function runExt3Brain(utterance, phone, callId, turnHistory, now, media=''
   const ext1=typeof brainBranch==='function'&&brainBranch()==='1';
   return ext3Turn({utterance,summary,prior,current:turnHistory,now,prefs,media,voice:ext1?'male':'female',brief:ext1},{
     library:ext3Library,
+    newsSearch:ext3NewsSearch,
     llm:(prompt,{budgetMs=12000,maxTokens=1500,planner=false}={})=>planner
       ? raceSynthesis(prompt,budgetMs,{maxTokens:Math.min(maxTokens,600),gemini:true,geminiBudgetMs:2500})
       : raceSynthesis(prompt,budgetMs,{maxTokens,quality:true}),

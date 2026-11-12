@@ -366,3 +366,23 @@ test('stock openings are cut from answers', async () => {
   const r = await ext3Turn({ utterance: 'איך עובד מקרר', now }, deps);
   assert.match(r.reply, /^מקרר עובד/);
 });
+
+test('news questions use real headlines', async () => {
+  let asked = '';
+  const { deps, prompts } = baseDeps(['{"intent":"web","search":"חדשות היום"}', '{"answer":"הידיעה המרכזית היום היא שהכנסת אישרה את התקציב."}'], {
+    newsSearch: async q => { asked = q; return [1, 2, 3, 4].map(i => ({ title: 'ידיעה ' + i, snippet: 'פרטים ' + i, source: 'ynet', date: 'לפני שעה' })); }
+  });
+  const r = await ext3Turn({ utterance: 'מה החדשות היום בארץ?', now }, deps);
+  assert.ok(asked);
+  assert.match(prompts.at(-1).p, /ידיעה 1/);
+  assert.match(r.reply, /התקציב/);
+});
+
+test('"recommend a new song" stays a YouTube search', async () => {
+  let searched = null;
+  const found = { videoId: 'shwekeynew1', title: 'יעקב שוואקי - שיר חדש', channelTitle: 'Shwekey', durationSec: 240, viewCount: 1000, description: '' };
+  const { deps } = baseDeps(['{"intent":"web","search":"שיר חדש שוואקי"}', '{"pick":0,"answer":"מצאתי לך את יעקב שוואקי - שיר חדש"}'], { findVideos: async q => { searched = q; return [found]; } });
+  const r = await ext3Turn({ utterance: 'תמליצי לי על שיר חדש של יעקב שוואקי', now }, deps);
+  assert.ok(searched);
+  assert.equal(r.ref.videoId, 'shwekeynew1');
+});

@@ -151,6 +151,7 @@ export function parsePlan(text) {
 
 const YT_WORD = /(?:יוטיוב|יויוטב|יוטוב|יו טיוב|youtube)/iu;
 const VIDEO_WORD = /(?:סרטון|סרטונים|סרט|הרצאה|וידאו|וידיאו|דוקו|תיעודי)/u;
+const SONG_WORD = /(?:שיר|שירים|קליפ|סינגל|להיט|להיטים|הופעה|סט |מחרוזת|פרק|פרקים)/u;
 
 /** Used when every planner model is down: plain, conservative rules. */
 export function heuristicPlan(utterance, { video = null } = {}) {
@@ -170,7 +171,7 @@ export function heuristicPlan(utterance, { video = null } = {}) {
   // The video named in the request, not the whole sentence, is what gets searched.
   if (/(?:תשמיע|תשמיעי|להשמיע|תפעיל|תפעילי|לשמוע את|תוריד|תורידי|להוריד)/u.test(u) && !/^(?:לא|אל)(?=$|[\s,.!?])/u.test(u)) return { ...base, intent: 'video_play', ytHe: video && /(?:אותו|אותה|זה|הזה|הזאת|שלו|שלה)/u.test(u) ? '' : u.replace(/(?:הלו|כן|בבקשה|אני רוצה|תשמיעי|תשמיע|להשמיע|לשמוע|לי|את|תפעילי|תפעיל|תורידי|תוריד|להוריד|השיר|הסרטון|ה?ו?וידי?או|קובץ שמע|ביוטיוב|יוטיוב)/gu, ' ').replace(/\s+/g, ' ').trim() };
   if (video && /(?:השם|איך קוראים|איך נקרא|כמה זמן|אורך|ארוך|הערוץ|באנגלית|בעברית|תתרגם|תתרגמי|על מה הוא|מה יש ב)/u.test(u) && (VIDEO_WORD.test(u) || /(?:אותו|שלו|זה)/u.test(u))) return { ...base, intent: 'video_about' };
-  if ((YT_WORD.test(u) || VIDEO_WORD.test(u)) && /(?:תמליצ|ממליצ|מומלץ|תמצא|תמצאי|תחפש|תחפשי|אני מחפש|יש סרטון|איזה סרטון|תביא|תביאי)/u.test(u)) return { ...base, intent: 'video_find' };
+  if ((YT_WORD.test(u) || VIDEO_WORD.test(u) || SONG_WORD.test(u)) && /(?:תמליצ|ממליצ|מומלץ|תמצא|תמצאי|תחפש|תחפשי|אני מחפש|יש סרטון|איזה סרטון|איזה שיר|מה השיר|תביא|תביאי|הכי חדש|חדש של|שיצא|שיצאו)/u.test(u)) return { ...base, intent: 'video_find' };
   if (/(?:תחפש|תחפשי|חפש|חפשי|באינטרנט|ברשת|בגוגל|עדכני|היום|עכשיו|חדשות|מחיר|כמה עולה|שער|מזג האוויר|מי ראש|מי שר|מי נשיא|מתי פתוח|שעות פתיחה|טלפון של)/u.test(u)) return { ...base, intent: 'web' };
   return { ...base, intent: 'chat' };
 }
@@ -517,6 +518,9 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     plan = parsePlan(await deps.llm(plannerPrompt({ context: smallContext, utterance, now, video, media, prefs }), { budgetMs: Number(deps.plannerBudgetMs || 3200), maxTokens: 450, planner: true }));
   } catch (e) { log.warn?.('[EXT3_BRAIN] planner unavailable; using rules', { status: e?.status || 0 }); }
   if (!plan) plan = rules;
+  // A song or video to find stays a YouTube search even when the planner
+  // called it a web question (12.11: "a new song by Shwekey" got a web answer).
+  if (rules.intent === 'video_find' && ['web', 'chat'].includes(plan.intent)) plan = { ...plan, intent: 'video_find', ytHe: plan.ytHe || rules.ytHe, recentDays: plan.recentDays || rules.recentDays };
   // A standing instruction said in plain words is kept even when the planner missed it.
   // Only when he really said a standing rule (the planner sometimes fills the
   // field with a description of the request).
@@ -692,6 +696,17 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   if (plan.intent === 'web') {
     const q1 = plan.search || plan.standalone || utterance;
     const hours = /(?:פתוח|פתוחה|סגור|סגורה|שעות|עד מתי|מתי נפתח|מתי נסגר)/u.test(utterance + ' ' + plan.standalone);
+    // News: today's real headlines (with time and outlet) instead of news-site home pages.
+    const news = deps.newsSearch && /(?:חדשות|מבזק|מבזקים|כותרות|מה קורה בארץ|מה קרה היום|מה חדש בעולם|מה חדש בארץ)/u.test(utterance + ' ' + plan.standalone);
+    if (news) {
+      const items = await deps.newsSearch(q1, { timeoutMs: 4000 }).catch(() => []);
+      if (items.length >= 3) {
+        const list = items.slice(0, 12).map((x, i) => 'כותרת ' + (i + 1) + ': ' + clip(x.title, 160) + (x.source ? ' (' + x.source + (x.date ? ', ' + x.date : '') + ')' : '') + (x.snippet ? '. ' + clip(x.snippet, 260) : '')).join('\n');
+        log.info?.('[EXT3_BRAIN] news headlines', { count: items.length });
+        const reply = await ask('המתקשר רוצה לשמוע חדשות. לפניך הכותרות האמיתיות של עכשיו מחיפוש חדשות, עם מקור ושעה. ספרי לו את הידיעות החשובות והמעניינות ביותר, כל ידיעה במשפט או שניים עם הפרטים שבכותרת ובתקציר, כמו קריין חדשות חם וברור: קודם הדבר הגדול של היום, אחר כך עוד ידיעות מתחומים שונים. אל תמציאי פרטים שלא מופיעים, ואל תקריאי שמות אתרים ארוכים. בסוף שאלי אם לפרט על אחת הידיעות.', 'כותרות:\n' + list, { maxTokens: 1800, budgetMs: 13000, ctx: smallContext });
+        return out({ reply });
+      }
+    }
     const queries = [...new Set([q1, plan.standalone, hours ? q1.replace(/\s*(?:עכשיו|כרגע|היום)\s*/g, ' ') + ' שעות פתיחה' : ''].filter(Boolean))].slice(0, 3);
     const sets = await Promise.allSettled(queries.map(q => deps.webSearch(q, { timeoutMs: 4500 })));
     const seen = new Set(), results = [];
