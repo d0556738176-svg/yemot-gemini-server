@@ -75,11 +75,14 @@ export async function runBranch4EngineSelfTest(env = process.env, { generateText
   if (String(env.BRANCH4_SELFTEST_FULL || '').trim() === '1' && generateText) {
     return runFullChain(runId, env, generateText);
   }
-  const useAceMusic = isAceMusicConfigured(env);
-  const useAce = !useAceMusic && !!String(env.ACESTEP_API_URL || '').trim() && !!String(env.ACESTEP_API_KEY || '').trim();
-  const useFal = !useAceMusic && !useAce && isFalConfigured(env);
+  // BRANCH4_SELFTEST_ENGINE=acemusic|ace-step|fal|hf forces one engine.
+  const forced = String(env.BRANCH4_SELFTEST_ENGINE || '').trim().toLowerCase();
+  const useAceMusic = forced ? forced === 'acemusic' : isAceMusicConfigured(env);
+  const useAce = forced ? forced === 'ace-step'
+    : !useAceMusic && !!String(env.ACESTEP_API_URL || '').trim() && !!String(env.ACESTEP_API_KEY || '').trim();
+  const useFal = forced ? forced === 'fal' : !useAceMusic && !useAce && isFalConfigured(env);
   const engine = useAceMusic ? 'acemusic.ai (official free cloud)' : useAce ? 'private ace-step' : useFal ? 'fal.ai ace-step' : String(env.HF_MUSIC_SPACE_URL || 'default ace-step space');
-  console.info(TAG, 'start', { runId, engine, durationSec: Number(env.BRANCH4_SELFTEST_DURATION || 40) });
+  console.info(TAG, 'start', { runId, engine, hfTokenPresent: !!String(env.HF_TOKEN || '').trim(), durationSec: Number(env.BRANCH4_SELFTEST_DURATION || 40) });
 
   const spec = {
     lyrics: TEST_LYRICS,
