@@ -10,7 +10,7 @@ t0 = time.time()
 try:
     c = Client(os.environ.get("SPACE", "ACE-Step/Ace-Step-v1.5"), token=os.environ.get("HF_TOKEN") or None, verbose=False)
     res = c.predict(
-        selected_model="acestep-v15-turbo",
+        selected_model=os.environ.get("HF_MODEL", "acestep-v15-xl-turbo"),
         generation_mode="custom",
         simple_query_input="",
         simple_vocal_language="he",
