@@ -11,6 +11,8 @@ import subprocess
 import time
 import urllib.request
 
+import os
+
 import modal
 
 app = modal.App("yemot-branch4-acestep")
@@ -49,7 +51,7 @@ IMAGE = (
 
 @app.function(
     image=IMAGE,
-    gpu="L4",
+    gpu=os.environ.get("ACESTEP_GPU", "L4"),
     secrets=[modal.Secret.from_name("acestep-api-key")],
     volumes={
         "/app/checkpoints": MODEL_VOLUME,

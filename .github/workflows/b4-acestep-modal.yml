@@ -33,6 +33,7 @@ jobs:
       RAW_MODAL_ID: ${{ secrets.MODAL_TOKEN_ID }}
       RAW_MODAL_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       GIVEN_ACE_KEY: ${{ secrets.ACESTEP_API_KEY }}
+      ACESTEP_GPU: T4
     steps:
       - uses: actions/checkout@v4
 
