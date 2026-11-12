@@ -72,7 +72,8 @@ const PROBES = {
   SAMBANOVA_API_KEY: chat('https://api.sambanova.ai/v1', 'gpt-oss-120b'),
   ZAI_API_KEY: chat('https://api.z.ai/api/paas/v4', 'glm-4.5-flash'),
   COHERE_API_KEY: chat('https://api.cohere.ai/compatibility/v1', 'command-a-03-2025'),
-  GEMINI_API_KEY: key => call('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=' + encodeURIComponent(key), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: 'hi' }] }], generationConfig: { maxOutputTokens: 1 } }) }),
+  // Key validity (the model list); quota is seen in real calls.
+  GEMINI_API_KEY: key => call('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=' + encodeURIComponent(key)),
   TAVILY_API_KEY: key => call('https://api.tavily.com/search', { method: 'POST', headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' }, body: JSON.stringify({ query: 'ירושלים', max_results: 1 }) }),
   SERPER_API_KEY: key => call('https://google.serper.dev/search', { method: 'POST', headers: { 'x-api-key': key, 'content-type': 'application/json' }, body: JSON.stringify({ q: 'ירושלים', num: 1 }) }),
   LANGSEARCH_API_KEY: key => call('https://api.langsearch.com/v1/web-search', { method: 'POST', headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' }, body: JSON.stringify({ query: 'ירושלים', count: 1 }) }),

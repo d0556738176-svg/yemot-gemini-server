@@ -198,13 +198,11 @@ export async function findOfficialWebsite(name, { timeoutMs = 2500 } = {}) {
 }
 
 export async function searchJina(query, { timeoutMs = 4500, count = 6 } = {}) {
-  const key = env('JINA_API_KEY');
-  if (!key) throw Object.assign(new Error('Jina key not configured'), { status: 412 });
-  const data = await fetchJson('https://s.jina.ai/?q=' + encodeURIComponent(String(query).slice(0, 300)), {
+  const data = await withKeys('JINA_API_KEY', key => fetchJson('https://s.jina.ai/?q=' + encodeURIComponent(String(query).slice(0, 300)), {
     timeoutMs, label: 'Jina search',
     // Without the Bearer header s.jina.ai answers 401 even when a key exists.
     headers: { authorization: 'Bearer ' + key, 'x-respond-with': 'no-content', 'x-locale': 'he-IL' }
-  });
+  }), { label: 'Jina' });
   const items = Array.isArray(data?.data) ? data.data : [];
   return normalizeResults(items.map(x => ({ title: x.title, url: x.url, snippet: x.description || x.content })), count);
 }
@@ -260,22 +258,26 @@ export async function searchSecondary(query, { timeoutMs = 3500 } = {}) {
 // ---------- Page reading ----------
 
 export async function readWithJina(url, { timeoutMs = 6000 } = {}) {
-  const key = env('JINA_API_KEY');
-  const data = await fetchJson('https://r.jina.ai/' + url, {
+  const read = key => fetchJson('https://r.jina.ai/' + url, {
     timeoutMs, label: 'Jina reader',
     headers: { ...(key ? { authorization: 'Bearer ' + key } : {}), 'x-return-format': 'markdown', 'x-retain-images': 'none' }
   });
+  // Keys in order (JINA_API_KEY, JINA_BACKUP_API_KEY, JINA_API_KEY_2 ..); when all are
+  // out of quota the reader still works without a key, at a lower rate.
+  let data;
+  if (keysFor('JINA_API_KEY').length) {
+    try { data = await withKeys('JINA_API_KEY', read, { label: 'Jina' }); }
+    catch (e) { if (![401, 402, 403, 429].includes(Number(e?.status)) && !/quota|exceed|balance|credit/i.test(String(e?.message))) throw e; data = await read(''); }
+  } else data = await read('');
   return { title: clean(data?.data?.title), url: data?.data?.url || url, content: String(data?.data?.content || '').trim() };
 }
 
 export async function readWithFirecrawl(url, { timeoutMs = 9000 } = {}) {
-  const key = env('FIRECRAWL_API_KEY');
-  if (!key) throw Object.assign(new Error('Firecrawl key not configured'), { status: 412 });
-  const data = await fetchJson('https://api.firecrawl.dev/v2/scrape', {
+  const data = await withKeys('FIRECRAWL_API_KEY', key => fetchJson('https://api.firecrawl.dev/v2/scrape', {
     method: 'POST', timeoutMs, label: 'Firecrawl',
     headers: { authorization: 'Bearer ' + key },
     body: { url, formats: ['markdown'], onlyMainContent: true, timeout: Math.max(3000, timeoutMs - 500) }
-  });
+  }), { label: 'Firecrawl' });
   return { title: clean(data?.data?.metadata?.title), url: data?.data?.metadata?.sourceURL || url, content: String(data?.data?.markdown || '').trim() };
 }
 
@@ -317,7 +319,7 @@ const PAGE_READERS = [
 export async function readPage(url, { timeoutMs = 8000, hedgeMs = 1800, minChars = 120 } = {}) {
   let done = false;
   const attempts = PAGE_READERS.map(([name, keyName, run], index) => (async () => {
-    if (keyName && !env(keyName)) throw Object.assign(new Error(name + ' not configured'), { status: 412 });
+    if (keyName && !keysFor(keyName).length) throw Object.assign(new Error(name + ' not configured'), { status: 412 });
     const id = 'read:' + name;
     if (cooldowns.isCoolingDown(id)) throw Object.assign(new Error(name + ' cooling down'), { status: 503 });
     if (index > 0) {
