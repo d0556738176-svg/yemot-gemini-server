@@ -1,0 +1,17 @@
+{
+ "attempts": [
+  {
+   "space": "ACE-Step/Ace-Step-v1.5",
+   "model": "acestep-v15-xl-turbo",
+   "seconds": 3.6,
+   "status_text": "❌ Model not fully initialized. Missing components: ['model', 'vae', 'text_tokenizer', 'text_encoder']"
+  },
+  {
+   "space": "MBLF/ACE-Step-1.5",
+   "model": "acestep-v15-xl-turbo",
+   "seconds": 231.0,
+   "error": "AppError('GPU task aborted')"
+  }
+ ],
+ "ok": false
+}
