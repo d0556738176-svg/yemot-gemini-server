@@ -4532,9 +4532,21 @@ function ext2Wake(reason='') {
   if(Date.now()-ext2LastWakeOk<4*60*1000) return Promise.resolve(true);
   const base=String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'');
   const t0=Date.now();
-  ext2WakeInFlight=fetch(base+'/health',{signal:AbortSignal.timeout(100000),headers:{'user-agent':'yemot-ext3-wake'}})
-    .then(r=>{ const ok=r.status<500; if(ok) ext2LastWakeOk=Date.now(); console.info('[EXT2_WAKE]',{reason,status:r.status,ms:Date.now()-t0}); return ok; })
-    .catch(e=>{ console.warn('[EXT2_WAKE] no answer',{reason,ms:Date.now()-t0,error:String(e?.name||e?.message||e).slice(0,60)}); return false; })
+  // 12.11: Render answers 429 to a sleeping free service when the request
+  // comes from another Render service, and does not wake it (the metrics show
+  // no request ever reached it). A request from outside Render does wake it,
+  // so the wake also goes through an outside page reader (Jina, no key needed).
+  const direct=()=>fetch(base+'/health',{signal:AbortSignal.timeout(15000),headers:{'user-agent':'yemot-ext3-wake'}}).then(r=>r.status);
+  const outside=()=>fetch('https://r.jina.ai/'+base+'/health',{signal:AbortSignal.timeout(100000),headers:{'x-no-cache':'true','x-timeout':'90','accept':'application/json'}}).then(async r=>{ const t=await r.text().catch(()=>''); return /"ok"\s*:\s*true|yemot-gemini-server/.test(t)?200:r.status; });
+  ext2WakeInFlight=(async()=>{
+    let st=await direct().catch(()=>0);
+    let via='direct';
+    if(st!==200) { via='outside'; st=await outside().catch(()=>0); if(st===200) { await new Promise(r=>setTimeout(r,1500)); const again=await direct().catch(()=>0); if(again) st=again; } }
+    const ok=st===200;
+    if(ok) ext2LastWakeOk=Date.now();
+    console.info('[EXT2_WAKE]',{reason,via,status:st,ms:Date.now()-t0});
+    return ok;
+  })().catch(e=>{ console.warn('[EXT2_WAKE] failed',{reason,ms:Date.now()-t0,error:String(e?.message||e).slice(0,60)}); return false; })
     .finally(()=>{ ext2WakeInFlight=null; });
   return ext2WakeInFlight;
 }
@@ -5843,7 +5855,8 @@ let deepBad=0;
 async function runBranch3DeepTest() {
   const phone='0000000003'; deepBad=0;
   // The link to the extension-2 media service (status only, nothing downloaded).
-  { const st=await ext2Media({videoId:'dQw4w9WgXcQ'},{timeoutMs:60000}).catch(()=>null); console.info('[DEEP3] ext2 media link',JSON.stringify(st?{ok:true,audio:st.audio?.status,video:st.video?.status}:{ok:false})); }
+  { const woke=await ext2Wake('selftest'); console.info('[DEEP3] download service wake',{woke});
+    const st=await ext2Media({videoId:'dQw4w9WgXcQ'},{timeoutMs:60000}).catch(()=>null); console.info('[DEEP3] ext2 media link',JSON.stringify(st?{ok:true,audio:st.audio?.status,video:st.video?.status}:{ok:false})); }
   const { writeMemory, rememberTurn: remember } = await import('./branch1-memory.js');
   const wipe=async()=>{
     await writeMemory(phone,{phone,summary:'',entries:[]}).catch(()=>{});
