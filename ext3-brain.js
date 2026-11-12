@@ -89,7 +89,7 @@ export function activeLesson(current = []) {
 
 // ---------- planner ----------
 
-export const INTENTS = ['chat', 'web', 'video_find', 'video_about', 'video_play', 'media_status', 'cancel', 'read_page', 'recall'];
+export const INTENTS = ['library', 'chat', 'web', 'video_find', 'video_about', 'video_play', 'media_status', 'cancel', 'read_page', 'recall'];
 
 export function plannerPrompt({ context, utterance, now, video, media = '', prefs = [] }) {
   return [
@@ -102,6 +102,7 @@ export function plannerPrompt({ context, utterance, now, video, media = '', pref
     'video_about = שאלה על סרטון שכבר הוזכר בשיחה (מה השם, תרגום השם, אורך, ערוץ, על מה הוא, האם הוא בעברית).',
     'video_play = המתקשר מבקש עכשיו לשמוע, להשמיע, להפעיל או להוריד סרטון או שיר מסוים (הסרטון שהוזכר, או שיר/סרטון שהוא מתאר בשמו). שאלה על מצב הורדה אינה video_play.',
     'media_status = שאלה על הורדה או הכנה שכבר התחילה: מה המצב, כמה אחוזים, מה מורידים עכשיו, האם מוכן.',
+    'library = בקשה לשמוע אילו שירים או קבצים כבר הורדו ושמורים במערכת.',
     'cancel = המתקשר מבקש לבטל או לעצור הורדה, או אומר שלא רצה להוריד.',
     'read_page = המתקשר מבקש שתקריאי לו כתבה, מאמר או דף מאתר מסוים (למשל "תקריאי לי כתבה מחזקת מהידברות").',
     'recall = שאלה על שיחות קודמות או על פרטים שהמתקשר סיפר על עצמו.',
@@ -155,7 +156,12 @@ const VIDEO_WORD = /(?:סרטון|סרטונים|סרט|הרצאה|וידאו|ו
 export function heuristicPlan(utterance, { video = null } = {}) {
   const u = String(utterance || '').trim();
   const base = { standalone: u, search: u, ytHe: u.replace(YT_WORD, ' ').replace(/\s+/g, ' ').trim(), ytEn: '', minMinutes: 0, maxMinutes: 0, recentDays: /(?:השבוע|לאחרונה|חדש|חדשים|הכי טרי)/u.test(u) ? 30 : 0, order: 'relevance', instruction: '', play: /(?:להוריד|תוריד|הורד).{0,20}(?:וידאו|וידיאו|סרטון עצמו)|כן לוידאו/u.test(u) ? 'video' : 'audio', continueOffer: false };
+  // A key choice that names something to hear ("לשמיעת השיר X") is a play request.
+  const chosen = u.match(/^בחרתי באפשרות\s*\d+\s*:?\s*(.*)$/u);
+  if (chosen && /(?:לשמיעת|להשמעת|לשמוע|להשמיע|לנגן|השיר|שיר|הסרטון|סרטון|הפרק|פרק)/u.test(chosen[1]) && !/(?:ביטול|המשך השיחה|לחיפוש|להמשך|שיחה על)/u.test(chosen[1]))
+    return { ...base, intent: 'video_play', ytHe: chosen[1].replace(/(?:לשמיעת|להשמעת|לשמוע את|לשמוע|להשמיע את|להשמיע|לנגן את|לנגן|השיר|שיר|הסרטון|סרטון|הפרק|של\s+$)/gu, ' ').replace(/\s+/g, ' ').trim() };
   if (/^בחרתי באפשרות/u.test(u)) return { ...base, intent: 'chat', continueOffer: true };
+  if (/(?:אילו|איזה|מה|תגיד|תגידי|תקריא|תקריאי|רשימת|רשימה של).{0,20}(?:שירים|קבצים|סרטונים|השירים|הקבצים).{0,25}(?:הורדתי|הורדנו|ירדו|שהורדת|שמורים|יש לי|כבר הורדו|במערכת)/u.test(u)) return { ...base, intent: 'library' };
   if (/(?:מצב|סטטוס|כמה אחוז|אחוזים|מה את מורידה|מה מורידים|מה את מכינה|כבר מוכן|מתי יהיה מוכן|ירד כבר|הורד כבר).{0,25}|(?:מצב|כמה).{0,10}(?:ההורדה|ההורדות|הקובץ)/u.test(u) && /(?:הורד|הורדה|הורדות|אחוז|מוכן|מכינה|קובץ)/u.test(u)) return { ...base, intent: 'media_status' };
   if (/(?:תבטל|תבטלי|לבטל|ביטול|תעצור|תעצרי|עצור|תפסיק|תפסיקי).{0,30}(?:הורד|הורדה|את זה|אותו)?|לא רוצה (?:שת|ש)?(?:ו)?ריד|אל תורידי|אל תוריד/u.test(u)) return { ...base, intent: 'cancel' };
   if (/(?:תקריא|תקריאי|תקראי|תקרא|להקריא).{0,30}(?:כתבה|מאמר|דף|אתר|סיפור מ)/u.test(u)) return { ...base, intent: 'read_page' };
@@ -316,8 +322,14 @@ export const PHONE_STYLE = [
   'עני על כל חלקי השאלה. כשאת לא יודעת פרט, אמרי זאת במפורש ("את שמך עוד לא אמרת לי") והמשיכי לשאר השאלה.',
   'אל תאמרי "המקורות שסופקו" או "לפי ההקשר": דברי בטבעיות, למשל "לפי מה שמצאתי עכשיו".',
   'כשאת מציעה למתקשר לבחור בין כמה אפשרויות, קודם הסבירי במשפט או שניים מה כל אפשרות, ואז אמרי אותן בפורמט קבוע עם השם האמיתי של כל אפשרות לפני המקש, למשל: "למשתנים ונתונים הקש 1, לתנאים והחלטות הקש 2, ללולאות הקש 3", עד 6 אפשרויות, ואמרי שאפשר גם לומר את המספר. אסור לכתוב "הנושא הראשון" במקום שם אמיתי. המקשים האלה באמת עובדים בשיחה. כשהמתקשר בחר אפשרות, התחילי מיד את מה שבחר, בפירוט, בלי לחזור על הרשימה.',
-  'אל תמציא שמות, מספרים, מחירים, תאריכים, סרטונים, ערוצים או ציטוטים. כשאינך בטוחה בפרט, אמור זאת בפשטות.'
+  'אל תמציא שמות, מספרים, מחירים, תאריכים, סרטונים, ערוצים או ציטוטים. כשאינך בטוחה בפרט, אמור זאת בפשטות.',
+  // Owner, 12.11: no stock phrases; talk like a real, warm person.
+  'פתחי ישר בתוכן עצמו. אסור לפתוח במילות נימוס קבועות כמו "שמחתי לשמוע", "שמחה לעזור", "שאלה מצוינת", "שאלה טובה", "בשמחה", "בהחלט", "כמובן", "תודה ששאלת", ואסור לחזור מתשובה לתשובה על אותם ביטויים, אותה פתיחה או אותה שאלת סיום. דברי כמו אדם אמיתי: חם, נעים, סקרן ומגוון, עם הומור עדין כשמתאים, כמו חבר חכם שכיף לדבר איתו.',
+  'את לא משמיעה ולא מורידה בעצמך דרך מה שאת כותבת: אל תאמרי "משמיעה עכשיו" ואל תבטיחי להשמיע. כשהמתקשר רוצה לשמוע משהו, אמרי לו לומר "תשמיעי לי את" ואת שם השיר או הסרטון.'
 ].join(' ');
+// Stock openings that slip through anyway are cut off the answer.
+const STOCK_OPENING = /^(?:\s*(?:(?:אני\s+)?(?:שמחתי|שמחה|שמח)\s+(?:מאוד\s+)?(?:לשמוע|לעזור|שפנית|ששאלת|שאתה|על)[^.!?,]*[.!?,]|(?:איזו\s+|זו\s+)?שאלה\s+(?:מצוינת|טובה|מעולה|נהדרת|יפה|מעניינת)[^.!?,]*[.!?,]|בשמחה[.!?,]|בהחלט[.!?,]|כמובן[.!?,]|תודה (?:ששאלת|על השאלה)[^.!?,]*[.!?,])\s*)+/u;
+export function cutStockOpening(text) { const t = String(text || ''); const cut = t.replace(STOCK_OPENING, ''); return cut.length > 20 ? cut : t; }
 
 // Extension 1 speaks as a man and answers briefly; extension 3 as a woman, at length.
 const MALE_SELF = [['מורידה','מוריד'],['מעירה','מעיר'],['ממשיכה','ממשיך'],['משמיעה','משמיע'],['מקשיבה','מקשיב'],['מכינה','מכין'],['יכולה','יכול'],['בטוחה','בטוח'],['זוכרת','זוכר'],['ממליצה','ממליץ'],['יודעת','יודע'],['מבינה','מבין'],['מחפשת','מחפש'],['מצטערת','מצטער'],['שמחה לעזור','שמח לעזור'],['מנסה שוב','מנסה שוב']];
@@ -435,6 +447,23 @@ function hostOf(url) { return String(url || '').replace(/^https?:\/\//, '').spli
 // exactly the same text (a second read may extract the page differently).
 const articleCache = new Map();
 function cacheArticle(url, text) { articleCache.delete(url); articleCache.set(url, text); while (articleCache.size > 40) articleCache.delete(articleCache.keys().next().value); }
+// ---------- songs already downloaded ----------
+const LIB_STOP = new Set(['של', 'את', 'לי', 'שיר', 'השיר', 'סרטון', 'הסרטון', 'בבקשה', 'קליפ', 'רשמי', 'official', 'video', 'music', 'prod', 'by', 'the']);
+const libWords = t => String(t || '').toLowerCase().replace(/[^\u0590-\u05FFa-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 1 && !LIB_STOP.has(w));
+// The downloaded song whose title carries (almost) all the words he said.
+export function libraryMatch(lib, text) {
+  const q = libWords(text);
+  if (!q.length) return null;
+  let best = null, bestScore = 0;
+  for (const item of lib || []) {
+    const t = libWords(item.title).join(' ');
+    const score = q.filter(w => t.includes(w)).length / q.length;
+    if (score > bestScore) { best = item; bestScore = score; }
+  }
+  return bestScore >= 0.75 ? best : null;
+}
+const AGAIN = /(?:שוב|מחדש|עוד פעם להוריד|הורדה חדשה|להוריד שוב|תוריד שוב|תורידי שוב)/u;
+
 export function activeArticle(current = []) {
   for (let i = (current || []).length - 1; i >= Math.max(0, current.length - 3); i--) if (current[i]?.ref?.type === 'article') return current[i].ref;
   return null;
@@ -481,11 +510,11 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   const t0 = Date.now();
   const rules = heuristicPlan(utterance, { video });
   const continuing = /^(?:כן|תמשיכי|תמשיך|המשיכי|המשך|הלאה|נמשיך|עוד)(?=$|[\s,.!?])/u.test(utterance.trim());
-  const sure = !stuck && (rules.continueOffer || ['media_status', 'cancel'].includes(rules.intent) || (video && ['video_play', 'video_about'].includes(rules.intent) && !rules.ytHe));
+  const sure = !stuck && (rules.continueOffer || ['media_status', 'cancel', 'library'].includes(rules.intent) || (rules.intent === 'video_play' && /^בחרתי באפשרות/u.test(utterance)) || (video && ['video_play', 'video_about'].includes(rules.intent) && !rules.ytHe));
   if (article && continuing) plan = { ...rules, intent: 'read_page', continueOffer: true };
   else if (sure) plan = rules;
   else try {
-    plan = parsePlan(await deps.llm(plannerPrompt({ context: smallContext, utterance, now, video, media, prefs }), { budgetMs: 4500, maxTokens: 450, planner: true }));
+    plan = parsePlan(await deps.llm(plannerPrompt({ context: smallContext, utterance, now, video, media, prefs }), { budgetMs: Number(deps.plannerBudgetMs || 3200), maxTokens: 450, planner: true }));
   } catch (e) { log.warn?.('[EXT3_BRAIN] planner unavailable; using rules', { status: e?.status || 0 }); }
   if (!plan) plan = rules;
   // A standing instruction said in plain words is kept even when the planner missed it.
@@ -519,7 +548,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       await new Promise(r => setTimeout(r, deps.retryPauseMs ?? 3000));
       raw = await deps.llm(answerPrompt({ ...common, context: smallContext.slice(-1500), extra: String(extra || '').slice(0, 3000) }), { budgetMs: 10000, maxTokens: Math.min(maxTokens, 1000) });
     }
-    const a = cleanScript(extractAnswer(raw).replace(/^answer\s*[:¶]?\s*/i, ''));
+    const a = cutStockOpening(cleanScript(extractAnswer(raw).replace(/^answer\s*[:¶]?\s*/i, '')));
     if (!a) throw Object.assign(new Error('empty answer'), { status: 502 });
     return a;
   };
@@ -527,7 +556,26 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   if (plan.intent === 'media_status') return out({ mediaStatus: true, reply: '' });
   if (plan.intent === 'cancel') return out({ cancel: true, reply: '' });
 
+  if (plan.intent === 'library') {
+    const lib = deps.library ? await deps.library().catch(() => []) : [];
+    if (!lib.length) return out({ reply: 'עוד לא מצאתי שירים שהורדו ושמורים במערכת. אפשר לבקש ממני שיר או סרטון, ואמצא ואוריד אותו בשבילך.' });
+    const recent = [...lib].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 6);
+    return out({ reply: 'יש אצלך במערכת ' + lib.length + ' שירים וקבצים שכבר הורדו, והם מתנגנים מיד בלי הורדה נוספת. האחרונים שהורדו: ' +
+      recent.map((x, i) => 'לשמיעת ' + clip(x.title, 70) + ' הקש ' + (i + 1)).join(', ') + '. אפשר גם לבקש כל שיר אחר בשמו.' });
+  }
+
   if (plan.intent === 'video_play') {
+    // Already downloaded? Then it plays now, with no new download (unless he
+    // asked to download it again).
+    const lib = deps.library && !AGAIN.test(utterance) ? await deps.library().catch(() => []) : [];
+    const fromLib = item => out({ ref: { type: 'video', videoId: item.videoId, title: item.title }, play: { paths: [item.path], durationSec: 0, title: item.title },
+      reply: clip(item.title, 140) + ' כבר שמור אצלך במערכת, אז לא צריך להוריד אותו שוב. משמיעה אותו עכשיו.' });
+    if (lib.length) {
+      const pointsAtItEarly = /(?:אותו|אותה|הזה|הזאת|את זה|שלו|שלה|שהמלצת|שאמרת|שדיברנו|שמצאת)/u.test(utterance);
+      const ownName = !pointsAtItEarly && rules.intent === 'video_play' && rules.ytHe && rules.ytHe.length >= 3 ? rules.ytHe : (plan.ytHe || '');
+      const hit = (video && (pointsAtItEarly || !ownName) && lib.find(x => x.videoId === video.videoId)) || (ownName && libraryMatch(lib, ownName));
+      if (hit) return fromLib(hit);
+    }
     // Which video: the one on record when he points at it, otherwise the one he
     // names (searched by name, never by the whole sentence). Nothing is
     // downloaded here: he hears the full title first and chooses with a key.
@@ -544,6 +592,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       const found = await (deps.findVideos || findVideos)([named, plan.ytEn], { minMinutes: plan.minMinutes, maxMinutes: plan.maxMinutes, env: deps.env, fetchImpl: deps.fetchImpl, proxy: deps.youtubeProxy }).catch(() => []);
       if (found[0]) v = videoRef(found[0]);
     }
+    const inLib = v && lib.find(x => x.videoId === v.videoId);
+    if (inLib) return fromLib(inLib);
     if (!v) return out({ reply: 'עוד לא בחרנו סרטון מסוים. ספר לי את שם השיר או הסרטון שאתה רוצה, ואמצא לך אותו ביוטיוב.' });
     return out({
       ref: v,
@@ -575,7 +625,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       const m = noThinking(raw).match(/\{[\s\S]*\}/);
       const j = m ? JSON.parse(m[0]) : null;
       if (Number.isInteger(j?.pick) && found[j.pick]) pick = j.pick;
-      reply = String(j?.answer || '').trim();
+      reply = cutStockOpening(String(j?.answer || '').trim());
     } catch (e) { log.warn?.('[EXT3_BRAIN] video pick unavailable; using the top result', { status: e?.status || 0 }); }
     const v = found[pick];
     if (!reply || !reply.includes(v.title.slice(0, Math.min(20, v.title.length)))) {
@@ -660,7 +710,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     let pages = [];
     if (deps.readPages) {
       const urls = results.filter(r => sourceRank(r.url) < 3).slice(0, 3).map(r => r.url);
-      pages = await Promise.race([deps.readPages(urls, { timeoutMs: 5500 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 5200).unref?.())]);
+      // Pages that answer within ~4 s are read; the rest stay as search snippets.
+      pages = await Promise.race([deps.readPages(urls, { timeoutMs: 4000 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 4200).unref?.())]);
     }
     const byUrl = new Map(pages.map(p => [String(p.url || '').replace(/[#?].*$/, ''), p]));
     let budget = 5200;

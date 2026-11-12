@@ -51,13 +51,18 @@ export async function withKeys(base, fn, { label = base } = {}) {
 }
 
 // ---------- startup report ----------
-async function call(url, opts = {}, timeoutMs = 9000) {
+async function call(url, opts = {}, timeoutMs = 15000) {
   const r = await fetch(url, { ...opts, signal: AbortSignal.timeout(timeoutMs) });
   let body = ''; try { body = await r.text(); } catch {}
   return { status: r.status, body: body.slice(0, 300) };
 }
 function verdict({ status, body }) {
   if (status >= 200 && status < 300) return 'ok';
+  // The provider's own reason (never contains the key itself); quotes and URLs dropped.
+  const why = ' | ' + String(body || '').replace(/sk-[A-Za-z0-9_-]{6,}|AIza[0-9A-Za-z_-]{10,}|gsk_[A-Za-z0-9]{6,}/g, '[key]').replace(/https?:\/\/\S+/g, '').replace(/\s+/g, ' ').slice(0, 160);
+  return verdictOnly({ status, body }) + why;
+}
+function verdictOnly({ status, body }) {
   if (/quota|exceed|credit|insufficient|usage limit|limit reached|billing/i.test(body) || status === 402 || status === 432 || status === 433) return 'out of quota';
   if (status === 429) return 'busy now (rate limit)';
   if (status === 401 || status === 403) return 'rejected (wrong or disabled key)';
@@ -90,10 +95,21 @@ export async function keyReport() {
     if (!slots.length) { rows.push({ field: base, status: 'missing' }); continue; }
     for (const s of slots) {
       let status;
-      try { status = verdict(await probe(s.key)); } catch (e) { status = 'no answer (' + String(e?.name || 'error') + ')'; }
+      try { status = verdict(await probe(s.key)); }
+      catch (e) {
+        // A slow first answer is retried once with more time before calling it dead.
+        try { status = verdict(await Promise.race([probe(s.key), new Promise((_, j) => setTimeout(() => j(Object.assign(new Error('timeout'), { name: 'TimeoutError' })), 25000))])); }
+        catch (e2) { status = 'no answer (' + String(e2?.name || e?.name || 'error') + ')'; }
+      }
+      // Key text with spaces, quotes or line breaks inside is a paste problem.
+      if (/[\s"'<>]/.test(String(process.env[s.name] || '').trim())) status += ' (the value has spaces or quotes inside: paste the key again)';
       rows.push({ field: s.name, status });
     }
   }
+  // Fields that look like keys but no part of the server reads (often a typo in the name).
+  const known = new Set(Object.keys(PROBES).flatMap(slotNames));
+  const extra = Object.keys(process.env).filter(n => /(KEY|TOKEN)/.test(n) && !known.has(n)).sort();
+  rows.push({ field: 'OTHER KEY-LIKE FIELDS (names only)', status: extra.join(', ') || 'none' });
   for (const r of rows) console.info('[KEY_REPORT] ' + r.field + ': ' + r.status);
   return rows;
 }

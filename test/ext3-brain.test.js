@@ -324,3 +324,45 @@ test('extension 1: man\'s voice and short answers', async () => {
   const b = baseDeps([]); const c = await ext3Turn({ utterance: 'תשמיעי לי אותו', current, now, voice: 'male', brief: true }, b.deps);
   assert.match(c.reply, /לפני שאני מוריד,/);
 });
+
+const libSongs = [
+  { videoId: 'downdowndow', title: 'אושר כהן - דאון', path: '/7/012', at: '2026-11-10T10:00:00Z' },
+  { videoId: 'kupakupakup', title: 'קופה ראשית - פרק 5 עונה 4', path: '/7/013', at: '2026-11-11T10:00:00Z' }
+];
+
+test('a downloaded song plays at once, with no confirmation and no download', async () => {
+  let searched = false;
+  const { deps } = baseDeps([], { library: async () => libSongs, findVideos: async () => { searched = true; return []; } });
+  const r = await ext3Turn({ utterance: 'תשמיעי לי את אושר כהן דאון', now }, deps);
+  assert.deepEqual(r.play.paths, ['/7/012']);
+  assert.equal(r.confirm, undefined);
+  assert.equal(searched, false);
+  assert.match(r.reply, /כבר שמור/);
+});
+
+test('"download it again" skips the library and asks to confirm', async () => {
+  const found = { videoId: 'downdowndow', title: 'אושר כהן - דאון', channelTitle: 'o', durationSec: 190, viewCount: 5, description: '' };
+  const { deps } = baseDeps([], { library: async () => libSongs, findVideos: async () => [found] });
+  const r = await ext3Turn({ utterance: 'תורידי שוב את אושר כהן דאון', now }, deps);
+  assert.ok(r.confirm);
+  assert.equal(r.play, undefined);
+});
+
+test('the list of downloaded songs comes with keys', async () => {
+  const { deps } = baseDeps([], { library: async () => libSongs });
+  const r = await ext3Turn({ utterance: 'אילו שירים כבר הורדתי?', now }, deps);
+  assert.match(r.reply, /לשמיעת קופה ראשית - פרק 5 עונה 4 הקש 1/);
+  assert.match(r.reply, /לשמיעת אושר כהן - דאון הקש 2/);
+});
+
+test('a key choice that names a song plays it', async () => {
+  const { deps } = baseDeps([], { library: async () => libSongs });
+  const r = await ext3Turn({ utterance: 'בחרתי באפשרות 2: לשמיעת אושר כהן - דאון', now }, deps);
+  assert.deepEqual(r.play.paths, ['/7/012']);
+});
+
+test('stock openings are cut from answers', async () => {
+  const { deps } = baseDeps(['{"intent":"chat"}', '{"answer":"שמחתי לשמוע שאתה מתעניין! מקרר עובד בעזרת מדחס שדוחס גז קירור."}']);
+  const r = await ext3Turn({ utterance: 'איך עובד מקרר', now }, deps);
+  assert.match(r.reply, /^מקרר עובד/);
+});

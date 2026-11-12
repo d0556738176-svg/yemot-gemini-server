@@ -4445,6 +4445,24 @@ async function ext3ReadPages(urls,opts={}) {
   if(extra.length) console.info('[EXT3_BRAIN] pages read directly',{count:extra.length});
   return [...got,...extra];
 }
+// Every song already downloaded (extension 7's list: video id -> file, title),
+// read from Yemot and kept for 5 minutes. A song in it plays at once, with no
+// new download (owner, 12.11).
+let ext3LibCache={at:0,items:[]};
+async function ext3Library() {
+  if(Date.now()-ext3LibCache.at<5*60*1000) return ext3LibCache.items;
+  const u=String(process.env.YEMOT_API_USERNAME||'').trim(), pw=String(process.env.YEMOT_API_PASSWORD||'').trim();
+  const token=String(process.env.YEMOT_TOKEN||'').trim()||(u&&pw?u+':'+pw:'');
+  if(!token) return [];
+  try {
+    const r=await fetch('https://www.call2all.co.il/ym/api/DownloadFile?'+new URLSearchParams({token,path:'ivr2:/2/youtubeaudio/ext7_index.json'}),{signal:AbortSignal.timeout(6000)});
+    const j=JSON.parse(await r.text());
+    const items=Object.entries(j?.items||{}).filter(([id,e])=>e?.file&&!/-he$/.test(id)).map(([videoId,e])=>({videoId,title:String(e.title||''),path:'/7/'+e.file,at:e.at||''}));
+    ext3LibCache={at:Date.now(),items};
+    console.info('[EXT3_LIBRARY] songs already downloaded',{count:items.length});
+    return items;
+  } catch(e) { console.warn('[EXT3_LIBRARY] not readable',String(e?.message||e).slice(0,100)); return ext3LibCache.items; }
+}
 async function runExt3Brain(utterance, phone, callId, turnHistory, now, media='') {
   const key=normalizePhone(phone);
   const prior=key!=='לא מזוהה'?conversationLog.filter(x=>normalizePhone(x.phone)===key&&x.user&&String(x.callId||'')!==String(callId||'')).slice(-12):[];
@@ -4452,6 +4470,7 @@ async function runExt3Brain(utterance, phone, callId, turnHistory, now, media=''
   const prefs=key!=='לא מזוהה'?(callerPrefs.get(key)||[]):[];
   const ext1=typeof brainBranch==='function'&&brainBranch()==='1';
   return ext3Turn({utterance,summary,prior,current:turnHistory,now,prefs,media,voice:ext1?'male':'female',brief:ext1},{
+    library:ext3Library,
     llm:(prompt,{budgetMs=12000,maxTokens=1500,planner=false}={})=>planner
       ? raceSynthesis(prompt,budgetMs,{maxTokens:Math.min(maxTokens,600),gemini:true,geminiBudgetMs:2500})
       : raceSynthesis(prompt,budgetMs,{maxTokens,quality:true}),
@@ -4491,11 +4510,35 @@ async function ext2Media(job,{start=false,timeoutMs=8000}={}) {
     return r.ok&&j?.ok?j:null;
   } catch { return null; }
 }
+// Wakes the extension-2 service (free plan: it sleeps when idle). One request
+// at a time, held long enough for a cold start (~1 min); the outcome is logged
+// so a failed wake can be diagnosed (11.11: the service never woke).
+let ext2WakeInFlight=null, ext2LastWakeOk=0;
+function ext2Wake(reason='') {
+  if(ext2WakeInFlight) return ext2WakeInFlight;
+  if(Date.now()-ext2LastWakeOk<4*60*1000) return Promise.resolve(true);
+  const base=String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'');
+  const t0=Date.now();
+  ext2WakeInFlight=fetch(base+'/health',{signal:AbortSignal.timeout(100000),headers:{'user-agent':'yemot-ext3-wake'}})
+    .then(r=>{ const ok=r.status<500; if(ok) ext2LastWakeOk=Date.now(); console.info('[EXT2_WAKE]',{reason,status:r.status,ms:Date.now()-t0}); return ok; })
+    .catch(e=>{ console.warn('[EXT2_WAKE] no answer',{reason,ms:Date.now()-t0,error:String(e?.name||e?.message||e).slice(0,60)}); return false; })
+    .finally(()=>{ ext2WakeInFlight=null; });
+  return ext2WakeInFlight;
+}
+// Why a download stopped, in words the caller understands.
+function ext3FailReason(err) {
+  const e=String(err||'');
+  if(/unavailable|private|removed|blocked|geo|region/i.test(e)) return 'הסרטון הזה לא זמין להורדה מיוטיוב, כנראה שהוא הוסר, פרטי או חסום';
+  if(/too_long|length|duration/i.test(e)) return 'הסרטון ארוך מדי להורדה';
+  if(/quota|credit|limit|payment/i.test(e)) return 'נגמרה כרגע מכסת ההורדות של המנוע';
+  return 'מנוע ההורדות נכשל';
+}
 // Called once per turn: what changed in this call's downloads, to be said.
 async function ext3MediaNotes(media) {
   const notes=[];
   await Promise.all(ext3Jobs(media).map(async job=>{
-    if(!job||typeof job!=='object'||!job.videoId||job.done||job.cancelled||job.needsStart) return;
+    if(!job||typeof job!=='object'||!job.videoId||job.done||job.cancelled) return;
+    if(job.needsStart) { if(!media.waking) ext3WakeLoop(media); return; }
     const st=await ext2Media(job,{timeoutMs:3500});
     if(!st) {
       if(Date.now()-job.since>4*60*1000 && !job.unreachableSaid) { job.unreachableSaid=true; notes.push('שירות ההורדות לא עונה כרגע, אז ההכנה של '+job.title+' מתעכבת. אפשר להמשיך לדבר, ואנסה שוב.'); }
@@ -4505,8 +4548,8 @@ async function ext3MediaNotes(media) {
     if(st.audio?.status==='ready'&&st.audio.paths?.length) job.paths=st.audio.paths;
     if(job.mode==='video') {
       if(st.video?.status==='ready'&&!job.videoSaid) { job.videoSaid=true; notes.push('הווידאו של '+job.title+' נשמר בתיקיית וידאו.'); }
-      if(st.video?.status==='failed'&&!job.failSaid) { job.failSaid=true; job.done=true; notes.push('הורדת הווידאו של '+job.title+' לא הצליחה. אפשר לנסות שוב בשלוחה 2.'); }
-    } else if(st.audio?.status==='failed'&&!job.failSaid) { job.failSaid=true; job.done=true; notes.push('ההכנה של '+job.title+' לא הצליחה. אפשר לנסות שוב, או לחפש אותו בשלוחה 2.'); }
+      if(st.video?.status==='failed'&&!job.failSaid) { job.failSaid=true; job.done=true; notes.push('הורדת הווידאו של '+job.title+' לא הצליחה: '+ext3FailReason(st.video.error)+'.'); }
+    } else if(st.audio?.status==='failed'&&!job.failSaid) { job.failSaid=true; job.done=true; notes.push('ההורדה של '+job.title+' לא הצליחה: '+ext3FailReason(st.audio.error)+'. אפשר לבקש ממני גרסה אחרת של אותו שיר.'); }
     if(job.paths&&!job.readySaid) { job.readySaid=true; notes.push('הקובץ של '+job.title+' מוכן. כשתרצה לשמוע אותו, אמור תשמיעי לי אותו.'); }
     if(job.readySaid&&(job.mode!=='video'||job.videoSaid)) job.done=true;
   }));
@@ -4518,20 +4561,20 @@ async function ext3MediaNotes(media) {
 function ext3WakeLoop(media) {
   if(media.waking) return;
   media.waking=true;
-  const base=String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'');
-  const until=Date.now()+4*60*1000;
+  const until=Date.now()+10*60*1000;
   (async()=>{
     while(Date.now()<until) {
-      const waiting=[...media.values()].filter(j=>j&&j.needsStart&&!j.cancelled);
+      const waiting=[...media.values()].filter(j=>j&&j.videoId&&j.needsStart&&!j.cancelled);
       if(!waiting.length) break;
-      await fetch(base+'/health',{signal:AbortSignal.timeout(20000)}).catch(()=>null);
+      await ext2Wake('download waiting');
       for(const job of waiting) {
         const st=await ext2Media(job,{start:true,timeoutMs:15000});
         if(st) { job.needsStart=false; job.startedAt=Date.now(); console.info('[EXT3_MEDIA] download service awake; started',{videoId:job.videoId,mode:job.mode}); }
       }
-      if(![...media.values()].some(j=>j&&j.needsStart&&!j.cancelled)) break;
-      await new Promise(r=>setTimeout(r,10000));
+      if(![...media.values()].some(j=>j&&j.videoId&&j.needsStart&&!j.cancelled)) break;
+      await new Promise(r=>setTimeout(r,8000));
     }
+    if([...media.values()].some(j=>j&&j.videoId&&j.needsStart&&!j.cancelled)) console.warn('[EXT3_MEDIA] download service did not wake in 10 minutes; will try again on the next turn');
     media.waking=false;
   })().catch(()=>{ media.waking=false; });
 }
@@ -4544,11 +4587,16 @@ async function ext3MediaStatusReply(media) {
   const parts=[];
   for(const job of jobs) {
     if(job.paths) { parts.push('הקובץ של '+job.title+' מוכן. כדי לשמוע אותו אמור תשמיעי לי אותו.'); continue; }
-    if(job.needsStart) { parts.push('שירות ההורדות עדיין מתעורר, ואני ממשיכה לנסות להתחיל את '+job.title+' כל כמה שניות. ברגע שהוא יענה ההורדה תתחיל.'); continue; }
+    if(job.needsStart) {
+      // Maybe it woke meanwhile: try to start right now, else keep knocking.
+      const now=await ext2Media(job,{start:true,timeoutMs:8000});
+      if(!now) { if(!media.waking) ext3WakeLoop(media); parts.push('שירות ההורדות עדיין מתעורר'+(Date.now()-job.since>120000?', זה לוקח יותר זמן מהרגיל':'')+', ואני ממשיכה לנסות להתחיל את '+job.title+'. ברגע שהוא יענה ההורדה תתחיל, ואודיע לך.'); continue; }
+      job.needsStart=false; job.startedAt=Date.now();
+    }
     const st=await ext2Media(job,{timeoutMs:6000});
     if(!st) { parts.push('שירות ההורדות לא ענה לי ברגע זה לגבי '+job.title+'. אני אנסה שוב, ואודיע כשהקובץ מוכן.'); continue; }
     if(st.audio?.status==='ready'&&st.audio.paths?.length) { job.paths=st.audio.paths; parts.push('הקובץ של '+job.title+' מוכן. כדי לשמוע אותו אמור תשמיעי לי אותו.'); continue; }
-    if(st.audio?.status==='failed'||st.video?.status==='failed') { parts.push('ההורדה של '+job.title+' לא הצליחה.'); continue; }
+    if(st.audio?.status==='failed'||st.video?.status==='failed') { job.done=true; parts.push('ההורדה של '+job.title+' לא הצליחה: '+ext3FailReason(st.audio?.error||st.video?.error)+'. אפשר לבקש ממני גרסה אחרת של אותו שיר או סרטון.'); continue; }
     const min=Number(st.audio?.minutes ?? st.video?.minutes);
     parts.push('ההורדה של '+job.title+(job.mode==='video'?', כווידאו וגם כקובץ שמע מאותה הורדה,':'')+' עדיין בתהליך'+(Number.isFinite(min)?(min<1?', היא התחילה לפני פחות מדקה':', כבר '+min+' דקות'):'')+'. '+(st.audio?.spoken?st.audio.spoken+' ':'')+'אודיע לך ברגע שהקובץ מוכן.');
   }
@@ -4634,7 +4682,9 @@ async function callHandler(call) {
   const turnContext={youtubeResults:[],currentWebsiteUrl:null,currentWebsitePages:[],currentWebsitePageIndex:0,currentWebsiteReadOffset:0};
   // Extension 3: downloads running for this call, and a file to play next.
   const callMedia=new Map(); let pendingPlay=null; let pendingConfirm=null;
-  if(typeof brainBranch==='function'&&brainBranch()) { wakeSearxng(); if(process.env.EXT3_MEDIA_SECRET) fetch(String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'')+'/health',{signal:AbortSignal.timeout(90000)}).catch(()=>{}); }
+  // The download service stays awake for the whole call (a check every few
+  // minutes), so a download asked for mid-call starts at once.
+  if(typeof brainBranch==='function'&&brainBranch()) { wakeSearxng(); if(process.env.EXT3_MEDIA_SECRET&&!call.selfTest) void ext2Wake('call start'); }
   if(typeof loadCallerMemory==='function') await loadCallerMemory(callerPhone);
   if (process.env.ENABLE_AI_OPENING !== 'false' && callerPhone !== 'לא מזוהה' && conversationLog.some(x=>x.phone===callerPhone)) {
     openingPrompt=await buildOpeningForCaller(callerPhone,explicitSearchOnly);
@@ -4851,6 +4901,7 @@ async function callHandler(call) {
           ext3Done=true;
         }
         else {
+          if(!call.selfTest&&process.env.EXT3_MEDIA_SECRET) void ext2Wake('call active');
           if(pendingConfirm) { console.info('[EXT3_MEDIA] confirmation dropped: caller moved on',{callId:activeKey}); pendingConfirm=null; }
           let r=null, lastError=null;
           const brainStart=Date.now();
@@ -4877,7 +4928,8 @@ async function callHandler(call) {
           else if(r?.reply) {
             replyText=r.reply; turnContext.ext3Ref=r.ref||null; ext3Done=true;
             if(call.selfTest) call.selfTest.lastRef=r.ref||null;
-            if(r.confirm) { pendingConfirm=r.confirm; if(call.selfTest) call.selfTest.lastConfirm=r.confirm; console.info('[EXT3_MEDIA] asking to confirm before download',{callId:activeKey,videoId:r.confirm.videoId}); }
+            if(r.play) { pendingPlay=r.play; console.info('[EXT3_MEDIA] playing from the library, no download',{callId:activeKey,files:r.play.paths.length}); }
+            if(r.confirm) { if(!call.selfTest) void ext2Wake('confirm offered'); pendingConfirm=r.confirm; if(call.selfTest) call.selfTest.lastConfirm=r.confirm; console.info('[EXT3_MEDIA] asking to confirm before download',{callId:activeKey,videoId:r.confirm.videoId}); }
           }
           else {
             // No fallback to the older routing here (it answered with unrelated
