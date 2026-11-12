@@ -20,7 +20,11 @@ CACHE_VOLUME = modal.Volume.from_name("yemot-branch4-acestep-hf-cache", create_i
 
 PORT = 8001
 IMAGE = (
-    modal.Image.from_registry("ghcr.io/ace-step/ace-step-1.5:latest")
+    # add_python gives Modal its own interpreter (the image only ships
+    # python3.11 for uv); entrypoint([]) stops the image's Gradio entrypoint
+    # from hijacking the container - serve() starts the API itself.
+    modal.Image.from_registry("ghcr.io/ace-step/ace-step-1.5:latest", add_python="3.11")
+    .entrypoint([])
     .env(
         {
             "ACESTEP_MODE": "api",
@@ -30,9 +34,14 @@ IMAGE = (
             "ACESTEP_CONFIG_PATH": "acestep-v15-turbo",
             # The smaller LM is a cost/VRAM-conscious starting point.
             "ACESTEP_LM_MODEL_PATH": "acestep-5Hz-lm-0.6B",
+            # The API server only loads the LM when asked; extension 4 sends
+            # thinking=true, so load it at startup instead of failing per task.
+            "ACESTEP_INIT_LLM": "true",
             "ACESTEP_LLM_BACKEND": "pt",
             "ACESTEP_OFFLOAD_TO_CPU": "false",
             "TOKENIZERS_PARALLELISM": "false",
+            # The image is already synced; never let `uv run` re-resolve at boot.
+            "UV_NO_SYNC": "1",
         }
     )
 )

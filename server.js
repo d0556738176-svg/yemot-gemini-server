@@ -4048,13 +4048,14 @@ async function backupCallHandler(call) {
   }
 }
 
+const songGenerateText = async prompt => {
+  const result = await generateWithRetry([{ role: 'user', parts: [{ text: prompt }] }], false, false, 30000);
+  return String(result?.response?.text?.() || '');
+};
 const songCallHandler = createSongCallHandler({
   yemotApi,
   transcribePhoneAudio,
-  generateText: async prompt => {
-    const result = await generateWithRetry([{ role: 'user', parts: [{ text: prompt }] }], false, false, 30000);
-    return String(result?.response?.text?.() || '');
-  },
+  generateText: songGenerateText,
   sanitizeForYemot,
   withTimeout,
   getCallerNumber,
@@ -4281,6 +4282,6 @@ app.listen(port,async()=>{
   // Isolated engine probe; no-op unless BRANCH4_ENGINE_SELFTEST_ID is set.
   // Needs no Yemot routing, so it cannot affect the live phone line.
   void import('./branch4-engine-selftest.js')
-    .then(m => m.runBranch4EngineSelfTest())
+    .then(m => m.runBranch4EngineSelfTest(process.env, { generateText: songGenerateText }))
     .catch(e => logDetailedError('Branch 4 engine self-test', e));
 });

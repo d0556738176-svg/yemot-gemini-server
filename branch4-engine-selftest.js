@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
 import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 import { generateWithFalAceStep, isFalConfigured } from './song-engine-fal.js';
+import { generateWithAceStep, createSong } from './song-generator.js';
 
 const TAG = '[BRANCH4_ENGINE_SELFTEST]';
 // Short, clearly original Hebrew test lyrics — enough to hear vocals.
@@ -41,12 +42,42 @@ async function wavDurationSec(file) {
   return { bytes: b.length, durationSec: +((b.length - 44) / (rate * channels * bits / 8)).toFixed(2), rate, channels, bits };
 }
 
-export async function runBranch4EngineSelfTest(env = process.env) {
+// Full mode (BRANCH4_SELFTEST_FULL=1): run the real extension-4 production
+// path - lyrics from the LLM, music engine chain, conversion, Yemot upload to
+// ivr2:/4/songs and verification - exactly as a phone call would.
+async function runFullChain(runId, env, generateText) {
+  const prompt = String(env.BRANCH4_SELFTEST_PROMPT || 'שיר שמח לכבוד שבת, עם גיטרה וקלרינט, קול גברי').slice(0, 300);
+  const t0 = Date.now();
+  console.info(TAG, 'full chain start', { runId, promptChars: prompt.length });
+  try {
+    const result = await createSong({ prompt, callId: 'selftest-' + runId, userKey: 'selftest-' + runId, generateText });
+    if (result?.needsClarification) {
+      console.info(TAG, 'summary', JSON.stringify({ mode: 'full', ok: false, needsClarification: true, question: result.clarificationQuestion, runId }));
+      return;
+    }
+    console.info(TAG, 'summary', JSON.stringify({
+      mode: 'full', ok: true, ms: Date.now() - t0, provider: result.provider, model: result.model,
+      title: result.spec?.title, durationSeconds: result.spec?.durationSeconds, lyricsChars: result.spec?.lyrics?.length,
+      lyricsPreview: String(result.spec?.lyrics || '').slice(0, 400), playbackPaths: result.playbackPaths, runId
+    }));
+  } catch (error) {
+    console.warn(TAG, 'summary', JSON.stringify({
+      mode: 'full', ok: false, ms: Date.now() - t0, status: Number(error?.status || 0) || null,
+      message: String(error?.message || error).slice(0, 300), runId
+    }));
+  }
+}
+
+export async function runBranch4EngineSelfTest(env = process.env, { generateText } = {}) {
   const runId = String(env.BRANCH4_ENGINE_SELFTEST_ID || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24);
   if (!runId) return;
-  const useFal = isFalConfigured(env);
-  const engine = useFal ? 'fal.ai ace-step' : String(env.HF_MUSIC_SPACE_URL || 'default ace-step space');
-  console.info(TAG, 'start', { runId, engine, useFal, durationSec: Number(env.BRANCH4_SELFTEST_DURATION || 40) });
+  if (String(env.BRANCH4_SELFTEST_FULL || '').trim() === '1' && generateText) {
+    return runFullChain(runId, env, generateText);
+  }
+  const useAce = !!String(env.ACESTEP_API_URL || '').trim() && !!String(env.ACESTEP_API_KEY || '').trim();
+  const useFal = !useAce && isFalConfigured(env);
+  const engine = useAce ? 'private ace-step (modal)' : useFal ? 'fal.ai ace-step' : String(env.HF_MUSIC_SPACE_URL || 'default ace-step space');
+  console.info(TAG, 'start', { runId, engine, durationSec: Number(env.BRANCH4_SELFTEST_DURATION || 40) });
 
   const spec = {
     lyrics: TEST_LYRICS,
@@ -58,7 +89,8 @@ export async function runBranch4EngineSelfTest(env = process.env) {
   const started = Date.now();
   let result;
   try {
-    result = useFal ? await generateWithFalAceStep(spec, env) : await generateWithHuggingFaceSpace(spec);
+    result = useAce ? await generateWithAceStep(spec)
+      : useFal ? await generateWithFalAceStep(spec, env) : await generateWithHuggingFaceSpace(spec);
   } catch (error) {
     console.warn(TAG, 'generation failed', {
       ms: Date.now() - started,

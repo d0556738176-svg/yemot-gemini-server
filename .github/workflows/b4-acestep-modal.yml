@@ -1,0 +1,96 @@
+# Extension 4: deploy the private ACE-Step 1.5 music server to Modal and run a
+# live Hebrew song test against it. Runs entirely in GitHub (no home PC).
+#
+# Needs two repository secrets (Settings > Secrets and variables > Actions):
+#   MODAL_TOKEN_ID, MODAL_TOKEN_SECRET  - from modal.com > Settings > API Tokens
+# Optional: ACESTEP_API_KEY - otherwise a fresh random key is generated.
+#
+# Results (report, test mp3, and the API key encrypted to the maintainer's
+# public key) are pushed to the b4-acestep-results branch. Nothing secret is
+# ever printed or committed in clear text.
+name: Branch 4 - ACE-Step on Modal
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/branch4-engine-test]
+    paths:
+      - 'deploy/ace-step-modal/**'
+      - '.github/workflows/b4-acestep-modal.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: b4-acestep-modal
+  cancel-in-progress: false
+
+jobs:
+  deploy-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      GIVEN_ACE_KEY: ${{ secrets.ACESTEP_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Prepare
+        id: prep
+        run: |
+          mkdir -p out
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo '{"ok": false, "stage": "missing_modal_tokens"}' > out/report.json
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$GIVEN_ACE_KEY" ]; then KEY="$GIVEN_ACE_KEY"; else KEY="$(openssl rand -hex 32)"; fi
+          echo "::add-mask::$KEY"
+          echo "ACESTEP_API_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          pip install --quiet modal
+
+      - name: Deploy ACE-Step to Modal
+        id: deploy
+        if: steps.prep.outputs.ready == 'true'
+        run: |
+          set -o pipefail
+          modal secret create acestep-api-key ACESTEP_API_KEY="$ACESTEP_API_KEY" --force > /dev/null
+          modal deploy deploy/ace-step-modal/app.py 2>&1 | tee out/deploy.log
+          URL="$(grep -oE 'https://[A-Za-z0-9.-]+\.modal\.run' out/deploy.log | head -1)"
+          if [ -z "$URL" ]; then
+            echo '{"ok": false, "stage": "deploy_no_url"}' > out/report.json
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Live Hebrew song test
+        if: steps.deploy.outputs.url != ''
+        run: python deploy/ace-step-modal/smoke_test.py "${{ steps.deploy.outputs.url }}" out
+
+      - name: Publish results
+        if: always()
+        run: |
+          [ -f out/report.json ] || echo '{"ok": false, "stage": "unknown_failure"}' > out/report.json
+          if [ -n "${ACESTEP_API_KEY:-}" ]; then
+            printf '%s' "$ACESTEP_API_KEY" | openssl pkeyutl -encrypt -pubin \
+              -inkey deploy/ace-step-modal/report-pubkey.pem -pkeyopt rsa_padding_mode:oaep \
+              | base64 -w0 > out/acestep-key.enc
+          fi
+          echo "${{ steps.deploy.outputs.url }}" > out/url.txt
+          echo "${{ github.run_id }} ${{ github.sha }} $(date -u +%FT%TZ)" > out/run.txt
+          # Keep logs short and free of any token text.
+          [ -f out/deploy.log ] && tail -n 60 out/deploy.log | grep -viE 'token|secret' > out/deploy-tail.log; rm -f out/deploy.log
+          cd out
+          git init -q
+          git config user.name "b4-bot"
+          git config user.email "b4-bot@users.noreply.github.com"
+          git checkout -q -b b4-acestep-results
+          git add -A
+          git commit -q -m "ACE-Step Modal results ${{ github.run_id }}"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" b4-acestep-results

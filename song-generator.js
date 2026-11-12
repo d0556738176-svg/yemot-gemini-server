@@ -273,17 +273,37 @@ function parseAceStepResult(result) {
   return [];
 }
 
+// The private ACE-Step server scales to zero when idle. Waking it the moment a
+// caller enters extension 4 lets the GPU boot while they are still speaking,
+// instead of after the lyrics are ready. Deduplicated; never throws.
+let aceWarmUntil = 0;
+let aceWarmPromise = null;
+export function warmMusicEngine() {
+  try {
+    if (!String(process.env.ACESTEP_API_URL || '').trim()) return null;
+    if (aceWarmPromise || Date.now() < aceWarmUntil) return aceWarmPromise;
+    const url = new URL('/health', aceStepApiBase());
+    const startedAt = Date.now();
+    aceWarmPromise = fetch(url, { headers: aceStepHeaders(false), signal: AbortSignal.timeout(900000) })
+      .then(r => { log('ACE_STEP_WARM', { status: r.status, ms: Date.now() - startedAt }); if (r.ok) aceWarmUntil = Date.now() + 45000; })
+      .catch(error => log('ACE_STEP_WARM_FAILED', { message: String(error?.message || error).slice(0, 120) }))
+      .finally(() => { aceWarmPromise = null; });
+    return aceWarmPromise;
+  } catch { return null; }
+}
+
 export async function generateWithAceStep(spec) {
   const base = aceStepApiBase();
   const headers = aceStepHeaders(true);
-  const totalTimeout = Math.max(30000, Math.min(600000, Number(process.env.SONG_GENERATION_TIMEOUT_MS || 300000)));
+  // Default leaves room for a cold GPU boot (~2-5 min) plus generation.
+  const totalTimeout = Math.max(30000, Math.min(600000, Number(process.env.SONG_GENERATION_TIMEOUT_MS || 540000)));
   const startedAt = Date.now();
   const submitUrl = new URL('/release_task', base);
   const submitted = await fetchWithTimeout(submitUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify(buildAceStepPayload(spec))
-  }, Math.min(totalTimeout, 30000), 'ACE-Step task submission');
+  }, totalTimeout, 'ACE-Step task submission'); // a cold GPU server holds this request while it boots
   const submitData = unwrapAceStepData(await submitted.json());
   const taskId = String(submitData?.task_id || submitData?.taskId || '').trim();
   if (!taskId) throw new Error('ACE-Step did not return a task_id');
@@ -353,85 +373,65 @@ async function generateWithBackup(spec) {
   return { audio, provider: 'backup', model: String(process.env.MUSIC_BACKUP_MODEL || 'configured-provider'), contentType: type };
 }
 
+// Ordered music engines. The private ACE-Step server (Modal, free monthly
+// credit) is first; the free Hugging Face Space next; paid/optional hosts last.
+// Each engine is skipped while cooling down after a failure, so a dead engine
+// never makes the caller wait twice.
+function musicProviders() {
+  const env = process.env;
+  return [
+    {
+      id: 'ace-step',
+      configured: () => !!String(env.ACESTEP_API_URL || '').trim() && !!String(env.ACESTEP_API_KEY || '').trim(),
+      run: generateWithAceStep
+    },
+    {
+      id: 'huggingface-space',
+      configured: () => String(env.HF_MUSIC_SPACE_ENABLED || '').toLowerCase() === 'true',
+      run: generateWithHuggingFaceSpace
+    },
+    {
+      id: 'fal-ace-step',
+      configured: () => isFalConfigured(),
+      run: generateWithFalAceStep
+    },
+    {
+      id: 'backup',
+      configured: () => !!String(env.MUSIC_BACKUP_API_URL || '').trim() && !!String(env.MUSIC_BACKUP_API_KEY || '').trim(),
+      run: generateWithBackup
+    }
+  ];
+}
+
 async function generateAudio(spec) {
-  // Preferred provider: fal.ai ACE-Step (pay-per-use, no Space to wake,
-  // no ZeroGPU token). Used whenever FAL_KEY is configured.
-  const falState = statusOf('fal-ace-step');
-  let falError = null;
-  if (isFalConfigured() && falState.status !== 'disabled' && falState.cooldownUntil <= Date.now()) {
+  const errors = [];
+  let anyConfigured = false;
+  for (const provider of musicProviders()) {
+    if (!provider.configured()) continue;
+    anyConfigured = true;
+    const state = statusOf(provider.id);
+    if (state.status === 'disabled' || state.cooldownUntil > Date.now()) {
+      log('MUSIC_PROVIDER_SKIPPED', { provider: provider.id, status: state.status });
+      continue;
+    }
     try {
-      log('MUSIC_PROVIDER_SELECTED', { provider: 'fal-ace-step' });
-      const result = await generateWithFalAceStep(spec);
-      markProvider('fal-ace-step', 'available');
+      log('MUSIC_PROVIDER_SELECTED', { provider: provider.id });
+      const result = await provider.run(spec);
+      markProvider(provider.id, 'available');
       return result;
     } catch (error) {
-      falError = error;
+      errors.push(error);
       const status = httpStatus(error);
       const failure = classifyProviderFailure(status, error?.message);
-      markProvider('fal-ace-step', failure.status, failure.cooldownMs);
-      log('MUSIC_PROVIDER_FAILED', { provider: 'fal-ace-step', status: status || 'unknown' });
+      markProvider(provider.id, failure.status, failure.cooldownMs);
+      log('MUSIC_PROVIDER_FAILED', { provider: provider.id, status: status || 'unknown', message: String(error?.message || '').slice(0, 160) });
       if (!shouldFallbackToBackup(status)) throw error;
     }
   }
-  const aceState = statusOf('ace-step');
-  const aceConfigured = !!String(process.env.ACESTEP_API_URL || '').trim() && !!String(process.env.ACESTEP_API_KEY || '').trim();
-  let aceError = null;
-  if (aceConfigured && aceState.status !== 'disabled' && aceState.cooldownUntil <= Date.now()) {
-    try {
-      log('MUSIC_PROVIDER_SELECTED', { provider: 'ace-step', model: String(process.env.ACESTEP_MODEL || 'acestep-v15-turbo') });
-      const result = await generateWithAceStep(spec);
-      markProvider('ace-step', 'available');
-      return result;
-    } catch (error) {
-      aceError = error;
-      const status = httpStatus(error);
-      const failure = classifyProviderFailure(status, error?.message);
-      markProvider('ace-step', failure.status, failure.cooldownMs);
-      log('MUSIC_PROVIDER_FAILED', { provider: 'ace-step', status: status || 'unknown' });
-      if (!shouldFallbackToBackup(status)) throw error;
-    }
-  }
-  let hfError = null;
-  const hfState = statusOf('huggingface-space');
-  if (String(process.env.HF_MUSIC_SPACE_ENABLED || '').toLowerCase() === 'true' &&
-      hfState.status !== 'disabled' && hfState.cooldownUntil <= Date.now()) {
-    try {
-      log('MUSIC_PROVIDER_SELECTED', { provider: 'huggingface-space' });
-      const result = await generateWithHuggingFaceSpace(spec);
-      markProvider('huggingface-space', 'available');
-      return result;
-    } catch (error) {
-      hfError = error;
-      const status = httpStatus(error);
-      const failure = classifyProviderFailure(status);
-      markProvider('huggingface-space', failure.status, failure.cooldownMs);
-      log('MUSIC_PROVIDER_FAILED', { provider: 'huggingface-space', status: status || 'unknown' });
-      if (!shouldFallbackToBackup(status)) throw error;
-    }
-  }
-  const backupEndpoint = String(process.env.MUSIC_BACKUP_API_URL || '').trim();
-  const backupKey = String(process.env.MUSIC_BACKUP_API_KEY || '').trim();
-  if (backupEndpoint && backupKey) {
-    try {
-      log('MUSIC_PROVIDER_SELECTED', { provider: 'backup' });
-      const result = await generateWithBackup(spec);
-      markProvider('backup', 'available');
-      return result;
-    } catch (error) {
-      const status = httpStatus(error);
-      markProvider('backup', status === 429 ? 'rate_limited' : 'temporary_error', status === 429 ? 60000 : 15000);
-      log('MUSIC_PROVIDER_FAILED', { provider: 'backup', status: status || 'unknown' });
-      throw error;
-    }
-  }
-  if (falError) throw falError;
-  if (aceError) throw aceError;
-  if (hfError) throw hfError;
-  throw Object.assign(new Error(
-    aceConfigured
-      ? 'Music provider is temporarily unavailable and no backup provider is configured'
-      : 'ACE-Step is not configured and no backup music provider is configured'
-  ), { status: 503 });
+  if (errors.length) throw errors[0];
+  throw Object.assign(new Error(anyConfigured
+    ? 'All music providers are cooling down after recent failures'
+    : 'No music provider is configured'), { status: 503 });
 }
 
 function runFfmpeg(args, timeoutMs = 30000) {

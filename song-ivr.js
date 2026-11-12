@@ -1,4 +1,4 @@
-import { createSong } from './song-generator.js';
+import { createSong, warmMusicEngine } from './song-generator.js';
 
 const SONG_WAIT_TIMEOUT_MS = Number(process.env.SONG_WAIT_PROMPT_TIMEOUT_MS || 15000);
 
@@ -20,6 +20,7 @@ export function createSongCallHandler({
     let pendingRequest = '';
     let awaitingClarification = false;
     let clarificationCount = 0;
+    warmMusicEngine();
 
     try {
       while (true) {
