@@ -9,7 +9,7 @@ import { YemotRouter, ExitError } from 'yemot-router2';
 import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
-import { keySlots, keysFor, withKeys, keyReport } from './key-slots.js';
+import { keySlots, keysFor, withKeys, keyReport, isDeadKey, markDeadKey } from './key-slots.js';
 import { ext3Turn, parseKeyOptions, spokenDuration, toMaleSelf } from './ext3-brain.js';
 import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
@@ -2582,13 +2582,13 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     // strong models on the same key = more answers before "rate limited".
     ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?4000+i*800:0}))
   ]) {
-    if(!provider.apiKey) continue;
+    if(!provider.apiKey||isDeadKey(provider.apiKey)) continue;
     racers.push((provider.delayMs?new Promise(r=>setTimeout(r,provider.delayMs)).then(()=>{ if(raceDone) throw Object.assign(new Error('not needed'),{status:499}); }):Promise.resolve()).then(()=>callCompatibleChatCompletion({
       provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
       messages:[{role:'user',content:prompt}],timeoutMs:Math.max(1200,budgetMs-300),
       maxTokens,cooldowns:provider.big?branch1SynthCooldownsBig:branch1SynthCooldowns,cooldownMs:15000
     })).then(text=>{ text=String(text||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim(); if(!text) throw new Error('empty'); return text; })
-      .catch(err=>{ console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
+      .catch(err=>{ if([401,402,403].includes(Number(err?.status))) markDeadKey(provider.apiKey); console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
   }
   const checked=validate?racers.map(r=>r.then(text=>{
     if(!validate(text)) { console.warn('[BRANCH1_WEB_SYNTH] ungrounded answer rejected'); throw Object.assign(new Error('ungrounded answer'),{status:422}); }
@@ -6184,7 +6184,7 @@ app.listen(port,async()=>{
         setTimeout(()=>providerHealth({force:true}).catch(e=>console.warn('[WEB_PROVIDERS] health check failed',String(e?.message||e).slice(0,160))),4000);
       if(process.env.BRANCH3_DEEP_TEST) setTimeout(()=>runBranch3DeepTest(),25000);
       // Which key fields are set and whether each key works (names and statuses only).
-      if(String(process.env.KEY_REPORT||'').trim()==='on') setTimeout(()=>keyReport().catch(e=>console.warn('[KEY_REPORT] failed',String(e?.message||e).slice(0,160))),8000);
+      if(String(process.env.KEY_REPORT||'on').trim()!=='off') setTimeout(()=>keyReport().catch(e=>console.warn('[KEY_REPORT] failed',String(e?.message||e).slice(0,160))),8000);
       if(String(process.env.BRANCH1_E2E_SELFTEST||'off')==='on') setTimeout(()=>runBranch1EndToEndSelfTest().then(()=>runBranch3SelfTest()).catch(e=>console.warn('[E2E_SELFTEST] crashed',String(e?.message||e).slice(0,200))),20000);
     }
   } catch {}

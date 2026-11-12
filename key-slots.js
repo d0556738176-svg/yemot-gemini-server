@@ -18,6 +18,11 @@ export function keySlots(base) {
 }
 export const keysFor = base => keySlots(base).map(x => x.key);
 
+// Keys the provider rejected or that have no balance: left out of the model
+// race (they only waste time), until the next start re-checks them.
+const deadKeys = new Set();
+export const isDeadKey = key => deadKeys.has(key);
+export function markDeadKey(key) { if (key) deadKeys.add(key); }
 // A key that ran out (quota, rejected) rests; a rate-limited one rests briefly.
 const resting = new Map();
 function restKey(key, status, message) {
@@ -103,6 +108,7 @@ export async function keyReport() {
       }
       // Key text with spaces, quotes or line breaks inside is a paste problem.
       if (/[\s"'<>]/.test(String(process.env[s.name] || '').trim())) status += ' (the value has spaces or quotes inside: paste the key again)';
+      if (/^(?:rejected|out of quota)/.test(status) && !/^(?:TAVILY|SERPER|LANGSEARCH|EXA|JINA|FIRECRAWL|YOUTUBE|DEEPGRAM)/.test(base)) markDeadKey(s.key);
       rows.push({ field: s.name, status });
     }
   }

@@ -631,6 +631,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       if (Number.isInteger(j?.pick) && found[j.pick]) pick = j.pick;
       reply = cutStockOpening(String(j?.answer || '').trim());
     } catch (e) { log.warn?.('[EXT3_BRAIN] video pick unavailable; using the top result', { status: e?.status || 0 }); }
+    // No pick from the model: the most watched of the top results, not just the first.
+    if (!reply && found.length > 1) pick = found.slice(0, 5).reduce((b, x, i) => (Number(x.viewCount) || 0) > (Number(found[b].viewCount) || 0) ? i : b, 0);
     const v = found[pick];
     if (!reply || !reply.includes(v.title.slice(0, Math.min(20, v.title.length)))) {
       reply = 'מצאתי לך ביוטיוב את הסרטון ' + v.title + ', בערוץ ' + v.channelTitle + '. אורכו ' + spokenDuration(v.durationSec) + (spokenViews(v.viewCount) ? ', ויש לו ' + spokenViews(v.viewCount) : '') + '. ' +
@@ -701,9 +703,12 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     if (news) {
       const items = await deps.newsSearch(q1, { timeoutMs: 4000 }).catch(() => []);
       if (items.length >= 3) {
-        const list = items.slice(0, 12).map((x, i) => 'כותרת ' + (i + 1) + ': ' + clip(x.title, 160) + (x.source ? ' (' + x.source + (x.date ? ', ' + x.date : '') + ')' : '') + (x.snippet ? '. ' + clip(x.snippet, 260) : '')).join('\n');
+        const list = items.slice(0, 9).map((x, i) => 'כותרת ' + (i + 1) + ': ' + clip(x.title, 140) + (x.source ? ' (' + x.source + (x.date ? ', ' + x.date : '') + ')' : '') + (x.snippet ? '. ' + clip(x.snippet, 200) : '')).join('\n');
         log.info?.('[EXT3_BRAIN] news headlines', { count: items.length });
-        const reply = await ask('המתקשר רוצה לשמוע חדשות. לפניך הכותרות האמיתיות של עכשיו מחיפוש חדשות, עם מקור ושעה. ספרי לו את הידיעות החשובות והמעניינות ביותר, כל ידיעה במשפט או שניים עם הפרטים שבכותרת ובתקציר, כמו קריין חדשות חם וברור: קודם הדבר הגדול של היום, אחר כך עוד ידיעות מתחומים שונים. אל תמציאי פרטים שלא מופיעים, ואל תקריאי שמות אתרים ארוכים. בסוף שאלי אם לפרט על אחת הידיעות.', 'כותרות:\n' + list, { maxTokens: 1800, budgetMs: 13000, ctx: smallContext });
+        const headlinesOnly = () => 'הנה הכותרות של עכשיו. ' + items.slice(0, 6).map((x, i) => (i ? 'ועוד ידיעה: ' : '') + clip(x.title, 150) + (x.source ? ', לפי ' + x.source : '') + '.').join(' ') + ' אם תרצה, אפרט על אחת מהן.';
+        const reply = await ask('המתקשר רוצה לשמוע חדשות. לפניך הכותרות האמיתיות של עכשיו מחיפוש חדשות, עם מקור ושעה. ספרי לו את הידיעות החשובות והמעניינות ביותר, כל ידיעה במשפט או שניים עם הפרטים שבכותרת ובתקציר, כמו קריין חדשות חם וברור: קודם הדבר הגדול של היום, אחר כך עוד ידיעות מתחומים שונים. אל תמציאי פרטים שלא מופיעים, ואל תקריאי שמות אתרים ארוכים. בסוף שאלי אם לפרט על אחת הידיעות.', 'כותרות:\n' + list, { maxTokens: 1500, budgetMs: 12000, ctx: smallContext })
+          // Every model busy: the real headlines are still worth hearing.
+          .catch(() => headlinesOnly());
         return out({ reply });
       }
     }
