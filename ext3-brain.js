@@ -333,7 +333,7 @@ const STOCK_OPENING = /^(?:\s*(?:(?:אני\s+)?(?:שמחתי|שמחה|שמח)\s+
 export function cutStockOpening(text) { const t = String(text || ''); const cut = t.replace(STOCK_OPENING, ''); return cut.length > 20 ? cut : t; }
 
 // Extension 1 speaks as a man and answers briefly; extension 3 as a woman, at length.
-const MALE_SELF = [['מורידה','מוריד'],['מעירה','מעיר'],['ממשיכה','ממשיך'],['משמיעה','משמיע'],['מקשיבה','מקשיב'],['מכינה','מכין'],['יכולה','יכול'],['בטוחה','בטוח'],['זוכרת','זוכר'],['ממליצה','ממליץ'],['יודעת','יודע'],['מבינה','מבין'],['מחפשת','מחפש'],['מצטערת','מצטער'],['שמחה לעזור','שמח לעזור'],['מנסה שוב','מנסה שוב']];
+const MALE_SELF = [['מורידה','מוריד'],['מעירה','מעיר'],['ממשיכה','ממשיך'],['משמיעה','משמיע'],['מקשיבה','מקשיב'],['מכינה','מכין'],['יכולה','יכול'],['בטוחה','בטוח'],['זוכרת','זוכר'],['ממליצה','ממליץ'],['יודעת','יודע'],['מבינה','מבין'],['מחפשת','מחפש'],['מצטערת','מצטער'],['שמחה לעזור','שמח לעזור'],['תשמיעי','תשמיע'],['תורידי','תוריד'],['תמשיכי','תמשיך'],['תקריאי','תקריא']];
 export function toMaleSelf(text) {
   let t = String(text || '');
   for (const [f, m] of MALE_SELF) t = t.replace(new RegExp('(?<![\\u0590-\\u05FF])' + f + '(?![\\u0590-\\u05FF])', 'gu'), m);
@@ -552,7 +552,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       await new Promise(r => setTimeout(r, deps.retryPauseMs ?? 3000));
       raw = await deps.llm(answerPrompt({ ...common, context: smallContext.slice(-1500), extra: String(extra || '').slice(0, 3000) }), { budgetMs: 10000, maxTokens: Math.min(maxTokens, 1000) });
     }
-    const a = cutStockOpening(cleanScript(extractAnswer(raw).replace(/^answer\s*[:¶]?\s*/i, '')));
+    const a = cutStockOpening(cleanScript(extractAnswer(raw).replace(/^\s*(?:answer|תשובה)\s*[:¶,.\-]?\s*/i, '')));
     if (!a) throw Object.assign(new Error('empty answer'), { status: 502 });
     return a;
   };
