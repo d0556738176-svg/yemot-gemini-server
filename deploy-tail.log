@@ -1,0 +1,10 @@
+Created a new secret 'acestep-api-key' with the key 'ACESTEP_API_KEY'
+
+Use it in your Modal app:
+
+                                                                                
+@app.function(secrets=[modal.Secret.from_name("acestep-api-key")])              
+def some_function():                                                            
+    os.getenv("ACESTEP_API_KEY")                                                
+                                                                                
+Error: Please add a payment method to use L4 GPU functions.
