@@ -32,8 +32,8 @@ PAYLOAD = {
     "prompt": "joyful hebrew shabbat song, warm male vocals, acoustic guitar, clarinet, mid-tempo",
     "lyrics": LYRICS,
     "vocal_language": "he",
-    "audio_duration": 45,
-    "thinking": True,
+    "audio_duration": int(os.environ.get("SMOKE_DURATION", "45")),
+    "thinking": os.environ.get("SMOKE_THINKING", "true") == "true",
     "use_format": False,
     "use_cot_caption": True,
     "use_cot_language": True,
@@ -99,7 +99,7 @@ try:
     step("submitted", task_id=task_id, code=sub.get("code"))
     submitted_at = time.time()
     file_url = None
-    while time.time() - submitted_at < 900:
+    while time.time() - submitted_at < int(os.environ.get("SMOKE_GEN_TIMEOUT", "900")):
         time.sleep(4)
         q = call("/query_result", {"task_id_list": [task_id]}, timeout=60)
         rows = q.get("data") or []

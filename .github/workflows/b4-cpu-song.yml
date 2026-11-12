@@ -1,0 +1,52 @@
+# Extension 4, fully free engine experiment: run the official ACE-Step 1.5 API
+# on a GitHub Actions CPU runner (no GPU, no card, no external account) and
+# generate one Hebrew song. Measures how long a song takes on CPU.
+name: Branch 4 - ACE-Step on GitHub CPU
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/branch4-engine-test]
+    paths: ['.github/workflows/b4-cpu-song.yml', 'deploy/cpu-song/**']
+permissions:
+  contents: write
+concurrency: { group: b4-cpu-song, cancel-in-progress: false }
+jobs:
+  song:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SMOKE_THINKING: 'false'
+      SMOKE_DURATION: '40'
+      SMOKE_GEN_TIMEOUT: '4000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: ace-step/ACE-Step-1.5, path: ace }
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with:
+          path: ace/checkpoints
+          key: acestep15-ckpt-turbo-v1
+      - name: Install
+        run: |
+          mkdir -p out
+          T0=$(date +%s)
+          cd ace && uv sync --python 3.11 > ../out/install.log 2>&1 || (tail -40 ../out/install.log; exit 1)
+          echo "install_seconds=$(( $(date +%s) - T0 ))" >> ../out/timing.txt
+      - name: Start ACE-Step API on CPU and generate
+        run: |
+          export ACESTEP_API_KEY="$(openssl rand -hex 16)"
+          cd ace
+          ACESTEP_CONFIG_PATH=acestep-v15-turbo ACESTEP_INIT_LLM=false ACESTEP_OFFLOAD_TO_CPU=false \
+            nohup uv run acestep-api --host 127.0.0.1 --port 8001 > ../out/server.log 2>&1 &
+          cd ..
+          python3 deploy/ace-step-modal/smoke_test.py http://127.0.0.1:8001 out || true
+          nproc >> out/timing.txt; free -g >> out/timing.txt
+      - if: always()
+        run: |
+          mkdir -p out; cd out
+          [ -f server.log ] && tail -n 120 server.log > server-tail.log; rm -f server.log
+          [ -f install.log ] && tail -n 30 install.log > install-tail.log; rm -f install.log
+          git init -q && git config user.name b4-bot && git config user.email b4-bot@users.noreply.github.com
+          git checkout -q -b b4-cpu-results && git add -A && git commit -q -m "cpu ${{ github.run_id }}" --allow-empty
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" b4-cpu-results
