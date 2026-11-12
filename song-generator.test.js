@@ -129,3 +129,38 @@ test('backup is not attempted for invalid client payloads but can recover from p
   assert.equal(shouldFallbackToBackup(429), true);
   assert.equal(shouldFallbackToBackup(503), true);
 });
+
+test('acemusic payload sends Hebrew lyrics with the style caption and a clamped duration', async () => {
+  const { buildAceMusicPayload, decodeAceMusicResponse } = await import('./song-engine-acemusic.js');
+  const p = buildAceMusicPayload({ lyrics: '[Verse 1]\nשבת שלום', musicPrompt: 'joyful, male vocals', language: 'he', durationSeconds: 999 }, {});
+  assert.equal(p.lyrics, '[Verse 1]\nשבת שלום');
+  assert.equal(p.messages[0].content, 'joyful, male vocals');
+  assert.equal(p.audio_config.vocal_language, 'he');
+  assert.equal(p.audio_config.duration, 240);
+  assert.equal(p.audio_config.format, 'mp3');
+  assert.equal(p.stream, false);
+  const audio = Buffer.alloc(20000, 7);
+  const out = decodeAceMusicResponse({ choices: [{ finish_reason: 'stop', message: { content: 'ok', audio: [{ type: 'audio_url', audio_url: { url: 'data:audio/mpeg;base64,' + audio.toString('base64') } }] } }] });
+  assert.equal(out.audio.length, 20000);
+  assert.equal(out.contentType, 'audio/mpeg');
+  assert.throws(() => decodeAceMusicResponse({ choices: [{ finish_reason: 'error', message: { content: 'boom' } }] }), /boom/);
+  assert.throws(() => decodeAceMusicResponse({ choices: [{ finish_reason: 'stop', message: { content: 'x', audio: [] } }] }), /no audio/);
+});
+
+test('acemusic adapter posts to the OpenRouter-compatible endpoint and returns the decoded song', async () => {
+  const { generateWithAceMusic } = await import('./song-engine-acemusic.js');
+  const audio = Buffer.alloc(30000, 3);
+  const original = globalThis.fetch;
+  let seen;
+  globalThis.fetch = async (url, init) => {
+    seen = { url: String(url), init };
+    return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '## Metadata', audio: [{ audio_url: { url: 'data:audio/mpeg;base64,' + audio.toString('base64') } }] } }] }), { status: 200 });
+  };
+  try {
+    const r = await generateWithAceMusic({ lyrics: 'שלום', musicPrompt: 'pop', durationSeconds: 40 }, { ACE_MUSIC_API_KEY: 'k' });
+    assert.equal(seen.url, 'https://api.acemusic.ai/v1/chat/completions');
+    assert.equal(seen.init.headers.authorization, 'Bearer k');
+    assert.equal(r.provider, 'acemusic');
+    assert.equal(r.audio.length, 30000);
+  } finally { globalThis.fetch = original; }
+});

@@ -4243,7 +4243,8 @@ async function configureYemotStructure() {
   const hfMusicConfigured = String(process.env.HF_MUSIC_SPACE_ENABLED || '').trim().toLowerCase() === 'true' &&
     !!String(process.env.HF_TOKEN || '').trim();
   const falMusicConfigured = !!String(process.env.FAL_KEY || '').trim();
-  if (branch4Enabled && (aceStepConfigured || backupMusicConfigured || hfMusicConfigured || falMusicConfigured)) {
+  const aceMusicConfigured = !!String(process.env.ACE_MUSIC_API_KEY || '').trim();
+  if (branch4Enabled && (aceMusicConfigured || aceStepConfigured || backupMusicConfigured || hfMusicConfigured || falMusicConfigured)) {
     try {
       await updateExtension('ivr2:/4',{type:'api',api_link:publicUrl + '/yemot-song'});
     } catch (branch4SetupError) {

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import ffmpegPath from 'ffmpeg-static';
 import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 import { generateWithFalAceStep, isFalConfigured } from './song-engine-fal.js';
+import { generateWithAceMusic, isAceMusicConfigured } from './song-engine-acemusic.js';
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
 const MAX_AUDIO_BYTES = 35 * 1024 * 1024;
@@ -373,13 +374,19 @@ async function generateWithBackup(spec) {
   return { audio, provider: 'backup', model: String(process.env.MUSIC_BACKUP_MODEL || 'configured-provider'), contentType: type };
 }
 
-// Ordered music engines. The private ACE-Step server (Modal, free monthly
-// credit) is first; the free Hugging Face Space next; paid/optional hosts last.
+// Ordered music engines. The official free ACE-Step cloud (acemusic.ai) is
+// first, then a private ACE-Step server if one is configured, then the free
+// Hugging Face Space; paid/optional hosts last.
 // Each engine is skipped while cooling down after a failure, so a dead engine
 // never makes the caller wait twice.
 function musicProviders() {
   const env = process.env;
   return [
+    {
+      id: 'acemusic',
+      configured: () => isAceMusicConfigured(env),
+      run: spec => generateWithAceMusic(spec, env)
+    },
     {
       id: 'ace-step',
       configured: () => !!String(env.ACESTEP_API_URL || '').trim() && !!String(env.ACESTEP_API_KEY || '').trim(),
@@ -677,6 +684,7 @@ export async function createSong({ prompt, callId = '', userKey = 'unknown', gen
 
 export function getSongProviderHealth() {
   return {
+    aceMusic: statusOf('acemusic'),
     aceStep: statusOf('ace-step'),
     huggingFaceSpace: statusOf('huggingface-space'),
     backup: statusOf('backup'),

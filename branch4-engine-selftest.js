@@ -16,6 +16,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 import { generateWithFalAceStep, isFalConfigured } from './song-engine-fal.js';
 import { generateWithAceStep, createSong } from './song-generator.js';
+import { generateWithAceMusic, isAceMusicConfigured } from './song-engine-acemusic.js';
 
 const TAG = '[BRANCH4_ENGINE_SELFTEST]';
 // Short, clearly original Hebrew test lyrics — enough to hear vocals.
@@ -74,9 +75,10 @@ export async function runBranch4EngineSelfTest(env = process.env, { generateText
   if (String(env.BRANCH4_SELFTEST_FULL || '').trim() === '1' && generateText) {
     return runFullChain(runId, env, generateText);
   }
-  const useAce = !!String(env.ACESTEP_API_URL || '').trim() && !!String(env.ACESTEP_API_KEY || '').trim();
-  const useFal = !useAce && isFalConfigured(env);
-  const engine = useAce ? 'private ace-step (modal)' : useFal ? 'fal.ai ace-step' : String(env.HF_MUSIC_SPACE_URL || 'default ace-step space');
+  const useAceMusic = isAceMusicConfigured(env);
+  const useAce = !useAceMusic && !!String(env.ACESTEP_API_URL || '').trim() && !!String(env.ACESTEP_API_KEY || '').trim();
+  const useFal = !useAceMusic && !useAce && isFalConfigured(env);
+  const engine = useAceMusic ? 'acemusic.ai (official free cloud)' : useAce ? 'private ace-step' : useFal ? 'fal.ai ace-step' : String(env.HF_MUSIC_SPACE_URL || 'default ace-step space');
   console.info(TAG, 'start', { runId, engine, durationSec: Number(env.BRANCH4_SELFTEST_DURATION || 40) });
 
   const spec = {
@@ -89,7 +91,8 @@ export async function runBranch4EngineSelfTest(env = process.env, { generateText
   const started = Date.now();
   let result;
   try {
-    result = useAce ? await generateWithAceStep(spec)
+    result = useAceMusic ? await generateWithAceMusic(spec, env)
+      : useAce ? await generateWithAceStep(spec)
       : useFal ? await generateWithFalAceStep(spec, env) : await generateWithHuggingFaceSpace(spec);
   } catch (error) {
     console.warn(TAG, 'generation failed', {
