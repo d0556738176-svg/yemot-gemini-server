@@ -2560,7 +2560,11 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     try {
       const r=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,true,geminiBudgetMs?Math.min(geminiBudgetMs,7500):null,Number(geminiBudgetMs||process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS||2200));
       branch1PrimaryCooldown.clear('primary');
-      return String(r?.response?.text?.()||'').trim();
+      const gt=String(r?.response?.text?.()||'').trim();
+      const broken=brokenAnswer(gt);
+      if(broken) { console.warn('[BRANCH1_WEB_SYNTH] broken answer rejected',{provider:'Gemini',why:broken}); throw Object.assign(new Error('broken answer'),{status:422}); }
+      if(gt) console.info('[BRANCH1_WEB_SYNTH] answered by',{provider:'Gemini',chars:gt.length});
+      return gt;
     } catch(err) {
       const st=geminiErrorStatus(err);
       if([429,408,500,502,503,504].includes(st)) branch1PrimaryCooldown.cool('primary',st);
@@ -2587,7 +2591,13 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
       provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
       messages:[{role:'user',content:prompt}],timeoutMs:Math.max(1200,budgetMs-300),
       maxTokens,cooldowns:provider.big?branch1SynthCooldownsBig:branch1SynthCooldowns,cooldownMs:15000
-    })).then(text=>{ text=String(text||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim(); if(!text) throw new Error('empty'); return text; })
+    })).then(text=>{ text=String(text||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim(); if(!text) throw new Error('empty');
+      // 12.11: a weak free model answered with a loop of the same sentence and
+      // with Arabic words; such an answer loses the race instead of being spoken.
+      const broken=brokenAnswer(text);
+      if(broken) { console.warn('[BRANCH1_WEB_SYNTH] broken answer rejected',{provider:provider.name,model:provider.model,why:broken}); throw Object.assign(new Error('broken answer'),{status:422}); }
+      console.info('[BRANCH1_WEB_SYNTH] answered by',{provider:provider.name,model:provider.model,chars:text.length});
+      return text; })
       .catch(err=>{ if([401,402,403].includes(Number(err?.status))) markDeadKey(provider.apiKey); console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
   }
   const checked=validate?racers.map(r=>r.then(text=>{
@@ -2596,6 +2606,18 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
   })):racers;
   try { return await withTimeout(Promise.any(checked),budgetMs,'branch1 web synthesis'); }
   finally { raceDone=true; }
+}
+// An answer that is clearly broken: the same phrase over and over, or words in
+// Arabic script inside a Hebrew answer.
+function brokenAnswer(text) {
+  const t=String(text||'');
+  if(/[\u0600-\u06FF]{2,}/.test(t)) return 'arabic';
+  const parts=t.replace(/["{}\[\]]/g,' ').split(/[,.!?;\n]+/).map(x=>x.trim().replace(/\s+/g,' ')).filter(x=>x.split(' ').length>=4);
+  const seen=new Map();
+  for(const x of parts) { const n=(seen.get(x)||0)+1; seen.set(x,n); if(n>=3) return 'loop'; }
+  const words=t.split(/\s+/).filter(Boolean);
+  if(words.length>60) { const uniq=new Set(words).size; if(uniq/words.length<0.3) return 'repetitive'; }
+  return '';
 }
 // Follow-up resolution: a short question that leans on the previous turn ("is it open now?",
 // "and what is its number?") is rewritten into a self-contained question by a fast model,
