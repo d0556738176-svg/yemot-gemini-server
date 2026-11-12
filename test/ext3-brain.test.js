@@ -399,3 +399,18 @@ test('extension 3 may give a real compliment now and then, extension 1 never', a
   await ext3Turn({ utterance: 'איך עובד מטוס', current: [turns[0]], now }, c.deps);
   assert.doesNotMatch(c.prompts.at(-1).p, /מחמאה/);
 });
+
+test('a speaking style is switched on, followed in answers, and switched off', async () => {
+  const { STYLE_PREFIX } = await import('../ext3-brain.js');
+  const a = baseDeps([]);
+  const on = await ext3Turn({ utterance: 'מעכשיו תדברי איתי באופן עוקצני', now }, a.deps);
+  assert.ok(on.instruction.startsWith(STYLE_PREFIX));
+  assert.match(on.reply, /עוקצנית/);
+  assert.equal(a.prompts.length, 0);
+  const b = baseDeps(['{"intent":"chat"}', '{"answer":"נו באמת, מטוס עף בזכות הכנפיים."}']);
+  await ext3Turn({ utterance: 'איך עובד מטוס', now, prefs: [on.instruction] }, b.deps);
+  assert.match(b.prompts.at(-1).p, /בסגנון הזה/);
+  const off = await ext3Turn({ utterance: 'תדברי איתי רגיל', now, prefs: [on.instruction] }, baseDeps([]).deps);
+  assert.equal(off.styleReset, true);
+  assert.match(off.reply, /רגיל/);
+});

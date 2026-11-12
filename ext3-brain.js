@@ -355,9 +355,32 @@ export function teachingRule(lesson) {
 }
 
 // Standing instructions the caller gave ("don't talk about X", "always short").
+// ---------- speaking style the caller chose ("from now on talk sarcastically") ----------
+export const STYLE_PREFIX = 'סגנון דיבור: ';
+const STYLE_WORDS = [
+  [/עוקצ|עקיצ|ארס|ציני|צינית|סרקז|חצוף|חצופה|שנון|שנונה/u, 'עוקצני ושנון: הומור חד, עקיצות חביבות וקריצות, תשובות עם "טוויסט", כמו חבר שאוהב לעקוץ. לעקוץ בחיבה בלבד, בלי להעליב באמת, בלי קללות ובלי לפגוע, ועדיין לענות על השאלה במלואה ובדיוק'],
+  [/מצחיק|מצחיקה|בהומור|הומוריסט|משעשע|צחוקים|קורע/u, 'בהומור: קליל, משעשע ומלא בדיחות קטנות ודימויים מצחיקים, ועדיין לענות על השאלה במלואה ובדיוק'],
+  [/רשמי|רשמית|מכובד|מכובדת|ענייני|עניינית|מקצועי|מקצועית/u, 'רשמי וענייני: מנומס, מדויק ומקצועי, בלי בדיחות וסלנג'],
+  [/רגוע|רגועה|רך|רכה|עדין|עדינה|חם|חמה|נעים|נעימה/u, 'רגוע וחם: רך, נעים ומרגיע'],
+  [/נלהב|נלהבת|אנרגטי|אנרגטית|בהתלהבות|שמח|שמחה/u, 'נלהב ואנרגטי: מלא התלהבות ושמחה'],
+  [/סלנג|ישראלי|כמו חבר|חברי|חברית|בגובה העיניים/u, 'כמו חבר בגובה העיניים: סלנג ישראלי קליל ונעים, בלי מילים גסות']
+];
+const ASKS_STYLE = /(?:תדברי|תדבר|דברי|דבר|תעני|תענה|ענה|עני|תהיי|תהיה|להיות|תשתמשי|לדבר)\s+(?:איתי\s+|אליי\s+|אלי\s+)?(?:ב?אופן\s+|ב?צורה\s+|ב?סגנון\s+|כמו\s+)?/u;
+const BACK_TO_NORMAL = /(?:(?:תדברי|תדבר|דברי|דבר|תחזרי|תחזור|חזרי|חזור|תעני|תענה)(?:\s+(?:איתי|אליי|לדבר))?\s+(?:ל)?(?:רגיל|רגילה|כרגיל|נורמלי|נורמלית|כמו קודם|כמו תמיד|כמו שהיית|בסגנון הרגיל))|(?:תפסיקי|תפסיק|די|מספיק)\s+(?:עם\s+)?(?:ה)?(?:עקיצות|ציניות|סרקזם|בדיחות|הומור|ארס|הסגנון)/u;
+export function styleRequest(utterance) {
+  const u = String(utterance || '');
+  if (BACK_TO_NORMAL.test(u)) return { reset: true };
+  if (!ASKS_STYLE.test(u) && !/(?:מעכשיו|מהיום|מעתה)/u.test(u)) return null;
+  for (const [re, desc] of STYLE_WORDS) if (re.test(u)) return { style: desc };
+  return null;
+}
+
 export function prefsBlock(prefs = []) {
   const list = (prefs || []).map(x => String(x || '').trim()).filter(Boolean).slice(-15);
-  return list.length ? 'הוראות קבועות שהמתקשר נתן לך. חובה לקיים אותן תמיד, בכל תשובה, גם בשיחות הבאות:\n- ' + list.join('\n- ') : '';
+  const style = list.filter(x => x.startsWith(STYLE_PREFIX)).pop();
+  const rules = list.filter(x => !x.startsWith(STYLE_PREFIX));
+  return [rules.length ? 'הוראות קבועות שהמתקשר נתן לך. חובה לקיים אותן תמיד, בכל תשובה, גם בשיחות הבאות:\n- ' + rules.join('\n- ') : '',
+    style ? 'המתקשר ביקש שתדברי איתו מעכשיו בסגנון הזה, וזה גובר על הוראות הטון למעלה (אבל לא על הדיוק ועל הכבוד): ' + style.slice(STYLE_PREFIX.length) + '. המשיכי בסגנון הזה בכל תשובה עד שיבקש לחזור לרגיל.' : ''].filter(Boolean).join('\n');
 }
 
 export function answerPrompt({ context, utterance, plan, now, instruction, extra = '', lesson = null, prefs = [], media = '', stuck = false, voice = 'female', brief = false, compliment = false }) {
@@ -513,7 +536,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   const t0 = Date.now();
   const rules = heuristicPlan(utterance, { video });
   const continuing = /^(?:כן|תמשיכי|תמשיך|המשיכי|המשך|הלאה|נמשיך|עוד)(?=$|[\s,.!?])/u.test(utterance.trim());
-  const sure = !stuck && (rules.continueOffer || ['media_status', 'cancel', 'library'].includes(rules.intent) || (rules.intent === 'video_play' && /^בחרתי באפשרות/u.test(utterance)) || (video && ['video_play', 'video_about'].includes(rules.intent) && !rules.ytHe));
+  const sure = !stuck && (styleRequest(utterance) || rules.continueOffer || ['media_status', 'cancel', 'library'].includes(rules.intent) || (rules.intent === 'video_play' && /^בחרתי באפשרות/u.test(utterance)) || (video && ['video_play', 'video_about'].includes(rules.intent) && !rules.ytHe));
   if (article && continuing) plan = { ...rules, intent: 'read_page', continueOffer: true };
   else if (sure) plan = rules;
   else try {
@@ -527,6 +550,15 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // Only when he really said a standing rule (the planner sometimes fills the
   // field with a description of the request).
   const ruleWords = /(?:אל תדברי|אל תדבר|תפסיקי לדבר|תפסיק לדבר|אל תספרי|אל תזכירי|אני לא רוצה שתדברי|אני לא רוצה שתזכירי|מעכשיו|מהיום והלאה|מהיום ת|תמיד ת|אף פעם אל|אף פעם לא|תזכרי ש|תזכור ש|בפעם הבאה ש|תדברי איתי ב|תדברי אליי ב|תפני אליי)/u.test(utterance);
+  const styleAsk = styleRequest(utterance);
+  if (styleAsk) {
+    plan.intent = 'chat';
+    if (styleAsk.reset) return { intent: 'chat', styleReset: true, reply: 'בסדר, חזרתי לדבר איתך רגיל. על מה נדבר?' };
+    const shortStyle = styleAsk.style.split(':')[0];
+    return { intent: 'chat', instruction: STYLE_PREFIX + styleAsk.style, reply: /עוקצני/u.test(shortStyle)
+      ? 'אוקיי, ביקשת עוקצנית? קיבלת. רק שלא תתלונן אחר כך. כשתתגעגע לגרסה הנחמדה שלי, פשוט תגיד דברי רגיל.'
+      : 'בסדר, מעכשיו אדבר איתך ' + shortStyle + '. כשתרצה לחזור לרגיל, פשוט תגיד דברי רגיל.' };
+  }
   if (!ruleWords) plan.instruction = '';
   else {
     if (!plan.instruction) plan.instruction = utterance.trim().slice(0, 200);

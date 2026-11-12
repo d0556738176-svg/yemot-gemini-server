@@ -72,6 +72,19 @@ function serialized(key, fn) {
   void tail.then(() => { if (chains.get(key) === tail) chains.delete(key); });
   return job;
 }
+// Removes the standing instructions that start with a prefix (a speaking
+// style he switched off, or replaced with another).
+export function forgetPreferences(phone, prefix, opts = {}) {
+  const key = String(phone || '');
+  return serialized(key, async () => {
+    const mem = await readMemory(phone, opts);
+    if (!mem || !Array.isArray(mem.prefs)) return false;
+    const kept = mem.prefs.filter(p => !String(p?.text || p || '').startsWith(prefix));
+    if (kept.length === mem.prefs.length) return false;
+    mem.prefs = kept; mem.updatedAt = new Date().toISOString();
+    return writeMemory(phone, mem, opts);
+  });
+}
 // Standing instructions the caller gave ("don't talk about X", "always ...").
 // Kept beside the turns; the newest 20, a repeat replaces the older copy.
 export function rememberPreference(phone, text, opts = {}) {

@@ -1,7 +1,7 @@
 import { isConversationalReference, currentConversationText, resolveLookupContinuation, isYouTubeTechnicalDiscussion, mayUseYouTubeSearch, asksForFeedback } from './branch1-turn-context.js';
 import { isBranch1WebsiteRequest, answerBranch1Website } from './branch1-websites.js';
 import express from 'express';
-import { readMemory, rememberTurn, rememberPreference } from './branch1-memory.js';
+import { readMemory, rememberTurn, rememberPreference, forgetPreferences } from './branch1-memory.js';
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -4940,6 +4940,15 @@ async function callHandler(call) {
             if(attempt) { if(Date.now()-brainStart>12000) break; await new Promise(res=>setTimeout(res,1500)); }
             try { r=await runExt3Brain(userTranscript,callerPhone,callId,turnHistory,israelNow,ext3MediaLine(callMedia,null)); }
             catch(brainError) { lastError=brainError; console.warn('[EXT3_BRAIN] turn failed',{attempt,status:geminiErrorStatus(brainError),message:String(brainError?.message||brainError).slice(0,160)}); }
+          }
+          // A speaking style replaces the previous one; "talk normally" removes it.
+          const STYLE='סגנון דיבור: ';
+          if((r?.styleReset||String(r?.instruction||'').startsWith(STYLE)) && normalizePhone(callerPhone)!=='לא מזוהה') {
+            const key=normalizePhone(callerPhone);
+            callerPrefs.set(key,(callerPrefs.get(key)||[]).filter(x=>!String(x).startsWith(STYLE)));
+            await forgetPreferences(key,STYLE).catch(()=>{});
+            console.info('[EXT3_BRAIN] speaking style',{callId:activeKey,style:r.styleReset?'normal':String(r.instruction).slice(STYLE.length,STYLE.length+20)});
+            if(call.selfTest) call.selfTest.lastInstruction=r.styleReset?'style reset':r.instruction;
           }
           if(r?.instruction && normalizePhone(callerPhone)!=='לא מזוהה') {
             const key=normalizePhone(callerPhone), list=(callerPrefs.get(key)||[]).filter(x=>x!==r.instruction);
