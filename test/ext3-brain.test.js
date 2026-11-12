@@ -386,3 +386,16 @@ test('"recommend a new song" stays a YouTube search', async () => {
   assert.ok(searched);
   assert.equal(r.ref.videoId, 'shwekeynew1');
 });
+
+test('extension 3 may give a real compliment now and then, extension 1 never', async () => {
+  const turns = [{ user: 'a', assistant: 'b' }, { user: 'c', assistant: 'd' }];
+  const a = baseDeps(['{"intent":"chat"}', '{"answer":"תשובה מלאה על המטוס"}']);
+  await ext3Turn({ utterance: 'איך עובד מטוס', current: turns, now }, a.deps);
+  assert.match(a.prompts.at(-1).p, /מחמאה קצרה וכנה/);
+  const b = baseDeps(['{"intent":"chat"}', '{"answer":"תשובה"}']);
+  await ext3Turn({ utterance: 'איך עובד מטוס', current: turns, now, voice: 'male', brief: true }, b.deps);
+  assert.doesNotMatch(b.prompts.at(-1).p, /מחמאה/);
+  const c = baseDeps(['{"intent":"chat"}', '{"answer":"תשובה"}']);
+  await ext3Turn({ utterance: 'איך עובד מטוס', current: [turns[0]], now }, c.deps);
+  assert.doesNotMatch(c.prompts.at(-1).p, /מחמאה/);
+});

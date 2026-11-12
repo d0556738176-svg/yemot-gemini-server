@@ -360,7 +360,7 @@ export function prefsBlock(prefs = []) {
   return list.length ? 'הוראות קבועות שהמתקשר נתן לך. חובה לקיים אותן תמיד, בכל תשובה, גם בשיחות הבאות:\n- ' + list.join('\n- ') : '';
 }
 
-export function answerPrompt({ context, utterance, plan, now, instruction, extra = '', lesson = null, prefs = [], media = '', stuck = false, voice = 'female', brief = false }) {
+export function answerPrompt({ context, utterance, plan, now, instruction, extra = '', lesson = null, prefs = [], media = '', stuck = false, voice = 'female', brief = false, compliment = false }) {
   return [
     instruction,
     PHONE_STYLE,
@@ -379,6 +379,8 @@ export function answerPrompt({ context, utterance, plan, now, instruction, extra
     plan?.standalone && plan.standalone !== utterance ? 'הכוונה שלו: ' + plan.standalone : '',
     '',
     voiceRule(voice),
+    // Owner, 12.11 (extension 3): now and then a real compliment, never flattery.
+    compliment ? 'בתשובה הזאת מותר לך, רק אם יש לזה סיבה אמיתית בשיחה, לשלב מחמאה קצרה וכנה אחת על משהו ספציפי שהמתקשר אמר או עשה (שאלה חכמה שחשב עליה, רעיון יפה, סקרנות, הומור, התמדה בלימוד), במשפט אחד טבעי באמצע או בסוף התשובה, ולא בפתיחה. בלי הגזמה, בלי מילים כמו "מדהים" או "גאון", ובלי לחזור על מחמאה שכבר נאמרה. אם אין סיבה אמיתית, אל תחמיאי בכלל.' : '',
     lengthRule(brief, utterance),
     'החזר אובייקט JSON תקין בלבד עם שדה "answer".'
   ].filter(x => x !== '').join('\n');
@@ -543,7 +545,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // small enough for the free fast models (they refuse big ones with 413).
   const ask = async (instruction, extra = '', { maxTokens = 1800, budgetMs = 13000, lesson = lessonRef, ctx = context } = {}) => {
     let raw;
-    const common = { utterance, plan, now, instruction, lesson, prefs, media, stuck, voice, brief };
+    const common = { utterance, plan, now, instruction, lesson, prefs, media, stuck, voice, brief, compliment: voice !== 'male' && !brief && !stuck && (current || []).length % 4 === 2 };
     if (brief && !/(?:בהרחבה|בפירוט|תפרט|תרחיב|לעומק|באריכות)/u.test(utterance)) maxTokens = Math.min(maxTokens, 700);
     try { raw = await deps.llm(answerPrompt({ ...common, context: ctx, extra }), { budgetMs, maxTokens }); }
     catch (e) {
