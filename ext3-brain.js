@@ -552,7 +552,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       await new Promise(r => setTimeout(r, deps.retryPauseMs ?? 3000));
       raw = await deps.llm(answerPrompt({ ...common, context: smallContext.slice(-1500), extra: String(extra || '').slice(0, 3000) }), { budgetMs: 10000, maxTokens: Math.min(maxTokens, 1000) });
     }
-    const a = cutStockOpening(cleanScript(extractAnswer(raw).replace(/^\s*(?:answer|תשובה)\s*[:¶,.\-]?\s*/i, '')));
+    const a = cutStockOpening(cleanScript(extractAnswer(raw).replace(/^\s*answer\s*[:¶,.\-]?\s*/i, '')));
     if (!a) throw Object.assign(new Error('empty answer'), { status: 502 });
     return a;
   };
