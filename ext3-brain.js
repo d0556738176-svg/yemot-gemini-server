@@ -372,6 +372,10 @@ export function styleRequest(utterance) {
   if (BACK_TO_NORMAL.test(u)) return { reset: true };
   if (!ASKS_STYLE.test(u) && !/(?:מעכשיו|מהיום|מעתה)/u.test(u)) return null;
   for (const [re, desc] of STYLE_WORDS) if (re.test(u)) return { style: desc };
+  // Any other style in his own words ("like a teacher", "in grandma's style"),
+  // but not a topic ("talk to me about planes").
+  const own = u.match(/(?:כמו|בסגנון(?:\s+של)?|באופן|בצורה|בטון)\s+(.{2,60})$/u);
+  if (own && !/\sעל\s/u.test(u) && u.split(/\s+/).length <= 12) return { own: own[1].replace(/[.!?]+$/, '').trim(), style: own[1].replace(/[.!?]+$/, '').trim() + ': לדבר בסגנון הזה בדיוק כפי שהמתקשר תיאר, בטבעיות, ועדיין לענות על השאלה במלואה ובדיוק' };
   return null;
 }
 
@@ -557,7 +561,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     const shortStyle = styleAsk.style.split(':')[0];
     return { intent: 'chat', instruction: STYLE_PREFIX + styleAsk.style, reply: /עוקצני/u.test(shortStyle)
       ? 'אוקיי, ביקשת עוקצנית? קיבלת. רק שלא תתלונן אחר כך. כשתתגעגע לגרסה הנחמדה שלי, פשוט תגיד דברי רגיל.'
-      : 'בסדר, מעכשיו אדבר איתך ' + shortStyle + '. כשתרצה לחזור לרגיל, פשוט תגיד דברי רגיל.' };
+      : 'בסדר, מעכשיו אדבר איתך ' + (styleAsk.own ? 'בסגנון של ' + styleAsk.own : shortStyle) + '. כשתרצה לחזור לרגיל, פשוט תגיד דברי רגיל.' };
   }
   if (!ruleWords) plan.instruction = '';
   else {
