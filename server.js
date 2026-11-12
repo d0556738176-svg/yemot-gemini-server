@@ -5845,6 +5845,19 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
   serverTime:new Date().toISOString()
 }));
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
+// Web search for extension 2's misheard names (12.11): the extension 2 server
+// has no web keys, so it asks here. Only with the shared secret set in Render.
+app.post('/internal/web-hints', rateLimit(60, 60 * 1000, 'web-hints'), async (req,res)=>{
+  const secret=String(process.env.WEB_HINTS_SECRET||'').trim(), got=String(req.get('x-web-hints-secret')||'');
+  const { timingSafeEqual } = await import('node:crypto');
+  if(!secret||got.length!==secret.length||!timingSafeEqual(Buffer.from(got),Buffer.from(secret))) return res.status(403).json({error:'forbidden'});
+  const q=String(req.body?.q||'').trim().slice(0,200);
+  if(!q) return res.json({});
+  const { webYouTubeHints } = await import('./youtube-web-hints.js');
+  const h=await webYouTubeHints(q,{localOnly:true}).catch(()=>null);
+  console.info('[WEB_HINTS] served',{provider:h?.provider||null,videos:h?.videos?.length||0});
+  res.json(h||{});
+});
 
 // End-to-end check of branch 1 after each build: one simulated call runs the
 // real phone handler (routing, search, websites, YouTube, video) with text in
