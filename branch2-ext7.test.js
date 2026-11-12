@@ -42,9 +42,11 @@ test('keys match the requested layout', () => {
   assert.equal(EXT7_SETTINGS.control_play3, 'seconds_minus');
   assert.equal(EXT7_SETTINGS.control_play7, 'minut_plus_amount1');
   assert.equal(EXT7_SETTINGS.minut_plus_amount1, '180000');
-  assert.equal(EXT7_SETTINGS['control_play*'], 'go_to_folder');
-  assert.equal(EXT7_SETTINGS['playfile_control_play_*_goto'], '/');
-  assert.equal(EXT8_SETTINGS['control_play*'], 'go_to_folder');
+  // 12.11: * is Yemot's own star menu again; 0 returns to the main menu.
+  assert.equal(EXT7_SETTINGS['control_play*'], undefined);
+  assert.equal(EXT7_SETTINGS.control_play0, 'go_to_folder');
+  assert.equal(EXT7_SETTINGS.playfile_control_play_0_goto, '/');
+  assert.equal(EXT8_SETTINGS.control_play0, 'go_to_folder');
   assert.equal(EXT7_SETTINGS.control_play2, undefined);
 });
 
@@ -78,4 +80,17 @@ import { stripUnusedKeys } from './branch2-ext7.js';
 test('a key the layout no longer uses is removed from ext.ini', () => {
   const out = stripUnusedKeys('type=playfile\ncontrol_play2=seconds_minus\ncontrol_play1=seconds_plus\ntitle=x', EXT7_SETTINGS);
   assert.equal(out, 'type=playfile\ncontrol_play1=seconds_plus\ntitle=x');
+});
+
+test('old star lines are removed from extensions 7 and 8', () => {
+  const out = stripUnusedKeys('type=playfile\ncontrol_play*=go_to_folder\nplayfile_control_play_*_goto=/\ncontrol_play0=go_to_folder\nplayfile_control_play_0_goto=/', EXT7_SETTINGS);
+  assert.equal(out, 'type=playfile\ncontrol_play0=go_to_folder\nplayfile_control_play_0_goto=/');
+});
+
+import { withMainMenuKey } from './branch2-star-keys.js';
+test('every playback extension: star lines out, 0 = main menu, other lines kept', () => {
+  assert.equal(withMainMenuKey('type=playfile\r\ncontrol_play*=go_to_folder\r\nplayfile_control_play_*_goto=/\r\ntitle=x\r\n'),
+    'type=playfile\ntitle=x\ncontrol_play0=go_to_folder\nplayfile_control_play_0_goto=/\n');
+  const once = withMainMenuKey('type=last_play');
+  assert.equal(withMainMenuKey(once), once);
 });

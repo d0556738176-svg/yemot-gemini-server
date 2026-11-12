@@ -12,7 +12,8 @@
 //   4 = minus                 -> the file uploaded before (older)
 //   6 = plus                  -> the newer file
 //   7 = minut_plus_amount1    -> 3 minutes forward (minut_plus_amount1=180000 ms)
-//   * = go_to_folder          -> back to the main menu (playfile_control_play_*_goto=/)
+//   0 = go_to_folder          -> back to the main menu (playfile_control_play_0_goto=/)
+//   * = Yemot's own star menu (playlist settings), as before (owner, 12.11)
 //   8 = send_api              -> the file's details, spoken (owner, 07.11)
 //   9 = send_api              -> Hebrew dubbing of the file, after 1 = yes / 2 = no
 export const PLAY_KEYS = {
@@ -23,8 +24,8 @@ export const PLAY_KEYS = {
   control_play6: 'plus',
   control_play7: 'minut_plus_amount1',
   minut_plus_amount1: '180000',
-  'control_play*': 'go_to_folder',
-  'playfile_control_play_*_goto': '/',
+  control_play0: 'go_to_folder',
+  playfile_control_play_0_goto: '/',
   // 8 = the file's details spoken; 9 = Hebrew dubbing (asks 1/2 first).
   // Yemot sends the playing file (what) and position (PlayStop) to api_link
   // (set at start to <server>/yemot-media); playback then resumes there.
@@ -47,7 +48,9 @@ export const EXT7_SETTINGS = {
 export function stripUnusedKeys(iniText, settings) {
   return String(iniText || '').split(/\r?\n/).filter(line => {
     const m = /^\s*(control_play[0-9*#])\s*=/.exec(line);
-    return !m || m[1] in settings;
+    if (m) return m[1] in settings;
+    const g = /^\s*playfile_control_play_([0-9*#])_goto\s*=/.exec(line);
+    return !g || ('control_play' + g[1]) in settings;
   }).join('\n');
 }
 

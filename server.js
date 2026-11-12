@@ -5155,8 +5155,8 @@ async function configureYemotStructure() {
         }
       } catch (e) { console.warn('[Yemot automatic setup] extension 7 not configured', { message: String(e?.message || e).slice(0, 200) }); }
     }
-    // * = main menu in every playback extension of the account (owner, 06.11).
-    try { await (await import('./branch2-star-keys.js')).applyStarToMainMenu({ base, token }); }
+    // Playback extensions: * = Yemot star menu, 0 = main menu (owner, 12.11).
+    try { await (await import('./branch2-star-keys.js')).applyMainMenuKey({ base, token }); }
     catch (e) { console.warn('[STAR_KEYS] check skipped', { message: String(e?.message || e).slice(0, 160) }); }
     console.log('[Yemot automatic setup] branch-2-only mode; extensions 1 and 3 were left untouched');
     return;
