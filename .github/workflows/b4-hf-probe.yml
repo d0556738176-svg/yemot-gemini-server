@@ -1,0 +1,30 @@
+# Probe the official ACE-Step Hugging Face Space API (extension 4 free engine).
+name: Branch 4 - HF Space probe
+on:
+  push:
+    branches: [fix/branch4-engine-test]
+    paths: ['deploy/hf-probe/**', '.github/workflows/b4-hf-probe.yml']
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install --quiet gradio_client
+      - env:
+          RAW: ${{ secrets.HF_TOKEN }}
+        run: |
+          export HF_TOKEN="$(printf '%s' "$RAW" | grep -oE 'hf_[A-Za-z0-9]+' | head -1 || true)"
+          echo "::add-mask::$HF_TOKEN"
+          python deploy/hf-probe/probe.py out ${{ '' }} || true
+          [ -f deploy/hf-probe/generate.py ] && timeout 900 python deploy/hf-probe/generate.py out || true
+      - if: always()
+        run: |
+          mkdir -p out; cd out
+          git init -q && git config user.name b4-bot && git config user.email b4-bot@users.noreply.github.com
+          git checkout -q -b b4-hf-probe && git add -A && git commit -q -m "probe ${{ github.run_id }}" --allow-empty
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" b4-hf-probe
