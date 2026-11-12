@@ -4477,7 +4477,7 @@ async function youtubeCallHandler(call) {
           regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
           timeoutMs:REQUEST_TIMEOUT_MS
         });
-        console.info('[YouTube IVR] smart search',{spoken:String(currentQuery).slice(0,80),rewritten:found.rewritten||null,results:found.length});
+        console.info('[YouTube IVR] smart search',JSON.stringify({spoken:String(currentQuery).slice(0,80),rewritten:found.rewritten||null,web:found.web||null,results:found.length,first:found.slice(0,3).map(v=>String(v.title||'').slice(0,60))}));
       } catch(searchError) {
         if(searchError instanceof ExitError||isCallerHangupError(searchError)) throw searchError;
         const status=Number(searchError?.status)||0;
@@ -5411,6 +5411,19 @@ app.listen(port,async()=>{
     console.info('[SMART_SEARCH_TEST]',JSON.stringify(out));
     if(out.rewritten)await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
   })().catch(e=>console.warn('[SMART_SEARCH_TEST] failed',String(e?.message||e).slice(0,160)));
+  // 12.11: misheard names. Which web providers exist, and one live check with
+  // a badly misheard name (as speech recognition really spells it).
+  void import('./youtube-web-hints.js').then(m=>console.info('[WEB_HINTS] providers',JSON.stringify(m.configuredWebHintProviders()))).catch(()=>{});
+  if(process.env.YOUTUBE_API_KEY) void (async()=>{
+    const { _pipeline } = await import('./youtube-authorized-playback.js');
+    const MARK='ivr2:/2/selftest/smart_search_v3_web.json';
+    if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
+    const { smartYouTubeSearch } = await import('./youtube-smart-search.js');
+    const r=await smartYouTubeSearch('מוטי שטיין מס הנשמה בקר בי',{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
+    const out={rewritten:r.rewritten||null,web:r.web||null,first:r.slice(0,5).map(v=>v.title),count:r.length};
+    console.info('[SMART_SEARCH_TEST_V3]',JSON.stringify(out));
+    if(r.web)await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
+  })().catch(e=>console.warn('[SMART_SEARCH_TEST_V3] failed',String(e?.message||e).slice(0,160)));
   // One real song save after the naming change (05.11): same path as a caller's song.
   if(process.env.YOUTUBE_API_KEY&&process.env.APIFY_TOKEN) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;

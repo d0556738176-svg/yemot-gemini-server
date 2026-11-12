@@ -27,3 +27,33 @@ test('without the model it is the plain search', async () => {
   const r = await smartYouTubeSearch('שיר', {}, {}, fakeSearch(calls));
   assert.equal(calls.length, 1); assert.equal(r.length, 3);
 });
+
+test('misheard name: web search links come first and its titles reach the rewrite', async () => {
+  const calls = [];
+  let sentToModel = '';
+  const fetchImpl = async (url, init) => {
+    sentToModel = JSON.parse(init.body).messages[1].content;
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'מוטי שטיינמץ הנשמה בקרבי' } }] }) };
+  };
+  const webHints = async () => ({ provider: 'serper', corrected: null, titles: ['מוטי שטיינמץ - הנשמה בקרבי'], videos: [{ videoId: 'WEBWEBWEB01', title: 'מוטי שטיינמץ - הנשמה בקרבי' }] });
+  const videosByIds = async ids => ids.map(id => ({ videoId: id, title: 'מוטי שטיינמץ - הנשמה בקרבי' }));
+  const r = await smartYouTubeSearch('מוטי שטיין מס הנשמה בקרבי', { fetchImpl, apiKey: 'k' }, { GROQ_API_KEY: 'k' }, fakeSearch(calls), { webHints, videosByIds });
+  assert.equal(r[0].videoId, 'WEBWEBWEB01');
+  assert.match(sentToModel, /מוטי שטיינמץ - הנשמה בקרבי/);
+  assert.equal(r.rewritten, 'מוטי שטיינמץ הנשמה בקרבי');
+  assert.equal(r.web.provider, 'serper');
+});
+
+test('no web provider and no model: the plain search still works', async () => {
+  const calls = [];
+  const r = await smartYouTubeSearch('שיר', {}, {}, fakeSearch(calls), { webHints: async () => null });
+  assert.ok(r.length > 0);
+});
+
+import { videoIdFromUrl } from './youtube-web-hints.js';
+test('video ids are read from every YouTube link form', () => {
+  assert.equal(videoIdFromUrl('https://www.youtube.com/watch?v=abcdefghijk&t=3'), 'abcdefghijk');
+  assert.equal(videoIdFromUrl('https://youtu.be/abcdefghijk'), 'abcdefghijk');
+  assert.equal(videoIdFromUrl('https://www.youtube.com/shorts/abcdefghijk'), 'abcdefghijk');
+  assert.equal(videoIdFromUrl('https://www.youtube.com/@channel'), null);
+});
