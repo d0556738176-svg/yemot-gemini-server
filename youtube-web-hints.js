@@ -56,17 +56,35 @@ async function langsearch(q, env, fetchImpl, timeoutMs) {
   return { items: (j.data?.webPages?.value || []).map(x => ({ url: x.url, title: x.name })), corrected: null };
 }
 
-const PROVIDERS = [['serper', serper], ['tavily', tavily], ['langsearch', langsearch]];
+// A service without its own web keys (the extension 2 server) asks the main
+// server, which holds them; a shared secret set only in Render protects it.
+async function viaMain(q, env, fetchImpl, timeoutMs) {
+  const secret = String(env.WEB_HINTS_SECRET || '').trim();
+  if (!secret || env.WEB_HINTS_LOCAL_ONLY === '1') return null;
+  const base = String(env.WEB_HINTS_URL || 'https://yemot-gemini-server.onrender.com').replace(/\/+$/, '');
+  const r = await fetchImpl(base + '/internal/web-hints', {
+    method: 'POST', signal: AbortSignal.timeout(timeoutMs + 1500),
+    headers: { 'content-type': 'application/json', 'x-web-hints-secret': secret },
+    body: JSON.stringify({ q }),
+  });
+  if (!r.ok) throw new Error('main ' + r.status);
+  const j = await r.json();
+  if (!j?.videos && !j?.titles) return null;
+  return { items: [...(j.videos || []).map(v => ({ url: 'https://www.youtube.com/watch?v=' + v.videoId, title: v.title })), ...(j.titles || []).map(t => ({ url: '', title: t }))], corrected: j.corrected || null, via: j.provider };
+}
+
+const PROVIDERS = [['serper', serper], ['tavily', tavily], ['langsearch', langsearch], ['main', viaMain]];
 
 export function configuredWebHintProviders(env = process.env) {
-  return { serper: !!String(env.SERPER_API_KEY || '').trim(), tavily: !!String(env.TAVILY_API_KEY || env.TAVILY_BACKUP_API_KEY || '').trim(), langsearch: !!String(env.LANGSEARCH_API_KEY || '').trim() };
+  return { main: !!String(env.WEB_HINTS_SECRET || '').trim(), serper: !!String(env.SERPER_API_KEY || '').trim(), tavily: !!String(env.TAVILY_API_KEY || env.TAVILY_BACKUP_API_KEY || '').trim(), langsearch: !!String(env.LANGSEARCH_API_KEY || '').trim() };
 }
 
 // { videos: [{videoId, title}], titles: [...], corrected, provider } or null.
-export async function webYouTubeHints(spoken, { env = process.env, fetchImpl = fetch, timeoutMs = Number(env.WEB_HINTS_TIMEOUT_MS || 3500) } = {}) {
+export async function webYouTubeHints(spoken, { env = process.env, fetchImpl = fetch, timeoutMs = Number(env.WEB_HINTS_TIMEOUT_MS || 3500), localOnly = false } = {}) {
   const q = String(spoken || '').trim();
   if (!q) return null;
   for (const [name, fn] of PROVIDERS) {
+    if (localOnly && name === 'main') continue;
     try {
       const out = await fn(q, env, fetchImpl, timeoutMs);
       if (!out) continue;
@@ -75,9 +93,9 @@ export async function webYouTubeHints(spoken, { env = process.env, fetchImpl = f
         const id = videoIdFromUrl(it.url);
         if (id && !seen.has(id)) { seen.add(id); videos.push({ videoId: id, title: cleanTitle(it.title) }); }
       }
-      const titles = out.items.map(i => cleanTitle(i.title)).filter(Boolean).slice(0, 8);
+      const titles = [...new Set(out.items.map(i => cleanTitle(i.title)).filter(Boolean))].slice(0, 8);
       if (!videos.length && !titles.length) continue;
-      return { videos, titles, corrected: out.corrected || null, provider: name };
+      return { videos, titles, corrected: out.corrected || null, provider: out.via ? name + ':' + out.via : name };
     } catch (e) {
       console.warn('[YouTube IVR] web hints provider failed', { provider: name, message: String(e?.message || e).slice(0, 120) });
     }
