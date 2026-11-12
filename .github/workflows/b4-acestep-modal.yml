@@ -30,8 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      RAW_MODAL_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      RAW_MODAL_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       GIVEN_ACE_KEY: ${{ secrets.ACESTEP_API_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +44,18 @@ jobs:
         id: prep
         run: |
           mkdir -p out
-          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+          # Tolerate pasting mistakes: surrounding spaces/newlines, quotes, or the
+          # two values swapped. Only prefixes and lengths are ever reported.
+          ID="$(printf '%s' "$RAW_MODAL_ID" | tr -d '[:space:]"' )"
+          SEC="$(printf '%s' "$RAW_MODAL_SECRET" | tr -d '[:space:]"' )"
+          case "$ID" in as-*) case "$SEC" in ak-*) T="$ID"; ID="$SEC"; SEC="$T";; esac;; esac
+          printf '{"id_prefix":"%s","id_len":%d,"secret_prefix":"%s","secret_len":%d}\n' \
+            "${ID:0:3}" "${#ID}" "${SEC:0:3}" "${#SEC}" > out/token-shape.json
+          if [ -n "$ID" ]; then echo "::add-mask::$ID"; fi
+          if [ -n "$SEC" ]; then echo "::add-mask::$SEC"; fi
+          echo "MODAL_TOKEN_ID=$ID" >> "$GITHUB_ENV"
+          echo "MODAL_TOKEN_SECRET=$SEC" >> "$GITHUB_ENV"
+          if [ -z "$ID" ] || [ -z "$SEC" ]; then
             echo '{"ok": false, "stage": "missing_modal_tokens"}' > out/report.json
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -60,8 +71,8 @@ jobs:
         if: steps.prep.outputs.ready == 'true'
         run: |
           set -o pipefail
-          modal secret create acestep-api-key ACESTEP_API_KEY="$ACESTEP_API_KEY" --force > /dev/null
-          modal deploy deploy/ace-step-modal/app.py 2>&1 | tee out/deploy.log
+          modal secret create acestep-api-key ACESTEP_API_KEY="$ACESTEP_API_KEY" --force 2>&1 | sed "s/$ACESTEP_API_KEY/***/g" | tee out/deploy.log
+          modal deploy deploy/ace-step-modal/app.py 2>&1 | tee -a out/deploy.log
           URL="$(grep -oE 'https://[A-Za-z0-9.-]+\.modal\.run' out/deploy.log | head -1)"
           if [ -z "$URL" ]; then
             echo '{"ok": false, "stage": "deploy_no_url"}' > out/report.json
@@ -85,7 +96,7 @@ jobs:
           echo "${{ steps.deploy.outputs.url }}" > out/url.txt
           echo "${{ github.run_id }} ${{ github.sha }} $(date -u +%FT%TZ)" > out/run.txt
           # Keep logs short and free of any token text.
-          [ -f out/deploy.log ] && tail -n 60 out/deploy.log | grep -viE 'token|secret' > out/deploy-tail.log; rm -f out/deploy.log
+          [ -f out/deploy.log ] && tail -n 80 out/deploy.log | grep -viE 'token|secret' > out/deploy-tail.log; rm -f out/deploy.log
           cd out
           git init -q
           git config user.name "b4-bot"
