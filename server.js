@@ -4677,7 +4677,7 @@ async function ext3MediaStatusReply(media) {
 function ext3PlayItNow(text) {
   const t=String(text||'').trim().replace(/[.!?,]/g,' ').replace(/\s+/g,' ');
   if(t.split(' ').length>7) return false;
-  if(!/(?:תשמיעי|תשמיע|להשמיע|לשמוע|תפעילי|תפעיל|תנגני|תנגן|שמעי לי|השמיעי)/u.test(t)) return false;
+  if(!/(?:תשמ(?:י?ע|יל|יר)|תשמיעלי|להשמיע|לשמוע|תפעילי|תפעיל|תנגני|תנגן|שמעי לי|השמיעי)/u.test(t)) return false;
   return /(?:אותו|אותה|את זה|הזה|הזאת|הקובץ|השיר|עכשיו)/u.test(t) || t.split(' ').length<=3;
 }
 // The digit of a structured list: a pressed key ("בחרתי באפשרות 2: ...") or the number said aloud.

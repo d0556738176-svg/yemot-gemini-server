@@ -91,7 +91,7 @@ export function activeLesson(current = []) {
 
 export const INTENTS = ['library', 'chat', 'web', 'video_find', 'video_about', 'video_play', 'media_status', 'cancel', 'read_page', 'recall'];
 
-export function plannerPrompt({ context, utterance, now, video, media = '', prefs = [] }) {
+export function plannerPrompt({ context, utterance, now, video, older = null, media = '', prefs = [] }) {
   return [
     'אתה המתכנן של עוזרת טלפונית חכמה. קרא את ההקשר ואת מה שהמתקשר אמר עכשיו, והחלט מה התור הזה צריך. אל תענה למתקשר.',
     'התמלול של הטלפון לפעמים משבש מילים (למשל "יויוטב" במקום "יוטיוב", או שם של חברה שלא נאמר). פרש לפי ההקשר והכוונה, לא לפי מילה בודדת.',
@@ -114,7 +114,10 @@ export function plannerPrompt({ context, utterance, now, video, media = '', pref
     'min_minutes/max_minutes רק אם ביקש אורך (למשל "כשעה" = min 40).',
     '',
     'הזמן עכשיו בישראל: ' + now,
-    video ? 'הסרטון האחרון שהוזכר: ' + refLine(video) : 'לא הוזכר עדיין סרטון.',
+    video ? 'הסרטון שעליו מדברים עכשיו: ' + refLine(video) : older ? 'סרטון שהוזכר לפני כמה תורות (ייתכן שהשיחה כבר עברה לנושא אחר): ' + refLine(older) : 'לא הוזכר עדיין סרטון.',
+    'הבנת הפניות: כשהמתקשר אומר "אותו", "הזה", "השיר שדיברנו עליו", "השני", "תסבירי יותר", "ומה עם...", קבעי לפי התשובה האחרונה וההקשר למה בדיוק הוא מתכוון. אם השיר או הסרטון שהוא מתכוון אליו הוזכר בשיחה (גם מתוך חיפוש באינטרנט או חדשות) ואינו הסרטון שלמעלה, כתבי ב-yt_he את השם המדויק שלו (זמר ושם שיר). ב-standalone כתבי את הבקשה המלאה עם השמות המפורשים, בלי "זה" ו"הוא".',
+    'כשהמתקשר מבקש כמה דברים במשפט אחד, כתבי ב-standalone את כולם, כדי שהתשובה תענה על כל אחד מהם.',
+    'תיקון: כשהמתקשר אומר "לא התכוונתי ל..." או "לא הבנת אותי", אל תחזרי על אותו חיפוש. הביני מההקשר מה כן רצה; אם עדיין לא ברור, intent=chat ו-standalone שמבקש ממנו להבהיר.',
     media ? 'הורדות בשיחה הזאת: ' + media : '',
     prefs.length ? 'הוראות קבועות של המתקשר: ' + prefs.join(' | ') : '',
     '',
@@ -150,6 +153,18 @@ export function parsePlan(text) {
 }
 
 const YT_WORD = /(?:יוטיוב|יויוטב|יוטוב|יו טיוב|youtube)/iu;
+// 'Play' as the phone hears it: תשמיעי, תשמעי, תשמילי, תשמירי, תשמיעלי ... (all seen in calls).
+export const PLAY_WORD = /(?:ש?תשמ(?:י?ע|יל|יר)(?:י|ו)?(?:לי)?(?![\u0590-\u05FF])|להשמיע|לשמוע את|תפעילי|תפעיל|תנגני|תנגן|לנגן|תורידי|תוריד|להוריד)/u;
+const PLAY_WORD_G = new RegExp(PLAY_WORD.source, 'gu');
+const POINT_WORD = /(?:אותו|אותה|זה|הזה|הזאת|שלו|שלה)(?![\u0590-\u05FF])/u;
+// He points back at something found earlier in this call, not at the last thing said.
+export const BACKREF = /(?:ש(?:אמרת|מצאת|הצעת|המלצת|דיברנו|הזכרת|אמרתי|ביקשתי)|לפני כן|מקודם|קודם|הקודם|הקודמת|ההוא|ההיא)(?![\u0590-\u05FF])/u;
+const ORDINALS = [[/(?:ה?ראשון|ה?ראשונה|אפשרות (?:1|אחת)|מספר (?:1|אחת))(?![\u0590-\u05FF])/u, 0], [/(?:ה?שני|ה?שנייה|ה?שניה|אפשרות (?:2|שתיים)|מספר (?:2|שתיים))(?![\u0590-\u05FF])/u, 1], [/(?:ה?שלישי|ה?שלישית|אפשרות (?:3|שלוש)|מספר (?:3|שלוש))(?![\u0590-\u05FF])/u, 2]];
+export function ordinalOption(text, options) {
+  if (!Array.isArray(options) || options.length < 2) return null;
+  for (const [re, i] of ORDINALS) if (re.test(text) && options[i]) return options[i];
+  return null;
+}
 const VIDEO_WORD = /(?:סרטון|סרטונים|סרט|הרצאה|וידאו|וידיאו|דוקו|תיעודי)/u;
 const SONG_WORD = /(?:שיר|שירים|קליפ|סינגל|להיט|להיטים|הופעה|סט |מחרוזת|פרק|פרקים)/u;
 
@@ -169,7 +184,7 @@ export function heuristicPlan(utterance, { video = null } = {}) {
   if (/^(?:כן|כן בבקשה|בטח|בוודאי|תמשיכי|תמשיך|המשיכי|נמשיך|אחת|אחד|1|יאללה|סבבה|אוקיי|אוקי)[.!? ]*$/u.test(u)) return { ...base, intent: 'chat', continueOffer: true };
   if (/(?:זוכר|זוכרת|דיברנו|אמרתי לך|שאלתי אותך|בפעם הקודמת|בשיחה הקודמת)/u.test(u) && !VIDEO_WORD.test(u)) return { ...base, intent: 'recall' };
   // The video named in the request, not the whole sentence, is what gets searched.
-  if (/(?:תשמיע|תשמיעי|להשמיע|תפעיל|תפעילי|לשמוע את|תוריד|תורידי|להוריד)/u.test(u) && !/^(?:לא|אל)(?=$|[\s,.!?])/u.test(u)) return { ...base, intent: 'video_play', ytHe: video && /(?:אותו|אותה|זה|הזה|הזאת|שלו|שלה)/u.test(u) ? '' : u.replace(/(?:הלו|כן|בבקשה|אני רוצה|תשמיעי|תשמיע|להשמיע|לשמוע|לי|את|תפעילי|תפעיל|תורידי|תוריד|להוריד|השיר|הסרטון|ה?ו?וידי?או|קובץ שמע|ביוטיוב|יוטיוב)/gu, ' ').replace(/\s+/g, ' ').trim() };
+  if (PLAY_WORD.test(u) && !/^(?:לא|אל)(?=$|[\s,.!?])/u.test(u)) return { ...base, intent: 'video_play', ytHe: video && POINT_WORD.test(u) ? '' : u.replace(PLAY_WORD_G, ' ').replace(/(?:הלו|נו|כן|בבקשה|אני רוצה|ש?תשמיעי|לי|את|השיר|הסרטון|הפרק|ה?ו?וידי?או|קובץ שמע|ביוטיוב|יוטיוב)/gu, ' ').replace(/\s+/g, ' ').trim() };
   if (video && /(?:השם|איך קוראים|איך נקרא|כמה זמן|אורך|ארוך|הערוץ|באנגלית|בעברית|תתרגם|תתרגמי|על מה הוא|מה יש ב)/u.test(u) && (VIDEO_WORD.test(u) || /(?:אותו|שלו|זה)/u.test(u))) return { ...base, intent: 'video_about' };
   if ((YT_WORD.test(u) || VIDEO_WORD.test(u) || SONG_WORD.test(u)) && /(?:תמליצ|ממליצ|מומלץ|תמצא|תמצאי|תחפש|תחפשי|אני מחפש|יש סרטון|איזה סרטון|איזה שיר|מה השיר|תביא|תביאי|הכי חדש|חדש של|שיצא|שיצאו)/u.test(u)) return { ...base, intent: 'video_find' };
   if (/(?:תחפש|תחפשי|חפש|חפשי|באינטרנט|ברשת|בגוגל|עדכני|היום|עכשיו|חדשות|מחיר|כמה עולה|שער|מזג האוויר|מי ראש|מי שר|מי נשיא|מתי פתוח|שעות פתיחה|טלפון של)/u.test(u)) return { ...base, intent: 'web' };
@@ -448,6 +463,7 @@ export function answerPrompt({ context, utterance, plan, now, instruction, extra
     '',
     'המתקשר אמר עכשיו: ' + utterance,
     plan?.standalone && plan.standalone !== utterance ? 'הכוונה שלו: ' + plan.standalone : '',
+    UNDERSTAND_RULE,
     '',
     voiceRule(voice),
     // Owner, 12.11 (extension 3): now and then a real compliment, never flattery.
@@ -457,6 +473,8 @@ export function answerPrompt({ context, utterance, plan, now, instruction, extra
   ].filter(x => x !== '').join('\n');
 }
 
+// Owner, 13.11: answer exactly what he meant, also in follow-ups.
+export const UNDERSTAND_RULE = 'לפני שאת עונה, הביני בדיוק מה הוא רוצה עכשיו לפי ההקשר: "תסבירי יותר", "תרחיבי" או "לא הבנתי" = הרחיבי על הנושא האחרון, בדרך אחרת ועם פרטים ודוגמאות חדשים, בלי לחזור על מה שכבר אמרת. "ומה עם...", "והשני?", "ואם..." = עני על אותה שאלה לגבי הדבר שהזכיר עכשיו. כמה בקשות במשפט אחד = עני על כל אחת מהן לפי הסדר, אף אחת לא נשמטת. תיקון ("לא, התכוונתי ל...") = קבלי אותו ועני לפי הכוונה המתוקנת, בלי התנצלות ארוכה ובלי לחזור על הטעות. "זה", "הוא", "אותו" = הדבר האחרון שדיברתם עליו.';
 // Owner, 11.11: when the talk goes in circles, stop guessing and let him
 // choose with keys.
 export const STUCK_RULE = 'נראה שאנחנו לא מבינים אחד את השני, או שהמתקשר חוזר על אותה בקשה או מבקש לבחור במקשים. אל תנחשי שוב ואל תחזרי על התשובה הקודמת. אמרי במשפט אחד מה הבנת שהוא מבקש, ואז הציעי 2 עד 5 אפשרויות ברורות ושונות במקשים. כל אפשרות חייבת להיאמר בדיוק בצורה "ל<שם האפשרות> הקש <מספר>", למשל "ללימוד משתנים הקש 1, ללימוד תנאים הקש 2, ללימוד לולאות הקש 3". בלי רשימה ממוספרת ובלי "בחרי מספר". פני אליו בלשון זכר. כשהוא יקיש, תמשיכי בדיוק לפי בחירתו.';
@@ -574,7 +592,17 @@ export async function ext3Turn(input, deps) {
 }
 async function ext3TurnInner({ utterance, summary = '', prior = [], current = [], now = '', prefs = [], media = '', voice = 'female', brief = false }, deps) {
   const log = deps.log || console;
-  const video = activeVideo(current, prior);
+  const lastVideo = activeVideo(current, prior);
+  // "It / this one" is what was just talked about: the video of the last two
+  // turns, or an earlier one only when he points back at it ("שמצאת", "לפני כן").
+  // 11.11: "תורידי לי את השיר הזה" meant a song from a web answer, and an old
+  // gospel video was offered again and again.
+  const lastVideoAge = (() => { for (let i = current.length - 1; i >= 0; i--) if (current[i]?.ref?.type === 'video') return current.length - 1 - i; return Infinity; })();
+  const backref = BACKREF.test(utterance);
+  let video = lastVideo && (lastVideoAge <= 1 || backref) ? lastVideo : null;
+  // "the second one" from the options read to him.
+  const picked = ordinalOption(utterance, lastVideo?.options);
+  if (picked && lastVideoAge <= 2) video = picked;
   const lessonRef = activeLesson(current);
   const article = activeArticle(current);
   const context = buildContext({ summary, prior, current, maxChars: 5200 });
@@ -583,14 +611,19 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   let plan = null;
   const t0 = Date.now();
   const rules = heuristicPlan(utterance, { video });
+  if (picked && rules.intent === 'video_play') rules.ytHe = '';
   const continuing = /^(?:כן|תמשיכי|תמשיך|המשיכי|המשך|הלאה|נמשיך|עוד)(?=$|[\s,.!?])/u.test(utterance.trim());
   const sure = !stuck && (styleRequest(utterance) || rules.continueOffer || ['media_status', 'cancel', 'library'].includes(rules.intent) || (rules.intent === 'video_play' && /^בחרתי באפשרות/u.test(utterance)) || (video && ['video_play', 'video_about'].includes(rules.intent) && !rules.ytHe));
   if (article && continuing) plan = { ...rules, intent: 'read_page', continueOffer: true };
   else if (sure) plan = rules;
   else try {
-    plan = parsePlan(await deps.llm(plannerPrompt({ context: smallContext, utterance, now, video, media, prefs }), { budgetMs: Number(deps.plannerBudgetMs || 3200), maxTokens: 450, planner: true }));
+    plan = parsePlan(await deps.llm(plannerPrompt({ context: smallContext, utterance, now, video, older: video ? null : lastVideo, media, prefs }), { budgetMs: Number(deps.plannerBudgetMs || 3200), maxTokens: 450, planner: true }));
   } catch (e) { log.warn?.('[EXT3_BRAIN] planner unavailable; using rules', { status: e?.status || 0 }); }
-  if (!plan) plan = rules;
+  if (!plan) {
+    plan = rules;
+    // No planner and nothing recent: "play it" still means the last video of the call.
+    if (!video && lastVideo && rules.intent === 'video_play' && !rules.ytHe) video = lastVideo;
+  }
   // A song or video to find stays a YouTube search even when the planner
   // called it a web question (12.11: "a new song by Shwekey" got a web answer).
   if (rules.intent === 'video_find' && ['web', 'chat'].includes(plan.intent)) plan = { ...plan, intent: 'video_find', ytHe: plan.ytHe || rules.ytHe, recentDays: plan.recentDays || rules.recentDays };
@@ -619,6 +652,10 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // no date cut-off (a show's last full episode can be months old).
   if ((plan.intent === 'video_find' || plan.intent === 'video_play') && NEWEST.test(utterance)) { plan.order = 'date'; plan.recentDays = 0; }
   if (!video && plan.intent === 'video_about') plan.intent = 'recall';
+  // "The episode you said you found" is the one found before, not a new search
+  // (12.11 22:11: he asked for it three times and got "not found").
+  if (video && plan.intent === 'video_find' && !PLAY_WORD.test(utterance) && /(?:ש(?:אמרת|מצאת|הצעת|המלצת|אמרתי)|לפני כן|מקודם)(?![\u0590-\u05FF])/u.test(utterance))
+    return { intent: 'video_about', ref: video, reply: 'הסרטון שמצאתי לך קודם הוא ' + video.title + (video.channelTitle ? ', בערוץ ' + video.channelTitle : '') + (video.durationSec ? ', אורכו ' + spokenDuration(video.durationSec) : '') + '. אם תרצה לשמוע או להוריד אותו, אמור תשמיעי לי אותו.' };
   // A video download only when the caller said so.
   plan.play = /(?:להוריד|תוריד|תורידי|הורד|הורדה|הורדת).{0,25}(?:וידאו|וידיאו|ווידאו|סרטון עצמו|הסרטון)|(?:וידאו|וידיאו|ווידאו).{0,15}(?:להוריד|תוריד|תורידי)|כן לוידאו/u.test(utterance) ? 'video' : 'audio';
   log.info?.('[EXT3_BRAIN] plan', { intent: plan.intent, standalone: plan.standalone.slice(0, 140), search: plan.search.slice(0, 100), yt: plan.ytHe.slice(0, 80), stuck, instruction: !!plan.instruction, ms: Date.now() - t0 });
@@ -740,7 +777,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       [v, ...others].forEach((x, i) => { choices[String(i + 1)] = { type: 'video', video: videoRef(x) }; });
       reply = reply.replace(/[.\s]*$/, '. ') + 'ואם תרצה לבחור במקשים: ' + [v, ...others].map((x, i) => 'ל' + clip(cleanTitle(x.title), 55) + ' הקש ' + (i + 1)).join(', ') + '.';
     }
-    return out({ ref: videoRef(v), reply, ...(others.length ? { choices } : {}) });
+    return out({ ref: { ...videoRef(v), ...(others.length ? { options: [v, ...others].map(videoRef) } : {}) }, reply, ...(others.length ? { choices } : {}) });
   }
 
   if (plan.intent === 'video_about' && video) {

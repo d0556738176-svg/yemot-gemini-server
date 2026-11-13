@@ -468,3 +468,40 @@ test('13.11: nothing long found -> the closest one, said honestly', async () => 
   assert.equal(r.ref.videoId, 'shortshort1');
   assert.match(prompts.at(-1).p, /לא נמצא ביוטיוב סרטון באורך מלא/);
 });
+
+const gospel = { type: 'video', videoId: 'gospelgosp1', title: 'LIGHT OF THE WORLD Gospel Fest', channelTitle: 'x', durationSec: 120 };
+test('13.11: "the song" from a web answer is not an old video from turns ago', async () => {
+  const current = [{ user: 'a', assistant: 'b', ref: gospel }, { user: 'c', assistant: 'd' }, { user: 'מה השיר הראשון במצעד', assistant: 'במקום הראשון במצעד נמצא השיר של אייל גולן' }];
+  const found = { videoId: 'eyalgolan01', title: 'אייל גולן - השיר החדש', channelTitle: 'Eyal Golan', durationSec: 200, viewCount: 1000 };
+  let asked = '';
+  const { deps } = baseDeps(['{"intent":"video_play","yt_he":"אייל גולן השיר החדש"}'], { findVideos: async q => { asked = q[0]; return [found]; } });
+  const r = await ext3Turn({ utterance: 'תורידי לי את השיר הזה', current, now }, deps);
+  assert.equal(asked, 'אייל גולן השיר החדש');
+  assert.equal(r.confirm.videoId, 'eyalgolan01');
+});
+
+test('13.11: "play it" right after a recommendation is that exact video, even as the phone mishears it', async () => {
+  for (const said of ['תשמיעי לי אותו', 'תשמעי לי אותו', 'תשמילי אותו', 'נו תשמירי לי אותו', 'תשמיעלי את זה']) {
+    const current = [{ user: 'תמצאי לי שיר', assistant: 'מצאתי', ref: clown }];
+    const { deps, prompts } = baseDeps([], { findVideos: async () => { throw new Error('no search'); } });
+    const r = await ext3Turn({ utterance: said, current, now }, deps);
+    assert.equal(r.confirm?.videoId, clown.videoId, said);
+    assert.equal(prompts.length, 0, said + ': no model needed');
+  }
+});
+
+test('13.11: "the second one" picks the second option read to him', async () => {
+  const opts = ['aaaaaaaaaaa', 'bbbbbbbbbbb', 'ccccccccccc'].map((id, i) => ({ type: 'video', videoId: id, title: 'אפשרות ' + (i + 1), channelTitle: 'c', durationSec: 60 }));
+  const current = [{ user: 'x', assistant: 'y', ref: { ...opts[0], options: opts } }];
+  const { deps } = baseDeps([]);
+  const r = await ext3Turn({ utterance: 'תשמיעי לי את השני', current, now }, deps);
+  assert.equal(r.confirm.videoId, 'bbbbbbbbbbb');
+});
+
+test('13.11: "the episode you said you found" returns to it instead of a new search', async () => {
+  const current = [{ user: 'x', assistant: 'מצאתי', ref: clown }, { user: 'y', assistant: 'לא מצאתי' }, { user: 'z', assistant: 'לא מצאתי' }];
+  const { deps } = baseDeps(['{"intent":"video_find","yt_he":"ארץ נהדרת פרק מלא"}'], { findVideos: async () => { throw new Error('no search'); } });
+  const r = await ext3Turn({ utterance: 'לא, אני רוצה את הפרק שאמרת לפני כן', current, now }, deps);
+  assert.equal(r.ref.videoId, clown.videoId);
+  assert.match(r.reply, /The Killer Clown/);
+});
