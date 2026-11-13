@@ -1,0 +1,120 @@
+[32m2026-11-13 11:19:45.388[0m | [34m[1mDEBUG   [0m | [36macestep.core.generation.handler.generate_music_decode[0m:[36m_prepare_generate_music_decode_state[0m:[36m65[0m - [34m[1m[generate_music] time_costs: {'encoder_time_cost': 14.929443120956421, 'diffusion_time_cost': 504.5815145969391, 'diffusion_per_step_time_cost': 63.072689324617386, 'total_time_cost': 519.5109577178955, 'offload_time_cost': 0.0}[0m
+[32m2026-11-13 11:19:45.418[0m | [1mINFO    [0m | [36macestep.core.generation.handler.generate_music_decode[0m:[36m_decode_generate_music_pred_latents[0m:[36m127[0m - [1m[generate_music] Decoding latents with VAE...[0m
+[32m2026-11-13 11:19:45.453[0m | [34m[1mDEBUG   [0m | [36macestep.core.generation.handler.generate_music_decode[0m:[36m_decode_generate_music_pred_latents[0m:[36m136[0m - [34m[1m[generate_music] Before VAE decode: allocated=0.00GB, max=0.00GB[0m
+[32m2026-11-13 11:19:45.468[0m | [1mINFO    [0m | [36macestep.core.generation.handler.generate_music_decode[0m:[36m_decode_generate_music_pred_latents[0m:[36m154[0m - [1m[generate_music] Effective free VRAM before VAE decode: 0.00 GB[0m
+[32m2026-11-13 11:19:45.469[0m | [33m[1mWARNING [0m | [36macestep.core.generation.handler.generate_music_decode[0m:[36m_decode_generate_music_pred_latents[0m:[36m159[0m - [33m[1m[generate_music] Only 0.00 GB free VRAM; auto-enabling CPU VAE decode[0m
+[32m2026-11-13 11:19:45.469[0m | [1mINFO    [0m | [36macestep.core.generation.handler.generate_music_decode[0m:[36m_decode_generate_music_pred_latents[0m:[36m165[0m - [1m[generate_music] Moving VAE to CPU for decode (ACESTEP_VAE_ON_CPU=1)...[0m
+[32m2026-11-13 11:19:45.542[0m | [1mINFO    [0m | [36macestep.core.generation.handler.generate_music_decode[0m:[36m_decode_generate_music_pred_latents[0m:[36m172[0m - [1m[generate_music] Using tiled VAE decode to reduce VRAM usage...[0m
+[32m2026-11-13 11:19:45.545[0m | [1mINFO    [0m | [36macestep.core.generation.handler.vae_decode[0m:[36mtiled_decode[0m:[36m56[0m - [1m[tiled_decode] chunk_size=256, offload_wav_to_cpu=True, latents_shape=torch.Size([1, 64, 1500])[0m
+INFO:     127.0.0.1:47050 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47058 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47068 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41166 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41182 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40890 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40896 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40898 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49358 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49368 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55154 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55162 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55168 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52908 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52912 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42054 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42062 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42078 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45392 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45404 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50860 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50872 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50880 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38084 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38090 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49038 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49054 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49068 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38138 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38154 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55508 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55524 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55536 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53534 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53548 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46100 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46102 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46114 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40272 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40282 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55092 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55104 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55110 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42196 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42204 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38518 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38534 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38542 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51348 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51358 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53308 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53312 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53324 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40990 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40998 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55310 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55314 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55324 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59284 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59292 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51610 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51620 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51632 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43900 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43910 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56248 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56264 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56278 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35698 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35700 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34610 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34624 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34626 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58276 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58290 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47930 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47946 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47954 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50676 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50690 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41014 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41016 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41024 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34000 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34010 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47338 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47340 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47352 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41420 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41432 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56318 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56324 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56328 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43310 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43318 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33598 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33612 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33620 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48372 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48384 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57322 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57334 - "POST /query_result HTTP/1.1" 200 OK
+[32m2026-11-13 11:26:31.209[0m | [1mINFO    [0m | [36macestep.core.generation.handler.generate_music_decode[0m:[36m_decode_generate_music_pred_latents[0m:[36m190[0m - [1m[generate_music] Restoring VAE to original device after CPU decode path...[0m
+[32m2026-11-13 11:26:31.217[0m | [34m[1mDEBUG   [0m | [36macestep.core.generation.handler.generate_music_decode[0m:[36m_decode_generate_music_pred_latents[0m:[36m193[0m - [34m[1m[generate_music] After VAE decode: allocated=0.00GB, max=0.00GB[0m
+INFO:     127.0.0.1:57340 - "POST /query_result HTTP/1.1" 200 OK
+[32m2026-11-13 11:26:37.562[0m | [1mINFO    [0m | [36macestep.core.generation.handler.generate_music_payload[0m:[36m_build_generate_music_success_payload[0m:[36m38[0m - [1m[generate_music] VAE decode completed. Preparing audio tensors...[0m
+[32m2026-11-13 11:26:37.564[0m | [1mINFO    [0m | [36macestep.core.generation.handler.generate_music_payload[0m:[36m_build_generate_music_success_payload[0m:[36m50[0m - [1m[generate_music] Done! Generated 1 audio tensors.[0m
+[32m2026-11-13 11:26:37.970[0m | [1mINFO    [0m | [36macestep.inference[0m:[36mgenerate_music[0m:[36m1002[0m - [1m[Normalization] Audio 0 BEFORE: Peak=1.0000, Target=-1.0dB[0m
+[32m2026-11-13 11:26:38.033[0m | [1mINFO    [0m | [36macestep.inference[0m:[36mgenerate_music[0m:[36m1007[0m - [1m[Normalization] Audio 0 AFTER: Peak=0.8913[0m
+[32m2026-11-13 11:26:39.583[0m | [34m[1mDEBUG   [0m | [36macestep.audio_utils[0m:[36m_save_mp3[0m:[36m183[0m - [34m[1m[AudioSaver] Saved audio to /home/runner/work/yemot-gemini-server/yemot-gemini-server/ace/.cache/acestep/tmp/api_audio/da561d57-e974-9406-e01b-a35a8817909e.mp3 (mp3, 48000Hz, 128k)[0m
+INFO:     127.0.0.1:59614 - "POST /query_result HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59626 - "GET /v1/audio?path=%2Fhome%2Frunner%2Fwork%2Fyemot-gemini-server%2Fyemot-gemini-server%2Face%2F.cache%2Facestep%2Ftmp%2Fapi_audio%2Fda561d57-e974-9406-e01b-a35a8817909e.mp3 HTTP/1.1" 200 OK

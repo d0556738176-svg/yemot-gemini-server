@@ -1,0 +1,71 @@
+{
+  "base_url": "http://127.0.0.1:8001",
+  "steps": [
+    {
+      "error": "<urlopen error [Errno 111] Connection refused>",
+      "name": "health_wait",
+      "t": 0.0
+    },
+    {
+      "error": "<urlopen error [Errno 111] Connection refused>",
+      "name": "health_wait",
+      "t": 20.0
+    },
+    {
+      "ok": true,
+      "body": {
+        "data": {
+          "status": "ok",
+          "service": "ACE-Step API",
+          "version": "1.0",
+          "models_initialized": false,
+          "llm_initialized": false,
+          "loaded_model": "acestep-v15-turbo",
+          "loaded_lm_model": null
+        },
+        "code": 200,
+        "error": null,
+        "timestamp": 1794568041945,
+        "extra": null
+      },
+      "name": "health",
+      "t": 40.0
+    },
+    {
+      "protected": true,
+      "http": 401,
+      "name": "auth_check",
+      "t": 40.0
+    },
+    {
+      "task_id": "70746718-83cb-4af5-a394-2ede8b4bf80b",
+      "code": 200,
+      "name": "submitted",
+      "t": 40.0
+    },
+    {
+      "gen_seconds": 1159.6,
+      "metas": {
+        "bpm": "N/A",
+        "duration": 60.0,
+        "genres": "N/A",
+        "keyscale": "N/A",
+        "timesignature": "N/A",
+        "prompt": "joyful hebrew shabbat song, warm male vocals, acoustic guitar, clarinet, mid-tempo",
+        "lyrics": "[Verse 1]\nשבת שלום לכל המשפחה\nנרות דולקים והבית בשמחה\n[Chorus]\nשבת שלום שבת שלום\nשיר של שמחה מכל מקום\n"
+      },
+      "lm_model": "acestep-5Hz-lm-0.6B",
+      "dit_model": "acestep-v15-turbo",
+      "name": "generated",
+      "t": 1199.6
+    },
+    {
+      "bytes": 960812,
+      "content_type": "audio/mpeg",
+      "name": "downloaded",
+      "t": 1199.9
+    }
+  ],
+  "ok": true,
+  "total_seconds": 1199.9
+}
