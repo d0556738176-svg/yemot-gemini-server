@@ -57,3 +57,23 @@ test('video ids are read from every YouTube link form', () => {
   assert.equal(videoIdFromUrl('https://www.youtube.com/shorts/abcdefghijk'), 'abcdefghijk');
   assert.equal(videoIdFromUrl('https://www.youtube.com/@channel'), null);
 });
+
+import { webYouTubeHints } from './youtube-web-hints.js';
+test('main server busy once (429): one retry, then the result is used and cached', async () => {
+  let n = 0;
+  const fetchImpl = async () => (++n === 1
+    ? { ok: false, status: 429, json: async () => ({}) }
+    : { ok: true, status: 200, json: async () => ({ provider: 'serper', videos: [{ videoId: 'abcdefghijk', title: 'T' }], titles: ['T'] }) });
+  const env = { WEB_HINTS_SECRET: 's' };
+  const h = await webYouTubeHints('retry test words', { env, fetchImpl });
+  assert.equal(h.videos[0].videoId, 'abcdefghijk');
+  assert.equal(h.provider, 'main:serper');
+  await webYouTubeHints('retry test words', { env, fetchImpl });
+  assert.equal(n, 2);
+});
+
+test('the rewrite never adds the word YouTube to the search', async () => {
+  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'בדיחה YouTube' } }] }) });
+  const { rewriteSearchQuery } = await import('./youtube-smart-search.js');
+  assert.equal(await rewriteSearchQuery('בדיחה', { GROQ_API_KEY: 'k' }, fetchImpl), 'בדיחה');
+});

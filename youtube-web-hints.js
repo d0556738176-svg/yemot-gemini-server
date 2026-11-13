@@ -62,12 +62,25 @@ async function viaMain(q, env, fetchImpl, timeoutMs) {
   const secret = String(env.WEB_HINTS_SECRET || '').trim();
   if (!secret || env.WEB_HINTS_LOCAL_ONLY === '1') return null;
   const base = String(env.WEB_HINTS_URL || 'https://yemot-gemini-server.onrender.com').replace(/\/+$/, '');
-  const r = await fetchImpl(base + '/internal/web-hints', {
-    method: 'POST', signal: AbortSignal.timeout(timeoutMs + 1500),
-    headers: { 'content-type': 'application/json', 'x-web-hints-secret': secret },
-    body: JSON.stringify({ q }),
-  });
-  if (!r.ok) throw new Error('main ' + r.status);
+  // Live 12.11-13.11: some calls timed out or got 429 while the main server
+  // was being deployed or busy, so one quick retry within a fixed budget.
+  const until = Date.now() + Number(env.WEB_HINTS_MAIN_BUDGET_MS || 8000);
+  let r = null, lastErr = null;
+  for (let attempt = 0; attempt < 2 && Date.now() < until - 500; attempt++) {
+    try {
+      r = await fetchImpl(base + '/internal/web-hints', {
+        method: 'POST', signal: AbortSignal.timeout(Math.min(timeoutMs + 2500, until - Date.now())),
+        headers: { 'content-type': 'application/json', 'x-web-hints-secret': secret },
+        body: JSON.stringify({ q }),
+      });
+      if (r.ok) break;
+      lastErr = new Error('main ' + r.status);
+      if (![429, 502, 503, 504].includes(r.status)) throw lastErr;
+      r = null;
+      await new Promise(res => setTimeout(res, 400));
+    } catch (e) { lastErr = e; r = null; if (String(e?.message || '').startsWith('main 4')) throw e; }
+  }
+  if (!r) throw lastErr || new Error('main unavailable');
   const j = await r.json();
   if (!j?.videos && !j?.titles) return null;
   return { items: [...(j.videos || []).map(v => ({ url: 'https://www.youtube.com/watch?v=' + v.videoId, title: v.title })), ...(j.titles || []).map(t => ({ url: '', title: t }))], corrected: j.corrected || null, via: j.provider };
@@ -80,9 +93,18 @@ export function configuredWebHintProviders(env = process.env) {
 }
 
 // { videos: [{videoId, title}], titles: [...], corrected, provider } or null.
+const cache = new Map(); // same words asked again (e.g. "עוד", a retry) -> no second web search
 export async function webYouTubeHints(spoken, { env = process.env, fetchImpl = fetch, timeoutMs = Number(env.WEB_HINTS_TIMEOUT_MS || 3500), localOnly = false } = {}) {
   const q = String(spoken || '').trim();
   if (!q) return null;
+  const hit = cache.get(q);
+  if (hit && Date.now() - hit.at < 6 * 60 * 60 * 1000) return hit.value;
+  const value = await webYouTubeHintsUncached(q, { env, fetchImpl, timeoutMs, localOnly });
+  if (value) { cache.set(q, { at: Date.now(), value }); if (cache.size > 300) cache.delete(cache.keys().next().value); }
+  return value;
+}
+
+async function webYouTubeHintsUncached(q, { env, fetchImpl, timeoutMs, localOnly }) {
   for (const [name, fn] of PROVIDERS) {
     if (localOnly && name === 'main') continue;
     try {

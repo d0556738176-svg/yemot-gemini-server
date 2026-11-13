@@ -17,7 +17,7 @@ export async function rewriteSearchQuery(spoken, env = process.env, fetchImpl = 
   const raw = await groqChat([
     { role: 'system', content: 'אתה עוזר חיפוש ביוטיוב לקו טלפון. תקבל תמלול של בקשה קולית בעברית (ייתכנו שגיאות שמיעה בשמות של זמרים, רבנים, ערוצים ושירים: אותיות שהתחלפו, מילה אחת שנשמעה כשתיים או להפך). החזר רק את מחרוזת החיפוש הטובה ביותר ליוטיוב: תקן שמות שנשמעו לא נכון לכתיב הנכון והמוכר, הסר מילות פנייה כמו "תחפש לי" "אני רוצה לשמוע" "תשמיע", השאר את שם השיר והאמן או הנושא, ואם ביקשו "חדש" או "האחרון" השאר את המילה חדש. בלי הסברים, בלי מרכאות, שורה אחת בלבד.' },
     { role: 'user', content: text + hintText }], { env, fetchImpl, maxTokens: 80, timeoutMs: Number(env.SMART_SEARCH_TIMEOUT_MS || 4000) });
-  const out = String(raw || '').split('\n')[0].replace(/^["'״]+|["'״]+$/g, '').trim();
+  const out = String(raw || '').split('\n')[0].replace(/^["'״]+|["'״]+$/g, '').replace(/\s*\b(?:YouTube|youtube)\b\s*|\s*יוטיוב\s*/g, ' ').replace(/\s+/g, ' ').trim();
   return out && out.length <= 120 ? out : null;
 }
 
