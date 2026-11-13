@@ -5,6 +5,7 @@
 // Israel, each run capped in cost, and logs which one really delivers a file.
 // Runs once per engine (a mark file in Yemot); never touches callers' jobs.
 import { apifyTokens } from './youtube-apify-source.js';
+import { ensureIsraelActor, israelRunInput, ISRAEL_ACTOR_SOURCE_HASH } from './youtube-israel-engine.js';
 
 const API = 'https://api.apify.com/v2';
 const log = (...a) => console.info('[GEO_TEST]', ...a);
@@ -87,6 +88,21 @@ export async function runGeoSelftest({ readMark, writeMark, env = process.env } 
   log('Israel-only test video', video);
   if (!video) return;
   const url = 'https://www.youtube.com/watch?v=' + video.videoId;
+  // Round 4: our own engine (youtube-israel-engine.js).
+  {
+    const MARK = 'ivr2:/2/selftest/geo_own_israel_engine_' + ISRAEL_ACTOR_SOURCE_HASH + '.json';
+    if (!(await readMark(MARK).catch(() => null))) {
+      try {
+        const actorId = await ensureIsraelActor(token);
+        const res = await tryEngine(token, { id: actorId, input: () => israelRunInput(video.videoId, 'audio') }, url, 1);
+        log('result', JSON.stringify({ video: video.videoId, seconds: video.seconds, own: true, ...res }));
+        if (res.ok) await writeMark(MARK, { at: new Date().toISOString(), video, ...res }).catch(() => {});
+      } catch (e) {
+        log('own engine failed', String(e?.message || e).slice(0, 1500));
+      }
+    }
+  }
+  return;
   for (const cand of GEO_CANDIDATES) {
     const MARK = 'ivr2:/2/selftest/geo_' + cand.id.replace(/[^A-Za-z0-9]/g, '_') + '_v4.json';
     if (await readMark(MARK).catch(() => null)) continue;
