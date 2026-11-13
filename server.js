@@ -4477,7 +4477,7 @@ async function youtubeCallHandler(call) {
           regionCode:process.env.YOUTUBE_REGION_CODE||'IL',
           timeoutMs:REQUEST_TIMEOUT_MS
         });
-        console.info('[YouTube IVR] smart search',JSON.stringify({spoken:String(currentQuery).slice(0,80),rewritten:found.rewritten||null,web:found.web||null,results:found.length,first:found.slice(0,3).map(v=>String(v.title||'').slice(0,60))}));
+        console.info('[YouTube IVR] smart search',JSON.stringify({spoken:String(currentQuery).slice(0,80),rewritten:found.rewritten||null,plan:found.plan||null,web:found.web||null,results:found.length,first:found.slice(0,3).map(v=>String(v.title||'').slice(0,60))}));
       } catch(searchError) {
         if(searchError instanceof ExitError||isCallerHangupError(searchError)) throw searchError;
         const status=Number(searchError?.status)||0;
@@ -5424,6 +5424,20 @@ app.listen(port,async()=>{
     console.info('[SMART_SEARCH_TEST_V4]',JSON.stringify(out));
     if(r.web)await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
   })().catch(e=>console.warn('[SMART_SEARCH_TEST_V4] failed',String(e?.message||e).slice(0,160)));
+  // 13.11: Hebrew request for an English-titled video, and a request by topic.
+  if(process.env.YOUTUBE_API_KEY) void (async()=>{
+    const { _pipeline } = await import('./youtube-authorized-playback.js');
+    const MARK='ivr2:/2/selftest/smart_search_v5_plan.json';
+    if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
+    const { smartYouTubeSearch } = await import('./youtube-smart-search.js');
+    const out={};
+    for(const q of ['תיק הליצן הרוצח שהטעה את כולם','תיק הליצן הרוצח באנגלית','משהו שקט ורגוע לשבת בלי כלי נגינה']){
+      const r=await smartYouTubeSearch(q,{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
+      out[q]={plan:r.plan||null,first:r.slice(0,4).map(v=>String(v.title).slice(0,70)),count:r.length};
+    }
+    console.info('[SMART_SEARCH_TEST_V5]',JSON.stringify(out));
+    if(Object.values(out).every(x=>x.plan))await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
+  })().catch(e=>console.warn('[SMART_SEARCH_TEST_V5] failed',String(e?.message||e).slice(0,160)));
   // One real song save after the naming change (05.11): same path as a caller's song.
   if(process.env.YOUTUBE_API_KEY&&process.env.APIFY_TOKEN) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;

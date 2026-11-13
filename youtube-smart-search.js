@@ -8,49 +8,77 @@ import { groqChat } from './groq-chat.js';
 import { searchYouTubeVideos, youtubeKeysFrom } from './youtube-ivr.js';
 import { webYouTubeHints, videosByIds } from './youtube-web-hints.js';
 
-export async function rewriteSearchQuery(spoken, env = process.env, fetchImpl = fetch, hints = null) {
+// The caller asked for English titles ("באנגלית") or spoke in English.
+export function wantsEnglish(spoken) {
+  const t = String(spoken || '');
+  const latin = (t.match(/[A-Za-z]/g) || []).length, heb = (t.match(/[\u05D0-\u05EA]/g) || []).length;
+  return /באנגלית|in english/i.test(t) || (latin > 3 && latin > heb);
+}
+
+// One model call plans the searches (owner, 13.11): the Hebrew search with the
+// names spelled right, an English search (many videos have English titles even
+// when described in Hebrew), and for a request by topic or style up to two
+// focused searches. Plain text from the model counts as the Hebrew search.
+export async function planSearch(spoken, env = process.env, fetchImpl = fetch, hints = null) {
   const text = String(spoken || '').trim();
   if (!text) return null;
   const hintText = hints?.titles?.length
     ? '\n\nכותרות שמנוע חיפוש באינטרנט החזיר לאותן מילים (הכתיב שלהן נכון; אם אחת מהן היא בבירור מה שהמתקשר ביקש, השתמש בכתיב השמות שלה):\n- ' + hints.titles.join('\n- ') + (hints.corrected ? '\nתיקון כתיב של מנוע החיפוש: ' + hints.corrected : '')
     : '';
   const raw = await groqChat([
-    { role: 'system', content: 'אתה עוזר חיפוש ביוטיוב לקו טלפון. תקבל תמלול של בקשה קולית בעברית (ייתכנו שגיאות שמיעה בשמות של זמרים, רבנים, ערוצים ושירים: אותיות שהתחלפו, מילה אחת שנשמעה כשתיים או להפך). החזר רק את מחרוזת החיפוש הטובה ביותר ליוטיוב: תקן שמות שנשמעו לא נכון לכתיב הנכון והמוכר, הסר מילות פנייה כמו "תחפש לי" "אני רוצה לשמוע" "תשמיע", השאר את שם השיר והאמן או הנושא, ואם ביקשו "חדש" או "האחרון" השאר את המילה חדש. בלי הסברים, בלי מרכאות, שורה אחת בלבד.' },
-    { role: 'user', content: text + hintText }], { env, fetchImpl, maxTokens: 80, timeoutMs: Number(env.SMART_SEARCH_TIMEOUT_MS || 4000) });
-  const out = String(raw || '').split('\n')[0].replace(/^["'״]+|["'״]+$/g, '').replace(/\s*\b(?:YouTube|youtube)\b\s*|\s*יוטיוב\s*/g, ' ').replace(/\s+/g, ' ').trim();
-  return out && out.length <= 120 ? out : null;
+    { role: 'system', content: 'אתה עוזר חיפוש ביוטיוב לקו טלפון. תקבל תמלול של בקשה קולית (ייתכנו שגיאות שמיעה בשמות של זמרים, רבנים, ערוצים, שירים וסרטונים: אותיות שהתחלפו, מילה אחת שנשמעה כשתיים או להפך). הבן מה המתקשר באמת מחפש והחזר JSON בלבד בשורה אחת: {"he":"...","en":"...","topics":["...","..."]}.\nhe: מחרוזת החיפוש הטובה ביותר בעברית: תקן שמות שנשמעו לא נכון לכתיב הנכון והמוכר, הסר מילות פנייה ("תחפש לי", "אני רוצה לשמוע", "תשמיע", "באנגלית"), השאר שם השיר והאמן או הנושא, ואם ביקשו "חדש" או "האחרון" השאר "חדש".\nen: אותו חיפוש באנגלית כפי שהכותרת באנגלית כנראה כתובה ביוטיוב (שמות אנשים באיות האנגלי המקובל שלהם, שם תיק/פרשה/סרט בשם המוכר באנגלית). אם זה שיר או תוכן עברי שאין לו כותרת באנגלית, כתוב את התעתיק האנגלי המקובל.\ntopics: רק אם הבקשה היא לפי נושא, סגנון או תיאור (ולא שם מסוים): עד שני חיפושים קצרים וממוקדים שונים זה מזה שמביאים בדיוק את סוג התוכן שביקש; אחרת רשימה ריקה.\nבלי הסברים ובלי טקסט מחוץ ל-JSON.' },
+    { role: 'user', content: text + hintText }], { env, fetchImpl, maxTokens: 160, timeoutMs: Number(env.SMART_SEARCH_TIMEOUT_MS || 4500) });
+  const clean = q => { const o = String(q || '').replace(/^["'״]+|["'״]+$/g, '').replace(/\s*\b(?:YouTube|youtube)\b\s*|\s*יוטיוב\s*|\s*באנגלית\s*/g, ' ').replace(/\s+/g, ' ').trim(); return o && o.length <= 120 ? o : null; };
+  const body = String(raw || '').trim();
+  let j = null;
+  try { j = JSON.parse((body.match(/\{[\s\S]*\}/) || [''])[0]); } catch { /* plain text */ }
+  if (!j) { const he = clean(body.split('\n')[0]); return he ? { he, en: null, topics: [] } : null; }
+  return { he: clean(j.he), en: clean(j.en), topics: (Array.isArray(j.topics) ? j.topics : []).map(clean).filter(Boolean).slice(0, 2) };
+}
+
+export async function rewriteSearchQuery(spoken, env = process.env, fetchImpl = fetch, hints = null) {
+  return (await planSearch(spoken, env, fetchImpl, hints))?.he || null;
 }
 
 export async function smartYouTubeSearch(spoken, opts = {}, env = process.env, search = searchYouTubeVideos, deps = {}) {
   const own = String(spoken || '').trim();
+  const english = wantsEnglish(own);
   const hintsFn = deps.webHints || webYouTubeHints, byIds = deps.videosByIds || videosByIds;
   // The caller's own words go to YouTube at once, while a web search looks
   // up how the names are really spelled (see youtube-web-hints.js).
   const ownSearch = search(own, opts).then(l => ({ l }), e => ({ e }));
   const hints = await hintsFn(own, { env, fetchImpl: opts.fetchImpl || fetch }).catch(() => null);
-  const rewritten = await rewriteSearchQuery(spoken, env, opts.fetchImpl, hints);
+  const plan = await planSearch(spoken, env, opts.fetchImpl, hints).catch(() => null);
+  const rewritten = plan?.he || null;
   const apiKey = opts.apiKey || youtubeKeysFrom(env)[0];
-  const [webList, rewrittenList, ownRes] = await Promise.all([
+  // Every planned search runs at once (Hebrew, English, topics), each only once.
+  const extra = [...new Set([rewritten, plan?.en, ...(plan?.topics || [])].filter(q => q && q !== own))];
+  const [webList, ownRes, ...extraLists] = await Promise.all([
     hints?.videos?.length ? byIds(hints.videos.map(v => v.videoId), { apiKey, fetchImpl: opts.fetchImpl }).catch(() => []) : [],
-    rewritten && rewritten !== own ? search(rewritten, opts).catch(() => []) : [],
     ownSearch,
+    ...extra.map(q => search(q, opts).catch(() => [])),
   ]);
-  if (ownRes.e && !webList.length && !rewrittenList.length) throw ownRes.e;
-  const queries = [...new Set([rewritten, own].filter(Boolean))];
-  const lists = queries.map(q => (q === own ? ownRes.l || [] : rewrittenList));
+  if (ownRes.e && !webList.length && !extraLists.some(l => l.length)) throw ownRes.e;
+  const listOf = q => (q === own ? ownRes.l || [] : extraLists[extra.indexOf(q)] || []);
+  const queries = [...new Set([rewritten, plan?.en, ...(plan?.topics || []), own].filter(Boolean))];
+  // Order of the merge: asked in English -> the English search leads;
+  // otherwise web links, the Hebrew search, the topic searches, the caller's
+  // own words, and the English search last.
+  const order = english
+    ? [plan?.en, rewritten, ...(plan?.topics || []), own]
+    : [rewritten, ...(plan?.topics || []), own, plan?.en];
+  const lists = [...new Set(order.filter(Boolean))].map(listOf);
+  const all = english ? [lists[0] || [], webList, ...lists.slice(1)] : [webList, ...lists];
   const seen = new Set(), merged = [];
-  // Interleave: best of the smart query first, then the caller's own words.
-  // Everything found (web links, the rewritten search, the caller's own
-  // words) is merged, then the titles that sound most like what the caller
-  // said go first (live 12.11: an unrelated web link was first and the right
-  // song third).
-  const all = [webList, ...lists];
   const max = Math.max(0, ...all.map(l => l.length));
   for (let i = 0; i < max; i++) for (const l of all) { const v = l[i]; if (v && !seen.has(v.videoId)) { seen.add(v.videoId); merged.push(v); } }
-  rankBySound(merged, [own, rewritten, hints?.corrected].filter(Boolean));
-  const pages = queries.map((q, i) => ({ query: q, token: lists[i]?.nextPageToken || null }));
+  // Titles that sound like the request move up (live 12.11). The English
+  // search counts here only when the caller asked in English (owner, 13.11).
+  rankBySound(merged, [own, rewritten, hints?.corrected, english ? plan?.en : null].filter(Boolean));
+  const pages = queries.map(q => ({ query: q, token: listOf(q)?.nextPageToken || null }));
   Object.defineProperty(merged, 'pages', { value: pages, enumerable: false });
   Object.defineProperty(merged, 'rewritten', { value: rewritten, enumerable: false });
+  Object.defineProperty(merged, 'plan', { value: plan ? { ...plan, english } : null, enumerable: false });
   Object.defineProperty(merged, 'web', { value: hints ? { provider: hints.provider, videos: webList.length, corrected: hints.corrected } : null, enumerable: false });
   return merged;
 }

@@ -94,3 +94,30 @@ test('a vague request keeps YouTube order', () => {
   rankBySound(list, ['בדיחה']);
   assert.deepEqual(list.map(v => v.videoId), ['x', 'y']);
 });
+
+const planFetch = plan => async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify(plan) } }] }) });
+const listSearch = (map, calls) => async q => { calls.push(q); const l = (map[q] || []).map((t, i) => ({ videoId: q.slice(0, 4) + i, title: t })); return l; };
+
+test('Hebrew description of an English video: an English search runs too and its result is in the list', async () => {
+  const calls = [];
+  const map = { 'the clown killer case': ['The Clown Killer Case That Fooled Everyone'], 'תיק הליצן הרוצח': ['סתם כותרת'] };
+  const r = await smartYouTubeSearch('תיק הליצן הרוצח שהטעה את כולם', { fetchImpl: planFetch({ he: 'תיק הליצן הרוצח', en: 'the clown killer case', topics: [] }) }, { GROQ_API_KEY: 'k' }, listSearch(map, calls), { webHints: async () => null });
+  assert.ok(calls.includes('the clown killer case'));
+  assert.ok(r.some(v => /Clown Killer/.test(v.title)));
+  assert.equal(r.plan.english, false);
+});
+
+test('asked "באנגלית": the English search leads and counts in the ranking', async () => {
+  const calls = [];
+  const map = { 'clown killer case': ['The Clown Killer Case That Fooled Everyone'], 'תיק הליצן': ['תיק הליצן - כתבה', 'תיק הליצן - חלק ב'] };
+  const r = await smartYouTubeSearch('תיק הליצן באנגלית', { fetchImpl: planFetch({ he: 'תיק הליצן', en: 'clown killer case', topics: [] }) }, { GROQ_API_KEY: 'k' }, listSearch(map, calls), { webHints: async () => null });
+  assert.match(r[0].title, /Clown Killer/);
+  assert.equal(r.plan.english, true);
+});
+
+test('request by topic or style: the focused topic searches run', async () => {
+  const calls = [];
+  const r = await smartYouTubeSearch('משהו שקט ורגוע לשבת בלי כלים', { fetchImpl: planFetch({ he: 'שירי שבת שקטים', en: 'calm shabbat songs', topics: ['ניגוני שבת ווקאלי', 'שירי שבת אקפלה רגועים'] }) }, { GROQ_API_KEY: 'k' }, listSearch({ 'ניגוני שבת ווקאלי': ['ניגון'] }, calls), { webHints: async () => null });
+  assert.ok(calls.includes('ניגוני שבת ווקאלי') && calls.includes('שירי שבת אקפלה רגועים'));
+  assert.ok(r.some(v => v.title === 'ניגון'));
+});
