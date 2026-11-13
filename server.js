@@ -5476,6 +5476,13 @@ app.listen(port,async()=>{
     console.info('[ISRAEL_VIDEO_E2E] as if the caller said "כן לוידאו" on an Israel-only video');
     startYouTubeVideoJob({videoId:'SGbRCbhWK_8',title:'בלתי הפיך - אתה ילד לא חמוד בכלל'});
   })().catch(e=>console.warn('[ISRAEL_VIDEO_E2E] failed',String(e?.message||e).slice(0,300)));
+  // Israel engine ready in every Apify account (and rebuilt weekly).
+  if(String(process.env.BRANCH2_ISRAEL_ENGINE||'on')!=='off') void (async()=>{
+    const { apifyTokens } = await import('./youtube-apify-source.js');
+    const { prepareIsraelEngineEverywhere } = await import('./youtube-israel-engine.js');
+    await new Promise(r=>setTimeout(r,20000));
+    await prepareIsraelEngineEverywhere(apifyTokens(process.env));
+  })().catch(e=>console.warn('[ISRAEL_ENGINE] prepare failed',String(e?.message||e).slice(0,200)));
   // One real song save after the naming change (05.11): same path as a caller's song.
   if(process.env.YOUTUBE_API_KEY&&process.env.APIFY_TOKEN) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;

@@ -150,8 +150,12 @@ export async function ensureIsraelActor(token, { log = console } = {}) {
       needBuild = true;
       log.info?.('[ISRAEL_ENGINE] engine source updated', { actorId: act.id });
     } else {
+      // YouTube changes often: a build older than 7 days is rebuilt so the
+      // newest yt-dlp is always used.
       const builds = await api(token, '/acts/' + act.id + '/builds?desc=1&limit=5');
-      needBuild = !(builds.data?.items || []).some(b => b.status === 'SUCCEEDED');
+      const ok = (builds.data?.items || []).filter(b => b.status === 'SUCCEEDED');
+      const newest = Math.max(0, ...ok.map(b => Date.parse(b.finishedAt || b.startedAt || 0) || 0));
+      needBuild = !ok.length || Date.now() - newest > 7 * 24 * 3600 * 1000;
     }
   }
   if (needBuild) {
@@ -179,4 +183,16 @@ export function israelRunInput(videoId, mode = 'audio') {
 export const ISRAEL_ACTOR = 'own~yemot-israel-downloader';
 export async function actorIdFor(actor, token, opts) {
   return actor === ISRAEL_ACTOR ? ensureIsraelActor(token, opts) : actor;
+}
+
+// Every account (main + backup keys) gets the engine ready in advance, so a
+// backup key never waits for a first build in the middle of a call.
+export async function prepareIsraelEngineEverywhere(tokens, { log = console } = {}) {
+  const out = [];
+  for (let i = 0; i < tokens.length; i++) {
+    try { out.push({ account: i + 1, actorId: await ensureIsraelActor(tokens[i], { log }) }); }
+    catch (e) { out.push({ account: i + 1, error: String(e?.message || e).slice(0, 160) }); }
+  }
+  log.info?.('[ISRAEL_ENGINE] ready in every account', JSON.stringify(out));
+  return out;
 }
