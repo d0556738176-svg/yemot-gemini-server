@@ -2537,6 +2537,10 @@ async function readBestPages(question,results,budgetMs=2000){
 // quality=true is used when the caller explicitly asked to search the internet:
 // only the strongest models race (the small fast model is left out) and Gemini,
 // whose Flash model reasons well over long evidence, joins after a short hedge.
+const keyTurn=new Map();
+// The strong model on each Groq key, and each OpenRouter key, share a rotation.
+function keyFamily(p) { const n=String(p.name||''); if((n==='Groq'&&p.big)||/^Groq\d+$/.test(n)) return 'groq'; if(/^OpenRouter\d*$/.test(n)) return 'openrouter'; return ''; }
+function synthCooling(p) { return ((p.big?branch1SynthCooldownsBig:branch1SynthCooldowns).get(p.name)||0)>Date.now(); }
 async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate=null,quality=false,geminiBudgetMs=null}={}){
   prompt=promptWithPersona(prompt);
   // Extension 3: the strong models start at once, the small fast model is only a
@@ -2585,8 +2589,18 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     // Owner, 10.11: Groq counts each model's free quota separately, so more
     // strong models on the same key = more answers before "rate limited".
     ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?5500+i*800:0}))
-  ]) {
-    if(!provider.apiKey||isDeadKey(provider.apiKey)) continue;
+  ].filter(p=>p.apiKey&&!isDeadKey(p.apiKey)).map((p,_,all)=>{
+    // 13.11: every Groq key fired on every turn, so all of them spent their
+    // per-minute quota together and hit "rate limited" together. Now the keys
+    // of one provider take turns: one starts at once, the next waits 2.5 s
+    // (and starts only if no answer came), and keys cooling down are skipped.
+    const fam=keyFamily(p); if(!fam) return p;
+    const group=all.filter(x=>keyFamily(x)===fam&&!synthCooling(x));
+    if(!group.includes(p)) return {...p,skip:true};
+    const start=(keyTurn.get(fam)||0)%group.length, idx=(group.indexOf(p)-start+group.length)%group.length;
+    return {...p,delayMs:Math.max(Number(p.delayMs)||0,idx*Number(process.env.KEY_ROTATE_MS||2000))};
+  })) {
+    if(provider.skip) continue;
     racers.push((provider.delayMs?new Promise(r=>setTimeout(r,provider.delayMs)).then(()=>{ if(raceDone) throw Object.assign(new Error('not needed'),{status:499}); }):Promise.resolve()).then(()=>callCompatibleChatCompletion({
       provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
       messages:[{role:'user',content:prompt}],timeoutMs:Math.max(1200,budgetMs-300),
@@ -2600,6 +2614,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
       return text; })
       .catch(err=>{ if([401,402,403].includes(Number(err?.status))) markDeadKey(provider.apiKey); console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
   }
+  for(const fam of ['groq','openrouter']) keyTurn.set(fam,(keyTurn.get(fam)||0)+1);
   const checked=validate?racers.map(r=>r.then(text=>{
     if(!validate(text)) { console.warn('[BRANCH1_WEB_SYNTH] ungrounded answer rejected'); throw Object.assign(new Error('ungrounded answer'),{status:422}); }
     return text;
