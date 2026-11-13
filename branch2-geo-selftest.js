@@ -21,7 +21,17 @@ function iso8601Seconds(d) {
 }
 
 // A short public video that YouTube allows only in Israel (not in the US).
-export async function findIsraelOnlyVideo(key, queries = ['כאן 11 פרק', 'כאן חדשות', 'כאן חינוכית', 'כאן 11']) {
+// Real Israel-only videos callers chose (logs 09.11-11.11), checked again live.
+export const KNOWN_ISRAEL_ONLY = ['HHkeMlB4yNI', 'FWx3ZbgLtR0', 'SGbRCbhWK_8', 'O-lvBFC5S0A', 'Z2Uq4aX2KPs', 'HF-NQbc7wY8', 'TQ4VtrIlhak', 'KMR00mcwuHw', 'wVw3XFpkDB8'];
+export async function findIsraelOnlyVideo(key, queries = ['כאן 11 פרק', 'כאן חדשות']) {
+  {
+    const v = new URL('https://www.googleapis.com/youtube/v3/videos');
+    Object.entries({ part: 'contentDetails,snippet', id: KNOWN_ISRAEL_ONLY.join(','), key }).forEach(([k, val]) => v.searchParams.set(k, val));
+    const vj = await (await fetch(v)).json();
+    const hits = (vj.items || []).map(it => ({ videoId: it.id, title: it.snippet?.title, seconds: iso8601Seconds(it.contentDetails?.duration), allowed: it.contentDetails?.regionRestriction?.allowed || null }))
+      .filter(x => x.allowed && x.allowed.includes('IL') && !x.allowed.includes('US') && x.seconds >= 20).sort((a, b) => a.seconds - b.seconds);
+    if (hits.length) return hits[0];
+  }
   for (const q of queries) {
     const s = new URL('https://www.googleapis.com/youtube/v3/search');
     Object.entries({ part: 'snippet', q, type: 'video', maxResults: '50', regionCode: 'IL', key }).forEach(([k, v]) => s.searchParams.set(k, v));
@@ -75,10 +85,10 @@ export async function runGeoSelftest({ readMark, writeMark, env = process.env } 
   if (!video) return;
   const url = 'https://www.youtube.com/watch?v=' + video.videoId;
   for (const cand of GEO_CANDIDATES) {
-    const MARK = 'ivr2:/2/selftest/geo_' + cand.id.replace(/[^A-Za-z0-9]/g, '_') + '_v1.json';
+    const MARK = 'ivr2:/2/selftest/geo_' + cand.id.replace(/[^A-Za-z0-9]/g, '_') + '_v2.json';
     if (await readMark(MARK).catch(() => null)) continue;
     try {
-      const res = await tryEngine(token, cand, url);
+      const res = await tryEngine(token, cand, url, Math.min(1.2, Math.max(0.3, Math.ceil(video.seconds / 60) * 0.03 + 0.2)));
       log('result', JSON.stringify({ video: video.videoId, seconds: video.seconds, ...res }));
       await writeMark(MARK, { at: new Date().toISOString(), video, ...res }).catch(() => {});
     } catch (e) {
