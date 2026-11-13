@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 120
     env:
       SMOKE_THINKING: 'false'
-      SMOKE_DURATION: '40'
+      SMOKE_DURATION: '60'
       SMOKE_GEN_TIMEOUT: '4000'
     steps:
       - name: Free runner disk (toolchains we do not use)
@@ -50,7 +50,7 @@ jobs:
         run: |
           export ACESTEP_API_KEY="$(openssl rand -hex 16)"
           cd ace
-          ACESTEP_CONFIG_PATH=acestep-v15-turbo ACESTEP_INIT_LLM=false ACESTEP_OFFLOAD_TO_CPU=false \
+          ACESTEP_GENERATION_TIMEOUT=3600 ACESTEP_CONFIG_PATH=acestep-v15-turbo ACESTEP_INIT_LLM=false ACESTEP_OFFLOAD_TO_CPU=false \
             nohup uv run acestep-api --host 127.0.0.1 --port 8001 > ../out/server.log 2>&1 &
           cd ..
           # Push progress every 2 minutes so a killed runner still leaves evidence.
