@@ -10,7 +10,7 @@ import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.j
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
 import { keySlots, keysFor, withKeys, keyReport, isDeadKey, markDeadKey } from './key-slots.js';
-import { ext3Turn, parseKeyOptions, spokenDuration, toMaleSelf } from './ext3-brain.js';
+import { ext3Turn, parseKeyOptions, spokenDuration, toMaleSelf, confirmFor, cleanTitle } from './ext3-brain.js';
 import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
@@ -4658,6 +4658,15 @@ async function ext3MediaStatusReply(media) {
 // (video + phone audio from the same download). Ready -> plays now;
 // otherwise the download starts (waking the service if needed) and the
 // conversation goes on.
+// The digit of a structured list: a pressed key ("בחרתי באפשרות 2: ...") or the number said aloud.
+function ext3KeyChoice(text, choices) {
+  const t=String(text||'').trim();
+  let d=(t.match(/^בחרתי באפשרות\s*([1-9])/u)||[])[1];
+  if(!d) { const w={'אחת':'1','אחד':'1','שתיים':'2','שניים':'2','שלוש':'3','שלושה':'3','ארבע':'4','ארבעה':'4','חמש':'5','חמישה':'5','שש':'6','שישה':'6'};
+    const m=t.match(/^(?:מספר\s*|אפשרות\s*|את\s*)?([1-9]|אחת|אחד|שתיים|שניים|שלוש|שלושה|ארבע|ארבעה|חמש|חמישה|שש|שישה)[.!?\s]*$/u); if(m) d=w[m[1]]||m[1]; }
+  return d&&choices&&choices[d]?d:'';
+}
+
 async function ext3StartOrPlay(h, media) {
   let job=media.get(h.videoId);
   const askedBefore=!!job&&!job.cancelled;
@@ -4733,7 +4742,7 @@ async function callHandler(call) {
   const turnHistory=[];
   const turnContext={youtubeResults:[],currentWebsiteUrl:null,currentWebsitePages:[],currentWebsitePageIndex:0,currentWebsiteReadOffset:0};
   // Extension 3: downloads running for this call, and a file to play next.
-  const callMedia=new Map(); let pendingPlay=null; let pendingConfirm=null;
+  const callMedia=new Map(); let pendingPlay=null; let pendingConfirm=null; let pendingChoices=null;
   // The download service stays awake for the whole call (a check every few
   // minutes), so a download asked for mid-call starts at once.
   if(typeof brainBranch==='function'&&brainBranch()) { wakeSearxng(); if(process.env.EXT3_MEDIA_SECRET&&!call.selfTest) void ext2Wake('call start'); }
@@ -4940,10 +4949,31 @@ async function callHandler(call) {
       if((!explicitSearchOnly || (typeof brainBranch==='function'&&brainBranch()==='1')) && String(process.env.EXT3_BRAIN||'on')!=='off' && typeof runExt3Brain==='function') {
         const fixed=answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
         if(fixed) { replyText=fixed; ext3Done=true; }
+        else if(!pendingConfirm && pendingChoices && ext3KeyChoice(userTranscript,pendingChoices)) {
+          // A key from a list the brain built (a song in the library, a video
+          // option): the digit maps straight to the item, never through its spoken label.
+          const d=ext3KeyChoice(userTranscript,pendingChoices), ch=pendingChoices[d]; pendingChoices=null;
+          console.info('[EXT3_KEYS] structured choice',{callId:activeKey,digit:d,type:ch.type});
+          if(ch.type==='play') {
+            const it=ch.item;
+            pendingPlay={paths:[it.path],durationSec:0,title:it.title};
+            replyText=cleanTitle(it.title)+' כבר שמור אצלך, אז לא צריך להוריד אותו שוב. משמיעה אותו עכשיו.';
+            turnContext.ext3Ref={type:'video',videoId:it.videoId,title:it.title};
+            console.info('[EXT3_MEDIA] playing from the library, no download',{callId:activeKey,files:1});
+          } else {
+            const lib=await ext3Library().catch(()=>[]), have=lib.find(x=>x.videoId===ch.video.videoId);
+            if(have) { pendingPlay={paths:[have.path],durationSec:0,title:have.title}; replyText=cleanTitle(have.title)+' כבר שמור אצלך, משמיעה אותו עכשיו.'; }
+            else { const c=confirmFor(ch.video,'audio'); replyText=c.reply; pendingConfirm=c.confirm; if(!call.selfTest) void ext2Wake('confirm offered'); }
+            turnContext.ext3Ref=ch.video;
+          }
+          if(typeof brainBranch==='function'&&brainBranch()==='1') replyText=toMaleSelf(replyText);
+          if(call.selfTest) call.selfTest.lastChoice={digit:d,type:ch.type};
+          ext3Done=true;
+        }
         else if(pendingConfirm && ext3ConfirmChoice(userTranscript)) {
           // He heard the exact title and chose: 1 audio, 2 video (+ audio from
           // the same download), 3 cancel. Nothing was downloaded before this.
-          const choice=ext3ConfirmChoice(userTranscript), c=pendingConfirm; pendingConfirm=null;
+          const choice=ext3ConfirmChoice(userTranscript), c=pendingConfirm; pendingConfirm=null; pendingChoices=null;
           console.info('[EXT3_MEDIA] confirmation',{callId:activeKey,videoId:c.videoId,choice});
           if(choice==='cancel') replyText='ביטלתי, ולא הורדתי כלום. על מה תרצה שנמשיך לדבר?';
           else if(call.selfTest) replyText='בחרת '+(choice==='video'?'וידאו':'קובץ שמע')+' עבור '+c.title+'.';
@@ -4988,6 +5018,7 @@ async function callHandler(call) {
           }
           else if(r?.reply) {
             replyText=r.reply; turnContext.ext3Ref=r.ref||null; ext3Done=true;
+            pendingChoices=r.choices&&Object.keys(r.choices).length?r.choices:null;
             if(call.selfTest) call.selfTest.lastRef=r.ref||null;
             if(r.play) { pendingPlay=r.play; console.info('[EXT3_MEDIA] playing from the library, no download',{callId:activeKey,files:r.play.paths.length}); }
             if(r.confirm) { if(!call.selfTest) void ext2Wake('confirm offered'); pendingConfirm=r.confirm; if(call.selfTest) call.selfTest.lastConfirm=r.confirm; console.info('[EXT3_MEDIA] asking to confirm before download',{callId:activeKey,videoId:r.confirm.videoId}); }

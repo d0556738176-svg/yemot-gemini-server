@@ -251,12 +251,36 @@ export function cleanDescription(text) {
     .split(/\n+/).filter(l => !/(?:follow|subscribe|instagram|facebook|tiktok|spotify|להזמנת הופעות|ניהול אישי|ייצוג|הצטרפו|הירשמו|לפרטים|הזמנות|חייגו|join the channel|prod\.? by)/i.test(l)).join(' ')
     .replace(/\s+/g, ' ').trim();
 }
+// Words that describe what he wants (full, newest, find me on YouTube), not
+// words that must appear in the title: "ארץ נהדרת פרק מלא הכי חדש" searches
+// "ארץ נהדרת", long, newest first.
+const YT_FILLER = /(?:^|\s)(?:תמצאי|תמצא|תמצאו|מצאי|תחפשי|תחפש|חפשי|תביאי|תביא|לי|בבקשה|אני|רוצה|מחפש|ביוטיוב|ביויוטב|יוטיוב|יויוטב|ביוטוב|youtube|באורך|מלא|המלא|מלאה|המלאה|ארוך|הארוך|ארוכה|הכי|חדש|החדש|חדשה|החדשה|חדשים|האחרון|אחרון|האחרונה|אחרונה|ביותר|שיצא|שיצאה|עכשיו|לאחרונה|את|של|גם|רק|תשמיעי|תשמיע|להשמיע|לשמוע|תורידי|תוריד|להוריד|סרטון|הסרטון|ה?ו?וידי?או|קליפ|הקליפ)(?=$|\s)/gu;
+export function ytSubject(q) {
+  const t = ' ' + String(q || '').replace(/[,.!?:;"'״׳()\-–]/g, ' ').replace(/\s+/g, ' ') + ' ';
+  let out = t, prev;
+  do { prev = out; out = out.replace(YT_FILLER, ' '); } while (out !== prev);
+  out = out.replace(/\s+/g, ' ').trim();
+  return out.length >= 2 ? out : String(q || '').trim();
+}
+export const NEWEST = /(?:הכי חדש|הכי חדשה|האחרון|האחרונה|החדש ביותר|החדשה ביותר|הכי עדכני|שיצא עכשיו|שיצא השבוע|שיצא לאחרונה|newest|latest)/iu;
+/** A title fit to read aloud and to put before a key: no "(Prod. by ...)", pipes or commas. */
+export function cleanTitle(t) {
+  return String(t || '')
+    .replace(/[\(\[][^)\]]*(?:prod|official|video|audio|lyrics|קליפ רשמי|רשמי|hd|4k)[^)\]]*[\)\]]/giu, ' ')
+    .replace(/(?:prod\.?|produced)\s*(?:by)?\s*[^|,]*$/iu, ' ')
+    .replace(/(?:official\s*(?:music)?\s*video|official audio|הקליפ הרשמי|קליפ רשמי)/giu, ' ')
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ')
+    .replace(/[|,.:;!?#*_"~]+/g, ' ').replace(/\s+-\s+/g, ' - ').replace(/\s+/g, ' ').replace(/^[\s-]+|[\s-]+$/g, '').trim();
+}
 export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, recentDays = 0, order = 'relevance', exclude = [], env, fetchImpl, proxy, regionCode = 'IL' } = {}) {
-  const qs = [...new Set((queries || []).map(q => String(q || '').trim()).filter(q => q.length >= 2))].slice(0, 3);
+  const qs = [...new Set((queries || []).map(q => String(q || '').trim()).filter(q => q.length >= 2).map(q => /[֐-׿]/.test(q) ? ytSubject(q) : q))].slice(0, 3);
   const duration = minMinutes >= 20 ? 'long' : (maxMinutes && maxMinutes <= 4) ? 'short' : (minMinutes >= 4 && (!maxMinutes || maxMinutes <= 20)) ? 'medium' : 'any';
-  const lists = await Promise.allSettled(qs.map(q => youtubeGet('search', {
-    part: 'snippet', q, type: 'video', maxResults: 15, safeSearch: 'strict', regionCode, relevanceLanguage: /[a-z]/i.test(q) && !/[֐-׿]/.test(q) ? 'en' : 'he', videoDuration: duration,
-    order: order === 'date' ? 'date' : order === 'views' ? 'viewCount' : 'relevance',
+  // "Newest": a relevance search and a date search together, then the newest
+  // of the ones that are really about it (a date-only search brings noise).
+  const plan = order === 'date' ? [...qs.map(q => [q, 'relevance']), [qs[0], 'date']] : qs.map(q => [q, order === 'views' ? 'viewCount' : 'relevance']);
+  const lists = await Promise.allSettled(plan.map(([q, ord]) => youtubeGet('search', {
+    part: 'snippet', q, type: 'video', maxResults: order === 'date' ? 25 : 15, safeSearch: 'strict', regionCode, relevanceLanguage: /[a-z]/i.test(q) && !/[֐-׿]/.test(q) ? 'en' : 'he', videoDuration: duration,
+    order: ord,
     ...(recentDays ? { publishedAfter: new Date(Date.now() - recentDays * 86400000).toISOString().replace(/\.\d+Z$/, 'Z') } : {})
   }, { env, fetchImpl, proxy })));
   const seen = new Set((exclude || []).map(String)), ids = [];
@@ -286,7 +310,13 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, rece
   if (minMinutes) videos = videos.filter(v => v.durationSec >= minMinutes * 60 * 0.75);
   if (maxMinutes) videos = videos.filter(v => v.durationSec <= maxMinutes * 60 * 1.25);
   // Relevance order from YouTube, nudged by popularity (or newest / most viewed when asked).
-  if (order === 'date') videos.sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
+  const subjectWords = String(qs[0] || '').replace(/[^\u0590-\u05FFa-zA-Z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 1 && !['שיר', 'השיר', 'פרק', 'הפרק', 'פרקים'].includes(w));
+  const subjectFit = v => { if (!subjectWords.length) return 1; const t = (String(v.title || '') + ' ' + String(v.channelTitle || '')).toLowerCase().replace(/[^\u0590-\u05FFa-z0-9 ]/g, ' '); return subjectWords.filter(w => t.includes(w.toLowerCase())).length / subjectWords.length; };
+  if (order === 'date') {
+    const top = Math.max(0, ...videos.map(subjectFit));
+    if (top >= 0.99) videos = videos.filter(v => subjectFit(v) >= 0.99);
+    videos.sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
+  }
   else if (order === 'views') videos.sort((a, b) => b.viewCount - a.viewCount);
   else {
     // The original song first: karaoke, covers, lyric and remix uploads only when he asked for one.
@@ -295,8 +325,8 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, rece
     const alt = v => (!askedAlt && ALT.test(v.title)) ? 8 : 0;
     // When he named a song, the titles that carry all of his words come first
     // ("אושר כהן דאון" -> the versions of "דאון"), and among those the original.
-    const STOP = new Set(['שיר', 'השיר', 'של', 'את', 'לי', 'סרטון', 'הסרטון', 'בבקשה', 'קליפ', 'הקליפ']);
-    const qWords = String((queries || [])[0] || '').replace(/[^\u0590-\u05FFa-zA-Z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 1 && !STOP.has(w));
+    const STOP = new Set(['שיר', 'השיר', 'של', 'את', 'לי', 'סרטון', 'הסרטון', 'בבקשה', 'קליפ', 'הקליפ', 'פרק', 'הפרק', 'פרקים']);
+    const qWords = String(qs[0] || '').replace(/[^\u0590-\u05FFa-zA-Z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 1 && !STOP.has(w));
     const fit = v => { if (!qWords.length) return 0; const t = String(v.title || '').toLowerCase(); return qWords.filter(w => t.includes(w.toLowerCase())).length / qWords.length; };
     const best = Math.max(0, ...videos.map(fit));
     if (qWords.length && qWords.length <= 6 && best >= 0.99) videos = videos.filter(v => fit(v) >= 0.99);
@@ -304,6 +334,15 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, rece
     videos.sort((a, b) => (rank.get(a.videoId) + alt(a) - rank.get(b.videoId) - alt(b)) - 4 * (Math.log10(b.viewCount + 10) - Math.log10(a.viewCount + 10)));
   }
   return videos.slice(0, 10);
+}
+
+/** The full title first, then 1 audio / 2 video / 3 cancel; nothing is downloaded before a choice. */
+export function confirmFor(v, mode = 'audio') {
+  return {
+    confirm: { videoId: v.videoId, title: v.title, channelTitle: v.channelTitle, durationSec: v.durationSec, mode },
+    reply: 'לפני שאני מורידה, רק לוודא שזה הסרטון הנכון: ' + v.title + (v.channelTitle ? ', בערוץ ' + v.channelTitle : '') + (v.durationSec ? ', אורכו ' + spokenDuration(v.durationSec) : '') + '. ' +
+      'להורדת קובץ שמע הקש 1, להורדת וידאו הקש 2, לביטול והמשך השיחה הקש 3. אפשר גם לומר אחת, שתיים או שלוש.'
+  };
 }
 
 export function videoRef(v) {
@@ -571,6 +610,9 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   }
   if ((plan.intent === 'video_find' || plan.intent === 'video_play') && !plan.minMinutes && /(?:ארוך|ארוכה|ארוכים|מלא|שעה)/u.test(utterance)) plan.minMinutes = /שעה/u.test(utterance) ? 40 : 20;
   if ((plan.intent === 'video_find' || plan.intent === 'video_play') && !plan.maxMinutes && /(?:שיר בודד|סינגל|שיר אחד|לא סט|בלי סט|לא רוצה סט)/u.test(utterance)) plan.maxMinutes = 8;
+  // "The newest / the latest episode": newest first among the real matches, with
+  // no date cut-off (a show's last full episode can be months old).
+  if ((plan.intent === 'video_find' || plan.intent === 'video_play') && NEWEST.test(utterance)) { plan.order = 'date'; plan.recentDays = 0; }
   if (!video && plan.intent === 'video_about') plan.intent = 'recall';
   // A video download only when the caller said so.
   plan.play = /(?:להוריד|תוריד|תורידי|הורד|הורדה|הורדת).{0,25}(?:וידאו|וידיאו|ווידאו|סרטון עצמו|הסרטון)|(?:וידאו|וידיאו|ווידאו).{0,15}(?:להוריד|תוריד|תורידי)|כן לוידאו/u.test(utterance) ? 'video' : 'audio';
@@ -602,8 +644,10 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     const lib = deps.library ? await deps.library().catch(() => []) : [];
     if (!lib.length) return out({ reply: 'עוד לא מצאתי שירים שהורדו ושמורים במערכת. אפשר לבקש ממני שיר או סרטון, ואמצא ואוריד אותו בשבילך.' });
     const recent = [...lib].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 6);
-    return out({ reply: 'יש אצלך במערכת ' + lib.length + ' שירים וקבצים שכבר הורדו, והם מתנגנים מיד בלי הורדה נוספת. האחרונים שהורדו: ' +
-      recent.map((x, i) => 'לשמיעת ' + clip(x.title, 70) + ' הקש ' + (i + 1)).join(', ') + '. אפשר גם לבקש כל שיר אחר בשמו.' });
+    const choices = {};
+    recent.forEach((x, i) => { choices[String(i + 1)] = { type: 'play', item: x }; });
+    return out({ choices, reply: 'יש אצלך במערכת ' + lib.length + ' שירים וקבצים שכבר הורדו, והם מתנגנים מיד בלי הורדה נוספת. האחרונים שהורדו: ' +
+      recent.map((x, i) => 'לשמיעת ' + clip(cleanTitle(x.title), 60) + ' הקש ' + (i + 1)).join(', ') + '. אפשר גם לבקש כל שיר אחר בשמו.' });
   }
 
   if (plan.intent === 'video_play') {
@@ -611,7 +655,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     // asked to download it again).
     const lib = deps.library && !AGAIN.test(utterance) ? await deps.library().catch(() => []) : [];
     const fromLib = item => out({ ref: { type: 'video', videoId: item.videoId, title: item.title }, play: { paths: [item.path], durationSec: 0, title: item.title },
-      reply: clip(item.title, 140) + ' כבר שמור אצלך במערכת, אז לא צריך להוריד אותו שוב. משמיעה אותו עכשיו.' });
+      reply: clip(cleanTitle(item.title), 140) + ' כבר שמור אצלך במערכת, אז לא צריך להוריד אותו שוב. משמיעה אותו עכשיו.' });
     if (lib.length) {
       const pointsAtItEarly = /(?:אותו|אותה|הזה|הזאת|את זה|שלו|שלה|שהמלצת|שאמרת|שדיברנו|שמצאת)/u.test(utterance);
       const ownName = !pointsAtItEarly && rules.intent === 'video_play' && rules.ytHe && rules.ytHe.length >= 3 ? rules.ytHe : (plan.ytHe || '');
@@ -631,18 +675,14 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     // The old video only when every word he said is in its title ("אושר כהן דאון" is not "אושר כהן - אין אותי").
     if (video && (!named || pointsAtIt || overlap(named, video.title) >= 0.85)) v = video;
     else if (named) {
-      const found = await (deps.findVideos || findVideos)([named, plan.ytEn], { minMinutes: plan.minMinutes, maxMinutes: plan.maxMinutes, env: deps.env, fetchImpl: deps.fetchImpl, proxy: deps.youtubeProxy }).catch(() => []);
+      let found = await (deps.findVideos || findVideos)([named, plan.ytEn], { minMinutes: plan.minMinutes, maxMinutes: plan.maxMinutes, order: plan.order === 'date' ? 'date' : 'relevance', env: deps.env, fetchImpl: deps.fetchImpl, proxy: deps.youtubeProxy }).catch(() => []);
+      if (!found.length && plan.minMinutes) found = await (deps.findVideos || findVideos)([named, plan.ytEn], { maxMinutes: plan.maxMinutes, order: plan.order === 'date' ? 'date' : 'relevance', env: deps.env, fetchImpl: deps.fetchImpl, proxy: deps.youtubeProxy }).catch(() => []);
       if (found[0]) v = videoRef(found[0]);
     }
     const inLib = v && lib.find(x => x.videoId === v.videoId);
     if (inLib) return fromLib(inLib);
     if (!v) return out({ reply: 'עוד לא בחרנו סרטון מסוים. ספר לי את שם השיר או הסרטון שאתה רוצה, ואמצא לך אותו ביוטיוב.' });
-    return out({
-      ref: v,
-      confirm: { videoId: v.videoId, title: v.title, channelTitle: v.channelTitle, durationSec: v.durationSec, mode: plan.play },
-      reply: 'לפני שאני מורידה, רק לוודא שזה הסרטון הנכון: ' + v.title + (v.channelTitle ? ', בערוץ ' + v.channelTitle : '') + (v.durationSec ? ', אורכו ' + spokenDuration(v.durationSec) : '') + '. ' +
-        'להורדת קובץ שמע הקש 1, להורדת וידאו הקש 2, לביטול והמשך השיחה הקש 3. אפשר גם לומר אחת, שתיים או שלוש.'
-    });
+    return out({ ref: v, ...confirmFor(v, plan.play) });
   }
 
   if (plan.intent === 'video_find') {
@@ -655,10 +695,20 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     if (!found.length && plan.recentDays) {
       try { found = await (deps.findVideos || findVideos)(queries, { minMinutes: plan.minMinutes, maxMinutes: plan.maxMinutes, recentDays: Math.max(60, plan.recentDays * 4), order: plan.order, exclude: seenIds, env: deps.env, fetchImpl: deps.fetchImpl, proxy: deps.youtubeProxy }); } catch {}
     }
-    if (!found.length) return out({ reply: 'חיפשתי ביוטיוב ולא מצאתי סרטון שמתאים בדיוק למה שביקשת. אפשר לתאר לי במילים אחרות את הנושא, או לומר אם חשוב לך שיהיה בעברית או באורך מסוים, ואחפש שוב.' });
+    // Step by step, each looser than the one before, until something real is found:
+    // the planner's words, then his own words cleaned, without the length, without the date.
+    const search = (qq, o) => (deps.findVideos || findVideos)(qq, { minMinutes: plan.minMinutes, maxMinutes: plan.maxMinutes, recentDays: plan.recentDays, order: plan.order, exclude: seenIds, env: deps.env, fetchImpl: deps.fetchImpl, proxy: deps.youtubeProxy, ...o }).catch(() => []);
+    let relaxed = '';
+    const own = ytSubject(utterance);
+    if (!found.length && own && own !== ytSubject(queries[0])) found = await search([own, plan.ytEn].filter(Boolean), {});
+    if (!found.length && plan.minMinutes) { found = await search([own || queries[0], ...queries].slice(0, 3), { minMinutes: 0, recentDays: 0 }); if (found.length) relaxed = 'length'; }
+    if (!found.length && plan.recentDays) { found = await search(queries, { recentDays: 0 }); if (found.length) relaxed = 'date'; }
+    if (!found.length) return out({ reply: 'חיפשתי ביוטיוב את ' + (own || queries[0]) + ' בכמה דרכים, ולא מצאתי סרטון שמתאים למה שביקשת. ייתכן שזה פשוט לא עלה ליוטיוב. אפשר לומר לי את השם בצורה אחרת, למשל שם הערוץ או שם הפרק, ואחפש שוב.' });
     const instruction = 'המתקשר ביקש המלצה על סרטון. לפניך רשימת סרטונים אמיתיים שנמצאו עכשיו ביוטיוב, עם הכותרת המדויקת, הערוץ, האורך בדקות, מספר הצפיות, תאריך הפרסום והתיאור. ' +
       'בחרי את הסרטון המתאים ביותר לבקשה: קודם שיתאים בדיוק לנושא, לסוג (שיר בודד, סט, הרצאה), לשפה, לאורך ולמידת החדשות שביקש, ובין המתאימים עדיף סרטון איכותי ופופולרי. אסור להמליץ על סרטון שאינו ברשימה, ואסור לשנות את הכותרת, הערוץ, האורך או התאריך. ' +
       'בתשובה אמרי את הכותרת המדויקת כפי שהיא (ואם היא בשפה זרה גם תרגום לעברית), את שם הערוץ, את האורך, מתי פורסם ואת מספר הצפיות, ותארי בעברית במילים שלך על מה הסרטון רק לפי התיאור שלו, בלי להמציא. ' +
+      (relaxed === 'length' ? 'חשוב: לא נמצא ביוטיוב סרטון באורך מלא כפי שביקש. אמרי לו זאת בכנות במשפט אחד (ייתכן שהפרקים המלאים לא עולים ליוטיוב), והציעי את הקרוב ביותר מהרשימה. ' : '') +
+      (plan.order === 'date' ? 'הוא ביקש את החדש ביותר: הרשימה ממוינת מהחדש לישן, אז עדיף את הראשון שמתאים לנושא, ואמרי מתי פורסם. ' : '') +
       'סיימי בכך שאפשר לומר "תשמיעי לי אותו" כדי לשמוע או להוריד אותו. ' +
       'החזר JSON בלבד בצורה {"pick":מספר i של הסרטון הנבחר,"answer":"התשובה למתקשר"}.';
     let pick = 0, reply = '';
@@ -677,7 +727,14 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
         (v.description && !/(?:@|www|\.com|טלפון|הופעות|יחסי ציבור|אינסטגרם|פייסבוק|instagram|facebook|ניהול|הזמנות|לפרטים)/i.test(clip(v.description, 220)) ? 'לפי התיאור שלו: ' + clip(v.description, 220) + ' ' : '') +
         'אם תרצה לשמוע או להוריד אותו, אמור תשמיעי לי אותו.';
     }
-    return out({ ref: videoRef(v), reply });
+    // The other good options, by key: pressing one says its full title and asks before any download.
+    const others = found.filter((x, i) => i !== pick).slice(0, 2);
+    const choices = {};
+    if (others.length) {
+      [v, ...others].forEach((x, i) => { choices[String(i + 1)] = { type: 'video', video: videoRef(x) }; });
+      reply = reply.replace(/[.\s]*$/, '. ') + 'ואם תרצה לבחור במקשים: ' + [v, ...others].map((x, i) => 'ל' + clip(cleanTitle(x.title), 55) + ' הקש ' + (i + 1)).join(', ') + '.';
+    }
+    return out({ ref: videoRef(v), reply, ...(others.length ? { choices } : {}) });
   }
 
   if (plan.intent === 'video_about' && video) {

@@ -414,3 +414,57 @@ test('a speaking style is switched on, followed in answers, and switched off', a
   assert.equal(off.styleReset, true);
   assert.match(off.reply, /רגיל/);
 });
+
+test('13.11: subject words, not "full / newest / find me on YouTube"', async () => {
+  const { ytSubject, cleanTitle, NEWEST } = await import('../ext3-brain.js');
+  assert.equal(ytSubject('ארץ נהדרת תמצאי לי ביוטיוב באורך מלא הכי חדש'), 'ארץ נהדרת');
+  assert.equal(ytSubject('ארץ נהדרת פרק מלא חדש'), 'ארץ נהדרת פרק');
+  assert.ok(NEWEST.test('ארץ נהדרת הפרק האחרון'));
+  const t = cleanTitle('ElaytZur Aviv alush Stam Tamim אלייצור ואביב אלוש סתם תמים , Prod. by N.B.G X Shay Vagus');
+  assert.ok(!/[,.]/.test(t) && !/Prod/i.test(t), t);
+  assert.match(t, /סתם תמים/);
+});
+
+test('13.11: "newest full episode" -> newest long match, even without the words in the title', async () => {
+  const items = [
+    { id: 'promo000001', snippet: { title: 'ארץ נהדרת | פרומו', channelTitle: 'keshet', publishedAt: '2026-11-10T00:00:00Z' }, contentDetails: { duration: 'PT1M' }, statistics: { viewCount: '5000' } },
+    { id: 'old00000001', snippet: { title: 'ארץ נהדרת עונה 22 פרק 3', channelTitle: 'keshet', publishedAt: '2025-01-01T00:00:00Z' }, contentDetails: { duration: 'PT45M' }, statistics: { viewCount: '900000' } },
+    { id: 'new00000001', snippet: { title: 'ארץ נהדרת | עונה 23 פרק 5', channelTitle: 'keshet', publishedAt: '2026-11-01T00:00:00Z' }, contentDetails: { duration: 'PT44M' }, statistics: { viewCount: '20000' } },
+    { id: 'other000001', snippet: { title: 'פודקאסט על טלוויזיה', channelTitle: 'pod', publishedAt: '2026-11-12T00:00:00Z' }, contentDetails: { duration: 'PT60M' }, statistics: { viewCount: '100' } }
+  ];
+  const queries = [];
+  const fetchImpl = async url => { if (String(url).includes('/search')) queries.push(new URL(url).searchParams.get('q')); return { ok: true, json: async () => String(url).includes('/search') ? { items: items.map(i => ({ id: { videoId: i.id } })) } : { items } }; };
+  const found = await findVideos(['ארץ נהדרת פרק מלא הכי חדש'], { minMinutes: 20, order: 'date', env: { YOUTUBE_API_KEY: 'k' }, fetchImpl });
+  assert.equal(found[0].videoId, 'new00000001');
+  assert.ok(!found.some(v => v.videoId === 'promo000001' || v.videoId === 'other000001'));
+  assert.ok(queries.every(q => !/מלא|חדש/.test(q)), queries.join('|'));
+});
+
+test('13.11: the library list gives structured key choices with clean titles', async () => {
+  const lib = [{ videoId: 'stamtamim01', title: 'Stam Tamim סתם תמים , Prod. by N.B.G', path: '/7/020', at: '2026-11-12T10:00:00Z' }, ...libSongs];
+  const { deps } = baseDeps([], { library: async () => lib });
+  const r = await ext3Turn({ utterance: 'איזה שירים כבר הורדתי', now }, deps);
+  assert.equal(r.choices['1'].item.path, '/7/020');
+  assert.equal(r.choices['1'].type, 'play');
+  assert.ok(!/Prod/.test(r.reply));
+  const keys = parseKeyOptions(r.reply);
+  assert.deepEqual(Object.keys(keys).sort(), ['1', '2', '3']);
+});
+
+test('13.11: a video recommendation offers the other options by key', async () => {
+  const vids = ['a', 'b', 'c'].map((x, i) => ({ videoId: x.repeat(11), title: 'ארץ נהדרת פרק ' + (i + 1), channelTitle: 'keshet', durationSec: 2700, viewCount: 100, publishedAt: '2026-11-01', description: '' }));
+  const { deps } = baseDeps(['{"intent":"video_find","yt_he":"ארץ נהדרת","min_minutes":20}', '{"pick":0,"answer":"מצאתי את ארץ נהדרת פרק 1, בערוץ keshet."}'], { findVideos: async () => vids });
+  const r = await ext3Turn({ utterance: 'תמצאי לי ביוטיוב את ארץ נהדרת באורך מלא הכי חדש', now }, deps);
+  assert.equal(r.intent, 'video_find');
+  assert.equal(r.choices['2'].video.videoId, 'bbbbbbbbbbb');
+  assert.match(r.reply, /הקש 3/);
+});
+
+test('13.11: nothing long found -> the closest one, said honestly', async () => {
+  const short = { videoId: 'shortshort1', title: 'ארץ נהדרת מערכון', channelTitle: 'keshet', durationSec: 300, viewCount: 100, publishedAt: '2026-11-01', description: '' };
+  const calls = [];
+  const { deps, prompts } = baseDeps(['{"intent":"video_find","yt_he":"ארץ נהדרת","min_minutes":20}', '{"pick":0,"answer":"פרקים מלאים לא מצאתי. הכי קרוב: ארץ נהדרת מערכון"}'], { findVideos: async (q, o) => { calls.push(o); return o.minMinutes ? [] : [short]; } });
+  const r = await ext3Turn({ utterance: 'ארץ נהדרת באורך מלא', now }, deps);
+  assert.equal(r.ref.videoId, 'shortshort1');
+  assert.match(prompts.at(-1).p, /לא נמצא ביוטיוב סרטון באורך מלא/);
+});
