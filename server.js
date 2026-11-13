@@ -7,6 +7,9 @@ import { readFileSync } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.js';
+import { createSongCallHandler } from './song-ivr.js';
+import { handleWorkerCallback, isCloudWorkerConfigured } from './song-cloud.js';
+import { getSongProviderHealth } from './song-generator.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
 import { keySlots, keysFor, withKeys, keyReport, isDeadKey, markDeadKey } from './key-slots.js';
@@ -5917,6 +5920,25 @@ function latestYemotValue(query) {
   const vals = Object.keys(query || {}).map(k => /^val_(\d+)$/.exec(k)).filter(Boolean).sort((a, b) => Number(b[1]) - Number(a[1]));
   return vals.length ? String(query[vals[0][0]] ?? '') : null;
 }
+// ---------- Extension 4: AI song maker (owner, 12-13.11) ----------
+// Lyrics: the same independent text models as the rest of the system (Gemini
+// last). Music: the official ACE-Step model on a free GitHub runner, which
+// posts the finished song back to /song-worker/callback.
+const songGenerateText = async prompt => {
+  try {
+    const text = await raceSynthesis(prompt, 25000, { maxTokens: 1800, quality: true });
+    if (String(text || '').includes('{')) return String(text);
+  } catch (e) { console.warn('[SONG] lyrics via fast providers failed', String(e?.message || e).slice(0, 120)); }
+  const result = await generateWithRetry([{ role: 'user', parts: [{ text: prompt }] }], false, false, 30000);
+  return String(result?.response?.text?.() || '');
+};
+const songCallHandler = createSongCallHandler({
+  yemotApi, transcribePhoneAudio, generateText: songGenerateText,
+  sanitizeForYemot, withTimeout, getCallerNumber, logDetailedError
+});
+app.post('/song-worker/callback', rateLimit(60, 60 * 1000, 'song-worker'), express.raw({ type: () => true, limit: '40mb' }), handleWorkerCallback);
+app.get('/health/songs', rateLimit(10, 60 * 1000, 'song-health'), (req, res) => res.json({ ok: true, cloudWorker: isCloudWorkerConfigured(), ...getSongProviderHealth() }));
+
 app.get(['/yemot', '/yemot-backup'], (req, res, next) => {
   if (req.query?.hangup === 'yes') return next();
   const starKeys = Object.entries(req.query || {}).filter(([k, v]) => /^val_\d+$/.test(k) && String(v).includes('*')).map(([k, v]) => k + '=' + String(v).slice(0, 20));
@@ -5936,6 +5958,8 @@ router.get('/yemot-backup', call => callPersona.run({persona:'female',branch:'3'
 router.get('/yemot-youtube', youtubeCallHandler);
 // Extension 5: live internet broadcast channels, opened only when the owner turns them on.
 router.get('/yemot-live', liveBroadcastHandler);
+// Extension 4: AI song maker.
+router.get('/yemot-song', songCallHandler);
 app.use(router);
 
 app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDashboardAuth, (req,res)=>res.json({
@@ -6294,6 +6318,15 @@ async function configureYemotStructure() {
       }
     } catch(e) {
       console.warn('[Yemot automatic setup] extension 3 setup failed',String(e?.message||e).slice(0,200));
+    }
+  }
+  // Extension 4: AI song maker (owner, 13.11). Non-fatal.
+  // Only once a music engine is connected, so callers never reach a dead extension.
+  if (process.env.BRANCH4_AUTO_CONFIGURE !== 'false' && isCloudWorkerConfigured()) {
+    try { await updateExtension('ivr2:/4',{type:'api',api_link:publicUrl + '/yemot-song',title:'יוצר השירים'}); }
+    catch(e) {
+      console.warn('[Yemot automatic setup] extension 4 setup failed',String(e?.message||e).slice(0,200));
+      try { await updateExtension('ivr2:/4',{type:'api',api_link:publicUrl + '/yemot-song'}); } catch {}
     }
   }
   try { await configureLiveExtension(publicUrl); }
