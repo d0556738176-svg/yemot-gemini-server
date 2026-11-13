@@ -2575,16 +2575,16 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     // In quality mode the small fast model is a reserve: it joins only if the
     // strong models have not answered after a short wait (they hit free-tier
     // rate limits under load, and the caller must never get raw excerpts).
-    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(isExt3()?(process.env.EXT3_RESERVE_MS||3500):(process.env.BRANCH1_QUALITY_RESERVE_MS||2500)):0},
+    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(isExt3()?(process.env.EXT3_RESERVE_MS||4500):(process.env.BRANCH1_QUALITY_RESERVE_MS||2500)):0},
     {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim(),big:true},
     // Extension 3 staggers the backups instead of firing every provider at
     // once: one strong answer per turn, so the free per-minute quotas last the
     // whole call (08.11: all providers were rate-limited by the second call).
-    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),delayMs:isExt3()?Number(process.env.EXT3_OPENROUTER_DELAY_MS||2500):0},
+    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),delayMs:isExt3()?Number(process.env.EXT3_OPENROUTER_DELAY_MS||3000):0},
     ...extraFastProviders(true),
     // Owner, 10.11: Groq counts each model's free quota separately, so more
     // strong models on the same key = more answers before "rate limited".
-    ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?2500+i*600:0}))
+    ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?5500+i*800:0}))
   ]) {
     if(!provider.apiKey||isDeadKey(provider.apiKey)) continue;
     racers.push((provider.delayMs?new Promise(r=>setTimeout(r,provider.delayMs)).then(()=>{ if(raceDone) throw Object.assign(new Error('not needed'),{status:499}); }):Promise.resolve()).then(()=>callCompatibleChatCompletion({

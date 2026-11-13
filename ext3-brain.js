@@ -315,7 +315,10 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, rece
   if (order === 'date') {
     const top = Math.max(0, ...videos.map(subjectFit));
     if (top >= 0.99) videos = videos.filter(v => subjectFit(v) >= 0.99);
-    videos.sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
+    // The show's own uploads first (its channel, or a broadcaster), then talk about it.
+    const own = v => { const c = String(v.channelTitle || '').toLowerCase(); return subjectWords.length && subjectWords.every(w => c.includes(w.toLowerCase())) ? 2 : /(?:keshet|קשת|mako|מאקו|reshet|רשת|כאן|kan |kan11|ערוץ 14|now14|i24|חדשות 12|N12)/i.test(c) ? 1 : 0; };
+    const lead = v => String(v.title || '').toLowerCase().replace(/[^\u0590-\u05FFa-z0-9 ]/g, ' ').trim().startsWith(subjectWords.join(' ').toLowerCase()) ? 1 : 0;
+    videos.sort((a, b) => (own(b) - own(a)) || (lead(b) - lead(a)) || (Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0)));
   }
   else if (order === 'views') videos.sort((a, b) => b.viewCount - a.viewCount);
   else {
@@ -708,6 +711,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       'בחרי את הסרטון המתאים ביותר לבקשה: קודם שיתאים בדיוק לנושא, לסוג (שיר בודד, סט, הרצאה), לשפה, לאורך ולמידת החדשות שביקש, ובין המתאימים עדיף סרטון איכותי ופופולרי. אסור להמליץ על סרטון שאינו ברשימה, ואסור לשנות את הכותרת, הערוץ, האורך או התאריך. ' +
       'בתשובה אמרי את הכותרת המדויקת כפי שהיא (ואם היא בשפה זרה גם תרגום לעברית), את שם הערוץ, את האורך, מתי פורסם ואת מספר הצפיות, ותארי בעברית במילים שלך על מה הסרטון רק לפי התיאור שלו, בלי להמציא. ' +
       (relaxed === 'length' ? 'חשוב: לא נמצא ביוטיוב סרטון באורך מלא כפי שביקש. אמרי לו זאת בכנות במשפט אחד (ייתכן שהפרקים המלאים לא עולים ליוטיוב), והציעי את הקרוב ביותר מהרשימה. ' : '') +
+      'אם הסרטונים שנמצאו אינם התוכנית או השיר עצמו אלא פודקאסט, ראיון, כתבה או קטע על הנושא, אמרי זאת בכנות במשפט אחד ("פרק מלא של התוכנית עצמה לא מצאתי ביוטיוב, אבל יש..."). ' +
       (plan.order === 'date' ? 'הוא ביקש את החדש ביותר: הרשימה ממוינת מהחדש לישן, אז עדיף את הראשון שמתאים לנושא, ואמרי מתי פורסם. ' : '') +
       'סיימי בכך שאפשר לומר "תשמיעי לי אותו" כדי לשמוע או להוריד אותו. ' +
       'החזר JSON בלבד בצורה {"pick":מספר i של הסרטון הנבחר,"answer":"התשובה למתקשר"}.';
