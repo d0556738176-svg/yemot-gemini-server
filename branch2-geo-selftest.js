@@ -11,8 +11,8 @@ const log = (...a) => console.info('[GEO_TEST]', ...a);
 
 export const GEO_CANDIDATES = [
   { id: 'dc_solutions~youtube-downloader-pro', input: url => ({ url, quality: 480, proxyConfiguration: { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'], apifyProxyCountry: 'IL' } }) },
-  { id: 'marielise.dev~youtube-video-downloader', input: url => ({ urls: [{ url }], format: 'mp3', residentialProxyMode: 'fallback', proxyCountry: 'IL' }) },
-  { id: 'utils~youtube-video-downloader', input: url => ({ videos: [{ url }], videoQuality: 'low' }) },
+  // Its country list has no IL (live 13.11); "" = automatic choice.
+  { id: 'marielise.dev~youtube-video-downloader', input: url => ({ urls: [{ url }], format: 'mp3', residentialProxyMode: 'fallback', proxyCountry: '' }) },
 ];
 
 function iso8601Seconds(d) {
@@ -85,10 +85,10 @@ export async function runGeoSelftest({ readMark, writeMark, env = process.env } 
   if (!video) return;
   const url = 'https://www.youtube.com/watch?v=' + video.videoId;
   for (const cand of GEO_CANDIDATES) {
-    const MARK = 'ivr2:/2/selftest/geo_' + cand.id.replace(/[^A-Za-z0-9]/g, '_') + '_v2.json';
+    const MARK = 'ivr2:/2/selftest/geo_' + cand.id.replace(/[^A-Za-z0-9]/g, '_') + '_v3.json';
     if (await readMark(MARK).catch(() => null)) continue;
     try {
-      const res = await tryEngine(token, cand, url, Math.min(1.2, Math.max(0.3, Math.ceil(video.seconds / 60) * 0.03 + 0.2)));
+      const res = await tryEngine(token, cand, url, Math.min(1.2, Math.max(0.5, Math.ceil(video.seconds / 60) * 0.03 + 0.35)));
       log('result', JSON.stringify({ video: video.videoId, seconds: video.seconds, ...res }));
       await writeMark(MARK, { at: new Date().toISOString(), video, ...res }).catch(() => {});
     } catch (e) {
