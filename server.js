@@ -5438,6 +5438,12 @@ app.listen(port,async()=>{
     console.info('[SMART_SEARCH_TEST_V6]',JSON.stringify(out));
     if(Object.values(out).every(x=>x.plan))await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
   })().catch(e=>console.warn('[SMART_SEARCH_TEST_V6] failed',String(e?.message||e).slice(0,160)));
+  // 13.11: Israel-only videos: live test of engines that download from Israel.
+  if(process.env.YOUTUBE_API_KEY) void (async()=>{
+    const { _pipeline } = await import('./youtube-authorized-playback.js');
+    const { runGeoSelftest } = await import('./branch2-geo-selftest.js');
+    await runGeoSelftest({ readMark:p=>_pipeline.readCacheJson(p), writeMark:(p,o)=>_pipeline.writeCacheJson(p,o) });
+  })().catch(e=>console.warn('[GEO_TEST] failed',String(e?.message||e).slice(0,200)));
   // One real song save after the naming change (05.11): same path as a caller's song.
   if(process.env.YOUTUBE_API_KEY&&process.env.APIFY_TOKEN) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
