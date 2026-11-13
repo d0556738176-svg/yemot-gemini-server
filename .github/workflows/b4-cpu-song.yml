@@ -39,6 +39,7 @@ jobs:
           key: acestep15-ckpt-turbo-v1
       - name: Install
         run: |
+          sudo apt-get -qq update && sudo apt-get -qq install -y ffmpeg > /dev/null
           mkdir -p out
           T0=$(date +%s)
           sudo mkdir -p /mnt/uvcache && sudo chown "$USER" /mnt/uvcache
