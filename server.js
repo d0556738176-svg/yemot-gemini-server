@@ -2560,7 +2560,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
       await new Promise(r=>setTimeout(r,Number(isExt3()?(process.env.EXT3_GEMINI_HEDGE_MS||2500):quality?(process.env.BRANCH1_QUALITY_GEMINI_HEDGE_MS||700):(process.env.BRANCH1_GEMINI_HEDGE_MS||1800))));
       if(raceDone) throw Object.assign(new Error('Gemini not needed'),{status:499});
     }
-    if(branch1PrimaryCooldown.isCoolingDown('primary')) throw Object.assign(new Error('Gemini cooling down'),{status:503});
+    if(branch1PrimaryCooldown.isCoolingDown('primary')) { console.info('[BRANCH1_WEB_SYNTH] Gemini resting after a failure; skipped'); throw Object.assign(new Error('Gemini cooling down'),{status:503}); }
     try {
       const r=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,true,geminiBudgetMs?Math.min(geminiBudgetMs,7500):null,Number(geminiBudgetMs||process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS||2200));
       branch1PrimaryCooldown.clear('primary');
@@ -2571,7 +2571,9 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
       return gt;
     } catch(err) {
       const st=geminiErrorStatus(err);
-      if([429,408,500,502,503,504].includes(st)) branch1PrimaryCooldown.cool('primary',st);
+      // 13.11: a slow answer is our own time limit (the planner gives Gemini 2.5 s),
+      // not a Gemini failure: resting all 7 keys for it left the answers with no Gemini.
+      if([429,500,502,503,504].includes(st)) branch1PrimaryCooldown.cool('primary',st);
       throw err;
     }
   })()]:[];

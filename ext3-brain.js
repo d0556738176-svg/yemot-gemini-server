@@ -108,7 +108,7 @@ export function plannerPrompt({ context, utterance, now, video, older = null, me
     'recall = שאלה על שיחות קודמות או על פרטים שהמתקשר סיפר על עצמו.',
     'בנוסף: כשהמתקשר נותן הוראה קבועה לגבי איך לדבר איתו או על מה לא לדבר (למשל "אל תדברי איתי על חדשות", "תמיד תעני קצר", "תקראי לי בשם דוד"), כתבי אותה בשדה instruction כמשפט ברור, אחרת השאירי ריק.',
     'החזר JSON בלבד, בלי טקסט נוסף, בצורה:',
-    '{"intent":"...","standalone":"השאלה כמשפט עצמאי וברור בעברית עם כל הפרטים מההקשר","search":"שאילתת חיפוש קצרה לאינטרנט אם intent=web או read_page","yt_he":"שאילתת חיפוש ביוטיוב בעברית: לסרטון/שיר שהמתקשר מתכוון אליו לפי ההקשר (למשל שם הזמר והשיר שדובר עליהם), לא המשפט שאמר","yt_en":"אותה שאילתה באנגלית אם מתאים","min_minutes":0,"max_minutes":0,"recent_days":0,"order":"relevance או date או views","play":"audio או video","continue_offer":false,"instruction":""}',
+    '{"intent":"...","standalone":"השאלה כמשפט עצמאי וברור בעברית עם כל הפרטים מההקשר","search":"שאילתת חיפוש קצרה לאינטרנט אם intent=web או read_page","searches":["כששאל כמה דברים שונים שצריך לחפש (למשל מזג אוויר וגם שער הדולר): שאילתה קצרה נפרדת לכל אחד, עד 3; אחרת רשימה ריקה"],"yt_he":"שאילתת חיפוש ביוטיוב בעברית: לסרטון/שיר שהמתקשר מתכוון אליו לפי ההקשר (למשל שם הזמר והשיר שדובר עליהם), לא המשפט שאמר","yt_en":"אותה שאילתה באנגלית אם מתאים","min_minutes":0,"max_minutes":0,"recent_days":0,"order":"relevance או date או views","play":"audio או video","continue_offer":false,"instruction":""}',
     'recent_days: כשביקש משהו חדש (השבוע=7, לאחרונה/חדש=30, היום=2). order: date כשביקש "הכי חדש", views כשביקש "הכי הרבה צפיות". שיר בודד = max_minutes 8, ואם אמר שאינו רוצה סט/רשימה/מיקס אל תחפשי סט.',
     'play = "video" רק כשהמתקשר ביקש במפורש להוריד את הווידאו/הסרטון עצמו. continue_offer = true כשהמתקשר רק מסכים להמשיך את מה שהוצע לו בתשובה הקודמת.',
     'min_minutes/max_minutes רק אם ביקש אורך (למשל "כשעה" = min 40).',
@@ -140,6 +140,7 @@ export function parsePlan(text) {
     intent: j.intent,
     standalone: str(j.standalone),
     search: str(j.search),
+    searches: Array.isArray(j.searches) ? j.searches.map(str).filter(x => x.length >= 3 && !/^כששאל/.test(x)).slice(0, 3) : [],
     ytHe: str(j.yt_he),
     ytEn: str(j.yt_en),
     minMinutes: Math.max(0, Number(j.min_minutes) || 0),
@@ -160,6 +161,12 @@ const POINT_WORD = /(?:אותו|אותה|זה|הזה|הזאת|שלו|שלה)(?![
 // He points back at something found earlier in this call, not at the last thing said.
 export const BACKREF = /(?:ש(?:אמרת|מצאת|הצעת|המלצת|דיברנו|הזכרת|אמרתי|ביקשתי)|לפני כן|מקודם|קודם|הקודם|הקודמת|ההוא|ההיא)(?![\u0590-\u05FF])/u;
 const ORDINALS = [[/(?:ה?ראשון|ה?ראשונה|אפשרות (?:1|אחת)|מספר (?:1|אחת))(?![\u0590-\u05FF])/u, 0], [/(?:ה?שני|ה?שנייה|ה?שניה|אפשרות (?:2|שתיים)|מספר (?:2|שתיים))(?![\u0590-\u05FF])/u, 1], [/(?:ה?שלישי|ה?שלישית|אפשרות (?:3|שלוש)|מספר (?:3|שלוש))(?![\u0590-\u05FF])/u, 2]];
+/** "מה מזג האוויר בירושלים וגם כמה עולה דולר" -> two separate searches. */
+export function splitRequests(text) {
+  const t = String(text || '').replace(/^(?:תגידי לי|תגיד לי|תבדקי לי|תבדוק לי|אני רוצה לדעת)\s+/u, '');
+  const parts = t.split(/\s*(?:,\s*)?(?:וגם|ובנוסף|ועוד|וגם תגידי|ותגידי לי גם)\s+/u).map(x => x.trim()).filter(x => x.split(/\s+/).length >= 2);
+  return parts.length >= 2 ? parts.slice(0, 3) : [];
+}
 export function ordinalOption(text, options) {
   if (!Array.isArray(options) || options.length < 2) return null;
   for (const [re, i] of ORDINALS) if (re.test(text) && options[i]) return options[i];
@@ -850,16 +857,26 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
         return out({ reply });
       }
     }
-    const queries = [...new Set([q1, plan.standalone, hours ? q1.replace(/\s*(?:עכשיו|כרגע|היום)\s*/g, ' ') + ' שעות פתיחה' : ''].filter(Boolean))].slice(0, 3);
+    // Several things to look up in one sentence ("the weather and also the dollar"):
+    // one search for each, and sources from each of them (13.11: the dollar was lost).
+    const parts = (plan.searches || []).length >= 2 ? plan.searches : splitRequests(utterance);
+    const multi = parts.length >= 2;
+    const queries = multi ? parts.slice(0, 3) : [...new Set([q1, plan.standalone, hours ? q1.replace(/\s*(?:עכשיו|כרגע|היום)\s*/g, ' ') + ' שעות פתיחה' : ''].filter(Boolean))].slice(0, 3);
     const sets = await Promise.allSettled(queries.map(q => deps.webSearch(q, { timeoutMs: 4500 })));
     const seen = new Set(), results = [];
-    for (const s of sets) for (const r of (s.status === 'fulfilled' ? s.value || [] : [])) {
-      const key = String(r.url || '').replace(/[#?].*$/, '');
-      if (!r.url || seen.has(key)) continue;
-      seen.add(key); results.push(r);
+    const lists = sets.map(s => (s.status === 'fulfilled' ? s.value || [] : []).filter(r => r?.url).sort((a, b) => sourceRank(a.url) - sourceRank(b.url)));
+    if (multi) {
+      // Take turns between the parts, so every part keeps its best sources.
+      for (let i = 0; i < 8; i++) for (const l of lists) { const r = l[i]; if (!r) continue; const key = String(r.url).replace(/[#?].*$/, ''); if (!seen.has(key)) { seen.add(key); results.push(r); } }
+    } else {
+      for (const l of lists) for (const r of l) {
+        const key = String(r.url || '').replace(/[#?].*$/, '');
+        if (seen.has(key)) continue;
+        seen.add(key); results.push(r);
+      }
+      // Official sites first, then news, then the rest; social pages last.
+      results.sort((a, b) => sourceRank(a.url) - sourceRank(b.url));
     }
-    // Official sites first, then news, then the rest; social pages last.
-    results.sort((a, b) => sourceRank(a.url) - sourceRank(b.url));
     if (!results.length) {
       log.warn?.('[EXT3_BRAIN] web search found nothing; answering from knowledge with a caveat');
       const reply = await ask('חיפשת באינטרנט ולא נמצאו מקורות. ענה מהידע הכללי שלך רק על מה שאת בטוחה בו, ואמרי בפירוש שלא הצלחת לאמת עכשיו את הפרטים העדכניים.', '', { maxTokens: 1400 });
@@ -867,7 +884,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     }
     let pages = [];
     if (deps.readPages) {
-      const urls = results.filter(r => sourceRank(r.url) < 3).slice(0, 3).map(r => r.url);
+      const urls = results.filter(r => sourceRank(r.url) < 3).slice(0, multi ? 4 : 3).map(r => r.url);
       // Pages that answer within ~4 s are read; the rest stay as search snippets.
       pages = await Promise.race([deps.readPages(urls, { timeoutMs: 4000 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 4200).unref?.())]);
     }
@@ -883,7 +900,9 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     log.info?.('[EXT3_BRAIN] web research', { queries, results: results.length, pagesRead: pages.length, official: results.filter(r => sourceRank(r.url) === 0).length, sourceChars: sourceText.length });
     const verify = 'בדיקת אמינות לפני שאת עונה: השווי בין המקורות. כשהם סותרים, העדיפי את האתר הרשמי, אחריו את המקור העדכני ביותר, ואמרי במפורש על איזה מקור את מתבססת ("לפי האתר הרשמי של כללית"). אל תצטטי שני מקורות סותרים בלי להכריע או להסביר. ' +
       (hours ? 'זו שאלה על שעות פתיחה, ולכן כאן עני ממוקד וקצר יחסית (5 עד 8 משפטים) גם אם בדרך כלל את מרחיבה: האם פתוח עכשיו ועד מתי, השעות של היום ושל מחר, הכתובת והטלפון. בלי עצות שלא נשאלו. כתבי שעות תמיד מהמוקדמת למאוחרת, למשל משמונה בבוקר עד אחת בצהריים. אם אין לך התאמה ודאית למקום שביקש, אמרי זאת בשני משפטים ושאלי באיזו עיר הוא נמצא, בלי לפרט נתונים לא ודאיים. אם הסניף שמופיע במקורות נמצא בעיר או בשכונה אחרת ממה שהמתקשר אמר, אמרי איזה סניף מצאת ושאלי אם לזה התכוון. זו שאלה על שעות פתיחה: מצאי את שעות היום הנוכחי (' + now + '), חשבי בעצמך לפי השעה עכשיו האם המקום פתוח או סגור ברגע זה ועד מתי, ואמרי את זה בתחילת התשובה בבירור. אם אין שעות מפורשות ליום הזה, אמרי שאין לך שעות מאומתות להיום והציעי להתקשר למקום, עם מספר הטלפון אם מופיע. ' : '');
-    const reply = await ask('המתקשר צריך מידע עדכני ומדויק. לפניך מקורות אמיתיים מהאינטרנט שנאספו ונקראו עכשיו לשאלה הזאת בלבד. אל תערבבי בתשובה מידע מתשובות קודמות שאינו קשור לשאלה הזאת. ' + verify + (hours ? 'ענה ממוקד ובבהירות, רק לפי המקורות:' : 'ענה בהרחבה ובפירוט רק לפי המקורות:') + ' עובדות, מספרים, שמות ותאריכים בדיוק כפי שכתובים בהם. כשהמקורות לא עונים על חלק מהשאלה, אמרי שלא מצאת את החלק הזה. אל תקריאי כתובות אתרים ואל תאמרי "מקור 1".', 'מקורות:\n' + sourceText, { maxTokens: hours ? 700 : 1800, budgetMs: 14000, ctx: smallContext })
+    const reply = await ask('המתקשר צריך מידע עדכני ומדויק. לפניך מקורות אמיתיים מהאינטרנט שנאספו ונקראו עכשיו לשאלה הזאת בלבד. אל תערבבי בתשובה מידע מתשובות קודמות שאינו קשור לשאלה הזאת. ' + verify +
+      (multi ? 'הוא שאל כמה דברים: ' + parts.join('; ') + '. עני על כל אחד מהם בנפרד ולפי הסדר, ואם לאחד מהם אין תשובה במקורות, אמרי זאת. ' : '') +
+      'כשמדובר בתחזית או בנתון יומי, השתמשי רק בנתון של היום (' + now + ') ואל תקריאי ימים שכבר עברו. ' + (hours ? 'ענה ממוקד ובבהירות, רק לפי המקורות:' : 'ענה בהרחבה ובפירוט רק לפי המקורות:') + ' עובדות, מספרים, שמות ותאריכים בדיוק כפי שכתובים בהם. כשהמקורות לא עונים על חלק מהשאלה, אמרי שלא מצאת את החלק הזה. אל תקריאי כתובות אתרים ואל תאמרי "מקור 1".', 'מקורות:\n' + sourceText, { maxTokens: hours ? 700 : 1800, budgetMs: 14000, ctx: smallContext })
       .catch(e => {
         log.warn?.('[EXT3_BRAIN] web answer not written; saying what was found', { status: e?.status || 0 });
         const seenHost = new Set();

@@ -505,3 +505,15 @@ test('13.11: "the episode you said you found" returns to it instead of a new sea
   assert.equal(r.ref.videoId, clown.videoId);
   assert.match(r.reply, /The Killer Clown/);
 });
+
+test('13.11: two things to look up in one sentence -> a search for each, and both reach the answer', async () => {
+  const searched = [];
+  const { deps, prompts } = baseDeps(['{"intent":"web","search":"מזג אוויר ירושלים","searches":[]}', '{"answer":"בירושלים 20 מעלות, והדולר 3.6 שקלים"}'], {
+    webSearch: async q => { searched.push(q); return /דולר/.test(q) ? [{ url: 'https://www.boi.org.il/x/12345', title: 'שער הדולר', snippet: 'הדולר 3.6' }] : [{ url: 'https://ims.gov.il/he/forecast/12345', title: 'תחזית', snippet: '20 מעלות' }]; }
+  });
+  const r = await ext3Turn({ utterance: 'תגידי לי מה מזג האוויר בירושלים וגם כמה עולה דולר היום', now }, deps);
+  assert.equal(searched.length, 2);
+  assert.match(prompts.at(-1).p, /שער הדולר/);
+  assert.match(prompts.at(-1).p, /עני על כל אחד מהם בנפרד/);
+  assert.match(r.reply, /דולר/);
+});
