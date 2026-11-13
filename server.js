@@ -5466,6 +5466,16 @@ app.listen(port,async()=>{
     console.info('[ISRAEL_E2E] result',JSON.stringify(out));
     if(out.playbackPaths?.length)await p.writeCacheJson(MARK,{at:new Date().toISOString(),...out});
   })().catch(e=>console.warn('[ISRAEL_E2E] failed',String(e?.code||'')+' '+String(e?.message||e).slice(0,400)));
+  // 13.11: "כן לוידאו" for an Israel-only video, same job as a caller's.
+  if(process.env.APIFY_TOKEN&&process.env.YOUTUBE_API_KEY) void (async()=>{
+    const p=(await import('./youtube-authorized-playback.js'))._pipeline;
+    const MARK='ivr2:/2/selftest/israel_video_e2e_v1.json';
+    if(await p.readCacheJson(MARK).catch(()=>null))return;
+    await new Promise(r=>setTimeout(r,150000));
+    await p.writeCacheJson(MARK,{at:new Date().toISOString(),started:true});
+    console.info('[ISRAEL_VIDEO_E2E] as if the caller said "כן לוידאו" on an Israel-only video');
+    startYouTubeVideoJob({videoId:'SGbRCbhWK_8',title:'בלתי הפיך - אתה ילד לא חמוד בכלל'});
+  })().catch(e=>console.warn('[ISRAEL_VIDEO_E2E] failed',String(e?.message||e).slice(0,300)));
   // One real song save after the naming change (05.11): same path as a caller's song.
   if(process.env.YOUTUBE_API_KEY&&process.env.APIFY_TOKEN) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
