@@ -43,6 +43,19 @@ export async function fetchVideoDurationSeconds(videoId, env = process.env, fetc
 // only alternatives on failure are free native retries and the backup keys.
 // An existing run receipt keeps its own recorded actor (a run already paid
 // for is reused, never repeated).
-export async function pickApifyActor() {
+// Exception (owner, 13.11): a video YouTube allows only in Israel goes to our
+// own Israel engine (youtube-israel-engine.js), and only such a video, to
+// save money. BRANCH2_ISRAEL_ENGINE=off turns this off.
+export async function pickApifyActor(videoId, env = process.env, deps = {}) {
+  if (videoId && String(env.BRANCH2_ISRAEL_ENGINE || 'on') !== 'off') {
+    try {
+      const { fetchVideoFacts, engineCannotReach } = await import('./youtube-video-facts.js');
+      const facts = await (deps.fetchVideoFacts || fetchVideoFacts)(videoId, env);
+      if (facts && engineCannotReach(facts, env)) {
+        const { ISRAEL_ACTOR } = await import('./youtube-israel-engine.js');
+        return { actor: ISRAEL_ACTOR, fallback: null, seconds: facts.durationSeconds ?? null, reason: 'israel_only' };
+      }
+    } catch { /* facts unknown: the normal engine */ }
+  }
   return { actor: NATIVE_ACTOR, fallback: null, seconds: null, reason: 'native_only' };
 }

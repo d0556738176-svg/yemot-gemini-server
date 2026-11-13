@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { parseProviderProgress, parseNativeAttempts, boundedLogText } from './youtube-provider-progress.js';
+import { ISRAEL_ACTOR, actorIdFor, israelRunInput } from './youtube-israel-engine.js';
 // One durable run receipt per video. Never restart a paid run on a local
 // timeout, HTTP error, caller hangup or server restart.
 const API_BASE='https://api.apify.com/v2';
@@ -193,7 +194,8 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
         const nativeFormat=['opus','m4a','mp3'].includes(String(env.BRANCH2_NATIVE_AUDIO_FORMAT||'opus').trim())?String(env.BRANCH2_NATIVE_AUDIO_FORMAT||'opus').trim():'opus';
         // After a rejection the retry sends only the required fields, so an
         // optional limit the engine dislikes can never stop a download.
-        const payload=JSON.stringify(native?(startRun.minimal
+        const israel=useActor===ISRAEL_ACTOR;
+        const payload=israel?JSON.stringify(israelRunInput(id,'audio')):JSON.stringify(native?(startRun.minimal
           ?{videoUrls:[watch],format:'audio',audioFormat:nativeFormat,audioQuality:nativeQuality}
           :{videoUrls:[watch],format:'audio',audioFormat:nativeFormat,audioQuality:nativeQuality,storageProvider:'apify',metadataOnly:false,maxMinutes:limits.maxMinutes,maxMegabytes:limits.maxMegabytes}):{urls:[watch],videoUrls:[watch],url:watch,videoUrl:watch,
           format:'mp3',audioQuality,quality:'best',downloadSubtitles:false,metadataOnly:false,
@@ -206,7 +208,13 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
           receipt={version:1,videoId:id,actorId:useActor,state:'starting',triedActors:tried,tokenIndex:ti,tokenFp:tokenFingerprint(tokens[ti]),runTimeoutSec,perVideoTimeoutSecs,attemptCount:attemptNo,createdAt:new Date(now()).toISOString()};
           await store.write(path,receipt);
           let r;
-          try{r=await fetchImpl(API_BASE+route,{method:'POST',headers:{authorization:'Bearer '+tokens[ti],'content-type':'application/json'},body:payload,signal:AbortSignal.timeout(30000)});}
+          // Our Israel engine has its own id in every account (created on demand).
+          let realRoute=route;
+          if(israel){
+            try{realRoute=route.replace('/acts/'+useActor+'/','/acts/'+await actorIdFor(useActor,tokens[ti],{log})+'/');}
+            catch(e){refusals.push('israel_engine');log.warn?.('[YouTube IVR] Israel engine not ready on this key; trying next key',{videoId:id,account:ti+1,message:String(e?.message||e).slice(0,200)});continue;}
+          }
+          try{r=await fetchImpl(API_BASE+realRoute,{method:'POST',headers:{authorization:'Bearer '+tokens[ti],'content-type':'application/json'},body:payload,signal:AbortSignal.timeout(30000)});}
           catch{throw err('apify_start_uncertain','Provider response unavailable; existing run retained');}
           if(ACCOUNT_REFUSAL.has(r.status)){
             refusals.push(r.status);
@@ -282,12 +290,12 @@ export function createApifyResolver({fetchImpl=fetch,sleep=ms=>new Promise(r=>se
         const created=Date.parse(receipt.createdAt)||0;
         let adopted=null;
         try{
-          const list=await api('/acts/'+receipt.actorId+'/runs?desc=1&limit=20');
+          const list=await api('/acts/'+(receipt.actorId===ISRAEL_ACTOR?await actorIdFor(ISRAEL_ACTOR,token,{log}):receipt.actorId)+'/runs?desc=1&limit=20');
           for(const run of list?.data?.items||[]){
             if(Date.parse(run.startedAt)<created-120000)break;
             if(!run.defaultKeyValueStoreId)continue;
             const input=await api('/key-value-stores/'+run.defaultKeyValueStoreId+'/records/INPUT').catch(()=>null);
-            const urls=[...(input?.videoUrls||[]),...(input?.urls||[]),input?.videoUrl,input?.url].map(String);
+            const urls=[...(input?.videoUrls||[]),...(input?.urls||[]),input?.videoUrl,input?.url,input?.videoId].map(String);
             if(urls.some(u=>u.includes(id))){adopted=run;break;}
           }
         }catch{ /* lookup failure: fall through to the age rule */ }

@@ -14,6 +14,7 @@
 // handle (the price is the same at every resolution): up to 20 minutes 1080p,
 // up to 90 minutes 720p, longer 480p. Always H.264, which every computer and
 // phone plays.
+import { ISRAEL_ACTOR, actorIdFor, israelRunInput } from './youtube-israel-engine.js';
 import { promises as fs, createWriteStream, createReadStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -58,6 +59,7 @@ function err(code, message) { return Object.assign(new Error(message), { code })
 
 function inputFor(actor, videoId, quality) {
   const watch = 'https://www.youtube.com/watch?v=' + videoId;
+  if (actor === ISRAEL_ACTOR) return { ...israelRunInput(videoId, 'video'), maxHeight: Math.min(720, parseInt(quality, 10) || 720) };
   if (actor === JOHNVC) return { videoUrls: [watch], format: 'video', quality, videoCodec: 'h264', storageProvider: 'apify', metadataOnly: false, maxMinutes: 720 };
   return { videoUrls: [watch], format: 'mp4', quality, downloadSubtitles: false, maxConcurrency: 1, perVideoTimeoutSecs: 300 };
 }
@@ -89,7 +91,10 @@ async function runEngine(actor, videoId, quality, { tokens, log, store, receiptP
     let started = false;
     for (let i = 0; i < tokens.length && !started; i++) {
       const idx = (ti + i) % tokens.length;
-      const r = await api(tokens[idx], '/acts/' + actor + '/runs?timeout=10800&maxTotalChargeUsd=' + (actor === JOHNVC ? '0.05' : '0.2'), { method: 'POST', body: JSON.stringify(inputFor(actor, videoId, quality)) });
+      let realActor = actor;
+      // Our Israel engine has its own id in each account (created on demand).
+      if (actor === ISRAEL_ACTOR) { try { realActor = await actorIdFor(actor, tokens[idx], { log }); } catch (e) { log.warn?.('[VIDEO] Israel engine not ready on this key; next key', { videoId, account: idx + 1, message: String(e?.message || e).slice(0, 200) }); continue; } }
+      const r = await api(tokens[idx], '/acts/' + realActor + '/runs?timeout=10800&maxTotalChargeUsd=' + (actor === JOHNVC ? '0.05' : '0.2'), { method: 'POST', body: JSON.stringify(inputFor(actor, videoId, quality)) });
       if (ACCOUNT_REFUSAL.has(r.status)) { log.info?.('[VIDEO] account refused start; next key', { videoId, actor, account: idx + 1, status: r.status }); continue; }
       const b = await r.json().catch(() => null);
       // Any other "no" also created no run: the next backup key gets the job.
@@ -160,6 +165,12 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
   const quality = videoQualityFor(durationSec, { subtitles: wantSubs && !!deps.burnSubtitles });
   const costs = engineCosts(durationSec);
   let order = Object.entries(costs).sort((a, b) => a[1] - b[1]).map(([a]) => a);
+  // Only a video YouTube allows only in Israel goes to our Israel engine
+  // (owner, 13.11), on every backup key in turn; the others never do.
+  if (String(env.BRANCH2_ISRAEL_ENGINE || 'on') !== 'off') {
+    const { engineCannotReach } = await import('./youtube-video-facts.js');
+    if (facts && engineCannotReach(facts, env)) order = [ISRAEL_ACTOR];
+  }
   // A run already going (e.g. before a server restart) is continued, never doubled.
   if (done?.state === 'running' && order.includes(done.actor)) order = [done.actor, ...order.filter(a => a !== done.actor)];
   log.info?.('[VIDEO] engine plan', { videoId, durationSec, quality, order, estimatedUsd: costs });

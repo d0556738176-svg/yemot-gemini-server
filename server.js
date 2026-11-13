@@ -3832,8 +3832,12 @@ async function confirmPlaybackPrompt(video) {
         if (video.durationSeconds == null) video.durationSeconds = facts.durationSeconds;
         video.publishedAt = facts.publishedAt || video.publishedAt || null;
         video.viewCount = facts.viewCount;
-        video.geoLimited = engineCannotReach(facts, process.env);
-        if (video.geoLimited) console.info('[YouTube IVR] video limited to countries the engine cannot reach; no download attempted', { videoId: video.videoId, allowed: facts.regionAllowed, blocked: facts.regionBlocked });
+        const israelOnly = engineCannotReach(facts, process.env);
+        // 13.11: such a video downloads through our Israel engine (only
+        // these videos, to save money); refused only when that is turned off.
+        video.israelOnly = israelOnly && String(process.env.BRANCH2_ISRAEL_ENGINE || 'on') !== 'off';
+        video.geoLimited = israelOnly && !video.israelOnly;
+        if (israelOnly) console.info('[YouTube IVR] video limited to Israel', { videoId: video.videoId, allowed: facts.regionAllowed, blocked: facts.regionBlocked, israelEngine: !!video.israelOnly });
       } else if (video.durationSeconds == null) {
         video.durationSeconds = await fetchVideoDurationSeconds(video.videoId, process.env);
       }
@@ -3844,6 +3848,7 @@ async function confirmPlaybackPrompt(video) {
     if (age) suffix += ' הסרטון עלה ' + age + '.';
     const views = viewsHebrew(video?.viewCount);
     if (views) suffix += ' ' + views + '.';
+    if (video?.israelOnly) suffix += ' בעל הסרטון הגביל אותו ביוטיוב לצפייה בישראל בלבד, ולכן הוא יורד דרך חיבור ישראלי מיוחד, שעולה קצת יותר מהרגיל.';
   } catch { /* facts are optional */ }
   if (video?.geoLimited) {
     const cached = await Promise.race([lookupCachedYouTubeAudio(String(video.videoId)).catch(() => null), new Promise(r => setTimeout(() => r(null), 2500))]);
@@ -5444,6 +5449,23 @@ app.listen(port,async()=>{
     const { runGeoSelftest } = await import('./branch2-geo-selftest.js');
     await runGeoSelftest({ readMark:p=>_pipeline.readCacheJson(p), writeMark:(p,o)=>_pipeline.writeCacheJson(p,o) });
   })().catch(e=>console.warn('[GEO_TEST] failed',String(e?.message||e).slice(0,200)));
+  // 13.11: full caller path for an Israel-only video (engine choice, Israel
+  // engine, conversion, upload to Yemot), then read back from Yemot.
+  if(process.env.APIFY_TOKEN&&process.env.YOUTUBE_API_KEY) void (async()=>{
+    const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
+    const MARK='ivr2:/2/selftest/israel_e2e_v1.json';
+    if(await p.readCacheJson(MARK).catch(()=>null))return;
+    await new Promise(r=>setTimeout(r,60000));
+    const id='SGbRCbhWK_8';
+    const { pickApifyActor } = await import('./youtube-engine-select.js');
+    console.info('[ISRAEL_E2E] engine choice',JSON.stringify(await pickApifyActor(id,process.env)));
+    const t=Date.now();
+    await pb.downloadAuthorizedAudioToYemot(id);
+    const cached=await pb.lookupCachedYouTubeAudio(id).catch(e=>({error:String(e?.message||e)}));
+    const out={ms:Date.now()-t,playbackPaths:cached?.playbackPaths||null,error:cached?.error||null};
+    console.info('[ISRAEL_E2E] result',JSON.stringify(out));
+    if(out.playbackPaths?.length)await p.writeCacheJson(MARK,{at:new Date().toISOString(),...out});
+  })().catch(e=>console.warn('[ISRAEL_E2E] failed',String(e?.code||'')+' '+String(e?.message||e).slice(0,400)));
   // One real song save after the naming change (05.11): same path as a caller's song.
   if(process.env.YOUTUBE_API_KEY&&process.env.APIFY_TOKEN) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;

@@ -173,3 +173,10 @@ export async function ensureIsraelActor(token, { log = console } = {}) {
 export function israelRunInput(videoId, mode = 'audio') {
   return { videoId, mode: mode === 'video' ? 'video' : 'audio', country: 'IL', maxHeight: 720 };
 }
+
+// The symbolic engine name used in receipts and engine choice; each account
+// has its own copy of the actor, so the real id is resolved per key.
+export const ISRAEL_ACTOR = 'own~yemot-israel-downloader';
+export async function actorIdFor(actor, token, opts) {
+  return actor === ISRAEL_ACTOR ? ensureIsraelActor(token, opts) : actor;
+}
