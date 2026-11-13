@@ -5416,14 +5416,14 @@ app.listen(port,async()=>{
   void import('./youtube-web-hints.js').then(m=>console.info('[WEB_HINTS] providers',JSON.stringify(m.configuredWebHintProviders()))).catch(()=>{});
   if(process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
-    const MARK='ivr2:/2/selftest/smart_search_v3_web.json';
+    const MARK='ivr2:/2/selftest/smart_search_v4_rank.json';
     if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
     const { smartYouTubeSearch } = await import('./youtube-smart-search.js');
     const r=await smartYouTubeSearch('מוטי שטיין מס הנשמה בקר בי',{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
     const out={rewritten:r.rewritten||null,web:r.web||null,first:r.slice(0,5).map(v=>v.title),count:r.length};
-    console.info('[SMART_SEARCH_TEST_V3]',JSON.stringify(out));
+    console.info('[SMART_SEARCH_TEST_V4]',JSON.stringify(out));
     if(r.web)await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
-  })().catch(e=>console.warn('[SMART_SEARCH_TEST_V3] failed',String(e?.message||e).slice(0,160)));
+  })().catch(e=>console.warn('[SMART_SEARCH_TEST_V4] failed',String(e?.message||e).slice(0,160)));
   // One real song save after the naming change (05.11): same path as a caller's song.
   if(process.env.YOUTUBE_API_KEY&&process.env.APIFY_TOKEN) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;

@@ -40,17 +40,47 @@ export async function smartYouTubeSearch(spoken, opts = {}, env = process.env, s
   const lists = queries.map(q => (q === own ? ownRes.l || [] : rewrittenList));
   const seen = new Set(), merged = [];
   // Interleave: best of the smart query first, then the caller's own words.
-  // The web's YouTube links come first: the web search is the step that
-  // corrects misheard names.
-  for (const v of webList.slice(0, 5)) if (!seen.has(v.videoId)) { seen.add(v.videoId); merged.push(v); }
-  const max = Math.max(0, ...lists.map(l => l.length));
-  for (let i = 0; i < max; i++) for (const l of lists) { const v = l[i]; if (v && !seen.has(v.videoId)) { seen.add(v.videoId); merged.push(v); } }
-  for (const v of webList.slice(5)) if (!seen.has(v.videoId)) { seen.add(v.videoId); merged.push(v); }
+  // Everything found (web links, the rewritten search, the caller's own
+  // words) is merged, then the titles that sound most like what the caller
+  // said go first (live 12.11: an unrelated web link was first and the right
+  // song third).
+  const all = [webList, ...lists];
+  const max = Math.max(0, ...all.map(l => l.length));
+  for (let i = 0; i < max; i++) for (const l of all) { const v = l[i]; if (v && !seen.has(v.videoId)) { seen.add(v.videoId); merged.push(v); } }
+  rankBySound(merged, [own, rewritten, hints?.corrected].filter(Boolean));
   const pages = queries.map((q, i) => ({ query: q, token: lists[i]?.nextPageToken || null }));
   Object.defineProperty(merged, 'pages', { value: pages, enumerable: false });
   Object.defineProperty(merged, 'rewritten', { value: rewritten, enumerable: false });
   Object.defineProperty(merged, 'web', { value: hints ? { provider: hints.provider, videos: webList.length, corrected: hints.corrected } : null, enumerable: false });
   return merged;
+}
+
+// How much a title sounds like what was said: speech recognition splits or
+// joins words and confuses similar letters, so both sides are reduced to a
+// letter skeleton (no spaces, final letters, vowels-letters or niqqud, similar
+// sounds merged) and compared by the share of the request's letter triples
+// found in the title.
+const SOUND = { 'ץ': 'צ', 'ם': 'מ', 'ן': 'נ', 'ך': 'כ', 'ף': 'פ', 'ק': 'כ', 'ת': 'ט', 'ש': 'ס', 'ע': 'א', 'ה': 'א', 'ח': 'כ', 'ו': '', 'י': '' };
+export function soundSkeleton(text) {
+  return String(text || '').toLowerCase().normalize('NFKD').replace(/[\u0591-\u05C7]/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '').split('').map(c => (c in SOUND ? SOUND[c] : c)).join('');
+}
+const FILLER = /(?:^|\s)(?:תחפש|חפש|תשמיע|השמע|לי|את|השיר|שיר|של|אני|רוצה|לשמוע|בבקשה)(?=\s|$)/g;
+export function soundScore(query, title) {
+  const q = soundSkeleton(String(query || '').replace(FILLER, ' ')), t = soundSkeleton(title);
+  if (q.length < 3 || !t) return 0;
+  let hit = 0, n = 0;
+  for (let i = 0; i + 3 <= q.length; i++) { n++; if (t.includes(q.slice(i, i + 3))) hit++; }
+  return n ? hit / n : 0;
+}
+// Stable: titles clearly closer to the request move up; the rest keep order.
+export function rankBySound(list, queries) {
+  const scored = list.map((v, i) => ({ v, i, s: Math.max(0, ...queries.map(q => soundScore(q, v.title))) }));
+  const best = Math.max(0, ...scored.map(x => x.s));
+  if (best < 0.5) return list; // nothing sounds like the request: keep YouTube's order
+  scored.sort((a, b) => (Math.round(b.s * 5) - Math.round(a.s * 5)) || a.i - b.i);
+  scored.forEach((x, k) => { list[k] = x.v; });
+  return list;
 }
 
 // The next page of every query used, merged, without results already heard.

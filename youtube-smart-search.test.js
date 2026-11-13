@@ -77,3 +77,20 @@ test('the rewrite never adds the word YouTube to the search', async () => {
   const { rewriteSearchQuery } = await import('./youtube-smart-search.js');
   assert.equal(await rewriteSearchQuery('בדיחה', { GROQ_API_KEY: 'k' }, fetchImpl), 'בדיחה');
 });
+
+import { soundScore, rankBySound } from './youtube-smart-search.js';
+test('misheard name: the song whose title sounds like the request goes first', () => {
+  const list = [
+    { videoId: 'a', title: '9. חיים ישראל - כל הלילות' },
+    { videoId: 'b', title: 'שמוליק לונגר & יואלי קליין - מאיר\'ל מיין קינד' },
+    { videoId: 'c', title: 'מוטי שטיינמץ - הנשמה בקרבי | Motty Steinmetz-Haneshama Bekirbi' },
+  ];
+  rankBySound(list, ['מוטי שטיין מס הנשמה בקר בי']);
+  assert.equal(list[0].videoId, 'c');
+  assert.ok(soundScore('מוטי שטיין מס הנשמה בקר בי', list[0].title) > 0.6);
+});
+test('a vague request keeps YouTube order', () => {
+  const list = [{ videoId: 'x', title: 'aaa' }, { videoId: 'y', title: 'bbb' }];
+  rankBySound(list, ['בדיחה']);
+  assert.deepEqual(list.map(v => v.videoId), ['x', 'y']);
+});
