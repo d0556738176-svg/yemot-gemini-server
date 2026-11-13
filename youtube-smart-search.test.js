@@ -143,3 +143,9 @@ test('newest request: the channel list keeps its date order (no English/topic se
   assert.ok(!calls.includes('abc new') && !calls.includes('x'));
   assert.equal(r.plan.newest, true);
 });
+
+test('request by topic: the focused searches lead the list', async () => {
+  const search = async q => (q === 'שירי אקפלה לשבת' ? [{ videoId: 'acap', title: 'אקפלה' }] : [{ videoId: 'pian' + q.length, title: 'פסנתר' }]);
+  const r = await smartYouTubeSearch('משהו שקט לשבת בלי כלי נגינה', { fetchImpl: planFetch({ he: 'שירים שקטים', en: 'quiet', topics: ['שירי אקפלה לשבת', 'ווקאלי רגוע'] }) }, { GROQ_API_KEY: 'k' }, search, { webHints: async () => null });
+  assert.equal(r[0].videoId, 'acap');
+});

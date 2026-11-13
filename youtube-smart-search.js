@@ -73,7 +73,9 @@ export async function smartYouTubeSearch(spoken, opts = {}, env = process.env, s
     ? [own, heNewest]
     : english
       ? [plan?.en, heNewest, ...(plan?.topics || []), own]
-      : [heNewest, ...(plan?.topics || []), own, plan?.en];
+      // A request by topic/style: the focused searches keep its conditions
+      // ("בלי כלי נגינה" -> a cappella), so they lead (live 13.11).
+      : plan?.topics?.length ? [...plan.topics, heNewest, own, plan?.en] : [heNewest, own, plan?.en];
   const lists = [...new Set(order.filter(Boolean))].map(listOf);
   // Newest: the channel's own list first, one after another (not interleaved).
   if (newest) {
@@ -85,13 +87,13 @@ export async function smartYouTubeSearch(spoken, opts = {}, env = process.env, s
     Object.defineProperty(mergedN, 'web', { value: hints ? { provider: hints.provider, videos: webList.length, corrected: hints.corrected } : null, enumerable: false });
     return mergedN;
   }
-  const all = english ? [lists[0] || [], webList, ...lists.slice(1)] : [webList, ...lists];
+  const all = english ? [lists[0] || [], webList, ...lists.slice(1)] : plan?.topics?.length ? [...lists, webList] : [webList, ...lists];
   const seen = new Set(), merged = [];
   const max = Math.max(0, ...all.map(l => l.length));
   for (let i = 0; i < max; i++) for (const l of all) { const v = l[i]; if (v && !seen.has(v.videoId)) { seen.add(v.videoId); merged.push(v); } }
   // Titles that sound like the request move up (live 12.11). The English
   // search counts here only when the caller asked in English (owner, 13.11).
-  rankBySound(merged, [own, rewritten, hints?.corrected, english ? plan?.en : null].filter(Boolean));
+  if (!plan?.topics?.length) rankBySound(merged, [own, rewritten, hints?.corrected, english ? plan?.en : null].filter(Boolean));
   const pages = queries.map(q => ({ query: q, token: listOf(q)?.nextPageToken || null }));
   Object.defineProperty(merged, 'pages', { value: pages, enumerable: false });
   Object.defineProperty(merged, 'rewritten', { value: rewritten, enumerable: false });
