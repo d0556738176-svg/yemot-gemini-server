@@ -4886,7 +4886,9 @@ app.get('/api/ext3/media', rateLimit(240, 60 * 1000, 'ext3-media'), async (req, 
     let audio = cached?.playbackPaths?.length ? { status: 'ready', paths: cached.playbackPaths } : (youtubePlaybackJobs.get(videoId) || null);
     let vjob = youtubeVideoJobs.get(videoId) || null;
     if (req.query.start === '1') {
-      if (mode === 'video' && (!vjob || vjob.status === 'failed')) vjob = startYouTubeVideoJob({ ...video });
+      // Owner, 13.11: extensions 1 and 3 ask about Hebrew subtitles too (subs=1/0).
+      const subs = req.query.subs === '1' ? { subtitles: true } : req.query.subs === '0' ? { subtitles: false } : {};
+      if (mode === 'video' && (!vjob || vjob.status === 'failed')) vjob = startYouTubeVideoJob({ ...video, ...subs });
       // The phone audio: from the video's own download when a video was asked
       // (made by that job), otherwise its own audio download.
       if (mode === 'audio' && (!audio || audio.status === 'failed')) audio = startYouTubePlaybackJob(video);
@@ -4896,7 +4898,7 @@ app.get('/api/ext3/media', rateLimit(240, 60 * 1000, 'ext3-media'), async (req, 
       spoken: audio.status === 'running' ? (progressAnnouncement(audio.progress || {}, {}, Date.now())?.text || null) : null,
       minutes: audio.startedAt ? Math.floor((Date.now() - audio.startedAt) / 60000) : null,
       error: audio.error ? String(audio.error?.code || audio.error?.message || audio.error).slice(0, 80) : null } : { status: 'none' };
-    const videoOut = vjob ? { status: vjob.status, minutes: vjob.startedAt ? Math.floor((Date.now() - vjob.startedAt) / 60000) : null, error: vjob.error ? String(vjob.error).slice(0, 80) : null } : { status: 'none' };
+    const videoOut = vjob ? { status: vjob.status, subtitles: vjob.subtitles ?? null, minutes: vjob.startedAt ? Math.floor((Date.now() - vjob.startedAt) / 60000) : null, error: vjob.error ? String(vjob.error).slice(0, 80) : null } : { status: 'none' };
     res.json({ ok: true, videoId, audio: audioOut, video: videoOut });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e).slice(0, 120) });
