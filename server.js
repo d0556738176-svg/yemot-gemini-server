@@ -2575,16 +2575,16 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     // In quality mode the small fast model is a reserve: it joins only if the
     // strong models have not answered after a short wait (they hit free-tier
     // rate limits under load, and the caller must never get raw excerpts).
-    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(isExt3()?(process.env.EXT3_RESERVE_MS||7000):(process.env.BRANCH1_QUALITY_RESERVE_MS||2500)):0},
+    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(isExt3()?(process.env.EXT3_RESERVE_MS||3500):(process.env.BRANCH1_QUALITY_RESERVE_MS||2500)):0},
     {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim(),big:true},
     // Extension 3 staggers the backups instead of firing every provider at
     // once: one strong answer per turn, so the free per-minute quotas last the
     // whole call (08.11: all providers were rate-limited by the second call).
-    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),delayMs:isExt3()?Number(process.env.EXT3_OPENROUTER_DELAY_MS||4500):0},
+    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),delayMs:isExt3()?Number(process.env.EXT3_OPENROUTER_DELAY_MS||2500):0},
     ...extraFastProviders(true),
     // Owner, 10.11: Groq counts each model's free quota separately, so more
     // strong models on the same key = more answers before "rate limited".
-    ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?4000+i*800:0}))
+    ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?2500+i*600:0}))
   ]) {
     if(!provider.apiKey||isDeadKey(provider.apiKey)) continue;
     racers.push((provider.delayMs?new Promise(r=>setTimeout(r,provider.delayMs)).then(()=>{ if(raceDone) throw Object.assign(new Error('not needed'),{status:499}); }):Promise.resolve()).then(()=>callCompatibleChatCompletion({
@@ -4602,7 +4602,7 @@ async function ext3MediaNotes(media) {
       if(st.video?.status==='ready'&&!job.videoSaid) { job.videoSaid=true; notes.push('הווידאו של '+job.title+' נשמר בתיקיית וידאו.'); }
       if(st.video?.status==='failed'&&!job.failSaid) { job.failSaid=true; job.done=true; notes.push('הורדת הווידאו של '+job.title+' לא הצליחה: '+ext3FailReason(st.video.error)+'.'); }
     } else if(st.audio?.status==='failed'&&!job.failSaid) { job.failSaid=true; job.done=true; notes.push('ההורדה של '+job.title+' לא הצליחה: '+ext3FailReason(st.audio.error)+'. אפשר לבקש ממני גרסה אחרת של אותו שיר.'); }
-    if(job.paths&&!job.readySaid) { job.readySaid=true; notes.push('הקובץ של '+job.title+' מוכן. כשתרצה לשמוע אותו, אמור תשמיעי לי אותו.'); }
+    if(job.paths&&!job.readySaid) { job.readySaid=true; media.lastReady=job; notes.push('הקובץ של '+job.title+' מוכן. כשתרצה לשמוע אותו, אמור תשמיעי לי אותו.'); }
     if(job.readySaid&&(job.mode!=='video'||job.videoSaid)) job.done=true;
   }));
   return notes.length?'ועוד הודעה: '+notes.join(' '):'';
@@ -4638,7 +4638,7 @@ async function ext3MediaStatusReply(media) {
   if(!jobs.length) return 'כרגע אני לא מורידה שום קובץ. אם תרצה, ספר לי איזה שיר או סרטון, אמצא אותו, אומר לך את שמו המלא, ותבחר אם להוריד.';
   const parts=[];
   for(const job of jobs) {
-    if(job.paths) { parts.push('הקובץ של '+job.title+' מוכן. כדי לשמוע אותו אמור תשמיעי לי אותו.'); continue; }
+    if(job.paths) { media.lastReady=job; parts.push('הקובץ של '+job.title+' מוכן. כדי לשמוע אותו אמור תשמיעי לי אותו.'); continue; }
     if(job.needsStart) {
       // Maybe it woke meanwhile: try to start right now, else keep knocking.
       const now=await ext2Media(job,{start:true,timeoutMs:8000});
@@ -4647,7 +4647,7 @@ async function ext3MediaStatusReply(media) {
     }
     const st=await ext2Media(job,{timeoutMs:6000});
     if(!st) { parts.push('שירות ההורדות לא ענה לי ברגע זה לגבי '+job.title+'. אני אנסה שוב, ואודיע כשהקובץ מוכן.'); continue; }
-    if(st.audio?.status==='ready'&&st.audio.paths?.length) { job.paths=st.audio.paths; parts.push('הקובץ של '+job.title+' מוכן. כדי לשמוע אותו אמור תשמיעי לי אותו.'); continue; }
+    if(st.audio?.status==='ready'&&st.audio.paths?.length) { job.paths=st.audio.paths; media.lastReady=job; parts.push('הקובץ של '+job.title+' מוכן. כדי לשמוע אותו אמור תשמיעי לי אותו.'); continue; }
     if(st.audio?.status==='failed'||st.video?.status==='failed') { job.done=true; parts.push('ההורדה של '+job.title+' לא הצליחה: '+ext3FailReason(st.audio?.error||st.video?.error)+'. אפשר לבקש ממני גרסה אחרת של אותו שיר או סרטון.'); continue; }
     const min=Number(st.audio?.minutes ?? st.video?.minutes);
     parts.push('ההורדה של '+job.title+(job.mode==='video'?', כווידאו וגם כקובץ שמע מאותה הורדה,':'')+' עדיין בתהליך'+(Number.isFinite(min)?(min<1?', היא התחילה לפני פחות מדקה':', כבר '+min+' דקות'):'')+'. '+(st.audio?.spoken?st.audio.spoken+' ':'')+'אודיע לך ברגע שהקובץ מוכן.');
@@ -4658,6 +4658,13 @@ async function ext3MediaStatusReply(media) {
 // (video + phone audio from the same download). Ready -> plays now;
 // otherwise the download starts (waking the service if needed) and the
 // conversation goes on.
+// "תשמיעי לי אותו" / "תשמיעי" / "כן תשמיעי" - a short ask to hear the file just announced, naming nothing else.
+function ext3PlayItNow(text) {
+  const t=String(text||'').trim().replace(/[.!?,]/g,' ').replace(/\s+/g,' ');
+  if(t.split(' ').length>7) return false;
+  if(!/(?:תשמיעי|תשמיע|להשמיע|לשמוע|תפעילי|תפעיל|תנגני|תנגן|שמעי לי|השמיעי)/u.test(t)) return false;
+  return /(?:אותו|אותה|את זה|הזה|הזאת|הקובץ|השיר|עכשיו)/u.test(t) || t.split(' ').length<=3;
+}
 // The digit of a structured list: a pressed key ("בחרתי באפשרות 2: ...") or the number said aloud.
 function ext3KeyChoice(text, choices) {
   const t=String(text||'').trim();
@@ -4949,6 +4956,17 @@ async function callHandler(call) {
       if((!explicitSearchOnly || (typeof brainBranch==='function'&&brainBranch()==='1')) && String(process.env.EXT3_BRAIN||'on')!=='off' && typeof runExt3Brain==='function') {
         const fixed=answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
         if(fixed) { replyText=fixed; ext3Done=true; }
+        else if(!pendingConfirm && callMedia.lastReady?.paths?.length && ext3PlayItNow(userTranscript)) {
+          // "Play it" right after "the file is ready": the file just made, at once,
+          // with no model in the way (12.11 18:43-18:47 it took four tries).
+          const j=callMedia.lastReady; callMedia.lastReady=null; pendingChoices=null;
+          pendingPlay={paths:j.paths,durationSec:Number(j.durationSec)||0,title:j.title};
+          replyText='משמיעה לך עכשיו את '+cleanTitle(j.title)+'.';
+          if(typeof brainBranch==='function'&&brainBranch()==='1') replyText=toMaleSelf(replyText);
+          turnContext.ext3Ref={type:'video',videoId:j.videoId,title:j.title,durationSec:j.durationSec};
+          console.info('[EXT3_MEDIA] playing the file just made',{callId:activeKey,files:j.paths.length});
+          ext3Done=true;
+        }
         else if(!pendingConfirm && pendingChoices && ext3KeyChoice(userTranscript,pendingChoices)) {
           // A key from a list the brain built (a song in the library, a video
           // option): the digit maps straight to the item, never through its spoken label.
@@ -5313,6 +5331,10 @@ async function callHandler(call) {
           console.warn('[CALL_FLOW] ext3 conversation answer after empty search failed',{callId:activeKey,status:geminiErrorStatus(convoError)});
         }
       }
+      // Silence while a download is being prepared: he is waiting for it, so the
+      // news on the download, not "I didn't hear you" again and again (12.11 18:42-18:46).
+      if(!replyText && (e.noSpeech||/Empty phone transcription/.test(String(e?.message||''))) && typeof ext3Jobs==='function' && ext3Jobs(callMedia).some(j=>!j.done&&!j.cancelled))
+        replyText=await ext3MediaStatusReply(callMedia).catch(()=>'')||'';
       if(!replyText && e.noSpeech) replyText='לא שמעתי אותך בבירור. אמור שוב בבקשה';
       if(!replyText) replyText=e.status===429?'מצטערים מנוע התשובות הגיע כרגע למגבלת השימוש נסה שוב בעוד כמה רגעים':
         e.status===503?'מצטערים מנוע התשובות אינו זמין כרגע נסה שוב בעוד רגע':

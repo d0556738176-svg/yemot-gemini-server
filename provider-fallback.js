@@ -69,7 +69,9 @@ export async function callCompatibleChatCompletion({
           max_tokens: Math.max(128, Number(maxTokens) || 900),
           // gpt-oss models are reasoning models: low effort keeps answers fast and
           // stops hidden reasoning from consuming the whole token budget (empty reply).
-          ...(provider === 'Groq' && /gpt-oss/i.test(String(model)) ? { reasoning_effort: 'low' } : {}),
+          // Every Groq key slot (Groq2, Groq3 ...) and Cerebras too: 13.11 the
+          // backup Groq keys ran gpt-oss-120b at the default effort and took ~8 s.
+          ...(/^(?:Groq|Cerebras)/.test(String(provider)) && /gpt-oss/i.test(String(model)) ? { reasoning_effort: 'low' } : {}),
           stream: false
         }),
         signal: controller.signal
