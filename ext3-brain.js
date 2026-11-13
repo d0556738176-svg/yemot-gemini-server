@@ -719,7 +719,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       'החזר JSON בלבד בצורה {"pick":מספר i של הסרטון הנבחר,"answer":"התשובה למתקשר"}.';
     let pick = 0, reply = '';
     try {
-      const raw = await deps.llm(answerPrompt({ context: smallContext, utterance, plan, now, instruction, prefs, voice, brief, extra: 'סרטונים שנמצאו:\n' + candidatesText(found.slice(0, 8)) }), { budgetMs: 12000, maxTokens: 1400 });
+      const raw = await deps.llm(answerPrompt({ context: smallContext, utterance, plan, now, instruction, prefs, voice, brief, extra: 'סרטונים שנמצאו:\n' + candidatesText(found.slice(0, plan.order === 'date' ? 3 : 8)) }), { budgetMs: 12000, maxTokens: 1400 });
       const m = noThinking(raw).match(/\{[\s\S]*\}/);
       const j = m ? JSON.parse(m[0]) : null;
       if (Number.isInteger(j?.pick) && found[j.pick]) pick = j.pick;
