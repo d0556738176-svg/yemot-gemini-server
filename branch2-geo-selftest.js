@@ -9,10 +9,13 @@ import { apifyTokens } from './youtube-apify-source.js';
 const API = 'https://api.apify.com/v2';
 const log = (...a) => console.info('[GEO_TEST]', ...a);
 
+const IL_RESIDENTIAL = { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'], apifyProxyCountry: 'IL' };
+// Round 1-2 (13.11): dc_solutions 403 even with a proxy; marielise has no IL
+// in its country list (auto = not Israel). Round 3: engines that take Apify's
+// standard proxy setting, so the country can be Israel.
 export const GEO_CANDIDATES = [
-  { id: 'dc_solutions~youtube-downloader-pro', input: url => ({ url, quality: 480, proxyConfiguration: { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'], apifyProxyCountry: 'IL' } }) },
-  // Its country list has no IL (live 13.11); "" = automatic choice.
-  { id: 'marielise.dev~youtube-video-downloader', input: url => ({ urls: [{ url }], format: 'mp3', residentialProxyMode: 'fallback', proxyCountry: '' }) },
+  { id: 'web.harvester~youtube-downloader', input: url => ({ youtubeUrls: [{ url }], maxRequestRetries: 5, proxyConfiguration: IL_RESIDENTIAL }) },
+  { id: 'hipersoft~youtube-downloader', input: url => ({ videoUrls: [url], format: 'mp3', proxyConfiguration: IL_RESIDENTIAL }) },
 ];
 
 function iso8601Seconds(d) {
@@ -68,12 +71,12 @@ export async function tryEngine(token, cand, url, maxChargeUsd = 0.3) {
   }
   const items = await api(token, '/datasets/' + run.defaultDatasetId + '/items?clean=1&limit=5').catch(() => []);
   const row = Array.isArray(items) ? items[0] || {} : {};
-  const link = row.downloadUrl || row.fileUrl || row.download_link || row.url_download || null;
+  const link = row.downloadUrl || row.fileUrl || row.download_link || row.url_download || row.mp3Url || row.audioUrl || row.fileLink || row.file?.url || null;
   let bytes = null;
   if (link) { try { const h = await fetch(link, { method: 'HEAD', signal: AbortSignal.timeout(30000) }); bytes = Number(h.headers.get('content-length')) || null; } catch { /* keep null */ } }
   let tail = '';
   if (run.status !== 'SUCCEEDED' || !link) tail = String(await api(token, '/logs/' + runId).catch(() => '')).slice(-1500);
-  return { engine: cand.id, status: run.status, usd: run.usageTotalUsd ?? null, charged: run.chargedEventCounts || null, ok: !!(link && bytes && bytes > 10000), bytes, rowKeys: Object.keys(row).slice(0, 25), error: row.error || row.errorCode || row.errorMessage || null, proxy: { enabled: row.residentialProxyEnabled, used: row.residentialProxyUsed }, logTail: tail };
+  return { engine: cand.id, status: run.status, usd: run.usageTotalUsd ?? null, charged: run.chargedEventCounts || null, ok: !!(link && bytes && bytes > 10000), bytes, rowKeys: Object.keys(row).slice(0, 25), row: JSON.stringify(row).slice(0, 700), error: row.error || row.errorCode || row.errorMessage || null, proxy: { enabled: row.residentialProxyEnabled, used: row.residentialProxyUsed }, logTail: tail };
 }
 
 export async function runGeoSelftest({ readMark, writeMark, env = process.env } = {}) {
@@ -85,7 +88,7 @@ export async function runGeoSelftest({ readMark, writeMark, env = process.env } 
   if (!video) return;
   const url = 'https://www.youtube.com/watch?v=' + video.videoId;
   for (const cand of GEO_CANDIDATES) {
-    const MARK = 'ivr2:/2/selftest/geo_' + cand.id.replace(/[^A-Za-z0-9]/g, '_') + '_v3.json';
+    const MARK = 'ivr2:/2/selftest/geo_' + cand.id.replace(/[^A-Za-z0-9]/g, '_') + '_v4.json';
     if (await readMark(MARK).catch(() => null)) continue;
     try {
       const res = await tryEngine(token, cand, url, Math.min(1.2, Math.max(0.5, Math.ceil(video.seconds / 60) * 0.03 + 0.35)));
