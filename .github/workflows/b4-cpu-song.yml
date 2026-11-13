@@ -36,6 +36,7 @@ jobs:
         run: |
           mkdir -p out
           T0=$(date +%s)
+          sudo mkdir -p /mnt/uvcache && sudo chown "$USER" /mnt/uvcache
           cd ace && UV_CACHE_DIR=/mnt/uvcache uv sync --python 3.11 > ../out/install.log 2>&1 || (tail -40 ../out/install.log; exit 1)
           df -h / >> ../out/timing.txt
           echo "install_seconds=$(( $(date +%s) - T0 ))" >> ../out/timing.txt
