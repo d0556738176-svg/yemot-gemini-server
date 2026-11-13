@@ -4555,7 +4555,7 @@ async function ext2Media(job,{start=false,timeoutMs=8000}={}) {
   if(!secret) return null;
   const base=String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'');
   const u=new URL(base+'/api/ext3/media');
-  for(const [k,v] of Object.entries({secret,videoId:job.videoId,mode:job.mode||'audio',title:job.title||'',channel:job.channelTitle||'',duration:job.durationSec||'',start:start?'1':'0'})) u.searchParams.set(k,String(v));
+  for(const [k,v] of Object.entries({secret,videoId:job.videoId,mode:job.mode||'audio',title:job.title||'',channel:job.channelTitle||'',duration:job.durationSec||'',start:start?'1':'0',...(typeof job.subtitles==='boolean'?{subs:job.subtitles?'1':'0'}:{})})) u.searchParams.set(k,String(v));
   try {
     const r=await fetch(u,{signal:AbortSignal.timeout(timeoutMs)});
     const j=await r.json().catch(()=>null);
@@ -4675,6 +4675,15 @@ async function ext3MediaStatusReply(media) {
 // (video + phone audio from the same download). Ready -> plays now;
 // otherwise the download starts (waking the service if needed) and the
 // conversation goes on.
+// Answer to "Hebrew subtitles? 1 yes, 2 no": true / false, or null when it is not an answer.
+function ext3SubsChoice(text) {
+  const t=String(text||'').replace(/[.,!?]/g,' ').replace(/\s+/g,' ').trim();
+  const m=t.match(/^בחרתי באפשרות\s*([12])/u); if(m) return m[1]==='1';
+  if(t.split(' ').length>6) return null;
+  if(/^(?:(?:אני רוצה|אז|כן)\s+)?(?:2|שתיים|שתים|לא|לא צריך|בלי|בלי כתובית|בלי כתוביות|ללא|אין צורך)(?=$|\s)/u.test(t)) return false;
+  if(/^(?:(?:אני רוצה|אז)\s+)?(?:1|אחת|אחד|כן|כן בבקשה|בטח|עם כתובית|עם כתוביות|תוסיפי|תוסיף|להוסיף|כתובית)(?=$|\s)/u.test(t)) return true;
+  return null;
+}
 // "תשמיעי לי אותו" / "תשמיעי" / "כן תשמיעי" - a short ask to hear the file just announced, naming nothing else.
 function ext3PlayItNow(text) {
   const t=String(text||'').trim().replace(/[.!?,]/g,' ').replace(/\s+/g,' ');
@@ -4696,6 +4705,7 @@ async function ext3StartOrPlay(h, media) {
   const askedBefore=!!job&&!job.cancelled;
   if(!job||job.cancelled) { job={...h,since:Date.now()}; media.set(h.videoId,job); }
   if(h.mode==='video'&&job.mode!=='video') { job.mode='video'; job.done=false; job.videoSaid=false; }
+  if(typeof h.subtitles==='boolean') job.subtitles=h.subtitles;
   const st=await ext2Media(job,{start:true,timeoutMs:12000});
   if(!st) {
     if(!process.env.EXT3_MEDIA_SECRET) { media.delete(h.videoId); return {handoff:true}; }
@@ -4766,7 +4776,7 @@ async function callHandler(call) {
   const turnHistory=[];
   const turnContext={youtubeResults:[],currentWebsiteUrl:null,currentWebsitePages:[],currentWebsitePageIndex:0,currentWebsiteReadOffset:0};
   // Extension 3: downloads running for this call, and a file to play next.
-  const callMedia=new Map(); let pendingPlay=null; let pendingConfirm=null; let pendingChoices=null;
+  const callMedia=new Map(); let pendingPlay=null; let pendingConfirm=null; let pendingChoices=null; let pendingSubs=null;
   // The download service stays awake for the whole call (a check every few
   // minutes), so a download asked for mid-call starts at once.
   if(typeof brainBranch==='function'&&brainBranch()) { wakeSearxng(); if(process.env.EXT3_MEDIA_SECRET&&!call.selfTest) void ext2Wake('call start'); }
@@ -4973,6 +4983,18 @@ async function callHandler(call) {
       if((!explicitSearchOnly || (typeof brainBranch==='function'&&brainBranch()==='1')) && String(process.env.EXT3_BRAIN||'on')!=='off' && typeof runExt3Brain==='function') {
         const fixed=answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
         if(fixed) { replyText=fixed; ext3Done=true; }
+        else if(pendingSubs && ext3SubsChoice(userTranscript)!==null) {
+          const subs=ext3SubsChoice(userTranscript), c=pendingSubs; pendingSubs=null;
+          console.info('[EXT3_MEDIA] video subtitles choice',{callId:activeKey,videoId:c.videoId,subtitles:subs});
+          if(call.selfTest) { replyText='בחרת וידאו '+(subs?'עם':'בלי')+' כתובית עבור '+c.title+'.'; call.selfTest.lastSubs=subs; }
+          else {
+            const m=await ext3StartOrPlay({...c,mode:'video',subtitles:subs},callMedia);
+            replyText=m.handoff?'שירות ההורדות לא מוגדר כרגע. אפשר להוריד את '+c.title+' בשלוחה 2.':(subs?'עם כתובית בעברית מוטבעת בתוך הסרטון. ':'בלי כתובית. ')+m.reply;
+            if(m.play) pendingPlay=m.play;
+          }
+          turnContext.ext3Ref={type:'video',videoId:c.videoId,title:c.title,channelTitle:c.channelTitle,durationSec:c.durationSec};
+          ext3Done=true;
+        }
         else if(!pendingConfirm && callMedia.lastReady?.paths?.length && ext3PlayItNow(userTranscript)) {
           // "Play it" right after "the file is ready": the file just made, at once,
           // with no model in the way (12.11 18:43-18:47 it took four tries).
@@ -5011,7 +5033,15 @@ async function callHandler(call) {
           const choice=ext3ConfirmChoice(userTranscript), c=pendingConfirm; pendingConfirm=null; pendingChoices=null;
           console.info('[EXT3_MEDIA] confirmation',{callId:activeKey,videoId:c.videoId,choice});
           if(choice==='cancel') replyText='ביטלתי, ולא הורדתי כלום. על מה תרצה שנמשיך לדבר?';
-          else if(call.selfTest) replyText='בחרת '+(choice==='video'?'וידאו':'קובץ שמע')+' עבור '+c.title+'.';
+          // Owner, 13.11: video (2) also offers Hebrew subtitles, as in extension 2.
+          else if(choice==='video') {
+            pendingSubs=c;
+            const lang=String(c.language||'').toLowerCase();
+            replyText=(lang.startsWith('he')||lang.startsWith('iw')?'הסרטון בעברית. ':lang?'הסרטון בשפה זרה, ואפשר לתרגם אותו לכתובית. ':'')+
+              'האם להוסיף לסרטון כתובית בעברית, מוטבעת בתוך הסרטון? להוספת כתובית בעברית הקש 1, בלי כתובית הקש 2. אפשר גם לומר כן או לא.';
+            if(call.selfTest) call.selfTest.lastSubsAsk=c.videoId;
+          }
+          else if(call.selfTest) replyText='בחרת קובץ שמע עבור '+c.title+'.';
           else { const m=await ext3StartOrPlay({...c,mode:choice},callMedia); replyText=m.handoff?'שירות ההורדות לא מוגדר כרגע. אפשר להוריד את '+c.title+' בשלוחה 2.':m.reply; if(m.play) pendingPlay=m.play; }
           turnContext.ext3Ref={type:'video',videoId:c.videoId,title:c.title,channelTitle:c.channelTitle,durationSec:c.durationSec};
           if(call.selfTest) call.selfTest.lastConfirmChoice=choice;
@@ -5020,6 +5050,7 @@ async function callHandler(call) {
         else {
           if(!call.selfTest&&process.env.EXT3_MEDIA_SECRET) void ext2Wake('call active');
           if(pendingConfirm) { console.info('[EXT3_MEDIA] confirmation dropped: caller moved on',{callId:activeKey}); pendingConfirm=null; }
+          if(pendingSubs) { console.info('[EXT3_MEDIA] subtitles question dropped: caller moved on; video not started',{callId:activeKey}); pendingSubs=null; }
           let r=null, lastError=null;
           const brainStart=Date.now();
           for(let attempt=0;attempt<2&&!r?.reply&&!r?.mediaStatus&&!r?.cancel;attempt++) {

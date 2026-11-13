@@ -194,7 +194,7 @@ test('play: never downloads, says the full title and offers keys 1/2/3', async (
   assert.ok(r.confirm);
   assert.match(r.reply, /The Killer Clown Case That Fooled Everyone/);
   assert.match(r.reply, /קובץ שמע הקש 1/);
-  assert.match(r.reply, /וידאו הקש 2/);
+  assert.match(r.reply, /וידאו עם אפשרות לכתובית בעברית הקש 2/);
   assert.match(r.reply, /לביטול והמשך השיחה הקש 3/);
 });
 

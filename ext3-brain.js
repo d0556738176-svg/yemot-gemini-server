@@ -364,9 +364,9 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, rece
 /** The full title first, then 1 audio / 2 video / 3 cancel; nothing is downloaded before a choice. */
 export function confirmFor(v, mode = 'audio') {
   return {
-    confirm: { videoId: v.videoId, title: v.title, channelTitle: v.channelTitle, durationSec: v.durationSec, mode },
+    confirm: { videoId: v.videoId, title: v.title, channelTitle: v.channelTitle, durationSec: v.durationSec, language: v.language || '', mode },
     reply: 'לפני שאני מורידה, רק לוודא שזה הסרטון הנכון: ' + v.title + (v.channelTitle ? ', בערוץ ' + v.channelTitle : '') + (v.durationSec ? ', אורכו ' + spokenDuration(v.durationSec) : '') + '. ' +
-      'להורדת קובץ שמע הקש 1, להורדת וידאו הקש 2, לביטול והמשך השיחה הקש 3. אפשר גם לומר אחת, שתיים או שלוש.'
+      'להורדת קובץ שמע הקש 1, להורדת וידאו עם אפשרות לכתובית בעברית הקש 2, לביטול והמשך השיחה הקש 3. אפשר גם לומר אחת, שתיים או שלוש.'
   };
 }
 
