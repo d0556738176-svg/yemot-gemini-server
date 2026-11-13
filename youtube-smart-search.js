@@ -5,7 +5,7 @@ import { groqChat } from './groq-chat.js';
 // understands best; both that search and the caller's own words are used and
 // merged, so a wrong rewrite can never hide what the caller actually said.
 // Never throws: without the model it is the plain search.
-import { searchYouTubeVideos, youtubeKeysFrom } from './youtube-ivr.js';
+import { searchYouTubeVideos, youtubeKeysFrom, wantsNewestQuery } from './youtube-ivr.js';
 import { webYouTubeHints, videosByIds } from './youtube-web-hints.js';
 
 // The caller asked for English titles ("באנגלית") or spoke in English.
@@ -26,7 +26,7 @@ export async function planSearch(spoken, env = process.env, fetchImpl = fetch, h
     ? '\n\nכותרות שמנוע חיפוש באינטרנט החזיר לאותן מילים (הכתיב שלהן נכון; אם אחת מהן היא בבירור מה שהמתקשר ביקש, השתמש בכתיב השמות שלה):\n- ' + hints.titles.join('\n- ') + (hints.corrected ? '\nתיקון כתיב של מנוע החיפוש: ' + hints.corrected : '')
     : '';
   const raw = await groqChat([
-    { role: 'system', content: 'אתה עוזר חיפוש ביוטיוב לקו טלפון. תקבל תמלול של בקשה קולית (ייתכנו שגיאות שמיעה בשמות של זמרים, רבנים, ערוצים, שירים וסרטונים: אותיות שהתחלפו, מילה אחת שנשמעה כשתיים או להפך). הבן מה המתקשר באמת מחפש והחזר JSON בלבד בשורה אחת: {"he":"...","en":"...","topics":["...","..."]}.\nhe: מחרוזת החיפוש הטובה ביותר בעברית: תקן שמות שנשמעו לא נכון לכתיב הנכון והמוכר, הסר מילות פנייה ("תחפש לי", "אני רוצה לשמוע", "תשמיע", "באנגלית"), השאר שם השיר והאמן או הנושא, ואם ביקשו "חדש" או "האחרון" השאר "חדש".\nen: אותו חיפוש באנגלית כפי שהכותרת באנגלית כנראה כתובה ביוטיוב (שמות אנשים באיות האנגלי המקובל שלהם, שם תיק/פרשה/סרט בשם המוכר באנגלית). אם זה שיר או תוכן עברי שאין לו כותרת באנגלית, כתוב את התעתיק האנגלי המקובל.\ntopics: רק אם הבקשה היא לפי נושא, סגנון או תיאור (ולא שם מסוים): עד שני חיפושים קצרים וממוקדים שונים זה מזה שמביאים בדיוק את סוג התוכן שביקש; אחרת רשימה ריקה.\nבלי הסברים ובלי טקסט מחוץ ל-JSON.' },
+    { role: 'system', content: 'אתה עוזר חיפוש ביוטיוב לקו טלפון. תקבל תמלול של בקשה קולית (ייתכנו שגיאות שמיעה בשמות של זמרים, רבנים, ערוצים, שירים וסרטונים: אותיות שהתחלפו, מילה אחת שנשמעה כשתיים או להפך). הבן מה המתקשר באמת מחפש והחזר JSON בלבד בשורה אחת: {"he":"...","en":"...","topics":["...","..."]}.\nhe: מחרוזת החיפוש הטובה ביותר בעברית: תקן שמות שנשמעו לא נכון לכתיב הנכון והמוכר, הסר מילות פנייה ("תחפש לי", "אני רוצה לשמוע", "תשמיע", "באנגלית"), השאר שם השיר והאמן או הנושא, ואם ביקשו "חדש" או "האחרון" השאר "חדש".\nen: אותו חיפוש באנגלית כפי שהכותרת באנגלית כנראה כתובה ביוטיוב (שמות אנשים באיות האנגלי המקובל שלהם, שם תיק/פרשה/סרט בשם המוכר באנגלית). אם זה שיר או תוכן עברי שאין לו כותרת באנגלית, כתוב את התעתיק האנגלי המקובל.\ntopics: אם בבקשה אין שם מסוים של שיר, סרטון, אמן או ערוץ (בקשה לפי נושא, סגנון, אווירה או תיאור) חובה לתת שני חיפושים קצרים וממוקדים, שונים זה מזה, במונחים שבהם סרטונים כאלה באמת נקראים ביוטיוב, ושומרים על כל תנאי שביקש (למשל "בלי כלי נגינה" = ווקאלי/אקפלה, "לילדים", "קצר"); אם יש שם מסוים, רשימה ריקה.\nבלי הסברים ובלי טקסט מחוץ ל-JSON.' },
     { role: 'user', content: text + hintText }], { env, fetchImpl, maxTokens: 160, timeoutMs: Number(env.SMART_SEARCH_TIMEOUT_MS || 4500) });
   const clean = q => { const o = String(q || '').replace(/^["'״]+|["'״]+$/g, '').replace(/\s*\b(?:YouTube|youtube)\b\s*|\s*יוטיוב\s*|\s*באנגלית\s*/g, ' ').replace(/\s+/g, ' ').trim(); return o && o.length <= 120 ? o : null; };
   const body = String(raw || '').trim();
@@ -43,6 +43,10 @@ export async function rewriteSearchQuery(spoken, env = process.env, fetchImpl = 
 export async function smartYouTubeSearch(spoken, opts = {}, env = process.env, search = searchYouTubeVideos, deps = {}) {
   const own = String(spoken || '').trim();
   const english = wantsEnglish(own);
+  // "The newest video of X": the caller's own words find X's channel and its
+  // uploads in date order. That order is the answer, so no English or topic
+  // searches and no reordering by sound (owner, 13.11).
+  const newest = wantsNewestQuery(own);
   const hintsFn = deps.webHints || webYouTubeHints, byIds = deps.videosByIds || videosByIds;
   // The caller's own words go to YouTube at once, while a web search looks
   // up how the names are really spelled (see youtube-web-hints.js).
@@ -52,7 +56,8 @@ export async function smartYouTubeSearch(spoken, opts = {}, env = process.env, s
   const rewritten = plan?.he || null;
   const apiKey = opts.apiKey || youtubeKeysFrom(env)[0];
   // Every planned search runs at once (Hebrew, English, topics), each only once.
-  const extra = [...new Set([rewritten, plan?.en, ...(plan?.topics || [])].filter(q => q && q !== own))];
+  const heNewest = newest && rewritten && !wantsNewestQuery(rewritten) ? rewritten + ' החדש' : rewritten;
+  const extra = [...new Set((newest ? [heNewest] : [heNewest, plan?.en, ...(plan?.topics || [])]).filter(q => q && q !== own))];
   const [webList, ownRes, ...extraLists] = await Promise.all([
     hints?.videos?.length ? byIds(hints.videos.map(v => v.videoId), { apiKey, fetchImpl: opts.fetchImpl }).catch(() => []) : [],
     ownSearch,
@@ -60,14 +65,26 @@ export async function smartYouTubeSearch(spoken, opts = {}, env = process.env, s
   ]);
   if (ownRes.e && !webList.length && !extraLists.some(l => l.length)) throw ownRes.e;
   const listOf = q => (q === own ? ownRes.l || [] : extraLists[extra.indexOf(q)] || []);
-  const queries = [...new Set([rewritten, plan?.en, ...(plan?.topics || []), own].filter(Boolean))];
+  const queries = [...new Set((newest ? [own, heNewest] : [heNewest, plan?.en, ...(plan?.topics || []), own]).filter(Boolean))];
   // Order of the merge: asked in English -> the English search leads;
   // otherwise web links, the Hebrew search, the topic searches, the caller's
   // own words, and the English search last.
-  const order = english
-    ? [plan?.en, rewritten, ...(plan?.topics || []), own]
-    : [rewritten, ...(plan?.topics || []), own, plan?.en];
+  const order = newest
+    ? [own, heNewest]
+    : english
+      ? [plan?.en, heNewest, ...(plan?.topics || []), own]
+      : [heNewest, ...(plan?.topics || []), own, plan?.en];
   const lists = [...new Set(order.filter(Boolean))].map(listOf);
+  // Newest: the channel's own list first, one after another (not interleaved).
+  if (newest) {
+    const seenN = new Set(), mergedN = [];
+    for (const l of [...lists, webList]) for (const v of l) if (v && !seenN.has(v.videoId)) { seenN.add(v.videoId); mergedN.push(v); }
+    Object.defineProperty(mergedN, 'pages', { value: queries.map(q => ({ query: q, token: listOf(q)?.nextPageToken || null })), enumerable: false });
+    Object.defineProperty(mergedN, 'rewritten', { value: rewritten, enumerable: false });
+    Object.defineProperty(mergedN, 'plan', { value: plan ? { ...plan, english, newest } : { newest }, enumerable: false });
+    Object.defineProperty(mergedN, 'web', { value: hints ? { provider: hints.provider, videos: webList.length, corrected: hints.corrected } : null, enumerable: false });
+    return mergedN;
+  }
   const all = english ? [lists[0] || [], webList, ...lists.slice(1)] : [webList, ...lists];
   const seen = new Set(), merged = [];
   const max = Math.max(0, ...all.map(l => l.length));

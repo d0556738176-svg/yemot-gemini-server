@@ -16,7 +16,7 @@ function cleanedSearchText(original) {
     // JavaScript's \b word boundary does not treat Hebrew letters as word characters.
     // Unicode letter/number boundaries make Hebrew filler words removable without
     // matching the same text inside a longer Hebrew word.
-    .replace(/(^|[^\p{L}\p{N}])(החדש ביותר|עדכני ביותר|הכי חדשה|הכי חדש|חדש ביותר|האחרונה|האחרון|אחרונה|אחרון|החדש)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
+    .replace(/(^|[^\p{L}\p{N}])(החדש ביותר|עדכני ביותר|הכי חדשה|הכי חדש|חדש ביותר|האחרונה|האחרון|אחרונה|אחרון|החדשה|החדש|חדשה|חדש)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
     .replace(/(^|[^\p{L}\p{N}])(אני רוצה לראות|תביא לי|תמצא לי|תראה לי|את הסרטון|הסרטונים|הסרטון|סרטונים|סרטון|אני רוצה|תביא|תן לי|תמצא|בנושא|נושא)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
     .replace(/^\s*של\s+/i, '')
     .replace(/\s+/g, ' ')
@@ -24,8 +24,18 @@ function cleanedSearchText(original) {
     .slice(0, 120);
 }
 
-function wantsNewestQuery(original) {
-  return /(הכי חדש|החדש ביותר|הכי חדשה|החדש|האחרון|האחרונה|אחרון|אחרונה|עדכני ביותר|חדש ביותר)/i.test(String(original || ''));
+// "הסרטון הכי חדש של X", "סרטון חדש של הערוץ X", "הפרק החדש של X המלא"
+// (owner, 13.11: "חדש" alone counts too).
+export function wantsNewestQuery(original) {
+  return /(^|[^\p{L}\p{N}])(הכי חדש|הכי חדשה|החדש ביותר|חדש ביותר|עדכני ביותר|החדש|החדשה|חדש|חדשה|האחרון|האחרונה|אחרון|אחרונה|העדכני|האחרונים|החדשים)(?=$|[^\p{L}\p{N}])/iu.test(String(original || ''));
+}
+
+// The channel or show name alone, for finding its channel: without
+// "הערוץ", "פרק", "המלא" and the like (they are never part of a name).
+export function channelNameFrom(q) {
+  return String(q || '')
+    .replace(/(^|[^\p{L}\p{N}])(של הערוץ|הערוץ של|הערוץ|ערוץ|בערוץ|של התוכנית|התוכנית|תוכנית|הפרק המלא|פרק מלא|הפרק|פרק|פרקים|המלא|המלאה|מלא|מלאה|עונה|חדש|חדשה|של)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
+    .replace(/\s+/g, ' ').trim();
 }
 
 async function fetchJson(url, fetchImpl, timeoutMs) {
@@ -107,9 +117,11 @@ async function searchYouTubeVideosWithKey(query, {
     // the request falls back to the normal search sorted by date below —
     // a "newest" request must never fail the whole search.
     try {
-      const channelVideos = await newestFromMatchingChannel(q, { key, regionCode, fetchImpl, timeoutMs });
+      const channelVideos = await newestFromMatchingChannel(channelNameFrom(q) || q, { key, regionCode, fetchImpl, timeoutMs, wantsFull: /(^|[^\p{L}])(המלא|המלאה|מלא|מלאה)(?=$|[^\p{L}])/u.test(original) });
       if (channelVideos.length) return channelVideos;
     } catch (error) {
+      // A used-up key must move to the next key, not be retried here.
+      if ([403, 429].includes(error?.httpStatus)) throw error;
       console.warn('[YouTube IVR] newest-video channel lookup failed; using date-sorted search', { status: error?.status || null, message: String(error?.message || error).slice(0, 120) });
     }
   }
@@ -155,7 +167,22 @@ async function searchYouTubeVideosWithKey(query, {
   return results;
 }
 
-async function newestFromMatchingChannel(q, { key, regionCode, fetchImpl, timeoutMs }) {
+// A show on a broadcaster's channel (many shows): the newest videos whose
+// title has the show's name come first; "המלא" -> titles that say full
+// episode first; then the channel's other uploads, newest first.
+export function orderChannelUploads(videos, name, channelIsTheName, wantsFull) {
+  const words = String(name || '').toLowerCase().split(/\s+/).filter(w => w.length > 1);
+  const has = v => words.length && words.every(w => String(v.title || '').toLowerCase().includes(w));
+  const full = v => /פרק מלא|הפרק המלא|full episode|(^|[^\p{L}])מלא(?=$|[^\p{L}])/iu.test(String(v.title || ''));
+  const byDate = (a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0);
+  const list = [...videos].sort(byDate);
+  const named = channelIsTheName ? list : list.filter(has);
+  const rest = list.filter(v => !named.includes(v));
+  const pick = arr => (wantsFull ? [...arr.filter(full), ...arr.filter(v => !full(v))] : arr);
+  return [...pick(named), ...pick(rest)].slice(0, 20);
+}
+
+async function newestFromMatchingChannel(q, { key, regionCode, fetchImpl, timeoutMs, wantsFull = false }) {
   const channelUrl = new URL('https://www.googleapis.com/youtube/v3/search');
   channelUrl.searchParams.set('part', 'snippet');
   channelUrl.searchParams.set('q', q);
@@ -186,10 +213,10 @@ async function newestFromMatchingChannel(q, { key, regionCode, fetchImpl, timeou
   const uploadsUrl = new URL('https://www.googleapis.com/youtube/v3/playlistItems');
   uploadsUrl.searchParams.set('part', 'snippet,contentDetails');
   uploadsUrl.searchParams.set('playlistId', uploadsPlaylistId);
-  uploadsUrl.searchParams.set('maxResults', '10');
+  uploadsUrl.searchParams.set('maxResults', '50');
   uploadsUrl.searchParams.set('key', key);
   const uploadsData = await fetchJson(uploadsUrl, fetchImpl, timeoutMs);
-  return (uploadsData.items || [])
+  const videos = (uploadsData.items || [])
     .filter(item => item.contentDetails?.videoId)
     .map(item => ({
       videoId: item.contentDetails.videoId,
@@ -198,6 +225,7 @@ async function newestFromMatchingChannel(q, { key, regionCode, fetchImpl, timeou
       publishedAt: item.contentDetails?.videoPublishedAt || item.snippet?.publishedAt || null,
       description: String(item.snippet?.description || '')
     }));
+  return orderChannelUploads(videos, q, ranked[0].score === words.length, wantsFull);
 }
 
 export function formatYouTubeChoices(videos) {

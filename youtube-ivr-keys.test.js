@@ -13,7 +13,7 @@ test('YouTube search moves to the next key when one key quota is used up', async
       if (key === 'k1') return { ok: false, status: 403, json: async () => ({ error: { errors: [{ reason: 'quotaExceeded' }] } }) };
       return { ok: true, status: 200, json: async () => ({ items: [{ id: { videoId: 'abc' }, snippet: { title: 'שיר', channelTitle: 'ערוץ' } }] }) };
     };
-    const r = await searchYouTubeVideos('שיר חדש', { fetchImpl, timeoutMs: 1000 });
+    const r = await searchYouTubeVideos('שיר יפה', { fetchImpl, timeoutMs: 1000 });
     assert.equal(r[0].videoId, 'abc');
     assert.deepEqual(used, ['k1', 'k2']);
     const used2 = used.length; await searchYouTubeVideos('שיר אחר', { fetchImpl, timeoutMs: 1000 });

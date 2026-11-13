@@ -121,3 +121,25 @@ test('request by topic or style: the focused topic searches run', async () => {
   assert.ok(calls.includes('ניגוני שבת ווקאלי') && calls.includes('שירי שבת אקפלה רגועים'));
   assert.ok(r.some(v => v.title === 'ניגון'));
 });
+
+import { wantsNewestQuery, channelNameFrom, orderChannelUploads } from './youtube-ivr.js';
+test('newest requests are recognized, "חדש" alone included', () => {
+  for (const q of ['סרטון חדש של הערוץ אבג', 'הסרטון הכי חדש של אבג', 'הפרק החדש של אבג המלא', 'השיעור האחרון של הרב'])
+    assert.equal(wantsNewestQuery(q), true, q);
+  assert.equal(wantsNewestQuery('חדשות הבוקר'), false);
+  assert.equal(channelNameFrom('סרטון של הערוץ אבג דהו'), 'סרטון אבג דהו');
+  assert.equal(channelNameFrom('הפרק המלא של אבג'), 'אבג');
+});
+test('a show on a broadcaster channel: its own newest episode first, full episode first when asked', () => {
+  const v = (id, title, d) => ({ videoId: id, title, publishedAt: '2026-11-' + d + 'T10:00:00Z' });
+  const out = orderChannelUploads([v('a', 'תוכנית אחרת', '12'), v('b', 'אבג - קטע', '11'), v('c', 'אבג פרק מלא', '10'), v('d', 'אבג פרק מלא', '03')], 'אבג', false, true);
+  assert.deepEqual(out.map(x => x.videoId), ['c', 'd', 'b', 'a']);
+});
+test('newest request: the channel list keeps its date order (no English/topic searches, no reordering)', async () => {
+  const calls = [];
+  const search = async q => { calls.push(q); return q.includes('חדש') ? [{ videoId: 'n1', title: 'זה החדש' }, { videoId: 'n2', title: 'אבג דהו ישן יותר' }] : []; };
+  const r = await smartYouTubeSearch('הסרטון הכי חדש של אבג דהו', { fetchImpl: planFetch({ he: 'אבג דהו חדש', en: 'abc new', topics: ['x', 'y'] }) }, { GROQ_API_KEY: 'k' }, search, { webHints: async () => null });
+  assert.deepEqual(r.slice(0, 2).map(v => v.videoId), ['n1', 'n2']);
+  assert.ok(!calls.includes('abc new') && !calls.includes('x'));
+  assert.equal(r.plan.newest, true);
+});

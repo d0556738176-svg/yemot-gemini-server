@@ -5427,17 +5427,17 @@ app.listen(port,async()=>{
   // 13.11: Hebrew request for an English-titled video, and a request by topic.
   if(process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
-    const MARK='ivr2:/2/selftest/smart_search_v5_plan.json';
+    const MARK='ivr2:/2/selftest/smart_search_v6_newest.json';
     if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
     const { smartYouTubeSearch } = await import('./youtube-smart-search.js');
     const out={};
-    for(const q of ['תיק הליצן הרוצח שהטעה את כולם','תיק הליצן הרוצח באנגלית','משהו שקט ורגוע לשבת בלי כלי נגינה']){
+    for(const q of ['סרטון חדש של הערוץ הידברות','משהו שקט ורגוע לשבת בלי כלי נגינה']){
       const r=await smartYouTubeSearch(q,{apiKey:process.env.YOUTUBE_API_KEY,regionCode:'IL'});
-      out[q]={plan:r.plan||null,first:r.slice(0,4).map(v=>String(v.title).slice(0,70)),count:r.length};
+      out[q]={plan:r.plan||null,first:r.slice(0,4).map(v=>String(v.title).slice(0,70)+' | '+String(v.channelTitle||'').slice(0,30)+' | '+String(v.publishedAt||'').slice(0,10)),count:r.length};
     }
-    console.info('[SMART_SEARCH_TEST_V5]',JSON.stringify(out));
+    console.info('[SMART_SEARCH_TEST_V6]',JSON.stringify(out));
     if(Object.values(out).every(x=>x.plan))await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
-  })().catch(e=>console.warn('[SMART_SEARCH_TEST_V5] failed',String(e?.message||e).slice(0,160)));
+  })().catch(e=>console.warn('[SMART_SEARCH_TEST_V6] failed',String(e?.message||e).slice(0,160)));
   // One real song save after the naming change (05.11): same path as a caller's song.
   if(process.env.YOUTUBE_API_KEY&&process.env.APIFY_TOKEN) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
