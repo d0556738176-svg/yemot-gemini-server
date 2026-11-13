@@ -372,7 +372,9 @@ export const PHONE_STYLE = [
 ].join(' ');
 // Stock openings that slip through anyway are cut off the answer.
 const STOCK_OPENING = /^(?:\s*(?:(?:אני\s+)?(?:שמחתי|שמחה|שמח)\s+(?:מאוד\s+)?(?:לשמוע|לעזור|שפנית|ששאלת|שאתה|על)[^.!?,]*[.!?,]|(?:איזו\s+|זו\s+)?שאלה\s+(?:מצוינת|טובה|מעולה|נהדרת|יפה|מעניינת)[^.!?,]*[.!?,]|בשמחה[.!?,]|בהחלט[.!?,]|כמובן[.!?,]|תודה (?:ששאלת|על השאלה)[^.!?,]*[.!?,])\s*)+/u;
-export function cutStockOpening(text) { const t = String(text || ''); const cut = t.replace(STOCK_OPENING, ''); return cut.length > 20 ? cut : t; }
+// 13.11: a small model began with its own note to itself ("בבקשה, בוצע קיצור").
+const META_OPENING = /^\s*(?:בבקשה[,.!]?\s*)?(?:בוצע קיצור|קיצרתי|הנה התשובה(?: המקוצרת)?|תשובה מקוצרת|הנה גרסה מקוצרת|הנה הניסוח)[,.:!]?\s*/u;
+export function cutStockOpening(text) { const t = String(text || '').replace(META_OPENING, ''); const cut = t.replace(STOCK_OPENING, ''); return cut.length > 20 ? cut : t; }
 
 // Extension 1 speaks as a man and answers briefly; extension 3 as a woman, at length.
 const MALE_SELF = [['מורידה','מוריד'],['מעירה','מעיר'],['ממשיכה','ממשיך'],['משמיעה','משמיע'],['מקשיבה','מקשיב'],['מכינה','מכין'],['יכולה','יכול'],['בטוחה','בטוח'],['זוכרת','זוכר'],['ממליצה','ממליץ'],['יודעת','יודע'],['מבינה','מבין'],['מחפשת','מחפש'],['מצטערת','מצטער'],['שמחה לעזור','שמח לעזור'],['תשמיעי','תשמיע'],['תורידי','תוריד'],['תמשיכי','תמשיך'],['תקריאי','תקריא']];
