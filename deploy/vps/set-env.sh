@@ -3,7 +3,8 @@
 # (the browser console cannot type capitals or shifted symbols).
 # Usage: bash set-env.sh <main|ext2> <setting_name_lowercase> <hexfile>
 set -euo pipefail
-app=$1; name=$(echo "$2" | tr a-z- A-Z_)  # console turns _ into -; val=$(xxd -r -p "$3" | tr -d '\r\n')
+# (the console turns _ into -, so dashes in the name become underscores)
+app=$1; name=$(echo "$2" | tr a-z- A-Z_); val=$(xxd -r -p "$3" | tr -d '\r\n')
 f=/opt/yemot/$app.env
 grep -v "^$name=" "$f" > "$f.new" || true
 printf '%s="%s"\n' "$name" "$val" >> "$f.new"
