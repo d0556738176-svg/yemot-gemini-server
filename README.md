@@ -1,3 +1,6 @@
+> **כל הזכויות שמורות © 2026 דוד ברזילי. אין רשות להעתיק, להפעיל או להשתמש בשום חלק מהקוד בלי אישור בכתב — ראו [LICENSE](LICENSE).**
+> **Copyright © 2026 David Barzilai. All rights reserved. No permission to copy, run or use any part of this code without written permission — see [LICENSE](LICENSE).**
+
 # Generic AI Phone Line — Gemini Audio
 
 This package is a sanitized generic version of the AI phone-line architecture.
