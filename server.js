@@ -4559,7 +4559,7 @@ async function ext2Media(job,{start=false,timeoutMs=8000}={}) {
   if(!secret) return null;
   const base=String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'');
   const u=new URL(base+'/api/ext3/media');
-  for(const [k,v] of Object.entries({secret,videoId:job.videoId,mode:job.mode||'audio',title:job.title||'',channel:job.channelTitle||'',duration:job.durationSec||'',start:start?'1':'0',...(typeof job.subtitles==='boolean'?{subs:job.subtitles?'1':'0'}:{})})) u.searchParams.set(k,String(v));
+  for(const [k,v] of Object.entries({secret,videoId:job.videoId,mode:job.mode||'audio',title:job.title||'',channel:job.channelTitle||'',duration:job.durationSec||'',start:start?'1':'0',...(job.paid?{paid:'1'}:{}),...(typeof job.subtitles==='boolean'?{subs:job.subtitles?'1':'0'}:{})})) u.searchParams.set(k,String(v));
   try {
     const r=await fetch(u,{signal:AbortSignal.timeout(timeoutMs)});
     const j=await r.json().catch(()=>null);
@@ -4606,6 +4606,16 @@ function ext3FailReason(err) {
   if(/quota|credit|limit|payment/i.test(e)) return 'נגמרה כרגע מכסת ההורדות של המנוע';
   return 'מנוע ההורדות נכשל';
 }
+// 15.11: the free direct download did not work (or the video is already
+// saved): extension 2 waits for the caller's key before the paid engine or a
+// second download. Returns the question, and remembers which job it is about.
+const EXT3_CONSENT_CODES=new Set(['paid_needs_consent','redo_needs_consent']);
+function ext3ConsentAsk(job,media,code) {
+  media.pendingPaid=job; job.failSaid=true; job.done=false;
+  return code==='redo_needs_consent'
+    ? 'הווידאו של '+job.title+' כבר שמור בתיקיית וידאו בלי כתובית. כדי להוסיף כתובית בעברית צריך להוריד אותו שוב. להורדה מחדש הקש 1, לביטול הקש 2.'
+    : 'ההורדה החינמית ישירות מיוטיוב לא הצליחה עבור '+job.title+'. אפשר להוריד אותו במנוע הגיבוי, שעולה מעט כסף. להורדה במנוע הגיבוי הקש 1, לביטול הקש 2.';
+}
 // Called once per turn: what changed in this call's downloads, to be said.
 async function ext3MediaNotes(media) {
   const notes=[];
@@ -4618,6 +4628,8 @@ async function ext3MediaNotes(media) {
       return;
     }
     job.needsStart=false;
+    { const c=[st.video?.error,st.audio?.error].find(x=>EXT3_CONSENT_CODES.has(String(x||'')));
+      if(c&&!job.failSaid) { notes.push(ext3ConsentAsk(job,media,c)); return; } }
     if(st.audio?.status==='ready'&&st.audio.paths?.length) job.paths=st.audio.paths;
     if(job.mode==='video') {
       if(st.video?.status==='ready'&&!job.videoSaid) { job.videoSaid=true; notes.push('הווידאו של '+job.title+' נשמר בתיקיית וידאו.'); }
@@ -4669,6 +4681,7 @@ async function ext3MediaStatusReply(media) {
     const st=await ext2Media(job,{timeoutMs:6000});
     if(!st) { parts.push('שירות ההורדות לא ענה לי ברגע זה לגבי '+job.title+'. אני אנסה שוב, ואודיע כשהקובץ מוכן.'); continue; }
     if(st.audio?.status==='ready'&&st.audio.paths?.length) { job.paths=st.audio.paths; media.lastReady=job; parts.push('הקובץ של '+job.title+' מוכן. כדי לשמוע אותו אמור תשמיעי לי אותו.'); continue; }
+    { const c=[st.video?.error,st.audio?.error].find(x=>EXT3_CONSENT_CODES.has(String(x||''))); if(c) { parts.push(ext3ConsentAsk(job,media,c)); continue; } }
     if(st.audio?.status==='failed'||st.video?.status==='failed') { job.done=true; parts.push('ההורדה של '+job.title+' לא הצליחה: '+ext3FailReason(st.audio?.error||st.video?.error)+'. אפשר לבקש ממני גרסה אחרת של אותו שיר או סרטון.'); continue; }
     const min=Number(st.audio?.minutes ?? st.video?.minutes);
     parts.push('ההורדה של '+job.title+(job.mode==='video'?', כווידאו וגם כקובץ שמע מאותה הורדה,':'')+' עדיין בתהליך'+(Number.isFinite(min)?(min<1?', היא התחילה לפני פחות מדקה':', כבר '+min+' דקות'):'')+'. '+(st.audio?.spoken?st.audio.spoken+' ':'')+'אודיע לך ברגע שהקובץ מוכן.');
@@ -4717,6 +4730,8 @@ async function ext3StartOrPlay(h, media) {
     return {reply:'שירות ההורדות היה במנוחה, ואני מעירה אותו עכשיו. אני ממשיכה לנסות לבד כל כמה שניות, וברגע שהוא יענה תתחיל ההורדה של '+job.title+(h.mode==='video'?' כווידאו, ומאותה הורדה גם קובץ שמע להשמעה בטלפון':'')+'. זה יכול לקחת כמה דקות. בינתיים אפשר להמשיך לדבר על כל דבר, ואודיע לך כשהקובץ מוכן.'};
   }
   job.needsStart=false;
+  { const c=[st.video?.error,st.audio?.error].find(x=>EXT3_CONSENT_CODES.has(String(x||'')));
+    if(c) return {reply:ext3ConsentAsk(job,media,c)}; }
   if(st.audio?.status==='ready'&&st.audio.paths?.length) job.paths=st.audio.paths;
   if(job.paths&&h.mode!=='video') {
     job.readySaid=true; job.done=true;
@@ -4987,6 +5002,20 @@ async function callHandler(call) {
       if((!explicitSearchOnly || (typeof brainBranch==='function'&&brainBranch()==='1')) && String(process.env.EXT3_BRAIN||'on')!=='off' && typeof runExt3Brain==='function') {
         const fixed=answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
         if(fixed) { replyText=fixed; ext3Done=true; }
+        else if(callMedia.pendingPaid && ext3SubsChoice(userTranscript)!==null) {
+          // 15.11: 1 = the paid engine / download again, 2 = cancel.
+          const yes=ext3SubsChoice(userTranscript), job=callMedia.pendingPaid; callMedia.pendingPaid=null;
+          console.info('[EXT3_MEDIA] paid engine / download again answer',{callId:activeKey,videoId:job.videoId,yes});
+          if(!yes) { job.cancelled=true; job.done=true; replyText='בסדר, לא הורדתי כלום ולא היה חיוב. על מה תרצה שנמשיך לדבר?'; }
+          else {
+            job.paid=true; job.failSaid=false; job.done=false; job.since=Date.now();
+            const m=await ext3StartOrPlay({...job},callMedia);
+            replyText=m.reply; if(m.play) pendingPlay=m.play;
+          }
+          if(typeof brainBranch==='function'&&brainBranch()==='1') replyText=toMaleSelf(replyText);
+          turnContext.ext3Ref={type:'video',videoId:job.videoId,title:job.title,durationSec:job.durationSec};
+          ext3Done=true;
+        }
         else if(pendingSubs && ext3SubsChoice(userTranscript)!==null) {
           const subs=ext3SubsChoice(userTranscript), c=pendingSubs; pendingSubs=null;
           console.info('[EXT3_MEDIA] video subtitles choice',{callId:activeKey,videoId:c.videoId,subtitles:subs});
