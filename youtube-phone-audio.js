@@ -35,20 +35,24 @@ export function phoneAudioSettings(env = process.env) {
     ceilingDb: Math.max(-12, Math.min(-1, num(env.BRANCH2_AUDIO_CEILING_DB, -4.5))),
     maxBoostDb: Math.max(0, Math.min(32, num(env.BRANCH2_AUDIO_MAX_BOOST_DB, 29))),
     maxCutDb: Math.max(0, Math.min(30, num(env.BRANCH2_AUDIO_MAX_CUT_DB, 20))),
-    highpassHz: Math.max(40, Math.min(300, num(env.BRANCH2_AUDIO_HIGHPASS_HZ, 110))),
+    // Owner, 15.11: the old sound, only with the instruments heard normally:
+    // the band opened at both ends (bass/drums below, strings/cymbals above)
+    // and less lift of the voice band. Warmth, de-esser, space and bass
+    // harmonics stay available by setting but are off.
+    highpassHz: Math.max(40, Math.min(300, num(env.BRANCH2_AUDIO_HIGHPASS_HZ, 100))),
     // Warmth (body of voice and guitar) and a gentle de-esser: the phone
     // line's own coding turns sharp "s" and cymbal spikes into a rasp (15.11).
-    warmthDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_WARMTH_DB, 1.5))),
-    deess: Math.max(0, Math.min(1, num(env.BRANCH2_AUDIO_DEESS, 0.35))),
+    warmthDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_WARMTH_DB, 0))),
+    deess: Math.max(0, Math.min(1, num(env.BRANCH2_AUDIO_DEESS, 0))),
     // The space of the recording (hall, crowd, reverb, wide instruments) lives
     // in the stereo difference, which a plain mono mix throws away: part of it
     // is kept, slightly delayed so it does not cancel the middle (15.11).
-    ambience: Math.max(0, Math.min(0.8, num(env.BRANCH2_AUDIO_AMBIENCE, 0.35))),
+    ambience: Math.max(0, Math.min(0.8, num(env.BRANCH2_AUDIO_AMBIENCE, 0))),
     // Bass and drums are below what a phone line carries; their harmonics are
     // made audible instead, so the ear still hears the bass line (15.11).
-    virtualBass: Math.max(0, Math.min(1, num(env.BRANCH2_AUDIO_VBASS, 0.35))),
-    lowpassHz: Math.max(3000, Math.min(3900, num(env.BRANCH2_AUDIO_LOWPASS_HZ, 3600))),
-    presenceDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_PRESENCE_DB, 1.5))),
+    virtualBass: Math.max(0, Math.min(1, num(env.BRANCH2_AUDIO_VBASS, 0))),
+    lowpassHz: Math.max(3000, Math.min(3900, num(env.BRANCH2_AUDIO_LOWPASS_HZ, 3800))),
+    presenceDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_PRESENCE_DB, 0.5))),
   };
 }
 
@@ -121,10 +125,9 @@ export function finishFilter(gainDb, s) {
     // and avoids a click when playback starts.
     'afade=t=in:d=0.03',
     `volume=${gainDb.toFixed(2)}dB`,
-    // Slow, gentle compression and a smooth limiter (auto release): fast
-    // release on a phone line is heard as a rough, "hoarse" edge (15.11).
-    'acompressor=threshold=0.18:ratio=2:attack=15:release=250:knee=8',
-    `alimiter=limit=${limit}:attack=5:release=120:asc=1:level=disabled`,
+    // Owner, 15.11: the original (q3) dynamics are kept, he prefers them.
+    'acompressor=threshold=0.18:ratio=2:attack=8:release=150:knee=6',
+    `alimiter=limit=${limit}:attack=3:release=60:level=disabled`,
     'aresample=osf=s16:dither_method=triangular',
   ].join(',');
 }
