@@ -25,5 +25,9 @@ jobs:
         run: node --check server.js
       - name: Check provider fallback syntax
         run: node --check provider-fallback.js
+      - name: Install ffmpeg for audio tests
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y ffmpeg > /dev/null
       - name: Run test suite
+        env:
+          FFMPEG_BIN: /usr/bin/ffmpeg
         run: npm test

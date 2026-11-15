@@ -27,7 +27,14 @@ jobs:
           node --check youtube-ivr.js
           node --check youtube-transcript.js
           node --check youtube-authorized-playback.js
+      # Install scripts are skipped above, so ffmpeg-static has no binary here.
+      # Tests that really convert audio (extension 4's song copy) use the
+      # system ffmpeg instead, through ffmpeg-static's own FFMPEG_BIN override.
+      - name: Install ffmpeg for audio tests
+        run: sudo apt-get -qq update && sudo apt-get -qq install -y ffmpeg > /dev/null
       - name: Run regression tests
+        env:
+          FFMPEG_BIN: /usr/bin/ffmpeg
         run: npm test
       - name: Check Tavily SDK initialization (offline)
         run: |
