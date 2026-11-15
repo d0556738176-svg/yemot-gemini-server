@@ -1,0 +1,38 @@
+# Make one song from song-direct/request.json (push to a song-direct/* branch)
+# with ACE-Step 1.5 on a free runner, and commit the mp3 back to the branch.
+name: Song direct
+on:
+  push:
+    branches: ['song-direct/**']
+    paths: ['song-direct/request.json']
+permissions:
+  contents: write
+jobs:
+  song:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Free disk and add swap
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/.ghcup || true
+          sudo swapoff -a || true
+          sudo fallocate -l 20G /mnt/swapfile && sudo chmod 600 /mnt/swapfile && sudo mkswap /mnt/swapfile > /dev/null && sudo swapon /mnt/swapfile
+          sudo apt-get -qq update && sudo apt-get -qq install -y ffmpeg > /dev/null
+          sudo mkdir -p /mnt/uvcache && sudo chown "$USER" /mnt/uvcache
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: ace-step/ACE-Step-1.5, ref: main, path: ace }
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/cache@v4
+        with: { path: ace/checkpoints, key: acestep15-turbo-checkpoints-v1 }
+      - name: Install ACE-Step
+        run: cd ace && UV_CACHE_DIR=/mnt/uvcache uv sync --python 3.11 > /tmp/install.log 2>&1 || (tail -40 /tmp/install.log; exit 1)
+      - name: Generate
+        run: |
+          export ACESTEP_API_KEY="$(openssl rand -hex 16)"
+          (cd ace && ACESTEP_GENERATION_TIMEOUT=3600 ACESTEP_CONFIG_PATH=acestep-v15-turbo ACESTEP_INIT_LLM=false nohup uv run acestep-api --host 127.0.0.1 --port 8001 > /tmp/server.log 2>&1 &)
+          python3 song-direct/make.py || { tail -n 60 /tmp/server.log | grep -v query_result; exit 1; }
+      - name: Commit the song
+        run: |
+          git config user.name "song-bot"; git config user.email "song-bot@users.noreply.github.com"
+          git add song-direct/out && git commit -m "Song: $(python3 -c 'import json;print(json.load(open("song-direct/request.json"))["name"])')" && git push
