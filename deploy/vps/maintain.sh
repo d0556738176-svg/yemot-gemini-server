@@ -23,6 +23,27 @@ WantedBy=timers.target
 UNIT
 systemctl daemon-reload
 systemctl enable --now yemot-clean.timer
+# YouTube changes often: the downloader of extension 2 updates itself every
+# night (and now), so direct downloads keep working (15.11).
+cat > /etc/systemd/system/yemot-ytdlp.service <<'UNIT'
+[Unit]
+Description=Update yt-dlp of extension 2
+[Service]
+Type=oneshot
+ExecStart=/opt/yemot/ext2/node_modules/youtube-dl-exec/bin/yt-dlp -U
+UNIT
+cat > /etc/systemd/system/yemot-ytdlp.timer <<'UNIT'
+[Unit]
+Description=Nightly yt-dlp update
+[Timer]
+OnCalendar=*-*-* 03:30
+Persistent=true
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now yemot-ytdlp.timer
+/opt/yemot/ext2/node_modules/youtube-dl-exec/bin/yt-dlp -U || true
 # Security updates install automatically (Ubuntu default); make sure it is on.
 systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
 # Setting names typed through the console may have - instead of _ (no Shift).

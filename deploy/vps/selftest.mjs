@@ -54,17 +54,14 @@ await check('youtube search (yt-dlp from this server)', async () => {
   if (r.status !== 0) throw new Error((r.stderr || 'exit ' + r.status).split('\n').filter(Boolean).pop());
   return r.stdout.trim().split('\n').length + ' results';
 });
-await check('youtube audio download (yt-dlp from this server)', async () => {
-  const out = tmp + '/zoo.m4a';
-  const r = spawnSync(ytdlp, ['--no-warnings', '-f', 'bestaudio[ext=m4a]/bestaudio', '-o', out, '--', 'jNQXAC9IVRw'], { timeout: 180000, encoding: 'utf8' });
-  if (r.status !== 0) throw new Error((r.stderr || 'exit ' + r.status).split('\n').filter(Boolean).pop());
-  return statSync(out).size + ' bytes';
+const { directDownload } = await import(EXT2 + '/youtube-direct.js');
+await check('youtube audio, direct (as extension 2 does it)', async () => {
+  const r = await directDownload('jNQXAC9IVRw', tmp + '/zoo.m4a', { mode: 'audio', ffmpegPath, log: { info() {}, warn: m => console.log('  try failed', JSON.stringify(m).slice(0, 160)) } });
+  return r.bytes + ' bytes, player ' + (r.client || 'default');
 });
-await check('youtube video download (yt-dlp from this server)', async () => {
-  const out = tmp + '/zoo.mp4';
-  const r = spawnSync(ytdlp, ['--no-warnings', '-f', 'best[height<=360][ext=mp4]/best[height<=360]', '-o', out, '--', 'jNQXAC9IVRw'], { timeout: 180000, encoding: 'utf8' });
-  if (r.status !== 0) throw new Error((r.stderr || 'exit ' + r.status).split('\n').filter(Boolean).pop());
-  return statSync(out).size + ' bytes';
+await check('youtube video, direct (as extension 2 does it)', async () => {
+  const r = await directDownload('jNQXAC9IVRw', tmp + '/zoo.mp4', { mode: 'video', height: 720, ffmpegPath, log: { info() {}, warn: m => console.log('  try failed', JSON.stringify(m).slice(0, 160)) } });
+  return r.bytes + ' bytes, player ' + (r.client || 'default');
 });
 await check('hebrew dubbing, whole chain (key 9; nothing is published)', async () => {
   for (const [k, v] of Object.entries(env)) if (!(k in process.env)) process.env[k] = v;
