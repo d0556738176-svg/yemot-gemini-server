@@ -35,8 +35,12 @@ export function phoneAudioSettings(env = process.env) {
     ceilingDb: Math.max(-12, Math.min(-1, num(env.BRANCH2_AUDIO_CEILING_DB, -4.5))),
     maxBoostDb: Math.max(0, Math.min(32, num(env.BRANCH2_AUDIO_MAX_BOOST_DB, 29))),
     maxCutDb: Math.max(0, Math.min(30, num(env.BRANCH2_AUDIO_MAX_CUT_DB, 20))),
-    highpassHz: Math.max(40, Math.min(300, num(env.BRANCH2_AUDIO_HIGHPASS_HZ, 140))),
-    lowpassHz: Math.max(3000, Math.min(3900, num(env.BRANCH2_AUDIO_LOWPASS_HZ, 3500))),
+    highpassHz: Math.max(40, Math.min(300, num(env.BRANCH2_AUDIO_HIGHPASS_HZ, 110))),
+    // Warmth (body of voice and guitar) and a gentle de-esser: the phone
+    // line's own coding turns sharp "s" and cymbal spikes into a rasp (15.11).
+    warmthDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_WARMTH_DB, 1.5))),
+    deess: Math.max(0, Math.min(1, num(env.BRANCH2_AUDIO_DEESS, 0.35))),
+    lowpassHz: Math.max(3000, Math.min(3900, num(env.BRANCH2_AUDIO_LOWPASS_HZ, 3600))),
     presenceDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_PRESENCE_DB, 1.5))),
   };
 }
@@ -70,7 +74,9 @@ export function prepassFilter(s, soxr, sampleRate = 8000) {
     // Full-band (non-phone) rendering keeps the deep bass and the highs.
     `highpass=f=${phone ? s.highpassHz : 30}:poles=2`,
     ...(phone ? [`lowpass=f=${s.lowpassHz}:poles=2`] : []),
+    ...(phone && s.warmthDb > 0 ? [`equalizer=f=280:t=o:w=1.2:g=${s.warmthDb}`] : []),
     ...(phone && s.presenceDb > 0 ? [`equalizer=f=2200:t=o:w=1.2:g=${s.presenceDb}`] : []),
+    ...(phone && s.deess > 0 ? [`deesser=i=${s.deess}:m=0.5:f=0.5:s=o`] : []),
     'volume=-6dB',
     'ebur128=framelog=verbose', // summary only; no per-frame lines
   ].join(',');
@@ -89,8 +95,10 @@ export function finishFilter(gainDb, s) {
     // and avoids a click when playback starts.
     'afade=t=in:d=0.03',
     `volume=${gainDb.toFixed(2)}dB`,
-    'acompressor=threshold=0.18:ratio=2:attack=8:release=150:knee=6',
-    `alimiter=limit=${limit}:attack=3:release=60:level=disabled`,
+    // Slow, gentle compression and a smooth limiter (auto release): fast
+    // release on a phone line is heard as a rough, "hoarse" edge (15.11).
+    'acompressor=threshold=0.18:ratio=2:attack=15:release=250:knee=8',
+    `alimiter=limit=${limit}:attack=5:release=120:asc=1:level=disabled`,
     'aresample=osf=s16:dither_method=triangular',
   ].join(',');
 }
