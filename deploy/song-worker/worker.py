@@ -23,9 +23,9 @@ def log(*a):
     print(f"[{round(time.time() - T0)}s]", *a, flush=True)
 
 
-def callback(kind, body=None, **extra):
+def callback(kind, body=None, ctype="audio/flac", **extra):
     q = {"job": JOB, "ticket": TICKET, "kind": kind, **extra}
-    headers = {"content-type": "audio/mpeg" if body else "application/json"}
+    headers = {"content-type": ctype if body else "application/json"}
     if kind == "audio":
         headers["x-song-payload"] = RAW
     for attempt in range(6):
@@ -98,7 +98,10 @@ def main():
     sub = api("/release_task", {
         "prompt": P["prompt"], "lyrics": P["lyrics"], "vocal_language": P.get("language", "he"),
         "audio_duration": int(P.get("duration", 90)), "thinking": False, "use_format": False,
-        "model": "acestep-v15-turbo", "task_type": "text2music", "audio_format": "mp3",
+        "model": "acestep-v15-turbo", "task_type": "text2music",
+        # Lossless master (owner, 15.11: "the best quality"); the phone server
+        # makes the phone, extension-7 and mp3 copies from it.
+        "audio_format": "flac",
         "inference_steps": 8, "batch_size": 1, "use_random_seed": True,
     }, timeout=120)
     task = (sub.get("data") or {}).get("task_id")
@@ -108,8 +111,9 @@ def main():
     audio = api(audio_path, raw=True, timeout=120)
     log("generated", len(audio), "bytes in", round(time.time() - t1), "s")
     if len(audio) < 20000: raise RuntimeError("audio too small")
-    with open("song.mp3", "wb") as f: f.write(audio)
-    if not callback("audio", audio): raise RuntimeError("could not deliver the song")
+    ctype = "audio/flac" if audio[:4] == b"fLaC" else "audio/mpeg"
+    with open("song.flac" if ctype == "audio/flac" else "song.mp3", "wb") as f: f.write(audio)
+    if not callback("audio", audio, ctype=ctype): raise RuntimeError("could not deliver the song")
 
 
 if __name__ == "__main__":

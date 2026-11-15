@@ -190,7 +190,8 @@ export async function handleWorkerCallback(req, res) {
   }
   let payload = {};
   try { payload = JSON.parse(Buffer.from(String(req.headers['x-song-payload'] || ''), 'base64').toString('utf8')); } catch {}
-  const generated = { audio, contentType: 'audio/mpeg', provider: 'github-cpu', model: 'acestep-v15-turbo' };
+  const flac = audio.subarray(0, 4).toString('latin1') === 'fLaC';
+  const generated = { audio, contentType: flac ? 'audio/flac' : 'audio/mpeg', provider: 'github-cpu', model: 'acestep-v15-turbo' };
   delivered.add(jobId);
   log('AUDIO_RECEIVED', { jobId, bytes: audio.length, waiting: !!waiter });
   res.json({ ok: true });

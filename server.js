@@ -5982,7 +5982,7 @@ const songCallHandler = createSongCallHandler({
   yemotApi, transcribePhoneAudio, generateText: songGenerateText,
   sanitizeForYemot, withTimeout, getCallerNumber, logDetailedError
 });
-app.post('/song-worker/callback', rateLimit(60, 60 * 1000, 'song-worker'), express.raw({ type: () => true, limit: '40mb' }), handleWorkerCallback);
+app.post('/song-worker/callback', rateLimit(60, 60 * 1000, 'song-worker'), express.raw({ type: () => true, limit: '100mb' }), handleWorkerCallback);
 app.get('/health/songs', rateLimit(10, 60 * 1000, 'song-health'), (req, res) => res.json({ ok: true, cloudWorker: isCloudWorkerConfigured(), ...getSongProviderHealth() }));
 
 app.get(['/yemot', '/yemot-backup'], (req, res, next) => {

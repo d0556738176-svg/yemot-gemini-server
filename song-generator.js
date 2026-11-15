@@ -479,8 +479,17 @@ function runFfmpeg(args, timeoutMs = 30000) {
   });
 }
 
+// The engine's master file: FLAC (lossless, 48 kHz stereo, since 15.11) or
+// MP3 from older runs. Decided from the bytes, never from a guess.
+export function masterExt(audio) {
+  const head = Buffer.from(audio || []).subarray(0, 4).toString('latin1');
+  if (head === 'fLaC') return 'flac';
+  if (head === 'RIFF') return 'wav';
+  return 'mp3';
+}
+
 async function convertToYemotWavChunks(audio, tempDir) {
-  const mp3Path = path.join(tempDir, 'source.mp3');
+  const mp3Path = path.join(tempDir, 'source.' + masterExt(audio));
   const chunksDir = path.join(tempDir, 'chunks');
   await fs.mkdir(chunksDir, { recursive: true });
   await fs.writeFile(mp3Path, audio);
@@ -576,7 +585,7 @@ async function saveSongRecord(record, method = 'POST') {
 
 // One full 8kHz mono WAV of the whole song, for extension 7.
 async function convertToSingleWav(audio, tempDir) {
-  const src = path.join(tempDir, 'full-source.mp3');
+  const src = path.join(tempDir, 'full-source.' + masterExt(audio));
   const out = path.join(tempDir, 'full.wav');
   await fs.writeFile(src, audio);
   await runFfmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-vn', '-ar', '8000', '-ac', '1', '-c:a', 'pcm_s16le', out], 60000);
@@ -591,7 +600,7 @@ async function convertToSingleWav(audio, tempDir) {
 // name, "AI song" as the singer, style, the full lyrics, date and the request.
 export async function saveSongDownloadCopy(audio, spec, uuid, tempDir, { upload = uploadRawToYemot, getFile = yemotFileMeta, folders = null } = {}) {
   const f = folders || await import('./download-folders.js');
-  const src = path.join(tempDir, 'ai-source.mp3'), out = path.join(tempDir, 'ai-download.mp3');
+  const src = path.join(tempDir, 'ai-source.' + masterExt(audio)), out = path.join(tempDir, 'ai-download.mp3');
   await fs.writeFile(src, audio);
   const now = new Date();
   const title = String(spec.title || 'שיר חדש').trim().slice(0, 120);
@@ -602,7 +611,10 @@ export async function saveSongDownloadCopy(audio, spec, uuid, tempDir, { upload 
     comment: ['נוצר בשלוחה 4', now.toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' }), spec.style || spec.prompt || ''].filter(Boolean).join(' | ').slice(0, 400),
     encoded_by: 'Yemot branch 4'
   };
-  const args = ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-map', '0:a', '-c', 'copy', '-id3v2_version', '3', '-write_id3v1', '1'];
+  // An mp3 master is kept bit for bit; a lossless master becomes a 320k mp3
+  // (the best mp3 there is) - the lossless file itself goes to "שירי AI".
+  const codec = masterExt(audio) === 'mp3' ? ['-c', 'copy'] : ['-c:a', 'libmp3lame', '-b:a', '320k'];
+  const args = ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-map', '0:a', ...codec, '-id3v2_version', '3', '-write_id3v1', '1'];
   for (const [k, v] of Object.entries(tags)) if (v) args.push('-metadata', k + '=' + v);
   args.push(out);
   await runFfmpeg(args, 60000);
@@ -628,7 +640,78 @@ export async function saveSongDownloadCopy(audio, spec, uuid, tempDir, { upload 
   return { remote, bytes };
 }
 
-async function uploadRawToYemot(filePath, remotePath) {
+// 15.11 (owner): a folder "שירי AI" with every AI song in the best quality
+// there is (the engine's lossless FLAC master, untouched) and every detail in
+// the file itself, the full lyrics included. Over 2,900 files it continues in
+// "שירי AI_2" and so on (Yemot's per-folder limit), counted in Yemot itself.
+export const AI_SONGS_BASE = 'ivr2:/שירי AI';
+export function aiSongTags(spec, meta = {}) {
+  const now = meta.now || new Date();
+  const local = now.toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' });
+  const style = [spec.genre, spec.mood, spec.tempo].filter(Boolean).join(', ');
+  return {
+    title: String(spec.title || 'שיר חדש').trim().slice(0, 120),
+    artist: 'שיר בינה מלאכותית',
+    album_artist: 'שלוחה 4 - יוצר השירים',
+    album: 'שירי AI',
+    composer: 'בינה מלאכותית (ACE-Step 1.5)',
+    lyricist: 'בינה מלאכותית',
+    genre: style.slice(0, 160) || 'שיר',
+    date: now.toISOString().slice(0, 10),
+    year: String(now.getUTCFullYear()),
+    language: String(spec.language || 'he'),
+    lyrics: String(spec.lyrics || '').trim().slice(0, 8000),
+    description: String(spec.musicPrompt || '').slice(0, 1000),
+    comment: ['נוצר בשלוחה 4', local, meta.request ? 'בקשה: ' + meta.request : ''].filter(Boolean).join(' | ').slice(0, 1000),
+    request: String(meta.request || '').slice(0, 1000),
+    style: String(spec.musicPrompt || '').slice(0, 1000),
+    created: now.toISOString(),
+    duration_requested: String(spec.durationSeconds || ''),
+    engine: String(meta.engine || 'ACE-Step 1.5 turbo'),
+    song_id: String(meta.id || ''),
+    encoded_by: 'Yemot branch 4'
+  };
+}
+
+export async function saveSongToAiFolder(audio, spec, uuid, tempDir, { upload = uploadRawToYemot, getFile = yemotFileMeta, countFiles = null, request = '', engine = '', now = new Date() } = {}) {
+  const ext = masterExt(audio);
+  const src = path.join(tempDir, 'ai-folder-source.' + ext);
+  const out = path.join(tempDir, 'ai-folder.' + ext);
+  await fs.writeFile(src, audio);
+  const tags = aiSongTags(spec, { request, engine, id: uuid, now });
+  // Stream copied as is (no re-encoding); only the details are written.
+  const args = ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-map', '0:a', '-c', 'copy'];
+  if (ext === 'mp3') args.push('-id3v2_version', '3', '-write_id3v1', '1');
+  for (const [k, v] of Object.entries(tags)) if (v) args.push('-metadata', k + '=' + v);
+  args.push(out);
+  await runFfmpeg(args, 60000);
+  const count = countFiles || (async p => (await import('./download-folders.js')).yemotFileCount(p, { apiBase: YEMOT_API_BASE, token: yemotKey() }));
+  let folder = AI_SONGS_BASE;
+  for (let n = 1; n < 50; n++) {
+    folder = n === 1 ? AI_SONGS_BASE : AI_SONGS_BASE + '_' + n;
+    const real = await count(folder).catch(() => null);
+    if (!Number.isFinite(real) || real < 2900) break;
+  }
+  const clean = tags.title.replace(/[\\/:*?"<>|\n\r\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90) || 'שיר';
+  const remote = folder + '/' + clean + ' - ' + uuid.slice(0, 6) + '.' + ext;
+  const bytes = (await fs.stat(out)).size;
+  let last = null;
+  for (const [i, w] of [0, 15000, 45000, 120000].entries()) {
+    if (w) await new Promise(r => setTimeout(r, w));
+    try {
+      await upload(out, remote, ext === 'flac' ? 'audio/flac' : 'audio/mpeg');
+      const m = await getFile(remote);
+      if (m?.file?.exists === true && Number(m?.file?.size) === bytes) { last = null; break; }
+      last = new Error('AI songs folder copy not verified in Yemot');
+    } catch (e) { last = e; }
+    log('AI_FOLDER_RETRY', { id: uuid, attempt: i + 1, message: String(last?.message || last).slice(0, 120) });
+  }
+  if (last) throw last;
+  log('AI_FOLDER_SAVED', { id: uuid, remote, bytes, format: ext });
+  return { remote, bytes, format: ext };
+}
+
+async function uploadRawToYemot(filePath, remotePath, type = 'audio/mpeg') {
   const buffer = await fs.readFile(filePath);
   const url = new URL(YEMOT_API_BASE + '/UploadFile');
   url.searchParams.set('token', yemotKey());
@@ -636,8 +719,8 @@ async function uploadRawToYemot(filePath, remotePath) {
   url.searchParams.set('convertAudio', '0');
   url.searchParams.set('autoNumbering', 'false');
   const form = new FormData();
-  form.append('file', new Blob([buffer], { type: 'audio/mpeg' }), path.basename(remotePath));
-  const response = await fetchWithTimeout(url, { method: 'POST', body: form }, 120000, 'Yemot download copy upload');
+  form.append('file', new Blob([buffer], { type }), path.basename(remotePath));
+  const response = await fetchWithTimeout(url, { method: 'POST', body: form }, Math.max(120000, Math.ceil(buffer.length / 100000) * 1000), 'Yemot download copy upload');
   const result = await response.json().catch(() => ({}));
   if (result.responseStatus && result.responseStatus !== 'OK') throw new Error('Yemot upload failed: ' + String(result.message || result.responseStatus));
   return result;
@@ -695,12 +778,16 @@ async function deliverSong(spec, generated, job, record, uuid) {
     let downloadCopy = null;
     try { downloadCopy = await saveSongDownloadCopy(generated.audio, spec, uuid, tempDir); }
     catch (error) { log('DOWNLOAD_COPY_FAILED', { id: uuid, message: String(error?.message || error).slice(0, 160) }); }
+    // 15.11 (owner): and to the "שירי AI" folder, best quality, all details.
+    let aiFolder = null;
+    try { aiFolder = await saveSongToAiFolder(generated.audio, spec, uuid, tempDir, { request: record.prompt || job.prompt || '', engine: generated.model || generated.provider || '' }); }
+    catch (error) { log('AI_FOLDER_FAILED', { id: uuid, message: String(error?.message || error).slice(0, 160) }); }
     record.status = 'ready';
     record.audio_url = archived || ('yemot://' + playbackPaths.join(','));
     record.completed_at = new Date().toISOString();
     await saveSongRecord(record, 'PATCH');
     job.status = 'ready';
-    log('SONG_READY', { id: uuid, provider: record.provider, durationSeconds: spec.durationSeconds, chunks: playbackPaths.length, ext7: ext7?.file || null, download: downloadCopy?.remote || null });
+    log('SONG_READY', { id: uuid, provider: record.provider, durationSeconds: spec.durationSeconds, chunks: playbackPaths.length, ext7: ext7?.file || null, download: downloadCopy?.remote || null, aiFolder: aiFolder?.remote || null });
     return { id: uuid, spec, provider: record.provider, model: record.model, playbackPaths, ext7, record };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
