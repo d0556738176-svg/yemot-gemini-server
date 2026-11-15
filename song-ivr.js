@@ -38,7 +38,7 @@ export function createSongCallHandler({
     const callId = String(call?.callId || call?.values?.ApiCallId || ('song-' + Date.now()));
     const caller = getCallerNumber(call);
     const say = value => sanitizeForYemot(value);
-    let prompt = 'ברוכים הבאים ליוצר השירים. אמרו על מה השיר ובאיזה סגנון, למשל שיר שמח לכבוד שבת עם גיטרה. בסיום הדיבור הקישו סולמית.';
+    let prompt = 'ברוכים הבאים ליוצר השירים. אמרו על מה השיר, באיזה סגנון ובאיזה קול: גבר, ילד או ילדה. אפשר גם להכתיב את מילות השיר בעצמכם. למשל: שיר שמח לכבוד שבת עם גיטרה בקול של ילד. בסיום הדיבור הקישו סולמית.';
     let transcript = '';
     let pendingRequest = '';
     let awaitingClarification = false;
