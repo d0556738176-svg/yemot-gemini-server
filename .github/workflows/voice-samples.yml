@@ -1,0 +1,16 @@
+name: Main menu voice samples
+on:
+  push:
+    branches: [voice-samples]
+    paths: ['voice-samples/**', '.github/workflows/voice-samples.yml']
+permissions: { contents: write }
+jobs:
+  make:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -q edge-tts && python voice-samples/make.py
+      - run: |
+          cd out && git init -q && git config user.name bot && git config user.email bot@users.noreply.github.com
+          git checkout -q -b voice-samples-out && git add -A && git commit -q -m samples
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" voice-samples-out
