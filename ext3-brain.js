@@ -159,7 +159,8 @@ export const PLAY_WORD = /(?:ש?תשמ(?:י?ע|יל|יר)(?:י|ו)?(?:לי)?(?![
 const PLAY_WORD_G = new RegExp(PLAY_WORD.source, 'gu');
 const POINT_WORD = /(?:אותו|אותה|זה|הזה|הזאת|שלו|שלה)(?![\u0590-\u05FF])/u;
 // He points back at something found earlier in this call, not at the last thing said.
-export const BACKREF = /(?:ש(?:אמרת|מצאת|הצעת|המלצת|דיברנו|הזכרת|אמרתי|ביקשתי)|לפני כן|מקודם|קודם|הקודם|הקודמת|ההוא|ההיא)(?![\u0590-\u05FF])/u;
+// 15.11: "the last video I talked with you about" (also from an earlier call).
+export const BACKREF = /(?:ש(?:אמרת|מצאת|הצעת|המלצת|דיברנו|הזכרת|אמרתי|ביקשתי|דיברתי|דיברת|שאלתי|שאלת|חיפשתי|חיפשת|שמעתי|השמעת|הורדנו|הורדתי|הורדת|הזכרתי)|לפני כן|מקודם|קודם|הקודם|הקודמת|ההוא|ההיא|(?:הסרטון|השיר|הקליפ|השיעור) האחרון ש)(?![\u0590-\u05FF])/u;
 const ORDINALS = [[/(?:ה?ראשון|ה?ראשונה|אפשרות (?:1|אחת)|מספר (?:1|אחת))(?![\u0590-\u05FF])/u, 0], [/(?:ה?שני|ה?שנייה|ה?שניה|אפשרות (?:2|שתיים)|מספר (?:2|שתיים))(?![\u0590-\u05FF])/u, 1], [/(?:ה?שלישי|ה?שלישית|אפשרות (?:3|שלוש)|מספר (?:3|שלוש))(?![\u0590-\u05FF])/u, 2]];
 /** "מה מזג האוויר בירושלים וגם כמה עולה דולר" -> two separate searches. */
 export function splitRequests(text) {
@@ -706,7 +707,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     const fromLib = item => out({ ref: { type: 'video', videoId: item.videoId, title: item.title }, play: { paths: [item.path], durationSec: 0, title: item.title },
       reply: clip(cleanTitle(item.title), 140) + ' כבר שמור אצלך במערכת, אז לא צריך להוריד אותו שוב. משמיעה אותו עכשיו.' });
     if (lib.length) {
-      const pointsAtItEarly = /(?:אותו|אותה|הזה|הזאת|את זה|שלו|שלה|שהמלצת|שאמרת|שדיברנו|שמצאת)/u.test(utterance);
+      const pointsAtItEarly = (/(?:אותו|אותה|הזה|הזאת|את זה|שלו|שלה|שהמלצת|שאמרת|שדיברנו|שמצאת)/u.test(utterance) || BACKREF.test(utterance));
       const ownName = !pointsAtItEarly && rules.intent === 'video_play' && rules.ytHe && rules.ytHe.length >= 3 ? rules.ytHe : (plan.ytHe || '');
       const hit = (video && (pointsAtItEarly || !ownName) && lib.find(x => x.videoId === video.videoId)) || (ownName && libraryMatch(lib, ownName));
       if (hit) return fromLib(hit);
@@ -715,7 +716,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     // names (searched by name, never by the whole sentence). Nothing is
     // downloaded here: he hears the full title first and chooses with a key.
     let v = null;
-    const pointsAtIt = /(?:אותו|אותה|הזה|הזאת|את זה|שלו|שלה|שהמלצת|שאמרת|שדיברנו|שמצאת)/u.test(utterance);
+    const pointsAtIt = (/(?:אותו|אותה|הזה|הזאת|את זה|שלו|שלה|שהמלצת|שאמרת|שדיברנו|שמצאת)/u.test(utterance) || BACKREF.test(utterance));
     // His own words name the target first (the planner sometimes fills in the
     // video already on record instead of the new name he said).
     const ownName = !pointsAtIt && rules.intent === 'video_play' && rules.ytHe && rules.ytHe.length >= 3 ? rules.ytHe : '';

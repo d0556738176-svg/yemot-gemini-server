@@ -517,3 +517,14 @@ test('13.11: two things to look up in one sentence -> a search for each, and bot
   assert.match(prompts.at(-1).p, /עני על כל אחד מהם בנפרד/);
   assert.match(r.reply, /דולר/);
 });
+
+test('"the last video I talked with you about" (from an earlier call) gets its name and the 1 audio / 2 video menu', async () => {
+  const prior = [{ user: 'תמליצי', assistant: 'ממליצה על הסרטון', ref: clown, callId: 'old' }];
+  const current = [{ user: 'מה נשמע', assistant: 'ברוך השם' }, { user: 'מה השעה', assistant: 'עשר' }];
+  const b = baseDeps(['{"intent":"video_play","standalone":"להשמיע את הסרטון האחרון","play":"audio","yt_he":"הסרטון האחרון"}']);
+  const r = await ext3Turn({ utterance: 'תשמיעי לי את הסרטון האחרון שדיברתי איתך', prior, current, now }, b.deps);
+  assert.equal(r.confirm?.videoId, 'abcdefghijk');
+  assert.match(r.reply, /The Killer Clown Case/);
+  assert.match(r.reply, /קובץ שמע הקש 1/);
+  assert.match(r.reply, /וידאו עם אפשרות לכתובית בעברית הקש 2/);
+});
