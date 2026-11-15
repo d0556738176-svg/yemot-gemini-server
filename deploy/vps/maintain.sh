@@ -25,4 +25,12 @@ systemctl daemon-reload
 systemctl enable --now yemot-clean.timer
 # Security updates install automatically (Ubuntu default); make sure it is on.
 systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
+# Setting names typed through the console may have - instead of _ (no Shift).
+for app in main ext2; do
+  f=/opt/yemot/$app.env
+  if grep -q '^[A-Z0-9]*-[A-Z0-9-]*=' "$f" 2>/dev/null; then
+    sed -i -E ':a; s/^([A-Z0-9_]*)-([A-Z0-9_-]*=)/\1_\2/; ta' "$f"
+    systemctl restart yemot-$app
+  fi
+done
 echo MAINTAIN-OK
