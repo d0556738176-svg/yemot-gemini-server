@@ -586,6 +586,79 @@ async function convertToSingleWav(audio, tempDir) {
 // Converts, uploads (extension 4 playback chunks + one file in extension 7)
 // and records a generated song. Shared by the live call path and by songs
 // that arrive after the caller already hung up.
+// The song as a file to download, in the same אודיו / אודיו_2 ... folders as
+// extension 2 (shared counter, real file count decides), with its details:
+// name, "AI song" as the singer, style, the full lyrics, date and the request.
+export async function saveSongDownloadCopy(audio, spec, uuid, tempDir, { upload = uploadRawToYemot, getFile = yemotFileMeta, folders = null } = {}) {
+  const f = folders || await import('./download-folders.js');
+  const src = path.join(tempDir, 'ai-source.mp3'), out = path.join(tempDir, 'ai-download.mp3');
+  await fs.writeFile(src, audio);
+  const now = new Date();
+  const title = String(spec.title || 'שיר חדש').trim().slice(0, 120);
+  const tags = {
+    title, artist: 'שיר בינה מלאכותית', album_artist: 'שלוחה 4', album: 'שירי בינה מלאכותית', composer: 'בינה מלאכותית',
+    genre: [spec.genre, spec.mood].filter(Boolean).join(', ').slice(0, 120) || 'שיר', date: now.toISOString().slice(0, 10), year: String(now.getUTCFullYear()),
+    lyrics: String(spec.lyrics || '').trim().slice(0, 8000),
+    comment: ['נוצר בשלוחה 4', now.toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' }), spec.style || spec.prompt || ''].filter(Boolean).join(' | ').slice(0, 400),
+    encoded_by: 'Yemot branch 4'
+  };
+  const args = ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-map', '0:a', '-c', 'copy', '-id3v2_version', '3', '-write_id3v1', '1'];
+  for (const [k, v] of Object.entries(tags)) if (v) args.push('-metadata', k + '=' + v);
+  args.push(out);
+  await runFfmpeg(args, 60000);
+  const io = { readJson: readYemotJson, writeJson: writeYemotJson };
+  const folder = await f.nextFolder('audio', { ...io, countFiles: p => f.yemotFileCount(p, { apiBase: YEMOT_API_BASE, token: yemotKey() }) });
+  const clean = title.replace(/[\\/:*?"<>|\n\r\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90) || 'שיר';
+  const remote = folder + '/שיר AI - ' + clean + ' - ' + uuid.slice(0, 6) + '.mp3';
+  const bytes = (await fs.stat(out)).size;
+  let last = null;
+  for (const [i, w] of [0, 15000, 45000, 120000].entries()) {
+    if (w) await new Promise(r => setTimeout(r, w));
+    try {
+      await upload(out, remote);
+      const m = await getFile(remote);
+      if (m?.file?.exists === true && Number(m?.file?.size) === bytes) { last = null; break; }
+      last = new Error('download copy not verified in Yemot');
+    } catch (e) { last = e; }
+    log('DOWNLOAD_COPY_RETRY', { id: uuid, attempt: i + 1, message: String(last?.message || last).slice(0, 120) });
+  }
+  if (last) throw last;
+  await f.countSaved('audio', io).catch(() => {});
+  log('DOWNLOAD_COPY_SAVED', { id: uuid, remote, bytes });
+  return { remote, bytes };
+}
+
+async function uploadRawToYemot(filePath, remotePath) {
+  const buffer = await fs.readFile(filePath);
+  const url = new URL(YEMOT_API_BASE + '/UploadFile');
+  url.searchParams.set('token', yemotKey());
+  url.searchParams.set('path', remotePath);
+  url.searchParams.set('convertAudio', '0');
+  url.searchParams.set('autoNumbering', 'false');
+  const form = new FormData();
+  form.append('file', new Blob([buffer], { type: 'audio/mpeg' }), path.basename(remotePath));
+  const response = await fetchWithTimeout(url, { method: 'POST', body: form }, 120000, 'Yemot download copy upload');
+  const result = await response.json().catch(() => ({}));
+  if (result.responseStatus && result.responseStatus !== 'OK') throw new Error('Yemot upload failed: ' + String(result.message || result.responseStatus));
+  return result;
+}
+async function yemotFileMeta(remotePath) {
+  const url = new URL(YEMOT_API_BASE + '/GetFile');
+  url.searchParams.set('token', yemotKey()); url.searchParams.set('what', remotePath);
+  return (await fetchWithTimeout(url, {}, 15000, 'Yemot file check')).json().catch(() => ({}));
+}
+async function readYemotJson(what) {
+  const url = new URL(YEMOT_API_BASE + '/GetTextFile');
+  url.searchParams.set('token', yemotKey()); url.searchParams.set('what', what);
+  const j = await (await fetchWithTimeout(url, {}, 15000, 'Yemot text read')).json().catch(() => ({}));
+  try { return JSON.parse(j?.contents || 'null'); } catch { return null; }
+}
+async function writeYemotJson(what, data) {
+  const url = new URL(YEMOT_API_BASE + '/UploadTextFile');
+  url.searchParams.set('token', yemotKey()); url.searchParams.set('what', what); url.searchParams.set('contents', JSON.stringify(data));
+  await fetchWithTimeout(url, { method: 'POST' }, 15000, 'Yemot text write');
+}
+
 async function deliverSong(spec, generated, job, record, uuid) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'song-generator-'));
   try {
@@ -616,12 +689,18 @@ async function deliverSong(spec, generated, job, record, uuid) {
     } catch (error) {
       log('EXT7_SAVE_FAILED', { id: uuid, message: String(error?.message || error).slice(0, 160) });
     }
+    // 15.11 (owner): every song also goes to the אודיו folder for downloading:
+    // the file exactly as made (no re-encoding) with all its details. Never
+    // fails the song.
+    let downloadCopy = null;
+    try { downloadCopy = await saveSongDownloadCopy(generated.audio, spec, uuid, tempDir); }
+    catch (error) { log('DOWNLOAD_COPY_FAILED', { id: uuid, message: String(error?.message || error).slice(0, 160) }); }
     record.status = 'ready';
     record.audio_url = archived || ('yemot://' + playbackPaths.join(','));
     record.completed_at = new Date().toISOString();
     await saveSongRecord(record, 'PATCH');
     job.status = 'ready';
-    log('SONG_READY', { id: uuid, provider: record.provider, durationSeconds: spec.durationSeconds, chunks: playbackPaths.length, ext7: ext7?.file || null });
+    log('SONG_READY', { id: uuid, provider: record.provider, durationSeconds: spec.durationSeconds, chunks: playbackPaths.length, ext7: ext7?.file || null, download: downloadCopy?.remote || null });
     return { id: uuid, spec, provider: record.provider, model: record.model, playbackPaths, ext7, record };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
