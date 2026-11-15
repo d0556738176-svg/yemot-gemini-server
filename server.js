@@ -5267,6 +5267,10 @@ app.listen(port,async()=>{
   await loadConversationLog();
   try { await configureYemotStructure(); }
   catch (e) { logDetailedError('Yemot automatic setup', e); }
+  // One-time tests from the old servers (real downloads, engine runs, searches)
+  // spend engine money and search quota at every restart when their mark is
+  // missing (15.11). Off unless BRANCH2_STARTUP_TESTS=on.
+  const STARTUP_TESTS=String(process.env.BRANCH2_STARTUP_TESTS||'off').toLowerCase()==='on';
   // Isolated branch 2 self-test; a no-op unless BRANCH2_SELFTEST_ID is set.
   void runBranch2SelfTest().catch(e=>logDetailedError('Branch 2 self-test',e));
   void runSegmentSelfTest().catch(e=>logDetailedError('Branch 2 segment self-test',e));
@@ -5274,7 +5278,7 @@ app.listen(port,async()=>{
   void import('./branch2-rapidapi-selftest.js')
     .then(m=>m.runBranch2RapidApiSelfTest())
     .catch(e=>logDetailedError('Branch 2 RapidAPI self-test',e));
-  void import('./branch2-sample-inspect.js')
+  if(STARTUP_TESTS) void import('./branch2-sample-inspect.js')
     .then(m=>m.runSampleInspect())
     .catch(e=>logDetailedError('Branch 2 sample inspect',e));
   // Extension 7: add songs saved before it existed (once), newest last-numbered.
@@ -5313,17 +5317,17 @@ app.listen(port,async()=>{
   })().catch(e=>console.warn('[EXT7] backfill failed',{message:String(e?.message||e).slice(0,200)}));
   // One-time read of a finished johnvc run log (GET only) to learn its real
   // progress output.
-  if(process.env.APIFY_TOKEN) void import('./branch2-provider-log-probe.js')
+  if(STARTUP_TESTS&&process.env.APIFY_TOKEN) void import('./branch2-provider-log-probe.js')
     .then(m=>m.runProviderLogProbe())
     .catch(e=>logDetailedError('Branch 2 provider log probe',e));
   // One-time account test: YouTube picture embedded in the saved songs.
-  if(process.env.APIFY_TOKEN) void import('./branch2-cover-selftest.js')
+  if(STARTUP_TESTS&&process.env.APIFY_TOKEN) void import('./branch2-cover-selftest.js')
     .then(m=>m.runCoverSelftest())
     .catch(e=>logDetailedError('Branch 2 cover selftest',e));
   // One-time real-song test of the whole chain (owner's request 04.11): one
   // religious song, downloaded exactly as from the phone, so the downloads
   // folder gets a real file with picture and details.
-  if(process.env.APIFY_TOKEN&&process.env.YOUTUBE_API_KEY) void (async()=>{
+  if(STARTUP_TESTS&&process.env.APIFY_TOKEN&&process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
     const MARK='ivr2:/2/selftest/real_song_test_v4.json';
     await new Promise(r=>setTimeout(r,60000)); // after the account tests
@@ -5342,7 +5346,7 @@ app.listen(port,async()=>{
   })().catch(e=>console.warn('[REAL_SONG_TEST] failed',{message:String(e?.message||e).slice(0,200)}));
   // One-time maintenance: downloads moved to /2, >50MB one-file upload test,
   // Apify keys audit (branch2-maintenance.js).
-  if(process.env.APIFY_TOKEN) void import('./branch2-maintenance.js')
+  if(STARTUP_TESTS&&process.env.APIFY_TOKEN) void import('./branch2-maintenance.js')
     .then(async m=>{await m.runMaintenance();await m.runMaintenanceV2();await m.runMultipartConvertTest();await m.runUploadCapTest();await m.runRenameLatin();})
     .catch(e=>logDetailedError('Branch 2 maintenance',e));
   // Video downloads that were running before a restart continue (same run).
@@ -5355,7 +5359,7 @@ app.listen(port,async()=>{
     for(const d of (Array.isArray(dubs)?dubs:[])) if(d?.videoId) startDubJob(d.videoId,d.title||'');
   })().catch(e=>console.warn('[VIDEO] resume skipped',{message:String(e?.message||e).slice(0,160)}));
   // One-time real test of "כן לוידאו" on a short religious video (04.11).
-  if(process.env.APIFY_TOKEN) void (async()=>{
+  if(STARTUP_TESTS&&process.env.APIFY_TOKEN) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
     const MARK='ivr2:/2/selftest/video_real_test_v8.json';
     // Waits for the account's multi-part upload test (a video is over 50MB).
@@ -5366,7 +5370,7 @@ app.listen(port,async()=>{
     startYouTubeVideoJob({videoId:'_Je4NEIzupw',title:'SHWEKEY - Your Time'});
   })().catch(()=>{});
   // One-time live check of the smart search (05.11).
-  if(process.env.YOUTUBE_API_KEY) void (async()=>{
+  if(STARTUP_TESTS&&process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
     const MARK='ivr2:/2/selftest/smart_search_v1.json';
     if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
@@ -5380,7 +5384,7 @@ app.listen(port,async()=>{
   // 05.11 evening: names again with the working language model, a smart-search
   // check, and a full Hebrew-subtitle test on a short English video (saved in
   // a test folder, checked from Yemot, then removed).
-  void import('./branch2-maintenance.js').then(async m=>{
+  if(STARTUP_TESTS) void import('./branch2-maintenance.js').then(async m=>{
     for(let i=0;i<40&&!(await (await import('./youtube-authorized-playback.js'))._pipeline.readCacheJson('ivr2:/2/selftest/rename_latin_v1.json').catch(()=>null));i++)await new Promise(r=>setTimeout(r,15000));
     await m.runRenameLatinV2();
     await m.runRenameLatinV3();
@@ -5407,7 +5411,7 @@ app.listen(port,async()=>{
     }
     await m.runEnglishNamesToHebrew();
   }).catch(e=>console.warn('[BRANCH2_MAINT] rename v2 failed',String(e?.message||e).slice(0,160)));
-  if(process.env.YOUTUBE_API_KEY) void (async()=>{
+  if(STARTUP_TESTS&&process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
     const MARK='ivr2:/2/selftest/smart_search_v2.json';
     if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
@@ -5421,7 +5425,7 @@ app.listen(port,async()=>{
   // 12.11: misheard names. Which web providers exist, and one live check with
   // a badly misheard name (as speech recognition really spells it).
   void import('./youtube-web-hints.js').then(m=>console.info('[WEB_HINTS] providers',JSON.stringify(m.configuredWebHintProviders()))).catch(()=>{});
-  if(process.env.YOUTUBE_API_KEY) void (async()=>{
+  if(STARTUP_TESTS&&process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
     const MARK='ivr2:/2/selftest/smart_search_v4_rank.json';
     if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
@@ -5432,7 +5436,7 @@ app.listen(port,async()=>{
     if(r.web)await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
   })().catch(e=>console.warn('[SMART_SEARCH_TEST_V4] failed',String(e?.message||e).slice(0,160)));
   // 13.11: Hebrew request for an English-titled video, and a request by topic.
-  if(process.env.YOUTUBE_API_KEY) void (async()=>{
+  if(STARTUP_TESTS&&process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
     const MARK='ivr2:/2/selftest/smart_search_v6_newest.json';
     if(await _pipeline.readCacheJson(MARK).catch(()=>null))return;
@@ -5446,14 +5450,14 @@ app.listen(port,async()=>{
     if(Object.values(out).every(x=>x.plan))await _pipeline.writeCacheJson(MARK,out).catch(()=>{});
   })().catch(e=>console.warn('[SMART_SEARCH_TEST_V6] failed',String(e?.message||e).slice(0,160)));
   // 13.11: Israel-only videos: live test of engines that download from Israel.
-  if(process.env.YOUTUBE_API_KEY) void (async()=>{
+  if(STARTUP_TESTS&&process.env.YOUTUBE_API_KEY) void (async()=>{
     const { _pipeline } = await import('./youtube-authorized-playback.js');
     const { runGeoSelftest } = await import('./branch2-geo-selftest.js');
     await runGeoSelftest({ readMark:p=>_pipeline.readCacheJson(p), writeMark:(p,o)=>_pipeline.writeCacheJson(p,o) });
   })().catch(e=>console.warn('[GEO_TEST] failed',String(e?.message||e).slice(0,200)));
   // 13.11: full caller path for an Israel-only video (engine choice, Israel
   // engine, conversion, upload to Yemot), then read back from Yemot.
-  if(process.env.APIFY_TOKEN&&process.env.YOUTUBE_API_KEY) void (async()=>{
+  if(STARTUP_TESTS&&process.env.APIFY_TOKEN&&process.env.YOUTUBE_API_KEY) void (async()=>{
     const pb=await import('./youtube-authorized-playback.js');const p=pb._pipeline;
     const MARK='ivr2:/2/selftest/israel_e2e_v1.json';
     if(await p.readCacheJson(MARK).catch(()=>null))return;
@@ -5469,7 +5473,7 @@ app.listen(port,async()=>{
     if(out.playbackPaths?.length)await p.writeCacheJson(MARK,{at:new Date().toISOString(),...out});
   })().catch(e=>console.warn('[ISRAEL_E2E] failed',String(e?.code||'')+' '+String(e?.message||e).slice(0,400)));
   // 13.11: "כן לוידאו" for an Israel-only video, same job as a caller's.
-  if(process.env.APIFY_TOKEN&&process.env.YOUTUBE_API_KEY) void (async()=>{
+  if(STARTUP_TESTS&&process.env.APIFY_TOKEN&&process.env.YOUTUBE_API_KEY) void (async()=>{
     const p=(await import('./youtube-authorized-playback.js'))._pipeline;
     const MARK='ivr2:/2/selftest/israel_video_e2e_v1.json';
     if(await p.readCacheJson(MARK).catch(()=>null))return;
