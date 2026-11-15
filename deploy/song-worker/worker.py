@@ -49,6 +49,41 @@ def api(path, body=None, timeout=60, raw=False):
         return d if raw else json.loads(d)
 
 
+def wait_for_result(task, timeout=3300, poll_seconds=5):
+    """Bounded polling tolerates transient HTTP failures without losing a task."""
+    started = time.monotonic()
+    last_report = started
+    failures = 0
+    while time.monotonic() - started < timeout:
+        time.sleep(poll_seconds)
+        try:
+            response = api("/query_result", {"task_id_list": [task]})
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            failures += 1
+            if failures >= 6:
+                raise RuntimeError("ACE-Step result polling failed repeatedly")
+            log("result polling retry", failures)
+            continue
+        failures = 0
+        rows = response.get("data") or []
+        row = next((r for r in rows if r.get("task_id") == task), {})
+        status = row.get("status")
+        if status == 2:
+            # Do not print result: it can contain caller lyrics and metadata.
+            raise RuntimeError("ACE-Step generation failed (status 2)")
+        if status == 1:
+            result = row.get("result")
+            result = json.loads(result) if isinstance(result, str) else result
+            if not result or not isinstance(result, list) or not result[0].get("file"):
+                raise RuntimeError("ACE-Step completed without an audio file")
+            return result[0]["file"]
+        now = time.monotonic()
+        if now - last_report >= 60:
+            log("generation pending", round(now - started), "s; status", status)
+            last_report = now
+    raise RuntimeError("generation timed out")
+
+
 def main():
     callback("status", stage="starting")
     deadline = time.time() + 1500
@@ -69,25 +104,19 @@ def main():
     task = (sub.get("data") or {}).get("task_id")
     if not task: raise RuntimeError("no task id: " + json.dumps(sub)[:200])
     t1 = time.time()
-    while True:
-        time.sleep(5)
-        rows = api("/query_result", {"task_id_list": [task]}).get("data") or []
-        row = rows[0] if rows else {}
-        if row.get("status") == 2: raise RuntimeError("generation failed: " + str(row)[:300])
-        if row.get("status") == 1:
-            res = row["result"]; res = json.loads(res) if isinstance(res, str) else res
-            audio = api(res[0]["file"], raw=True, timeout=120)
-            log("generated", len(audio), "bytes in", round(time.time() - t1), "s")
-            if len(audio) < 20000: raise RuntimeError("audio too small")
-            with open("song.mp3", "wb") as f: f.write(audio)
-            if not callback("audio", audio): raise RuntimeError("could not deliver the song")
-            return
-        if time.time() - t1 > 3300: raise RuntimeError("generation timed out")
+    audio_path = wait_for_result(task)
+    audio = api(audio_path, raw=True, timeout=120)
+    log("generated", len(audio), "bytes in", round(time.time() - t1), "s")
+    if len(audio) < 20000: raise RuntimeError("audio too small")
+    with open("song.mp3", "wb") as f: f.write(audio)
+    if not callback("audio", audio): raise RuntimeError("could not deliver the song")
 
 
-try:
-    main()
-except Exception as e:
-    log("FAILED", str(e)[:300])
-    callback("error", message=str(e)[:250])
-    sys.exit(1)
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        log("FAILED", str(e)[:300])
+        callback("error", message=str(e)[:250])
+        sys.exit(1)
+

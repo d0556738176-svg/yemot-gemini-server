@@ -19,10 +19,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      ACESTEP_REF: main
+      ACESTEP_REF: ca1e85fe9430179831e6bc6be790c332190a3866
+      UV_CACHE_DIR: /mnt/uvcache
     steps:
       - name: Mask ticket
-        run: echo "::add-mask::${{ inputs.ticket }}"
+        env:
+          WORKER_TICKET: ${{ inputs.ticket }}
+        run: echo "::add-mask::$WORKER_TICKET"
       - name: Free disk and add swap
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/.ghcup || true
@@ -32,16 +35,23 @@ jobs:
           sudo mkdir -p /mnt/uvcache && sudo chown "$USER" /mnt/uvcache
       - uses: actions/checkout@v4
         with: { sparse-checkout: deploy/song-worker }
+      - name: Worker regression tests
+        run: python3 -m unittest discover -s deploy/song-worker -p 'test_*.py' -v
       - uses: actions/checkout@v4
         with: { repository: ace-step/ACE-Step-1.5, ref: '${{ env.ACESTEP_REF }}', path: ace }
       - uses: astral-sh/setup-uv@v5
+        with:
+          # uv's post-job prune failed after successful audio delivery.
+          # Only the model checkpoints below need a persistent cache.
+          enable-cache: false
+          prune-cache: false
       - name: Model cache
         uses: actions/cache@v4
         with:
           path: ace/checkpoints
           key: acestep15-turbo-checkpoints-v1
       - name: Install ACE-Step
-        run: cd ace && UV_CACHE_DIR=/mnt/uvcache uv sync --python 3.11 > /tmp/install.log 2>&1 || (tail -40 /tmp/install.log; exit 1)
+        run: cd ace && UV_CACHE_DIR=/mnt/uvcache uv sync --frozen --python 3.11 > /tmp/install.log 2>&1 || (tail -40 /tmp/install.log; exit 1)
       - name: Generate and deliver
         env:
           JOB_ID: ${{ inputs.job_id }}
@@ -50,5 +60,6 @@ jobs:
           PAYLOAD: ${{ inputs.payload }}
         run: |
           export ACESTEP_API_KEY="$(openssl rand -hex 16)"
-          (cd ace && ACESTEP_GENERATION_TIMEOUT=3600 ACESTEP_CONFIG_PATH=acestep-v15-turbo ACESTEP_INIT_LLM=false nohup uv run acestep-api --host 127.0.0.1 --port 8001 > /tmp/server.log 2>&1 &)
+          (cd ace && ACESTEP_GENERATION_TIMEOUT=3600 ACESTEP_CONFIG_PATH=acestep-v15-turbo ACESTEP_INIT_LLM=false nohup .venv/bin/acestep-api --host 127.0.0.1 --port 8001 > /tmp/server.log 2>&1 &)
           python3 deploy/song-worker/worker.py || { tail -n 60 /tmp/server.log | grep -v query_result; exit 1; }
+
