@@ -2,11 +2,10 @@ import asyncio, edge_tts, os
 text = open("voice-samples/menu.txt", encoding="utf-8").read()
 os.makedirs("out", exist_ok=True)
 V = [
-  ("1-avri-natural", "he-IL-AvriNeural", "+0%", "+0Hz"),
-  ("2-avri-warm-deep", "he-IL-AvriNeural", "-6%", "-6Hz"),
-  ("3-avri-lively", "he-IL-AvriNeural", "+8%", "+4Hz"),
-  ("4-hila-natural", "he-IL-HilaNeural", "+0%", "+0Hz"),
-  ("5-hila-warm", "he-IL-HilaNeural", "-5%", "-4Hz"),
+  ("young-1-light", "he-IL-AvriNeural", "+6%", "+10Hz"),
+  ("young-2-fresh", "he-IL-AvriNeural", "+8%", "+15Hz"),
+  ("young-3-energetic", "he-IL-AvriNeural", "+12%", "+20Hz"),
+  ("young-4-calm", "he-IL-AvriNeural", "+2%", "+12Hz"),
 ]
 async def main():
     for name, voice, rate, pitch in V:
