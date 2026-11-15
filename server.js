@@ -4010,7 +4010,7 @@ function startYouTubePlaybackJob(video, opts = {}) {
   // No caller AbortSignal: the job must survive across the short hold requests.
   // A larger budget than the old inline path lets long shiurim finish.
   prepareYouTubePlayback(video, {
-    env: { ...process.env, YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS: String(process.env.YOUTUBE_PLAYBACK_JOB_BUDGET_MS || 2700000) },
+    env: { ...process.env, YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS: String(process.env.YOUTUBE_PLAYBACK_JOB_BUDGET_MS || 6 * 3600000) /* 15.11: very long lessons finish too (was 45 min) */ },
     resolveAlternate: resolvePublisherAudio,
     // Pass the caller's consent to switch to the costlier engine through to the resolver.
     downloadToYemot: (vid, dopts) => downloadAuthorizedAudioToYemot(vid, { ...dopts, consentToFallback }),
