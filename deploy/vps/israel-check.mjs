@@ -1,5 +1,5 @@
 // Direct download test on Israel-only videos (as extension 2 downloads them).
-//   node deploy/vps/israel-test.mjs
+//   node deploy/vps/israel-check.mjs
 import { mkdtempSync, rmSync } from 'node:fs';
 const EXT2 = '/opt/yemot/ext2';
 const { directDownload } = await import(EXT2 + '/youtube-direct.js');
