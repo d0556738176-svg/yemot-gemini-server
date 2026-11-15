@@ -35,15 +35,16 @@ export function phoneAudioSettings(env = process.env) {
     ceilingDb: Math.max(-12, Math.min(-1, num(env.BRANCH2_AUDIO_CEILING_DB, -4.5))),
     maxBoostDb: Math.max(0, Math.min(32, num(env.BRANCH2_AUDIO_MAX_BOOST_DB, 29))),
     maxCutDb: Math.max(0, Math.min(30, num(env.BRANCH2_AUDIO_MAX_CUT_DB, 20))),
-    // Owner, 15.11: the old sound, only with the instruments heard normally:
+    // Owner, 15.11 08:32: chose sample 2 ("less bass, soft"): band 140-3500 Hz,
+    // no lift of the voice band, gentle de-esser. Before that:
     // the band opened at both ends (bass/drums below, strings/cymbals above)
     // and less lift of the voice band. Warmth, de-esser, space and bass
     // harmonics stay available by setting but are off.
-    highpassHz: Math.max(40, Math.min(300, num(env.BRANCH2_AUDIO_HIGHPASS_HZ, 100))),
+    highpassHz: Math.max(40, Math.min(300, num(env.BRANCH2_AUDIO_HIGHPASS_HZ, 140))),
     // Warmth (body of voice and guitar) and a gentle de-esser: the phone
     // line's own coding turns sharp "s" and cymbal spikes into a rasp (15.11).
     warmthDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_WARMTH_DB, 0))),
-    deess: Math.max(0, Math.min(1, num(env.BRANCH2_AUDIO_DEESS, 0))),
+    deess: Math.max(0, Math.min(1, num(env.BRANCH2_AUDIO_DEESS, 0.3))),
     // The space of the recording (hall, crowd, reverb, wide instruments) lives
     // in the stereo difference, which a plain mono mix throws away: part of it
     // is kept, slightly delayed so it does not cancel the middle (15.11).
@@ -51,8 +52,8 @@ export function phoneAudioSettings(env = process.env) {
     // Bass and drums are below what a phone line carries; their harmonics are
     // made audible instead, so the ear still hears the bass line (15.11).
     virtualBass: Math.max(0, Math.min(1, num(env.BRANCH2_AUDIO_VBASS, 0))),
-    lowpassHz: Math.max(3000, Math.min(3900, num(env.BRANCH2_AUDIO_LOWPASS_HZ, 3800))),
-    presenceDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_PRESENCE_DB, 0.5))),
+    lowpassHz: Math.max(3000, Math.min(3900, num(env.BRANCH2_AUDIO_LOWPASS_HZ, 3500))),
+    presenceDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_PRESENCE_DB, 0))),
   };
 }
 
