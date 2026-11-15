@@ -138,6 +138,8 @@ async function adminMenu(call) {
 }
 
 export async function liveBroadcastHandler(call) {
+  // Cancelled (15.11): anyone who still reaches here goes back to the main menu.
+  if (!liveEnabled()) { log('extension 5 is cancelled; caller sent to the main menu'); return call.go_to_folder('/'); }
   for (;;) {
     const [state, channels] = await Promise.all([loadState(), loadChannels()]);
     if (state.on && !isOn(state)) { // time is up: record it so the file shows the truth
@@ -201,7 +203,22 @@ export async function checkStreamUrls(urls) {
 }
 
 // Points extension 5 at this handler (production service only) and logs what it was before.
+// Owner, 15.11 09:08: extension 5 cancelled completely. Unless BRANCH5_ENABLED
+// is "true" it is switched off at every start: pressing 5 goes back to the
+// main menu, the live channels are off, and nothing turns it on again.
+export const liveEnabled = () => /^(true|1|yes|on)$/i.test(String(process.env.BRANCH5_ENABLED || ''));
+export async function disableLiveExtension() {
+  if (!token()) return;
+  const before = await getText(FOLDER + '/ext.ini');
+  if (!/go_to_folder=\/\s*$/m.test(String(before || '')) || /type=api/.test(String(before || ''))) {
+    await putText(FOLDER + '/ext.ini', 'type=go_to_folder\ngo_to_folder=/\n');
+    log('extension 5 cancelled: pressing 5 returns to the main menu');
+  }
+  const state = await loadState().catch(() => null);
+  if (state && state.on) { await saveState({ on: false, changedAt: Date.now(), reason: 'extension 5 cancelled by the owner' }).catch(() => {}); log('live channels turned off'); }
+}
 export async function configureLiveExtension(publicUrl) {
+  if (!liveEnabled()) return disableLiveExtension();
   if (process.env.BRANCH5_LIVE_AUTO_CONFIGURE === 'false' || /staging|test/i.test(process.env.RENDER_SERVICE_NAME || '')) return;
   if (!token() || !publicUrl) return;
   const want = 'type=api\napi_link=' + publicUrl.replace(/\/$/, '') + '/yemot-live\ntitle=שידור חי\n';
