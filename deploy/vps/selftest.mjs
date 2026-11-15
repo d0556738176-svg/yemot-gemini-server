@@ -72,7 +72,7 @@ await check('hebrew dubbing, whole chain (key 9; nothing is published)', async (
   let published = null;
   const deps = {
     ffmpegPath,
-    fetchSource: async (id, dest) => copyFileSync(tmp + '/zoo.m4a', dest),
+    fetchSource: async (id, dest) => { try { copyFileSync(tmp + '/zoo.m4a', dest); } catch { copyFileSync(tmp + '/zoo.mp4', dest); } },
     preparePhone: async (src, dest) => copyFileSync(src, dest),
     publishExt7: async (name, file) => { published = statSync(file).size; return { file: 'test' }; },
     saveDownload: async () => {},
@@ -82,6 +82,15 @@ await check('hebrew dubbing, whole chain (key 9; nothing is published)', async (
   if (r.state !== 'done' || !published) throw new Error('state ' + r.state);
   return 'dubbed sound ' + published + ' bytes';
 });
+for (const k of Object.keys(env).filter(k => /^APIFY_TOKEN/.test(k)).sort()) {
+  await check('apify (extension 2 download engine) ' + k, async () => {
+    const j = await (await get('https://api.apify.com/v2/users/me/limits', { headers: { Authorization: 'Bearer ' + env[k] } })).json();
+    if (!j.data) throw new Error(JSON.stringify(j.error || j).slice(0, 120));
+    const used = j.data.current?.monthlyUsageUsd, max = j.data.limits?.maxMonthlyUsageUsd;
+    if (used >= max) throw new Error('monthly credit used up: ' + used + ' of ' + max + ' USD');
+    return 'used ' + (+used).toFixed(2) + ' of ' + max + ' USD this month';
+  });
+}
 await check('hebrew speech (edge tts)', async () => {
   const buf = await synthesize('בדיקה של הדיבור בעברית', { voice: 'he-IL-AvriNeural' });
   if (!buf || buf.length < 2000) throw new Error('empty audio'); return buf.length + ' bytes';
@@ -92,7 +101,8 @@ await check('song engine (github dispatch token)', async () => {
   if (!r.ok) throw new Error('GitHub HTTP ' + r.status); const j = await r.json();
   return (j.workflows || []).some(w => /song-worker/.test(w.path)) ? 'song workflow found' : 'song workflow NOT found';
 });
-for (const [name, key] of [['groq', 'GROQ_API_KEY'], ['gemini', 'GEMINI_API_KEY'], ['apify', 'APIFY_TOKEN'], ['rapidapi', 'RAPIDAPI_KEY']]) {
+console.log('yt-dlp version', spawnSync(ytdlp, ['--version'], { encoding: 'utf8' }).stdout.trim());
+for (const [name, key] of [['groq', 'GROQ_API_KEY'], ['gemini', 'GEMINI_API_KEY'], ['rapidapi', 'RAPIDAPI_KEY']]) {
   await check('key present: ' + name, async () => { if (!Object.keys(env).some(k => k.startsWith(key))) throw new Error('missing'); });
 }
 const disk = spawnSync('df', ['-h', '--output=pcent', '/'], { encoding: 'utf8' }).stdout.split('\n')[1]?.trim();
