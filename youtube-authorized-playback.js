@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
 import { addCoverArt, fetchThumbnail, normalizeCover, makeDownloadCopy, downloadMetadata, inspectMedia } from './youtube-cover-art.js';
 import { downloadVisionAudio } from './vision-audio.mjs';
-import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID } from './youtube-apify-source.js';
+import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID, apifyReceiptPath } from './youtube-apify-source.js';
 import { pickApifyActor } from './youtube-engine-select.js';
 import { directDownload, directEnabled } from './youtube-direct.js';
 import { preparePhoneAudio, PHONE_AUDIO_VERSION } from './youtube-phone-audio.js';
@@ -558,7 +558,13 @@ async function downloadApifySource(id, output, signal, onProgress=()=>{}, consen
       return { bytes: r.bytes, title: r.title || null };
     } catch (e) {
       if (signal?.aborted || e?.code === 'too_large') throw e;
-      console.warn('[YouTube IVR] direct download failed; using the engine', { videoId: id, message: String(e?.message || e).slice(0, 160) });
+      console.warn('[YouTube IVR] direct download failed', { videoId: id, consent, message: String(e?.message || e).slice(0, 160) });
+      // Owner, 15.11: the paid engine only after the caller agreed with a key
+      // (a run already paid for, e.g. before a restart, is still finished).
+      if (!consent && String(process.env.BRANCH2_PAID_NEEDS_CONSENT || 'on') !== 'off') {
+        const receipt = await readCacheJson(apifyReceiptPath(id)).catch(() => null);
+        if (!receipt?.runId) throw Object.assign(new Error('free direct download failed; the paid engine needs the caller\'s consent'), { code: 'paid_needs_consent' });
+      }
     }
   }
   onProgress({stage:'provider'});

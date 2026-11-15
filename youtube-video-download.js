@@ -154,6 +154,8 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
   if (done?.state === 'done') {
     const hadSubs = /hebrew/.test(String(done.subtitles || ''));
     if (!(video.subtitles === true && !hadSubs)) return { remote: done.remote, already: true };
+    // Owner, 15.11: downloading the same video again only after a key press.
+    if (!video.redoConsent) throw err('redo_needs_consent', 'saved before without subtitles; making it again needs the caller\'s consent');
     // Saved before without subtitles and now asked with them: made again.
     for (const f of done.files || []) await deps.deleteFile?.(f.remote).catch?.(() => {});
     log.info?.('[VIDEO] saved earlier without subtitles; making it again with Hebrew subtitles', { videoId, removed: (done.files || []).length });
@@ -185,8 +187,10 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       const r = await directDownload(videoId, path.join(directDir, 'source.mp4'), { mode: 'video', height: parseInt(quality, 10), ffmpegPath, log });
       got = { actor: 'direct', direct: path.join(directDir, 'source.mp4'), item: { title: r.title || facts?.title || video.title } };
     } catch (e) {
-      log.warn?.('[VIDEO] direct download failed; using the engines', { videoId, message: String(e?.message || e).slice(0, 160) });
+      log.warn?.('[VIDEO] direct download failed', { videoId, consent: !!video.paidConsent, message: String(e?.message || e).slice(0, 160) });
       await fs.rm(directDir, { recursive: true, force: true }).catch(() => {}); directDir = null;
+      // Owner, 15.11: the paid engines only after the caller agreed with a key.
+      if (!video.paidConsent && String(env.BRANCH2_PAID_NEEDS_CONSENT || 'on') !== 'off') throw err('paid_needs_consent', 'free direct download failed; the paid engine needs the caller\'s consent');
     }
   }
   if (!got) {

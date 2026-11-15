@@ -3969,6 +3969,27 @@ function startYouTubeVideoJob(video) {
     .finally(() => { try { release(); } catch {} });
   return state;
 }
+const PAID_ASK='ההורדה החינמית ישירות מיוטיוב לא הצליחה לסרטון הזה. אפשר להוריד אותו במנוע הגיבוי, שעולה מעט כסף. להורדה במנוע הגיבוי הקש 1, לביטול הקש 2.';
+// Before a video job: is it already saved (a second download needs a key), and
+// does YouTube give it to this server for free (otherwise the paid engine
+// needs a key)? Returns null to go ahead, or {ask, prompt}.
+async function videoStartGate(v) {
+  if (String(process.env.BRANCH2_PAID_NEEDS_CONSENT || 'on') === 'off') return null;
+  try {
+    const pb = await import('./youtube-authorized-playback.js');
+    const { videoReceiptPath } = await import('./youtube-video-download.js');
+    const done = await pb._pipeline.readCacheJson(videoReceiptPath(v.videoId)).catch(() => null);
+    if (done?.state === 'running') return null; // a run already going is continued
+    if (done?.state === 'done') {
+      const hadSubs = /hebrew/.test(String(done.subtitles || ''));
+      if (!(v.subtitles === true && !hadSubs)) return null; // already saved: nothing is downloaded
+      return { ask: 'redo', prompt: 'הסרטון הזה כבר שמור בתיקיית וידאו בלי כתובית. כדי להוסיף כתובית בעברית צריך להוריד אותו שוב. להורדה מחדש הקש 1, לביטול הקש 2.' };
+    }
+  } catch {}
+  const { directProbe } = await import('./youtube-direct.js');
+  if (await directProbe(v.videoId, { mode: 'video', height: 720 })) return null;
+  return { ask: 'paid', prompt: PAID_ASK };
+}
 function videoJobStatusText(id) {
   const st = youtubeVideoJobs.get(String(id || ''));
   if (!st) return '';
@@ -4050,6 +4071,7 @@ async function youtubeCallHandler(call) {
   // the keypad; 0 lets the caller say it aloud once instead.
   let pageStart=0, voiceOnce=false, emptyTaps=0, tapNo=0, keyTranscript=null;
   let pendingFallbackVideo=null;
+  let pendingPaidVideo=null; // video waiting for a key: paid engine or download again (15.11)
   let searchMode=null, typedOnce=false; // 'voice' | 'type' (owner, 08.11)
   let transcriptFailAttempts=0;
 
@@ -4165,7 +4187,7 @@ async function youtubeCallHandler(call) {
       nextPrompt=null;
 
       // Which keys mean what in the current step.
-      const keyState=pendingFallbackVideo?'fallback':pendingSubtitleVideo?'subtitles':pendingVideo?'confirm':results.length?'results':null;
+      const keyState=(pendingFallbackVideo||pendingPaidVideo)?'fallback':pendingSubtitleVideo?'subtitles':pendingVideo?'confirm':results.length?'results':null;
       if(keyState&&!voiceOnce) {
         const pageCount=Math.max(1,Math.min(5,results.length-pageStart));
         const hint={
@@ -4348,6 +4370,20 @@ async function youtubeCallHandler(call) {
         continue;
       }
 
+      // 15.11: a video waiting for the caller's key (paid engine / again).
+      if(pendingPaidVideo) {
+        if(isYesConfirm(transcript)) {
+          const {ask,...v}=pendingPaidVideo; pendingPaidVideo=null;
+          const st=startYouTubeVideoJob({...v,paidConsent:true,redoConsent:true});
+          console.info('[VIDEO] requested by caller after consent',{videoId:v.videoId,ask,status:st.status,subtitles:v.subtitles});
+          nextPrompt=(ask==='redo'?'הורדת הווידאו מחדש התחילה':'הורדת הווידאו במנוע הגיבוי התחילה')+(v.subtitles?', עם כתובית בעברית מוטבעת בתוך הסרטון.':'.')+' הסרטון יישמר בתיקיית וידאו, ומאותה הורדה יוכן גם השמע. אין צורך להישאר על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.';
+          continue;
+        }
+        if(isNoConfirm(transcript)) { pendingPaidVideo=null; nextPrompt='בסדר, לא הורדתי כלום ולא היה חיוב. אמור מספר של תוצאה אחרת, או חיפוש חדש.'; continue; }
+        nextPrompt='לא הבנתי. לאישור אמור כן, לביטול אמור לא.';
+        continue;
+      }
+
       // Consent to switch to the faster, costlier engine after the cheap one failed.
       if(pendingFallbackVideo) {
         if(isYesConfirm(transcript)) {
@@ -4363,10 +4399,10 @@ async function youtubeCallHandler(call) {
         }
         if(isNoConfirm(transcript)) {
           pendingFallbackVideo=null;
-          nextPrompt='בסדר, לא ננסה במנוע המהיר. אמור מספר של תוצאה אחרת, או חיפוש חדש.';
+          nextPrompt='בסדר, לא הורדתי במנוע הגיבוי ולא היה חיוב. אמור מספר של תוצאה אחרת, או חיפוש חדש.';
           continue;
         }
-        nextPrompt='לא הבנתי. אם לנסות במנוע המהיר יותר אמור כן, אחרת אמור לא.';
+        nextPrompt='לא הבנתי. להורדה במנוע הגיבוי אמור כן, לביטול אמור לא.';
         continue;
       }
 
@@ -4378,6 +4414,10 @@ async function youtubeCallHandler(call) {
         const yes=!no&&(isYesConfirm(transcript)||/^(?:תוסיף|להוסיף|הוסף|עם כתובית|עם כתוביות|כתובית|כתוביות|רוצה|אני רוצה)(?:\s|$)/u.test(said));
         if(!yes&&!no) { nextPrompt='לא הבנתי. האם להוסיף לסרטון כתובית בעברית? אמור כן או לא.'; continue; }
         const v={...pendingSubtitleVideo,subtitles:yes}; pendingSubtitleVideo=null;
+        // Owner, 15.11: free direct download first; the paid engine and a
+        // second download of a saved video only after a key press.
+        const gate=await videoStartGate(v);
+        if(gate){ pendingPaidVideo={...v,ask:gate.ask}; nextPrompt=gate.prompt; continue; }
         const st=startYouTubeVideoJob(v);
         console.info('[VIDEO] requested by caller',{videoId:v.videoId,status:st.status,subtitles:yes});
         nextPrompt=yes
@@ -4415,9 +4455,9 @@ async function youtubeCallHandler(call) {
               code,
               attempts:(playbackError?.attempts||[]).map(a=>a.path+':'+a.code).join(',')
             });
-            // Branch 2 runs only the native engine (free retries and backup keys
-            // are already exhausted inside the resolver), so no costlier engine
-            // is offered: the caller hears the real reason instead.
+            // 15.11: the free direct download failed: the paid engine only
+            // after the caller presses 1.
+            if(code==='paid_needs_consent') { pendingFallbackVideo=selectedVideo; nextPrompt=PAID_ASK; continue; }
             nextPrompt=playbackFailureMessage(code);
             continue;
           }
@@ -4888,10 +4928,17 @@ app.get('/api/ext3/media', rateLimit(240, 60 * 1000, 'ext3-media'), async (req, 
     if (req.query.start === '1') {
       // Owner, 13.11: extensions 1 and 3 ask about Hebrew subtitles too (subs=1/0).
       const subs = req.query.subs === '1' ? { subtitles: true } : req.query.subs === '0' ? { subtitles: false } : {};
-      if (mode === 'video' && (!vjob || vjob.status === 'failed')) vjob = startYouTubeVideoJob({ ...video, ...subs });
+      // 15.11: paid=1 is the caller's key press for the paid engine (or for
+      // downloading a saved video again); without it only the free way runs.
+      const paid = req.query.paid === '1';
+      if (mode === 'video' && (!vjob || vjob.status === 'failed')) {
+        const gate = paid ? null : await videoStartGate({ ...video, ...subs });
+        vjob = gate ? { status: 'failed', error: gate.ask === 'redo' ? 'redo_needs_consent' : 'paid_needs_consent', subtitles: subs.subtitles }
+          : startYouTubeVideoJob({ ...video, ...subs, ...(paid ? { paidConsent: true, redoConsent: true } : {}) });
+      }
       // The phone audio: from the video's own download when a video was asked
       // (made by that job), otherwise its own audio download.
-      if (mode === 'audio' && (!audio || audio.status === 'failed')) audio = startYouTubePlaybackJob(video);
+      if (mode === 'audio' && (!audio || audio.status === 'failed')) audio = startYouTubePlaybackJob(video, paid ? { consentToFallback: true } : {});
     }
     // spoken: the measured stage in words (never an estimated percentage).
     const audioOut = audio ? { status: audio.status, paths: audio.status === 'ready' ? audio.paths : null, stage: audio.progress?.stage || null,

@@ -107,3 +107,25 @@ export async function directDownload(videoId, output, { mode = 'audio', height, 
   await fs.rm(output, { force: true }).catch(() => {});
   throw last || Object.assign(new Error('direct download failed'), { code: 'direct_failed' });
 }
+
+// Quick check (no download) that YouTube gives this server the file: used
+// before a video job, so the caller is asked about the paid engine at once
+// when the free way cannot work (15.11). Same player types as the download.
+export async function directProbe(videoId, { mode = 'audio', height, timeoutMs = 45000, clients = CLIENTS, bin = ytdlpPath(), log = console } = {}) {
+  if (!/^[A-Za-z0-9_-]{11}$/.test(String(videoId || ''))) return false;
+  const until = Date.now() + timeoutMs;
+  for (const client of clients) {
+    const left = until - Date.now();
+    if (left < 3000) break;
+    const args = ['--no-warnings', '--no-playlist', '--simulate', '-f', formatFor(mode, height), ...(client ? ['--extractor-args', 'youtube:player_client=' + client] : []), '--', videoId];
+    const ok = await new Promise(resolve => {
+      const p = spawn(bin, args, { stdio: 'ignore', env: { ...process.env, PATH: (process.env.PATH || '') + ':/usr/local/bin:/usr/bin' } });
+      const t = setTimeout(() => { p.kill('SIGKILL'); resolve(false); }, left);
+      p.on('error', () => { clearTimeout(t); resolve(false); });
+      p.on('close', c => { clearTimeout(t); resolve(c === 0); });
+    });
+    if (ok) return true;
+  }
+  log.warn?.('[DIRECT] probe: YouTube does not give this file to the server', { videoId, mode });
+  return false;
+}
