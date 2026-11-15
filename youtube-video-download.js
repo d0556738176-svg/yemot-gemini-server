@@ -23,6 +23,7 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { apifyTokens } from './youtube-apify-source.js';
+import { directDownload, directEnabled } from './youtube-direct.js';
 
 export const VIDEO_DIR = 'ivr2:/וידאו'; // folder chosen per save by download-folders.js
 const API = 'https://api.apify.com/v2';
@@ -175,6 +176,20 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
   if (done?.state === 'running' && order.includes(done.actor)) order = [done.actor, ...order.filter(a => a !== done.actor)];
   log.info?.('[VIDEO] engine plan', { videoId, durationSec, quality, order, estimatedUsd: costs });
   let got = null, lastErr = null;
+  // First straight from YouTube on our own server (owner, 15.11); the engines
+  // and their backup keys only when that fails.
+  let directDir = null;
+  if (directEnabled(env) && done?.state !== 'running') {
+    directDir = await fs.mkdtemp(path.join(os.tmpdir(), 'video-direct-'));
+    try {
+      const r = await directDownload(videoId, path.join(directDir, 'source.mp4'), { mode: 'video', height: parseInt(quality, 10), ffmpegPath, log });
+      got = { actor: 'direct', direct: path.join(directDir, 'source.mp4'), item: { title: r.title || facts?.title || video.title } };
+    } catch (e) {
+      log.warn?.('[VIDEO] direct download failed; using the engines', { videoId, message: String(e?.message || e).slice(0, 160) });
+      await fs.rm(directDir, { recursive: true, force: true }).catch(() => {}); directDir = null;
+    }
+  }
+  if (!got) {
   // Each engine is tried on every backup key in turn (a run that failed on one
   // account, e.g. credit ran out mid-run, is started again on the next).
   for (const actor of order) {
@@ -192,13 +207,15 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
     if (got) break;
     log.warn?.('[VIDEO] engine could not deliver; trying the next one', { videoId, actor });
   }
+  }
   if (!got) throw lastErr || err('video_engine_failed', 'No engine delivered the video');
 
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'video-'));
   try {
     const src = path.join(temp, 'source.mp4'), out = path.join(temp, 'video.mp4');
     // The finished file is fetched up to 3 times (a dropped connection is not a failed video).
-    for (let k = 1; ; k++) {
+    if (got.direct) { await fs.rename(got.direct, src).catch(async () => { await fs.copyFile(got.direct, src); }); await fs.rm(directDir, { recursive: true, force: true }).catch(() => {}); }
+    else for (let k = 1; ; k++) {
       try {
         const r = await fetch(got.url, { signal: AbortSignal.timeout(2 * 3600 * 1000) });
         if (!r.ok || !r.body) throw err('video_transfer_failed', 'Video file download HTTP ' + r.status);

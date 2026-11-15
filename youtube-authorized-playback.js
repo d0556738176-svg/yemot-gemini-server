@@ -12,6 +12,7 @@ import { addCoverArt, fetchThumbnail, normalizeCover, makeDownloadCopy, download
 import { downloadVisionAudio } from './vision-audio.mjs';
 import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID } from './youtube-apify-source.js';
 import { pickApifyActor } from './youtube-engine-select.js';
+import { directDownload, directEnabled } from './youtube-direct.js';
 import { preparePhoneAudio, PHONE_AUDIO_VERSION } from './youtube-phone-audio.js';
 import { publishToExt7 } from './branch2-ext7.js';
 
@@ -547,6 +548,19 @@ export function lookupCachedYouTubeAudio(videoId) {
 // audio on Apify's residential-proxy infrastructure and stores the file, which
 // we then fetch here. This is what bypasses YouTube's datacenter-IP block.
 async function downloadApifySource(id, output, signal, onProgress=()=>{}, consent=false) {
+  // First straight from YouTube on our own server (owner, 15.11); the paid
+  // engines below only when that fails.
+  if (directEnabled(process.env)) {
+    try {
+      onProgress({stage:'transferring',bytes:0,totalBytes:null});
+      const r = await directDownload(id, output, { mode:'audio', ffmpegPath, signal, maxBytes:MAX_SOURCE_BYTES, onProgress:p=>onProgress({stage:'transferring',bytes:p.done,totalBytes:p.total}) });
+      onProgress({stage:'downloaded',bytes:r.bytes,totalBytes:r.bytes});
+      return { bytes: r.bytes, title: r.title || null };
+    } catch (e) {
+      if (signal?.aborted || e?.code === 'too_large') throw e;
+      console.warn('[YouTube IVR] direct download failed; using the engine', { videoId: id, message: String(e?.message || e).slice(0, 160) });
+    }
+  }
   onProgress({stage:'provider'});
   // Native johnvc audio is the primary engine for every length; the backup
   // engine is used only with the caller's consent. An existing run receipt
