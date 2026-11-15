@@ -15,6 +15,8 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
 const pending = new Map();
+// Songs whose mp3 already arrived (the watcher then stops).
+const delivered = new Set();
 let orphanHandler = null;
 const log = (event, details = {}) => console.info('[SONG_CLOUD]', event, details);
 
@@ -106,7 +108,52 @@ export async function generateWithCloudWorker(spec, meta = {}) {
     pending.delete(jobId);
     throw error;
   }
+  watchRun(jobId, payload);
   return result;
+}
+
+// 15.11: a runner that crashes (it ran out of disk) never calls back, and the
+// caller's song was lost after a long wait. Every 2 minutes the run is looked
+// up on GitHub; a run that ended without success is sent again (same job, so
+// the same waiter gets the song), at most twice.
+export async function findRun(jobId, since, { fetchImpl = fetch } = {}) {
+  const repo = env('SONG_WORKER_REPO', 'd0556738176-svg/yemot-gemini-server');
+  const workflow = env('SONG_WORKER_WORKFLOW', 'song-worker.yml');
+  const r = await fetchImpl('https://api.github.com/repos/' + repo + '/actions/workflows/' + encodeURIComponent(workflow) + '/runs?event=workflow_dispatch&per_page=30', {
+    headers: { authorization: 'Bearer ' + env('GITHUB_DISPATCH_TOKEN'), accept: 'application/vnd.github+json', 'user-agent': 'yemot-song-worker' },
+    signal: AbortSignal.timeout(15000)
+  });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  return (j?.workflow_runs || []).filter(x => x.display_title === 'song ' + jobId && Date.parse(x.created_at) >= since - 60000)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0] || null;
+}
+
+export function watchRun(jobId, payload, { everyMs = 120000, maxRetries = 2, fetchImpl = fetch, dispatch = dispatchSongJob } = {}) {
+  let retries = 0, since = Date.now();
+  const started = Date.now();
+  // Goes on after the caller hung up or his wait ended: a resent song is then
+  // finished on its own (orphan path) and still lands in extension 7.
+  const timer = setInterval(async () => {
+    if (delivered.has(jobId) || Date.now() - started > 3 * 3600000) return clearInterval(timer);
+    try {
+      const run = await findRun(jobId, since, { fetchImpl });
+      if (!run || run.status !== 'completed' || run.conclusion === 'success') return;
+      if (delivered.has(jobId)) return clearInterval(timer);
+      if (retries >= maxRetries) {
+        clearInterval(timer);
+        const w = pending.get(jobId); pending.delete(jobId);
+        log('WORKER_GAVE_UP', { jobId, conclusion: run.conclusion, retries });
+        w?.reject(Object.assign(new Error('Cloud worker failed ' + (retries + 1) + ' times'), { status: 502 }));
+        return;
+      }
+      retries++; since = Date.now();
+      log('WORKER_RUN_FAILED_RETRYING', { jobId, conclusion: run.conclusion, retry: retries });
+      await dispatch(jobId, payload);
+    } catch (e) { log('WORKER_WATCH_ERROR', { jobId, message: String(e?.message || e).slice(0, 120) }); }
+  }, everyMs);
+  timer.unref?.();
+  return timer;
 }
 
 export function cloudJobStatus(jobId) {
@@ -144,6 +191,7 @@ export async function handleWorkerCallback(req, res) {
   let payload = {};
   try { payload = JSON.parse(Buffer.from(String(req.headers['x-song-payload'] || ''), 'base64').toString('utf8')); } catch {}
   const generated = { audio, contentType: 'audio/mpeg', provider: 'github-cpu', model: 'acestep-v15-turbo' };
+  delivered.add(jobId);
   log('AUDIO_RECEIVED', { jobId, bytes: audio.length, waiting: !!waiter });
   res.json({ ok: true });
   if (waiter) {
