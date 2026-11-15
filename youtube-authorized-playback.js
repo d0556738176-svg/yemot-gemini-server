@@ -552,8 +552,8 @@ async function downloadApifySource(id, output, signal, onProgress=()=>{}, consen
   // engines below only when that fails.
   if (directEnabled(process.env)) {
     try {
-      onProgress({stage:'transferring',bytes:0,totalBytes:null});
-      const r = await directDownload(id, output, { mode:'audio', ffmpegPath, signal, maxBytes:MAX_SOURCE_BYTES, onProgress:p=>onProgress({stage:'transferring',bytes:p.done,totalBytes:p.total}) });
+      onProgress({stage:'transferring',direct:true,bytes:0,totalBytes:null});
+      const r = await directDownload(id, output, { mode:'audio', ffmpegPath, signal, maxBytes:MAX_SOURCE_BYTES, onProgress:p=>onProgress({stage:'transferring',direct:true,bytes:p.done,totalBytes:p.total}) });
       onProgress({stage:'downloaded',bytes:r.bytes,totalBytes:r.bytes});
       return { bytes: r.bytes, title: r.title || null };
     } catch (e) {

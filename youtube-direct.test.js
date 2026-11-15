@@ -20,3 +20,8 @@ test('can be turned off', () => {
 test('every player type failing throws so the engine is used', async () => {
   await assert.rejects(directDownload('jNQXAC9IVRw', '/tmp/direct-test-x', { bin: '/bin/false', log: {} }), /exit|failed/);
 });
+test('direct download progress is announced as a direct download with percent', async () => {
+  const { progressAnnouncement } = await import('./youtube-playback-progress.js');
+  const a = progressAnnouncement({ stage: 'transferring', direct: true, bytes: 40, totalBytes: 100 });
+  assert.match(a.text, /ישירות מיוטיוב/); assert.match(a.text, /40 אחוז/);
+});

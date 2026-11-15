@@ -22,6 +22,7 @@ export function progressAnnouncement(progress={},last={},now=Date.now()){
       }
       text=providerFactsText(progress,now,last.stage!=='provider');break;
     case 'transferring':
+      if(progress.direct){text=measured?'מוריד ישירות מיוטיוב. הורדו '+percent+' אחוז מהקובץ. נא להמתין.':'מוריד ישירות מיוטיוב. ההורדה נמשכת, נא להמתין.';break;}
       text=measured?'קובץ השמע מוכן במנוע וכעת מועבר לשרת. התקבלו '+percent+' אחוז מהקובץ. נא להמתין.'
         :'קובץ השמע מוכן במנוע וכעת מועבר לשרת. ההעברה נמשכת, נא להמתין.';break;
     case 'downloaded':
