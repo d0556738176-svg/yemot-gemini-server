@@ -1,3 +1,4 @@
+import { downloadPhoneRecording } from './yemot-recording.js';
 import { isConversationalReference, currentConversationText, resolveLookupContinuation, isYouTubeTechnicalDiscussion, mayUseYouTubeSearch, asksForFeedback } from './branch1-turn-context.js';
 import { isBranch1WebsiteRequest, answerBranch1Website } from './branch1-websites.js';
 import express from 'express';
@@ -4964,7 +4965,7 @@ async function callHandler(call) {
       // the caller for the generic 30-second network budget.
       const recordingDownloadTimeoutMs=Math.min(REQUEST_TIMEOUT_MS,
         Math.max(2500,Number(process.env.BRANCH1_RECORDING_DOWNLOAD_TIMEOUT_MS || 6000)));
-      const response=(call.selfTest||typedText)?{data:Buffer.from('selftest')}:await withTimeout(yemotApi.download_file('ivr2:'+recordPath), recordingDownloadTimeoutMs, 'yemotApi.download_file');
+      const response=(call.selfTest||typedText)?{data:Buffer.from('selftest')}:await downloadPhoneRecording(recordPath, {timeoutMs: recordingDownloadTimeoutMs});
       audioBuffer=response.data;
     } catch(e) {
       logDetailedError('recording download',e);
