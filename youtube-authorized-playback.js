@@ -690,7 +690,7 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null,tit
   // The words (YouTube's captions) as the file's lyrics, when the direct
   // download found them (owner, 15.11: full details in every file).
   const lyrics=await fs.readFile(source+'.lyrics.txt','utf8').catch(()=>'');
-  if(lyrics.trim())metadata.lyrics=lyrics.trim();
+  if(lyrics.trim()&&!metadata.lyrics)metadata.lyrics=lyrics.trim(); // the uploader's own words first
   // A dubbed version (" - דיבוב לעברית") keeps all details, named apart.
   if(titleSuffix)metadata.title=String(metadata.title||title||id)+titleSuffix;
   const cap=await uploadCapBytes();

@@ -145,6 +145,41 @@ export function publishedText(t) {
 }
 
 // Every tag a player shows, from the YouTube video's own details.
+// Song details the uploader wrote in the description (owner, 15.11: the
+// singer, song name, words and tune in their own fields, and the words
+// themselves as lyrics). Only labelled lines are used; nothing is guessed.
+export function descriptionCredits(description = '') {
+  const text = String(description || '').replace(/\r/g, '');
+  const field = labels => {
+    for (const l of labels) {
+      const m = new RegExp('(?:^|[\\n|•·])\\s*' + l + '\\s*[:：]\\s*([^\\n|•·]{1,80})', 'u').exec(text);
+      if (m) { const v = m[1].replace(/[#@].*$/u, '').trim(); if (v && !/^(?:לבעלי|כל הזכויות)/u.test(v)) return v; }
+    }
+    return null;
+  };
+  const out = {
+    artist: field(['ביצוע', 'מבצע', 'מבצעת', 'זמר', 'שירה', 'Artist', 'Singer', 'Performed by', 'Vocals']),
+    title: field(['שם השיר', 'שיר', 'Song', 'Title']),
+    lyricist: field(['מילים', 'Lyrics by', 'Lyricist', 'Words']),
+    composer: field(['לחן', 'Music by', 'Composer', 'Composed by']),
+    arranger: field(['עיבוד והפקה מוזיקלית', 'עיבוד והפקה', 'עיבוד', 'הפקה מוזיקלית', 'Arrangement', 'Arranged by', 'Produced by']),
+  };
+  // The words: the lines under a "lyrics" heading, up to the next divider/credits.
+  const lines = text.split('\n');
+  const head = lines.findIndex(l => /^\s*(?:[━─═\-_*~]+\s*)?(?:מילות השיר|מילים לשיר|מילות|Lyrics)\s*[:：]?\s*(?:[━─═\-_*~]+)?\s*$/iu.test(l));
+  if (head >= 0) {
+    const body = [];
+    for (const l of lines.slice(head + 1)) {
+      if (/^\s*[━─═_*~]{3,}\s*$/u.test(l)) { if (body.some(x => x.trim())) break; else continue; }
+      if (/^\s*(?:קרדיטים|Credits|#)/iu.test(l)) break;
+      body.push(l.trimEnd());
+    }
+    const words = body.join('\n').replace(/^\n+|\n+$/g, '').replace(/\n{3,}/g, '\n\n');
+    if (words.split('\n').filter(x => x.trim()).length >= 4) out.lyrics = words.slice(0, 20000);
+  }
+  return Object.fromEntries(Object.entries(out).filter(([, v]) => v));
+}
+
 export function downloadMetadata(videoId, facts = {}, fallbackTitle = null) {
   const url = 'https://www.youtube.com/watch?v=' + videoId;
   // The exact moment YouTube shows as the publish time, in Israel time.
@@ -153,12 +188,18 @@ export function downloadMetadata(videoId, facts = {}, fallbackTitle = null) {
   const date = Number.isFinite(t) ? new Date(t).toISOString().replace('.000Z', 'Z') : '';
   const body = String(facts.description || '').replace(/\r/g, '').slice(0, 2000);
   const desc = [published, body].filter(Boolean).join('\n\n');
+  const credits = descriptionCredits(facts.description);
   const m = {
-    title: facts.title || fallbackTitle || videoId,
-    artist: facts.channel, album_artist: facts.channel, album: facts.channel,
+    // The song's own name and singer when the description states them; the
+    // channel stays as the album, the full YouTube title in the comment.
+    title: credits.title || facts.title || fallbackTitle || videoId,
+    artist: credits.artist || facts.channel, album_artist: facts.channel, album: facts.channel,
+    composer: credits.composer || null, lyricist: credits.lyricist || null, arranger: credits.arranger || null,
     date: date || null,
+    year: Number.isFinite(t) ? String(new Date(t).getUTCFullYear()) : null,
     genre: GENRES[Number(facts.categoryId)] || null,
-    comment: [published, url].filter(Boolean).join(' | '), description: desc || null, synopsis: desc || null,
+    comment: [credits.title && facts.title && credits.title !== facts.title ? facts.title : '', published, url].filter(Boolean).join(' | '), description: desc || null, synopsis: desc || null,
+    lyrics: credits.lyrics || null,
     keywords: Array.isArray(facts.tags) && facts.tags.length ? facts.tags.join(', ').slice(0, 500) : null,
     copyright: facts.channel ? '© ' + facts.channel : null,
     publisher: 'YouTube', website: url, encoded_by: 'Yemot branch 2',
