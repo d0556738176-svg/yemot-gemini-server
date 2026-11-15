@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import ffmpegPath from 'ffmpeg-static';
+import ffmpegPath from './ffmpeg-path.js';
 import { downloadVerified } from './experiments/verified-audio/verified-download.mjs';
 import { downloadVisionAudio } from './experiments/verified-audio/vision-audio.mjs';
 

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import ffmpegPath from 'ffmpeg-static';
+import ffmpegPath from '../ffmpeg-path.js';
 import { saveSongDownloadCopy } from '../song-generator.js';
 
 test('an AI song is saved to the audio folder with its details, unchanged in quality', async () => {

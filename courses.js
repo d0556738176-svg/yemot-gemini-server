@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ffmpegPath from 'ffmpeg-static';
+import ffmpegPath from './ffmpeg-path.js';
 import { synthesize } from './edge-tts.js';
 
 const API = 'https://www.call2all.co.il/ym/api';

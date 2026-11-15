@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import ffmpegPath from 'ffmpeg-static';
+import ffmpegPath from './ffmpeg-path.js';
 import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 import { generateWithFalAceStep, isFalConfigured } from './song-engine-fal.js';
 import { generateWithAceMusic, isAceMusicConfigured } from './song-engine-acemusic.js';
