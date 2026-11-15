@@ -3930,7 +3930,7 @@ function startYouTubeVideoJob(video) {
       getFile: r => p.getYemotFile(r), ffmpegPath,
       fetchThumbnail: cover.fetchThumbnail, normalizeCover: cover.normalizeCover, downloadMetadata: cover.downloadMetadata,
       fetchVideoFacts, titleFileName, log: console,
-      nextFolder: async () => (await import('./download-folders.js')).nextFolder('video', { readJson: x => p.readCacheJson(x) }),
+      nextFolder: async () => { const f = await import('./download-folders.js'); return f.nextFolder('video', { readJson: x => p.readCacheJson(x), writeJson: (x, d) => p.writeCacheJson(x, d), countFiles: pth => f.yemotFileCount(pth, { apiBase: p.YEMOT_API_BASE, token: p.yemotApiKey() }) }); },
       uploadCap: async () => (await import('./youtube-authorized-playback.js')).uploadCapBytes(),
       hebrewSubtitles: async (file, dir) => {
         const { hebrewSubtitlesFor } = await import('./youtube-subtitles.js');

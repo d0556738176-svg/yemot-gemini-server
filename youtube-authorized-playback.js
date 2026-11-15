@@ -725,7 +725,7 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null,tit
   const saved=[];let seen=null;
   for(const x of files){
     const { withPart } = await import('./youtube-latin-name.js');
-    const remote=(await folders.nextFolder('audio',{readJson:readCacheJson}))+'/'+(x.part?withPart(name,x.part):name)+x.suffix+'.'+format;
+    const remote=(await folders.nextFolder('audio',{readJson:readCacheJson,writeJson:writeCacheJson,countFiles:pth=>folders.yemotFileCount(pth,{apiBase:YEMOT_API_BASE,token:yemotApiKey()})}))+'/'+(x.part?withPart(name,x.part):name)+x.suffix+'.'+format;
     const r=await uploadDownloadVerified(x.file,remote,temp);
     await fs.rm(x.file,{force:true}).catch(()=>{});
     await folders.countSaved('audio',{readJson:readCacheJson,writeJson:writeCacheJson});
