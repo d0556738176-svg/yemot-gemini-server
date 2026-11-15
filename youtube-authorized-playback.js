@@ -689,7 +689,43 @@ async function uploadDownloadVerified(file,remote,temp){
 // account's measured request limit): lossless FLAC; if too big, M4A (AAC
 // 256k, or YouTube's own AAC untouched); if even that is too big (very long
 // recordings), M4A in numbered parts, each a complete file with the picture.
+// Copies being made right now (main downloads and back-fills), so one song is
+// never saved twice at the same time.
+const copyInFlight=new Set();
 async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null,titleSuffix=''){
+  const key=id+(titleSuffix?'-he':'');
+  copyInFlight.add(key);
+  try{ return await saveDownloadCopyInner(id,source,title,temp,policy,durationSec,titleSuffix); }
+  finally{ copyInFlight.delete(key); }
+}
+// 15.11 (owner): every song he hears from YouTube must also be in the אודיו
+// folder. A song played from the system's own copy (downloaded before the
+// copies existed) gets its copy now, in the background: downloaded again for
+// free straight from YouTube, never with the paid engine. Tried once per song
+// per server run.
+const backfillTried=new Set();
+export async function ensureDownloadCopy(videoId,{ waitMs=120000 }={}){
+  const id=String(videoId||'').trim();
+  if(!/^[A-Za-z0-9_-]{11}$/.test(id)||backfillTried.has(id))return;
+  backfillTried.add(id);
+  await new Promise(r=>setTimeout(r,waitMs)); // a fresh download registers its own copy first
+  if(copyInFlight.has(id))return;
+  const policy=await downloadCopyPolicy();
+  if(!policy)return;
+  const owners=await readCacheJson(DOWNLOAD_OWNERS).catch(()=>null)||{};
+  if(Object.values(owners).includes(id))return;
+  const temp=await fs.mkdtemp(path.join(os.tmpdir(),'copy-backfill-'));
+  try{
+    const { directDownload, directEnabled } = await import('./youtube-direct.js');
+    if(!directEnabled(process.env))return;
+    const src=path.join(temp,'source');
+    const r=await directDownload(id,src,{mode:'audio',ffmpegPath,maxBytes:4096*1024*1024});
+    console.info('[DOWNLOADS] back-filling the download copy of a song played from the system',{videoId:id,bytes:r.bytes});
+    await saveDownloadCopy(id,src,r.title||null,temp,policy,null);
+  }catch(e){ console.warn('[DOWNLOADS] back-fill copy not made',{videoId:id,message:String(e?.message||e).slice(0,160)}); }
+  finally{ await fs.rm(temp,{recursive:true,force:true}).catch(()=>{}); }
+}
+async function saveDownloadCopyInner(id,source,title,temp,policy,durationSec=null,titleSuffix=''){
   const t=Date.now();
   const { fetchVideoFacts } = await import('./youtube-video-facts.js');
   const { retrying, coverFor } = await import('./youtube-cover-art.js');

@@ -12,7 +12,7 @@ import { selectedResultIndex, isMoreResultsRequest, isFreshYouTubeSearch } from 
 import { resolvePublisherAudio } from './youtube-alternate-audio.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { fetchVideoFacts, publishedAgoHebrew, viewsHebrew, engineCannotReach } from './youtube-video-facts.js';
-import { downloadAuthorizedAudioToYemot, lookupCachedYouTubeAudio, saveCachedYouTubeAudio, addPendingPlaybackJob, removePendingPlaybackJob, listPendingPlaybackJobs } from './youtube-authorized-playback.js';
+import { downloadAuthorizedAudioToYemot, lookupCachedYouTubeAudio, saveCachedYouTubeAudio, addPendingPlaybackJob, removePendingPlaybackJob, listPendingPlaybackJobs, ensureDownloadCopy } from './youtube-authorized-playback.js';
 import { apifyTokens, apifyWebhookQuery } from './youtube-apify-source.js';
 import { fetchVideoDurationSeconds } from './youtube-engine-select.js';
 import { prepareYouTubePlayback, playbackFailureMessage } from './youtube-playback-prepare.js';
@@ -4014,7 +4014,9 @@ function startYouTubePlaybackJob(video, opts = {}) {
     resolveAlternate: resolvePublisherAudio,
     // Pass the caller's consent to switch to the costlier engine through to the resolver.
     downloadToYemot: (vid, dopts) => downloadAuthorizedAudioToYemot(vid, { ...dopts, consentToFallback }),
-    lookupCached: lookupCachedYouTubeAudio,
+    // A song played from the system's own copy also gets its download copy
+    // in the אודיו folder if it has none (owner, 15.11).
+    lookupCached: async id => { const c = await lookupCachedYouTubeAudio(id); if (c?.playbackPaths?.length) void ensureDownloadCopy(id).catch(() => {}); return c; },
     saveCached: saveCachedYouTubeAudio,
     onProgress: progress => { state.progress=progress; }
   }).then(result => {
@@ -4924,6 +4926,7 @@ app.get('/api/ext3/media', rateLimit(240, 60 * 1000, 'ext3-media'), async (req, 
   try {
     const cached = await Promise.race([lookupCachedYouTubeAudio(videoId).catch(() => null), new Promise(r => setTimeout(() => r(null), 3000))]);
     let audio = cached?.playbackPaths?.length ? { status: 'ready', paths: cached.playbackPaths } : (youtubePlaybackJobs.get(videoId) || null);
+    if ((req.query.start === '1' && cached?.playbackPaths?.length) || req.query.copy === '1') void ensureDownloadCopy(videoId).catch(() => {});
     let vjob = youtubeVideoJobs.get(videoId) || null;
     if (req.query.start === '1') {
       // Owner, 13.11: extensions 1 and 3 ask about Hebrew subtitles too (subs=1/0).
