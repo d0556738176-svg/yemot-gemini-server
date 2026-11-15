@@ -13,6 +13,11 @@ MAIN_HOST="main.$DASH.sslip.io"; EXT2_HOST="ext2.$DASH.sslip.io"
 EXT2_BRANCH=${EXT2_BRANCH:-work/branch-2-confirm-yes-20261025}
 ROOT=/opt/yemot; mkdir -p $ROOT
 
+echo "== console autologin (the browser console is reachable only from the owner's Empire account)"
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear %%I $TERM\n' > /etc/systemd/system/getty@tty1.service.d/autologin.conf
+passwd -l root >/dev/null 2>&1 || true   # no password logins for root at all
+
 echo "== packages"
 cloud-init status --wait >/dev/null 2>&1 || true
 apt-get update -y
@@ -37,8 +42,9 @@ if ! swapon --show | grep -q swapfile; then
 fi
 
 echo "== code"
+REPO_URL=$(head -n1 /root/u)   # https URL with a read-only token (typed in once through the console)
 clone() { # dir branch
-  if [ ! -d "$1/.git" ]; then git clone -b "$2" git@github.com:d0556738176-svg/yemot-gemini-server.git "$1"
+  if [ ! -d "$1/.git" ]; then git clone -b "$2" "$REPO_URL" "$1"
   else git -C "$1" fetch origin "$2" && git -C "$1" checkout -B "$2" "origin/$2"; fi
   (cd "$1" && npm install --omit=dev --no-audit --no-fund)
 }
@@ -46,11 +52,16 @@ clone $ROOT/main main
 clone $ROOT/ext2 "$EXT2_BRANCH"
 
 echo "== settings from Render"
+if [ -s /root/.render-key ]; then
 node $ROOT/main/deploy/vps/render-env.mjs srv-das184ojo6nc739qecr0 $ROOT/main.env \
   PORT=3000 PUBLIC_BASE_URL=https://$MAIN_HOST RENDER_EXTERNAL_URL=https://$MAIN_HOST
 node $ROOT/main/deploy/vps/render-env.mjs srv-dbf3voivcj2c73eohsi0 $ROOT/ext2.env \
   PORT=3001 PUBLIC_BASE_URL=https://$EXT2_HOST RENDER_EXTERNAL_URL=https://$EXT2_HOST
 chmod 600 $ROOT/*.env
+else
+  echo "!! /root/.render-key missing: settings not copied yet"; touch $ROOT/main.env $ROOT/ext2.env
+fi
+chmod 600 /root/u
 
 echo "== services"
 for n in main ext2; do
