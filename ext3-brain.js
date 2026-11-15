@@ -563,6 +563,42 @@ export function libraryMatch(lib, text) {
   return bestScore >= 0.75 ? best : null;
 }
 const AGAIN = /(?:שוב|מחדש|עוד פעם להוריד|הורדה חדשה|להוריד שוב|תוריד שוב|תורידי שוב)/u;
+// 15.11: "download it" means a new download, never the saved copy.
+const WANTS_DOWNLOAD = /(?:תוריד|תורידי|להוריד|תורד|הורדה|תעשי הורדה|תעשה הורדה)/u;
+function wordSim(a, b) {
+  if (a === b) return 1;
+  const n = a.length, m = b.length; if (!n || !m) return 0;
+  const d = Array.from({ length: n + 1 }, (_, i) => [i, ...Array(m).fill(0)]);
+  for (let j = 1; j <= m; j++) d[0][j] = j;
+  for (let i = 1; i <= n; i++) for (let j = 1; j <= m; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return 1 - d[n][m] / Math.max(n, m);
+}
+// A saved song whose name only partly matches what he said (some words, or
+// words the phone heard a little wrong): asked about, never played on a guess.
+export function libraryNear(lib, text) {
+  const q = libWords(text);
+  if (!q.length) return null;
+  let best = null, bestScore = 0, bestStrong = 0;
+  for (const item of lib || []) {
+    const t = libWords(item.title);
+    if (!t.length) continue;
+    let sum = 0, strong = 0;
+    for (const w of q) {
+      const sim = Math.max(...t.map(x => (x.includes(w) || w.includes(x)) && Math.min(x.length, w.length) >= 3 ? 0.95 : wordSim(w, x)));
+      if (sim >= 0.8) { sum += 1; if (w.length >= 3) strong++; } else if (sim >= 0.6) sum += 0.5;
+    }
+    const score = sum / q.length;
+    if (score > bestScore || (score === bestScore && strong > bestStrong)) { best = item; bestScore = score; bestStrong = strong; }
+  }
+  return best && bestStrong >= 1 && bestScore >= 0.45 ? best : null;
+}
+export function libraryAsk(item, query) {
+  return {
+    ref: { type: 'video', videoId: item.videoId, title: item.title },
+    choices: { '1': { type: 'play', item }, '2': { type: 'search', query: String(query || '').slice(0, 120) } },
+    reply: 'יש אצלך במערכת שיר בשם ' + clip(cleanTitle(item.title), 140) + '. התכוונת אליו? להשמעה מיד, בלי הורדה, הקש 1. אם התכוונת לשיר אחר, הקש 2 ואחפש אותו ביוטיוב.'
+  };
+}
 
 export function activeArticle(current = []) {
   for (let i = (current || []).length - 1; i >= Math.max(0, current.length - 3); i--) if (current[i]?.ref?.type === 'article') return current[i].ref;
@@ -703,14 +739,22 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   if (plan.intent === 'video_play') {
     // Already downloaded? Then it plays now, with no new download (unless he
     // asked to download it again).
-    const lib = deps.library && !AGAIN.test(utterance) ? await deps.library().catch(() => []) : [];
+    const lib = deps.library && !AGAIN.test(utterance) && !WANTS_DOWNLOAD.test(utterance) ? await deps.library().catch(() => []) : [];
     const fromLib = item => out({ ref: { type: 'video', videoId: item.videoId, title: item.title }, play: { paths: [item.path], durationSec: 0, title: item.title },
       reply: clip(cleanTitle(item.title), 140) + ' כבר שמור אצלך במערכת, אז לא צריך להוריד אותו שוב. משמיעה אותו עכשיו.' });
     if (lib.length) {
       const pointsAtItEarly = (/(?:אותו|אותה|הזה|הזאת|את זה|שלו|שלה|שהמלצת|שאמרת|שדיברנו|שמצאת)/u.test(utterance) || BACKREF.test(utterance));
       const ownName = !pointsAtItEarly && rules.intent === 'video_play' && rules.ytHe && rules.ytHe.length >= 3 ? rules.ytHe : (plan.ytHe || '');
       const hit = (video && (pointsAtItEarly || !ownName) && lib.find(x => x.videoId === video.videoId)) || (ownName && libraryMatch(lib, ownName));
+      // He said only a small part of its name (one word of "אושר כהן - דאון"):
+      // asked first, not played on a guess (15.11).
+      const covers = (item, said) => { const t = libWords(item.title), q = libWords(said); return t.length ? t.filter(w => q.some(x => x.includes(w) || w.includes(x))).length / t.length : 1; };
+      if (hit && ownName && !pointsAtItEarly && !(video && hit.videoId === video.videoId) && covers(hit, ownName) < 0.5 && !/ביוטיוב/u.test(utterance)) return out(libraryAsk(hit, ownName));
       if (hit) return fromLib(hit);
+      // Only part of the name matched a saved song: ask before playing it.
+      const said = ownName || (plan.ytHe && plan.ytHe.length >= 3 ? plan.ytHe : '');
+      const near = said && !pointsAtItEarly && !/ביוטיוב/u.test(utterance) ? libraryNear(lib, said) : null;
+      if (near) return out(libraryAsk(near, said));
     }
     // Which video: the one on record when he points at it, otherwise the one he
     // names (searched by name, never by the whole sentence). Nothing is

@@ -5000,6 +5000,14 @@ async function callHandler(call) {
       // On any failure the older routing below still answers.
       let ext3Done=false;
       if((!explicitSearchOnly || (typeof brainBranch==='function'&&brainBranch()==='1')) && String(process.env.EXT3_BRAIN||'on')!=='off' && typeof runExt3Brain==='function') {
+        // 15.11: "2 = another song, search YouTube" after "did you mean the
+        // saved song?": the brain gets a plain YouTube request for his words.
+        { const d=!pendingConfirm&&pendingChoices?ext3KeyChoice(userTranscript,pendingChoices):'';
+          if(d&&pendingChoices[d]?.type==='search') {
+            const q=pendingChoices[d].query; pendingChoices=null;
+            console.info('[EXT3_KEYS] not the saved song; searching YouTube',{callId:activeKey,query:q});
+            userTranscript='תמצאי לי ביוטיוב את השיר '+q;
+          } }
         const fixed=answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
         if(fixed) { replyText=fixed; ext3Done=true; }
         else if(callMedia.pendingPaid && ext3SubsChoice(userTranscript)!==null) {

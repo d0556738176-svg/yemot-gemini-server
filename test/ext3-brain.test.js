@@ -528,3 +528,36 @@ test('"the last video I talked with you about" (from an earlier call) gets its n
   assert.match(r.reply, /קובץ שמע הקש 1/);
   assert.match(r.reply, /וידאו עם אפשרות לכתובית בעברית הקש 2/);
 });
+
+test('15.11: part of the name heard -> "did you mean the saved song?" with 1 play / 2 search', async () => {
+  let searched = false;
+  const { deps } = baseDeps([], { library: async () => libSongs, findVideos: async () => { searched = true; return []; } });
+  const r = await ext3Turn({ utterance: 'תשמיעי לי את דאון', now }, deps);
+  assert.equal(r.play, undefined);
+  assert.equal(searched, false);
+  assert.match(r.reply, /התכוונת אליו\? להשמעה מיד, בלי הורדה, הקש 1/);
+  assert.equal(r.choices['1'].type, 'play');
+  assert.equal(r.choices['2'].type, 'search');
+});
+
+test('15.11: a name the phone heard a little wrong still finds the saved song (asked first)', async () => {
+  const { deps } = baseDeps([], { library: async () => libSongs, findVideos: async () => [] });
+  const r = await ext3Turn({ utterance: 'תשמיעי לי את אושר כהנ דאוון', now }, deps);
+  assert.equal(r.choices?.['1']?.item?.videoId, 'downdowndow');
+});
+
+test('15.11: "download it" never plays the saved copy', async () => {
+  const found = { videoId: 'downdowndow', title: 'אושר כהן - דאון', channelTitle: 'o', durationSec: 190, viewCount: 5, description: '' };
+  const { deps } = baseDeps([], { library: async () => libSongs, findVideos: async () => [found] });
+  const r = await ext3Turn({ utterance: 'תורידי לי את אושר כהן דאון', now }, deps);
+  assert.ok(r.confirm);
+  assert.equal(r.play, undefined);
+});
+
+test('15.11: an unrelated song is not offered from the library', async () => {
+  const found = { videoId: 'zzzzzzzzzzz', title: 'ישי ריבו - לשם', channelTitle: 'o', durationSec: 200, viewCount: 5, description: '' };
+  const { deps } = baseDeps([], { library: async () => libSongs, findVideos: async () => [found] });
+  const r = await ext3Turn({ utterance: 'תשמיעי לי את ישי ריבו לשם', now }, deps);
+  assert.equal(r.choices, undefined);
+  assert.equal(r.confirm?.videoId, 'zzzzzzzzzzz');
+});
