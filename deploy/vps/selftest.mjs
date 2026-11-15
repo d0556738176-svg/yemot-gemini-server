@@ -1,0 +1,96 @@
+// Whole-server check, run on the Empire server:
+//   node /opt/yemot/main/deploy/vps/selftest.mjs
+// Prints one PASS/FAIL line per part. Never prints keys or links with secrets.
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { synthesize } from '../../edge-tts.js';
+import { copyFileSync, statSync, mkdtempSync } from 'node:fs';
+const EXT2 = '/opt/yemot/ext2';
+
+const env = {};
+for (const f of ['/opt/yemot/main.env', '/opt/yemot/ext2.env']) {
+  for (const line of readFileSync(f, 'utf8').split('\n')) {
+    const m = line.match(/^([A-Z0-9_]+)="(.*)"$/); if (m && !(m[1] in env)) env[m[1]] = m[2].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+}
+const results = [];
+async function check(name, fn) {
+  const t = Date.now();
+  try { const info = await fn(); results.push(true); console.log('PASS', name, (Date.now() - t) + 'ms', info || ''); }
+  catch (e) { results.push(false); console.log('FAIL', name, String(e?.message || e).slice(0, 160)); }
+}
+const get = (url, opts = {}) => fetch(url, { signal: AbortSignal.timeout(20000), ...opts });
+
+await check('main app', async () => { const r = await get('http://127.0.0.1:3000/'); if (r.status >= 500) throw new Error('HTTP ' + r.status); return 'HTTP ' + r.status; });
+await check('ext2 app', async () => { const r = await get('http://127.0.0.1:3001/'); if (r.status >= 500) throw new Error('HTTP ' + r.status); return 'HTTP ' + r.status; });
+await check('course builder', async () => { const r = await get('http://127.0.0.1:3002/'); return 'HTTP ' + r.status; });
+for (const h of ['main', 'ext2']) {
+  await check('https ' + h, async () => {
+    const base = h === 'main' ? env.PUBLIC_BASE_URL : env.EXT2_MEDIA_URL;
+    const r = await get(base + '/'); if (r.status >= 500) throw new Error('HTTP ' + r.status); return base + ' HTTP ' + r.status;
+  });
+}
+await check('main -> ext2 media link', async () => {
+  const r = await get(env.EXT2_MEDIA_URL + '/api/ext3/youtube/status?videoId=jNQXAC9IVRw'); return 'HTTP ' + r.status;
+});
+await check('yemot api', async () => {
+  const token = env.YEMOT_API_KEY || env.YEMOT_TOKEN || (env.YEMOT_API_USERNAME && env.YEMOT_API_PASSWORD ? env.YEMOT_API_USERNAME + ':' + env.YEMOT_API_PASSWORD : '');
+  if (!token) throw new Error('no yemot credentials');
+  const j = await (await get('https://www.call2all.co.il/ym/api/GetTextFile?' + new URLSearchParams({ token, what: 'ivr2:/4/ext.ini' }))).json();
+  if (j.responseStatus !== 'OK') throw new Error(String(j.message || j.responseStatus));
+  const link = (String(j.contents).match(/api_link=(\S+)/) || [])[1] || '';
+  if (!link.startsWith(env.PUBLIC_BASE_URL)) throw new Error('extension 4 points elsewhere: ' + link.replace(/[?#].*/, ''));
+  return 'extension 4 -> ' + link;
+});
+const tmp = mkdtempSync('/tmp/selftest-');
+const ytdlp = EXT2 + '/node_modules/youtube-dl-exec/bin/yt-dlp';
+const ffmpegPath = (await import(EXT2 + '/node_modules/ffmpeg-static/index.js')).default;
+await check('youtube search (yt-dlp from this server)', async () => {
+  const r = spawnSync(ytdlp, ['--no-warnings', '--flat-playlist', '--print', '%(id)s', 'ytsearch3:שיר חסידי'], { timeout: 90000, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error((r.stderr || 'exit ' + r.status).split('\n').filter(Boolean).pop());
+  return r.stdout.trim().split('\n').length + ' results';
+});
+await check('youtube audio download (yt-dlp from this server)', async () => {
+  const out = tmp + '/zoo.m4a';
+  const r = spawnSync(ytdlp, ['--no-warnings', '-f', 'bestaudio[ext=m4a]/bestaudio', '-o', out, '--', 'jNQXAC9IVRw'], { timeout: 180000, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error((r.stderr || 'exit ' + r.status).split('\n').filter(Boolean).pop());
+  return statSync(out).size + ' bytes';
+});
+await check('youtube video download (yt-dlp from this server)', async () => {
+  const out = tmp + '/zoo.mp4';
+  const r = spawnSync(ytdlp, ['--no-warnings', '-f', 'best[height<=360][ext=mp4]/best[height<=360]', '-o', out, '--', 'jNQXAC9IVRw'], { timeout: 180000, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error((r.stderr || 'exit ' + r.status).split('\n').filter(Boolean).pop());
+  return statSync(out).size + ' bytes';
+});
+await check('hebrew dubbing, whole chain (key 9; nothing is published)', async () => {
+  for (const [k, v] of Object.entries(env)) if (!(k in process.env)) process.env[k] = v;
+  const { dubToHebrew } = await import(EXT2 + '/youtube-dub.js');
+  let published = null;
+  const deps = {
+    ffmpegPath,
+    fetchSource: async (id, dest) => copyFileSync(tmp + '/zoo.m4a', dest),
+    preparePhone: async (src, dest) => copyFileSync(src, dest),
+    publishExt7: async (name, file) => { published = statSync(file).size; return { file: 'test' }; },
+    saveDownload: async () => {},
+  };
+  const quiet = { info: () => {}, warn: m => console.log('  warn', m), error: m => console.log('  error', m) };
+  const r = await dubToHebrew({ videoId: 'jNQXAC9IVRw', title: 'test' }, deps, { env: process.env, log: quiet });
+  if (r.state !== 'done' || !published) throw new Error('state ' + r.state);
+  return 'dubbed sound ' + published + ' bytes';
+});
+await check('hebrew speech (edge tts)', async () => {
+  const buf = await synthesize('בדיקה של הדיבור בעברית', { voice: 'he-IL-AvriNeural' });
+  if (!buf || buf.length < 2000) throw new Error('empty audio'); return buf.length + ' bytes';
+});
+await check('song engine (github dispatch token)', async () => {
+  if (!env.GITHUB_DISPATCH_TOKEN) throw new Error('GITHUB_DISPATCH_TOKEN missing');
+  const r = await get('https://api.github.com/repos/d0556738176-svg/yemot-gemini-server/actions/workflows', { headers: { Authorization: 'Bearer ' + env.GITHUB_DISPATCH_TOKEN, Accept: 'application/vnd.github+json' } });
+  if (!r.ok) throw new Error('GitHub HTTP ' + r.status); const j = await r.json();
+  return (j.workflows || []).some(w => /song-worker/.test(w.path)) ? 'song workflow found' : 'song workflow NOT found';
+});
+for (const [name, key] of [['groq', 'GROQ_API_KEY'], ['gemini', 'GEMINI_API_KEY'], ['apify', 'APIFY_TOKEN'], ['rapidapi', 'RAPIDAPI_KEY']]) {
+  await check('key present: ' + name, async () => { if (!Object.keys(env).some(k => k.startsWith(key))) throw new Error('missing'); });
+}
+const disk = spawnSync('df', ['-h', '--output=pcent', '/'], { encoding: 'utf8' }).stdout.split('\n')[1]?.trim();
+console.log('disk used', disk);
+console.log(results.every(Boolean) ? 'ALL-PASS' : 'SOME-FAILED', results.filter(Boolean).length + '/' + results.length);
