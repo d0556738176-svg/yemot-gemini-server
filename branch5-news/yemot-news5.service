@@ -1,0 +1,28 @@
+[Unit]
+Description=Isolated extension 5 news worker and phone service
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/yemot/news5
+EnvironmentFile=/opt/yemot/news5.env
+ExecStart=/usr/bin/node branch5-news/app.mjs serve
+Restart=on-failure
+RestartSec=30
+KillMode=control-group
+TimeoutStopSec=60
+Nice=15
+CPUQuota=25%
+MemoryHigh=512M
+MemoryMax=768M
+TasksMax=64
+IOSchedulingClass=idle
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/yemot-news5
+
+[Install]
+WantedBy=multi-user.target
