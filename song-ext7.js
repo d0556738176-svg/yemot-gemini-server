@@ -10,11 +10,12 @@ const API = 'https://www.call2all.co.il/ym/api';
 const INDEX = 'ivr2:/2/youtubeaudio/ext7_index.json';
 let chain = Promise.resolve();
 
+// Username:password first: it never expires (15.11: an old YEMOT_API_KEY in
+// the settings had expired and silently broke publishing to extension 7).
 export function yemotToken() {
-  const direct = String(process.env.YEMOT_API_KEY || process.env.YEMOT_TOKEN || '').trim();
-  if (direct) return direct;
   const u = String(process.env.YEMOT_API_USERNAME || '').trim(), p = String(process.env.YEMOT_API_PASSWORD || '').trim();
-  return u && p ? u + ':' + p : '';
+  if (u && p) return u + ':' + p;
+  return String(process.env.YEMOT_TOKEN || process.env.YEMOT_API_KEY || '').trim();
 }
 
 async function readIndex() {
