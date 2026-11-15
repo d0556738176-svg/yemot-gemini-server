@@ -4560,7 +4560,7 @@ async function ext2Media(job,{start=false,timeoutMs=8000}={}) {
   if(!secret) return null;
   const base=String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'');
   const u=new URL(base+'/api/ext3/media');
-  for(const [k,v] of Object.entries({secret,videoId:job.videoId,mode:job.mode||'audio',title:job.title||'',channel:job.channelTitle||'',duration:job.durationSec||'',start:start?'1':'0',...(job.paid?{paid:'1'}:{}),...(typeof job.subtitles==='boolean'?{subs:job.subtitles?'1':'0'}:{})})) u.searchParams.set(k,String(v));
+  for(const [k,v] of Object.entries({secret,videoId:job.videoId,mode:job.mode||'audio',title:job.title||'',channel:job.channelTitle||'',duration:job.durationSec||'',start:start?'1':'0',...(job.paid?{paid:'1'}:{}),...(job.copy?{copy:'1'}:{}),...(typeof job.subtitles==='boolean'?{subs:job.subtitles?'1':'0'}:{})})) u.searchParams.set(k,String(v));
   try {
     const r=await fetch(u,{signal:AbortSignal.timeout(timeoutMs)});
     const j=await r.json().catch(()=>null);
@@ -4616,6 +4616,12 @@ function ext3ConsentAsk(job,media,code) {
   return code==='redo_needs_consent'
     ? 'הווידאו של '+job.title+' כבר שמור בתיקיית וידאו בלי כתובית. כדי להוסיף כתובית בעברית צריך להוריד אותו שוב. להורדה מחדש הקש 1, לביטול הקש 2.'
     : 'ההורדה החינמית ישירות מיוטיוב לא הצליחה עבור '+job.title+'. אפשר להוריד אותו במנוע הגיבוי, שעולה מעט כסף. להורדה במנוע הגיבוי הקש 1, לביטול הקש 2.';
+}
+// 15.11 (owner): a song played from the library also has to be in the אודיו
+// folder: extension 2 makes its copy in the background if it has none.
+function ext3EnsureCopy(item) {
+  if(!item?.videoId||!/^[A-Za-z0-9_-]{11}$/.test(item.videoId)) return;
+  void ext2Media({videoId:item.videoId,title:item.title||'',mode:'audio',copy:true},false).catch(()=>{});
 }
 // Called once per turn: what changed in this call's downloads, to be said.
 async function ext3MediaNotes(media) {
@@ -5059,6 +5065,7 @@ async function callHandler(call) {
             replyText=cleanTitle(it.title)+' כבר שמור אצלך, אז לא צריך להוריד אותו שוב. משמיעה אותו עכשיו.';
             turnContext.ext3Ref={type:'video',videoId:it.videoId,title:it.title};
             console.info('[EXT3_MEDIA] playing from the library, no download',{callId:activeKey,files:1});
+            ext3EnsureCopy(it);
           } else {
             const lib=await ext3Library().catch(()=>[]), have=lib.find(x=>x.videoId===ch.video.videoId);
             if(have) { pendingPlay={paths:[have.path],durationSec:0,title:have.title}; replyText=cleanTitle(have.title)+' כבר שמור אצלך, משמיעה אותו עכשיו.'; }
@@ -5128,7 +5135,7 @@ async function callHandler(call) {
             replyText=r.reply; turnContext.ext3Ref=r.ref||null; ext3Done=true;
             pendingChoices=r.choices&&Object.keys(r.choices).length?r.choices:null;
             if(call.selfTest) call.selfTest.lastRef=r.ref||null;
-            if(r.play) { pendingPlay=r.play; console.info('[EXT3_MEDIA] playing from the library, no download',{callId:activeKey,files:r.play.paths.length}); }
+            if(r.play) { pendingPlay=r.play; console.info('[EXT3_MEDIA] playing from the library, no download',{callId:activeKey,files:r.play.paths.length}); if(r.ref?.videoId) ext3EnsureCopy(r.ref); }
             if(r.confirm) { if(!call.selfTest) void ext2Wake('confirm offered'); pendingConfirm=r.confirm; if(call.selfTest) call.selfTest.lastConfirm=r.confirm; console.info('[EXT3_MEDIA] asking to confirm before download',{callId:activeKey,videoId:r.confirm.videoId}); }
           }
           else {
