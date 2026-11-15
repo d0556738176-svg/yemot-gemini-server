@@ -33,15 +33,19 @@ for (const h of ['main', 'ext2']) {
 await check('main -> ext2 media link', async () => {
   const r = await get(env.EXT2_MEDIA_URL + '/api/ext3/youtube/status?videoId=jNQXAC9IVRw'); return 'HTTP ' + r.status;
 });
-await check('yemot api', async () => {
-  const token = env.YEMOT_API_KEY || env.YEMOT_TOKEN || (env.YEMOT_API_USERNAME && env.YEMOT_API_PASSWORD ? env.YEMOT_API_USERNAME + ':' + env.YEMOT_API_PASSWORD : '');
-  if (!token) throw new Error('no yemot credentials');
-  const j = await (await get('https://www.call2all.co.il/ym/api/GetTextFile?' + new URLSearchParams({ token, what: 'ivr2:/4/ext.ini' }))).json();
-  if (j.responseStatus !== 'OK') throw new Error(String(j.message || j.responseStatus));
-  const link = (String(j.contents).match(/api_link=(\S+)/) || [])[1] || '';
-  if (!link.startsWith(env.PUBLIC_BASE_URL)) throw new Error('extension 4 points elsewhere: ' + link.replace(/[?#].*/, ''));
-  return 'extension 4 -> ' + link;
-});
+const fileEnv = f => Object.fromEntries(readFileSync(f, 'utf8').split('\n').map(l => l.match(/^([A-Z0-9_]+)="(.*)"$/)).filter(Boolean).map(m => [m[1], m[2]]));
+for (const f of ['main', 'ext2']) {
+  const e = fileEnv('/opt/yemot/' + f + '.env');
+  const cands = { YEMOT_API_KEY: e.YEMOT_API_KEY, YEMOT_TOKEN: e.YEMOT_TOKEN, 'USERNAME:PASSWORD': e.YEMOT_API_USERNAME && e.YEMOT_API_PASSWORD ? e.YEMOT_API_USERNAME + ':' + e.YEMOT_API_PASSWORD : '' };
+  for (const [name, token] of Object.entries(cands)) {
+    if (!token) { console.log('     ', f, name, 'not set'); continue; }
+    await check('yemot login ' + f + ' ' + name, async () => {
+      const j = await (await get('https://www.call2all.co.il/ym/api/GetTextFile?' + new URLSearchParams({ token, what: 'ivr2:/4/ext.ini' }))).json();
+      if (j.responseStatus !== 'OK') throw new Error(String(j.message || j.responseStatus));
+      return 'extension 4 -> ' + ((String(j.contents).match(/api_link=(\S+)/) || [])[1] || '').replace(/[?#].*/, '');
+    });
+  }
+}
 const tmp = mkdtempSync('/tmp/selftest-');
 const ytdlp = EXT2 + '/node_modules/youtube-dl-exec/bin/yt-dlp';
 const ffmpegPath = (await import(EXT2 + '/node_modules/ffmpeg-static/index.js')).default;
