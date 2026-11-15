@@ -296,41 +296,73 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
     // One Yemot upload has a size limit (measured on the account); a bigger
     // video is cut (without re-encoding) into numbered complete parts.
     const cap = deps.uploadCap ? await deps.uploadCap() : Infinity;
-    const pieces = [];
-    const fullBytes = (await fs.stat(srcFile)).size;
-    if (fullBytes <= cap * 0.97) pieces.push({ file: await dress(srcFile, path.join(temp, 'video.mp4'), meta), suffix: '' });
-    else {
+    // Pieces of at most `limit` bytes: the whole video when it fits, else
+    // numbered complete parts cut without re-encoding.
+    const makePieces = async (limit, round) => {
+      const out = [];
+      const fullBytes = (await fs.stat(srcFile)).size;
+      if (fullBytes <= limit * 0.97) { out.push({ file: await dress(srcFile, path.join(temp, 'video.mp4'), meta), suffix: '' }); return out; }
       const dur = Number(durationSec) || Number(got.item?.durationSeconds) || 0;
-      const n = Math.ceil(fullBytes / (cap * 0.8)), seg = Math.max(30, Math.floor(dur / n) || 600);
-      await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', srcFile, '-map', '0', '-c', 'copy', '-f', 'segment', '-segment_time', String(seg), '-reset_timestamps', '1', '-segment_format', 'mp4', path.join(temp, 'seg%03d.mp4')]);
-      const segs = (await fs.readdir(temp)).filter(f => /^seg\d{3}\.mp4$/.test(f)).sort();
+      const n = Math.ceil(fullBytes / (limit * 0.8)), seg = Math.max(30, Math.floor(dur / n) || 600);
+      const pre = 'r' + round + 'seg';
+      await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', srcFile, '-map', '0', '-c', 'copy', '-f', 'segment', '-segment_time', String(seg), '-reset_timestamps', '1', '-segment_format', 'mp4', path.join(temp, pre + '%03d.mp4')]);
+      const segs = (await fs.readdir(temp)).filter(f => new RegExp('^' + pre + '\\d{3}\\.mp4$').test(f)).sort();
       for (const [k, f] of segs.entries()) {
         const tags = { ...meta, title: meta.title + ' (חלק ' + (k + 1) + ' מתוך ' + segs.length + ')', track: (k + 1) + '/' + segs.length };
-        pieces.push({ file: await dress(path.join(temp, f), path.join(temp, 'part' + (k + 1) + '.mp4'), tags), suffix: '', part: k + 1 });
+        out.push({ file: await dress(path.join(temp, f), path.join(temp, 'r' + round + 'part' + (k + 1) + '.mp4'), tags), suffix: '', part: k + 1 });
       }
-      log.info?.('[VIDEO] video larger than one upload; cut into parts', { videoId, bytes, cap, parts: pieces.length });
-    }
+      log.info?.('[VIDEO] video larger than one upload; cut into parts', { videoId, bytes: fullBytes, limit, parts: out.length });
+      return out;
+    };
     // Full Hebrew name as seen in Yemot (owner, 06.11); the download page
     // (/downloads) serves it under the same Hebrew name.
     const { titleFileName } = await import('./youtube-audio-cache.js');
     const { yemotFileName } = await import('./youtube-latin-name.js');
     const name = await yemotFileName(meta.title || videoId, { env, titleFileName }) || videoId;
-    const saved = [];
     const t = Date.now();
-    for (const pc of pieces) {
-      const size = (await fs.stat(pc.file)).size;
-      if (size > cap) throw err('video_too_large', 'A video part is still larger than one upload');
-      const folder = deps.nextFolder ? await deps.nextFolder() : VIDEO_DIR;
-      const { withPart } = await import('./youtube-latin-name.js');
-      const remote = folder + '/' + (pc.part ? withPart(name, pc.part) : name) + pc.suffix + '.mp4';
-      await upload(pc.file, remote);
-      const m = await getFile(remote);
-      if (m?.file?.exists !== true || Number(m?.file?.size) !== size) throw err('video_upload_unverified', 'Video not verified in Yemot');
-      await deps.countSaved?.().catch?.(() => {});
-      saved.push({ remote, bytes: size });
+    // 15.11: Yemot busy or the line dropped: each upload is tried again
+    // (after 15 s, 45 s, 2 and 5 minutes) and checked in Yemot; a whole video
+    // that still does not go up is cut into smaller parts and sent again.
+    const waits = (deps.uploadWaits || [0, 15000, 45000, 120000, 300000]);
+    const sendOne = async (pc, remote, size) => {
+      let last = null;
+      for (const [i, w] of waits.entries()) {
+        if (w) await new Promise(r => setTimeout(r, w));
+        try {
+          await upload(pc.file, remote);
+          const m = await getFile(remote);
+          if (m?.file?.exists === true && Number(m?.file?.size) === size) return;
+          last = err('video_upload_unverified', 'Video not verified in Yemot');
+        } catch (e) { last = e; }
+        log.warn?.('[VIDEO] upload did not go through; trying again', { videoId, remote, attempt: i + 1, of: waits.length, message: String(last?.message || last).slice(0, 140) });
+      }
+      throw last;
+    };
+    let saved = [];
+    for (let round = 0; ; round++) {
+      const limit = round === 0 ? cap : Math.min(cap, 20 * 1024 * 1024);
+      const pieces = await makePieces(limit, round);
+      saved = [];
+      try {
+        for (const pc of pieces) {
+          const size = (await fs.stat(pc.file)).size;
+          if (size > cap) throw err('video_too_large', 'A video part is still larger than one upload');
+          const folder = deps.nextFolder ? await deps.nextFolder() : VIDEO_DIR;
+          const { withPart } = await import('./youtube-latin-name.js');
+          const remote = folder + '/' + (pc.part ? withPart(name, pc.part) : name) + pc.suffix + '.mp4';
+          await sendOne(pc, remote, size);
+          await deps.countSaved?.().catch?.(() => {});
+          saved.push({ remote, bytes: size });
+        }
+        var piecesCount = pieces.length;
+        break;
+      } catch (e) {
+        if (round > 0 || pieces.length > 1 || e?.code === 'video_too_large') throw e;
+        log.warn?.('[VIDEO] the whole video did not go up; sending it in smaller parts', { videoId, message: String(e?.message || e).slice(0, 140) });
+      }
     }
     // A separate .srt with the same name, for players that read side files.
-    if (subs?.srt && !subs.burned && pieces.length === 1) {
+    if (subs?.srt && !subs.burned && piecesCount === 1) {
       const srtRemote = saved[0].remote.replace(/\.mp4$/, '.srt');
       try {
         const f = path.join(temp, 'he.srt');

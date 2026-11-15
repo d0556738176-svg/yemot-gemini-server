@@ -403,13 +403,25 @@ async function ensureUploadedAndVerified(filePath, remotePath, { expectedDuratio
     return;
   }
 
-  await uploadToYemot(filePath, remotePath, signal);
-
-  console.info('[YouTube IVR] playback step 8: verifying Yemot file', { remotePath });
-  const verified = await getYemotFile(remotePath);
-  if (!yemotFileReady(verified) || !durationMatches(verified, expectedDurationSec)) {
-    throw new Error('Yemot file upload was not verified: ' + (verified?.message || 'file missing after upload'));
+  // 15.11: Yemot busy or the line dropped: the phone file is sent again after
+  // 5, 15 and 45 seconds (a caller may be waiting, so the waits are short).
+  let verified = null, lastErr = null;
+  for (const [i, w] of [0, 5000, 15000, 45000].entries()) {
+    if (signal?.aborted) break;
+    if (w) await new Promise(r => setTimeout(r, w));
+    try {
+      await uploadToYemot(filePath, remotePath, signal);
+      console.info('[YouTube IVR] playback step 8: verifying Yemot file', { remotePath });
+      verified = await getYemotFile(remotePath);
+      if (yemotFileReady(verified) && durationMatches(verified, expectedDurationSec)) { lastErr = null; break; }
+      lastErr = new Error('Yemot file upload was not verified: ' + (verified?.message || 'file missing after upload'));
+    } catch (e) {
+      lastErr = e;
+      if (e?.code === 'too_large_for_yemot' || e?.name === 'AbortError' || signal?.aborted) throw e;
+    }
+    console.warn('[YouTube IVR] phone file did not go up; trying again', { remotePath, attempt: i + 1, message: String(lastErr?.message || lastErr).slice(0, 140) });
   }
+  if (lastErr) throw lastErr;
   console.info('[YouTube IVR] Yemot audio verified', {
     remotePath,
     size: verified.file?.size ?? null,
@@ -730,7 +742,15 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null,tit
   for(const x of files){
     const { withPart } = await import('./youtube-latin-name.js');
     const remote=(await folders.nextFolder('audio',{readJson:readCacheJson,writeJson:writeCacheJson,countFiles:pth=>folders.yemotFileCount(pth,{apiBase:YEMOT_API_BASE,token:yemotApiKey()})}))+'/'+(x.part?withPart(name,x.part):name)+x.suffix+'.'+format;
-    const r=await uploadDownloadVerified(x.file,remote,temp);
+    // 15.11: Yemot busy or the line dropped: tried again after 15 s, 45 s,
+    // 2 and 5 minutes (each try uploaded and read back in full).
+    let r=null,lastErr=null;
+    for(const [i,w] of [0,15000,45000,120000,300000].entries()){
+      if(w)await new Promise(res=>setTimeout(res,w));
+      try{r=await uploadDownloadVerified(x.file,remote,temp);break;}
+      catch(e){lastErr=e;console.warn('[DOWNLOADS] upload did not go through; trying again',{videoId:id,remote,attempt:i+1,message:String(e?.message||e).slice(0,140)});}
+    }
+    if(!r)throw lastErr;
     await fs.rm(x.file,{force:true}).catch(()=>{});
     await folders.countSaved('audio',{readJson:readCacheJson,writeJson:writeCacheJson});
     saved.push({remote,bytes:r.bytes});seen=seen||r.seen;
