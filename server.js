@@ -9,6 +9,7 @@ import { YemotRouter, ExitError } from 'yemot-router2';
 import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.js';
 import { createSongCallHandler } from './song-ivr.js';
 import { handleWorkerCallback, isCloudWorkerConfigured } from './song-cloud.js';
+import { startLinkGuard } from './yemot-link-guard.js';
 import { getSongProviderHealth } from './song-generator.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
@@ -6444,7 +6445,13 @@ app.listen(port,async()=>{
   if(process.env.BRANCH1_VERIFY_PUBLIC_SOURCES==='true') {
     void import('./branch1-source-check.js').then(module=>module.verifyBranch1PublicSources({search:branch1Search,extract:extractBranch1Page})).catch(error=>logDetailedError('Branch1 source check',error));
   }
-  try { await configureYemotStructure(); }
-  catch (e) { logDetailedError('Yemot automatic setup', e); }
+  // The system now runs on its own server. An old Render service that wakes up
+  // must never point the extensions back at Render.
+  if (process.env.RENDER && process.env.ALLOW_RENDER_YEMOT_SETUP !== 'true') console.log('[Yemot automatic setup] skipped on Render (the system runs on its own server)');
+  else {
+    try { await configureYemotStructure(); }
+    catch (e) { logDetailedError('Yemot automatic setup', e); }
+  }
+  startLinkGuard({ log: console });
 });
 
