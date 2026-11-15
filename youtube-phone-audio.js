@@ -40,6 +40,13 @@ export function phoneAudioSettings(env = process.env) {
     // line's own coding turns sharp "s" and cymbal spikes into a rasp (15.11).
     warmthDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_WARMTH_DB, 1.5))),
     deess: Math.max(0, Math.min(1, num(env.BRANCH2_AUDIO_DEESS, 0.35))),
+    // The space of the recording (hall, crowd, reverb, wide instruments) lives
+    // in the stereo difference, which a plain mono mix throws away: part of it
+    // is kept, slightly delayed so it does not cancel the middle (15.11).
+    ambience: Math.max(0, Math.min(0.8, num(env.BRANCH2_AUDIO_AMBIENCE, 0.35))),
+    // Bass and drums are below what a phone line carries; their harmonics are
+    // made audible instead, so the ear still hears the bass line (15.11).
+    virtualBass: Math.max(0, Math.min(1, num(env.BRANCH2_AUDIO_VBASS, 0.35))),
     lowpassHz: Math.max(3000, Math.min(3900, num(env.BRANCH2_AUDIO_LOWPASS_HZ, 3600))),
     presenceDb: Math.max(0, Math.min(4, num(env.BRANCH2_AUDIO_PRESENCE_DB, 1.5))),
   };
@@ -64,13 +71,7 @@ export function hasSoxr(run = runFfmpeg) {
 export function prepassFilter(s, soxr, sampleRate = 8000) {
   const phone = sampleRate <= 8000;
   const resample = soxr ? `aresample=${sampleRate}:resampler=soxr` : `aresample=${sampleRate}:filter_size=64:cutoff=0.97`;
-  return [
-    // aresample must directly follow aformat: it then performs the downmix as
-    // a true average (L+R)/2. With any filter in between, ffmpeg inserts an
-    // automatic converter that sums 3dB hotter (measured), which only risks
-    // overload on loud masters.
-    'aformat=channel_layouts=mono',
-    resample,
+  const tone = [
     // Full-band (non-phone) rendering keeps the deep bass and the highs.
     `highpass=f=${phone ? s.highpassHz : 30}:poles=2`,
     ...(phone ? [`lowpass=f=${s.lowpassHz}:poles=2`] : []),
@@ -80,6 +81,31 @@ export function prepassFilter(s, soxr, sampleRate = 8000) {
     'volume=-6dB',
     'ebur128=framelog=verbose', // summary only; no per-frame lines
   ].join(',');
+  if (!phone || (!(s.ambience > 0) && !(s.virtualBass > 0))) {
+    // aresample must directly follow aformat: it then performs the downmix as
+    // a true average (L+R)/2. With any filter in between, ffmpeg inserts an
+    // automatic converter that sums 3dB hotter (measured).
+    return ['aformat=channel_layouts=mono', resample, tone].join(',');
+  }
+  // Phone: middle (L+R)/2 and the space (L-R)/2 with exact pan factors (a mono
+  // source is copied to both sides, so its space is silence), then the bass
+  // harmonics, then the same tone shaping as before.
+  const graph = ['aformat=channel_layouts=stereo,asplit=2[pm][ps]',
+    `[pm]pan=mono|c0=0.5*c0+0.5*c1,${resample}[mid]`];
+  let last = 'mid';
+  if (s.ambience > 0) {
+    graph.push(`[ps]pan=mono|c0=0.5*c0-0.5*c1,${resample},highpass=f=300:poles=2,adelay=15,volume=${s.ambience}[side]`,
+      '[mid][side]amix=inputs=2:normalize=0:duration=first[wide]');
+    last = 'wide';
+  } else graph.push('[ps]anullsink');
+  if (s.virtualBass > 0) {
+    graph.push(`[${last}]asplit=2[dry][low]`,
+      `[low]lowpass=f=180:poles=2,volume=14dB,asoftclip=type=tanh,highpass=f=240:poles=2,lowpass=f=900:poles=2,volume=${s.virtualBass}[harm]`,
+      '[dry][harm]amix=inputs=2:normalize=0:duration=first[full]');
+    last = 'full';
+  }
+  graph.push(`[${last}]${tone}`);
+  return graph.join(';');
 }
 
 export function gainFor(measuredLufs, s) {
