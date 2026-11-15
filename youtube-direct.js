@@ -10,9 +10,14 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
 
 const require = createRequire(import.meta.url);
-export function ytdlpPath() {
+// /usr/local/bin/yt-dlp is the up-to-date standalone build the server
+// refreshes every night (the copy inside node_modules can be months old).
+export function ytdlpPath(env = process.env) {
+  if (env.YTDLP_PATH) return env.YTDLP_PATH;
+  if (existsSync('/usr/local/bin/yt-dlp')) return '/usr/local/bin/yt-dlp';
   try { return path.join(path.dirname(require.resolve('youtube-dl-exec/package.json')), 'bin', 'yt-dlp'); }
   catch { return 'yt-dlp'; }
 }
