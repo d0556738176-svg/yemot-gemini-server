@@ -8,7 +8,10 @@ ROOT=/opt/yemot
 for n in main ext2; do
   d=$ROOT/$n; b=$(git -C $d rev-parse --abbrev-ref HEAD)
   git -C $d fetch -q origin "$b" || continue
-  [ "$(git -C $d rev-parse HEAD)" = "$(git -C $d rev-parse origin/$b)" ] && { rm -f /run/yemot-wait-$n; continue; }
+  # 15.11: compared with the version that is really RUNNING (written after each
+  # restart), not the folder: a manual "git pull" must never skip a restart.
+  want=$(git -C $d rev-parse origin/$b)
+  [ "$(cat $ROOT/.running-$n 2>/dev/null)" = "$want" ] && { rm -f /run/yemot-wait-$n; continue; }
   busy=$(journalctl -u yemot-$n --since -90s -q -o cat 2>/dev/null | grep -c . || true)
   [ -f /run/yemot-wait-$n ] || date +%s > /run/yemot-wait-$n
   waited=$(( $(date +%s) - $(cat /run/yemot-wait-$n) ))
@@ -16,6 +19,7 @@ for n in main ext2; do
   git -C $d reset -q --hard "origin/$b"
   (cd $d && npm install --omit=dev --no-audit --no-fund >/dev/null 2>&1)
   systemctl restart yemot-$n
+  echo "$want" > $ROOT/.running-$n
   rm -f /run/yemot-wait-$n
   logger -t yemot-update "$n updated to $(git -C $d rev-parse --short HEAD) (waited ${waited}s)"
   [ $n = main ] && bash $ROOT/main/deploy/vps/maintain.sh >/dev/null 2>&1
