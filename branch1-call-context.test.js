@@ -15,7 +15,7 @@ async function runCall(questions,answers,{branch="1"}={}){
   activeCalls:new Map(),conversationLog:[],MAX_CONVERSATION_LOG:100,REQUEST_TIMEOUT_MS:10000,LONG_ANSWER_MAX_CHARS:10000,EXCLUSIVE_INSTRUCTION:'ענה על הבקשה בהקשר השיחה',
   branch1SpeechItems:text=>[{type:'text',data:text}],geminiErrorStatus:e=>e.status||0,
   getCallerNumber:()=> 'fixture',normalizePhone:x=>x,withTimeout:p=>p,
-  yemotApi:{download_file:async()=>({data:Buffer.from('fixture')})},
+  downloadPhoneRecording:async()=>({data:Buffer.from('audio')}),yemotApi:{download_file:async()=>({data:Buffer.from('fixture')})},
   isCallerHangupError:e=>e.name==='HangupError',correctKnownSpeechNames:x=>x,
   transcribePhoneAudio:async()=>questions[index++],resolveBranch1Question:q=>q,
   branch1FollowUpHistory:()=>'',shouldForceWebSearch,branch1WebSearchSubject,

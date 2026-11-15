@@ -126,7 +126,7 @@ test('branch 3 phone handler reads website, continues, switches topic and routes
   const context={console:{info(){},warn(){},error(){}},Buffer,Date,Intl,process:{env:{ENABLE_AI_OPENING:'false'}},
     getCallerNumber:()=> 'anonymous',activeCalls:new Map(),conversationLog:[],branch1SpeechItems,
     isCallerHangupError:e=>e.message==='hangup',geminiErrorStatus:e=>e.status||0,
-    REQUEST_TIMEOUT_MS:30000,withTimeout:async p=>p,yemotApi:{download_file:async()=>({data:Buffer.from('audio')})},
+    REQUEST_TIMEOUT_MS:30000,withTimeout:async p=>p,downloadPhoneRecording:async()=>({data:Buffer.from('audio')}),yemotApi:{download_file:async()=>({data:Buffer.from('audio')})},
     buildCallHistoryText:async()=>'',transcribePhoneAudio:async()=>inputs[transcriptIndex++],
     resolvePendingLookupQuestion:()=>'',resolveBranch1Question,isCorrection,branch1Clarification,selectRelevantHistoryForTurn:()=>'',branch1FollowUpHistory,
     isBranch1WebsiteRequest,isBranch1LocalRequest,isBranch1EventRequest,isMemoryRecall,ext3StandaloneQuestion:async()=>'',
