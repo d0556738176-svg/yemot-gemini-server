@@ -32,7 +32,7 @@ export function formatFor(mode, height) {
 
 export function argsFor(videoId, output, { mode = 'audio', height, client = '', ffmpegPath } = {}) {
   const a = ['--no-warnings', '--no-playlist', '--newline', '--no-part', '--force-overwrites', '--no-cache-dir',
-    '--retries', '3', '--fragment-retries', '5', '--socket-timeout', '30',
+    '--retries', '3', '--fragment-retries', '5', '--socket-timeout', '30', '--concurrent-fragments', '4',
     '-f', formatFor(mode, height), '-o', output,
     '--print', 'after_move:TITLE:%(title)s', '--no-simulate', '--progress'];
   if (mode === 'video') a.push('--merge-output-format', 'mp4');
