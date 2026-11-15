@@ -675,11 +675,14 @@ onOrphanSong(async (generated, payload, jobId) => {
   await deliverSong(spec, generated, { callId: payload?.callId || '', status: 'orphan' }, newRecord(id, spec, { callId: payload?.callId || '' }), id);
 });
 
+// Owner, 15.11: no limit on how many songs he asks for. SONG_MAX_PER_HOUR
+// (a number) brings a per-caller hourly limit back if ever needed.
 function enforceRateLimit(userKey) {
+  if (!Number(process.env.SONG_MAX_PER_HOUR)) return;
   const key = String(userKey || 'unknown').slice(0, 100);
   const now = Date.now();
   const windowMs = 60 * 60 * 1000;
-  const max = Math.max(1, Math.min(5, Number(process.env.SONG_MAX_PER_HOUR || 2)));
+  const max = Math.max(1, Number(process.env.SONG_MAX_PER_HOUR));
   const bucket = rateBuckets.get(key);
   if (!bucket || now - bucket.startedAt >= windowMs) {
     rateBuckets.set(key, { startedAt: now, count: 1 });

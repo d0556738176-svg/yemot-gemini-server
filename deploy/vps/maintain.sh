@@ -61,7 +61,7 @@ MAIN=https://main.${IP//./-}.sslip.io; EXT2=https://ext2.${IP//./-}.sslip.io
 fixenv() { # file  -> rewrites onrender addresses, returns 0 if changed
   local f=$1 before; before=$(md5sum < "$f")
   sed -i -E \
-    -e '/^BRANCH3_DEEP_TEST=/d' \
+    -e '/^BRANCH3_DEEP_TEST=/d' -e '/^SONG_MAX_PER_HOUR=/d' \
     -e '/^[A-Z0-9_]+="?https:\/\/[a-z0-9-]*audio-worker[a-z0-9-]*\.onrender\.com/d' \
     -e "s#https://[a-z0-9-]*branch2[a-z0-9-]*\.onrender\.com#$EXT2#g" \
     -e "s#https://yemot-course-builder\.onrender\.com#http://127.0.0.1:3002#g" \
