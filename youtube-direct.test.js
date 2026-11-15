@@ -25,3 +25,9 @@ test('direct download progress is announced as a direct download with percent', 
   const a = progressAnnouncement({ stage: 'transferring', direct: true, bytes: 40, totalBytes: 100 });
   assert.match(a.text, /ישירות מיוטיוב/); assert.match(a.text, /40 אחוז/);
 });
+test('captions become clean lyrics text, Hebrew first', async () => {
+  const fs = await import('node:fs');
+  fs.writeFileSync('/tmp/cap-he.srt', '1\n00:00:00,000 --> 00:00:02,000\n<i>שלום עולם</i>\n\n2\n00:00:02,000 --> 00:00:03,000\nשלום עולם\n\n3\n00:00:03,000 --> 00:00:04,000\nשורה שנייה\n');
+  const { lyricsText } = await import('./youtube-direct.js');
+  assert.equal(lyricsText([{ lang: 'he', file: '/tmp/cap-he.srt' }]), 'שלום עולם\nשורה שנייה');
+});

@@ -687,6 +687,10 @@ async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null,tit
   ]);
   if(!jpeg||!facts?.title)console.warn('[DOWNLOADS] saved with less than full details',{videoId:id,picture:!!jpeg,details:!!facts?.title});
   const metadata=downloadMetadata(id,facts||{},title);
+  // The words (YouTube's captions) as the file's lyrics, when the direct
+  // download found them (owner, 15.11: full details in every file).
+  const lyrics=await fs.readFile(source+'.lyrics.txt','utf8').catch(()=>'');
+  if(lyrics.trim())metadata.lyrics=lyrics.trim();
   // A dubbed version (" - דיבוב לעברית") keeps all details, named apart.
   if(titleSuffix)metadata.title=String(metadata.title||title||id)+titleSuffix;
   const cap=await uploadCapBytes();

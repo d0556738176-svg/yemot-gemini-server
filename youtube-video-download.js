@@ -184,7 +184,10 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
   if (directEnabled(env) && done?.state !== 'running') {
     directDir = await fs.mkdtemp(path.join(os.tmpdir(), 'video-direct-'));
     try {
-      const r = await directDownload(videoId, path.join(directDir, 'source.mp4'), { mode: 'video', height: parseInt(quality, 10), ffmpegPath, log });
+      // Free download: the best picture up to 1080p (owner, 15.11), unless the
+      // subtitles will be drawn into the picture (then the size the burning needs).
+      const burn = wantSubs && !!deps.burnSubtitles;
+      const r = await directDownload(videoId, path.join(directDir, 'source.mp4'), { mode: 'video', height: burn ? parseInt(quality, 10) : 1080, ffmpegPath, log });
       got = { actor: 'direct', direct: path.join(directDir, 'source.mp4'), item: { title: r.title || facts?.title || video.title } };
     } catch (e) {
       log.warn?.('[VIDEO] direct download failed', { videoId, consent: !!video.paidConsent, message: String(e?.message || e).slice(0, 160) });
@@ -268,7 +271,7 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
         const burned = deps.burnSubtitles ? await deps.burnSubtitles(src, subs.srt, temp, { quality, durationSec }).catch(() => null) : null;
         if (burned) { srcFile = burned; subs = { ...subs, burned: true }; }
         else try {
-          await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-i', srt, '-map', '0:v:0', '-map', '0:a:0?', '-map', '1:0', '-c', 'copy', '-c:s', 'mov_text', '-metadata:s:s:0', 'language=heb', '-metadata:s:s:0', 'title=עברית', '-disposition:s:0', 'default', withSubs]);
+          await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-i', srt, '-map', '0:v:0', '-map', '0:a:0?', '-map', '1:0', '-map', '0:s?', '-c', 'copy', '-c:s', 'mov_text', '-metadata:s:s:0', 'language=heb', '-metadata:s:s:0', 'title=עברית', '-disposition:s:0', 'default', withSubs]);
           srcFile = withSubs;
         } catch (e) { log.warn?.('[VIDEO] subtitles not embedded', { videoId, message: String(e.message).slice(0, 160) }); subs = { ...subs, embedded: false }; }
       }
@@ -283,7 +286,7 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       if (jpeg) args.push('-i', path.join(temp, 'cover.jpg'));
       args.push('-map', '0:v:0', '-map', '0:a:0?');
       if (jpeg) args.push('-map', '1:v:0', '-disposition:v:1', 'attached_pic');
-      args.push('-map', '0:s?', '-c', 'copy', '-map_metadata', '-1');
+      args.push('-map', '0:s?', '-c', 'copy', '-map_metadata:g', '-1'); // stream languages kept (caption tracks)
       if (srcFile !== src && !subs?.burned) args.push('-metadata:s:s:0', 'language=heb', '-metadata:s:s:0', 'title=עברית', '-disposition:s:0', 'default');
       for (const [k, v] of Object.entries(tags)) args.push('-metadata', k + '=' + String(v));
       args.push('-movflags', '+faststart', outFile);
