@@ -30,7 +30,7 @@ cat > /etc/systemd/system/yemot-ytdlp.service <<'UNIT'
 Description=Update yt-dlp of extension 2
 [Service]
 Type=oneshot
-ExecStart=/opt/yemot/ext2/node_modules/youtube-dl-exec/bin/yt-dlp -U
+ExecStart=/bin/sh -c 'curl -fsSL --retry 3 -o /usr/local/bin/yt-dlp.new https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux && chmod 755 /usr/local/bin/yt-dlp.new && /usr/local/bin/yt-dlp.new --version && mv -f /usr/local/bin/yt-dlp.new /usr/local/bin/yt-dlp'
 UNIT
 cat > /etc/systemd/system/yemot-ytdlp.timer <<'UNIT'
 [Unit]
@@ -43,7 +43,7 @@ WantedBy=timers.target
 UNIT
 systemctl daemon-reload
 systemctl enable --now yemot-ytdlp.timer
-/opt/yemot/ext2/node_modules/youtube-dl-exec/bin/yt-dlp -U || true
+systemctl start yemot-ytdlp.service || true
 # Security updates install automatically (Ubuntu default); make sure it is on.
 systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
 # Setting names typed through the console may have - instead of _ (no Shift).

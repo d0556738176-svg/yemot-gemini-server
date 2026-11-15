@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { synthesize } from '../../edge-tts.js';
-import { copyFileSync, statSync, mkdtempSync } from 'node:fs';
+import { copyFileSync, statSync, mkdtempSync, existsSync } from 'node:fs';
 const EXT2 = '/opt/yemot/ext2';
 
 const env = {};
@@ -47,7 +47,7 @@ for (const f of ['main', 'ext2']) {
   }
 }
 const tmp = mkdtempSync('/tmp/selftest-');
-const ytdlp = EXT2 + '/node_modules/youtube-dl-exec/bin/yt-dlp';
+const ytdlp = existsSync('/usr/local/bin/yt-dlp') ? '/usr/local/bin/yt-dlp' : EXT2 + '/node_modules/youtube-dl-exec/bin/yt-dlp';
 const ffmpegPath = (await import(EXT2 + '/node_modules/ffmpeg-static/index.js')).default;
 await check('youtube search (yt-dlp from this server)', async () => {
   const r = spawnSync(ytdlp, ['--no-warnings', '--flat-playlist', '--print', '%(id)s', 'ytsearch3:שיר חסידי'], { timeout: 90000, encoding: 'utf8' });
