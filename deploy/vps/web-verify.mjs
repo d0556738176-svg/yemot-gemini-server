@@ -23,7 +23,8 @@ const cov = await import(E + 'youtube-cover-art.js');
 const facts = await import(E + 'youtube-video-facts.js');
 const ff = (await import(E + 'node_modules/ffmpeg-static/index.js').catch(() => ({ default: 'ffmpeg' }))).default;
 const picked = [];
-for (const q of ['שיעור הרב גלינסקי', 'ניגון חסידי', 'שיעור פרשת השבוע']) {
+const ONLY_LIVE = process.argv[2] === 'live';
+for (const q of ONLY_LIVE ? ['ניגון חסידי'] : ['שיעור הרב גלינסקי', 'ניגון חסידי', 'שיעור פרשת השבוע']) {
   const t = Date.now();
   const c = await wm.webCandidates(q);
   log('candidates', JSON.stringify(q), c.length, 'sites', [...new Set(c.map(x => x.site))].slice(0, 12).join(','));
@@ -32,7 +33,7 @@ for (const q of ['שיעור הרב גלינסקי', 'ניגון חסידי', '�
   for (const it of r.items.slice(0, 6)) log('  item', it.id, it.site, it.durationSec, it.hasVideo ? 'video' : 'audio', it.impersonate ? 'imp' : '', String(it.title).slice(0, 60));
   for (const it of r.items) if (picked.length < 4 && !picked.some(p => p.site === it.site) && (it.durationSec || 0) < 3600) picked.push(it);
 }
-for (const url of ['https://soundcloud.com/shloimy-daskal/zol-shoin-kumen', 'https://www.dailymotion.com/video/x8j7k2w', 'https://www.kan.org.il/content/kan/podcasts/', 'https://www.yutorah.org/lectures/1108006/']) {
+for (const url of ONLY_LIVE ? [] : ['https://soundcloud.com/shloimy-daskal/zol-shoin-kumen', 'https://www.dailymotion.com/video/x8j7k2w', 'https://www.kan.org.il/content/kan/podcasts/', 'https://www.yutorah.org/lectures/1108006/']) {
   const t = Date.now(); const it = await wm.inspectLink({ url }).catch(e => null);
   log('inspect', url.split('/')[2], it ? 'OK ' + it.site + ' ' + it.durationSec + 's ' + (it.impersonate ? 'imp ' : '') + String(it.title).slice(0, 50) : 'no media', Math.round((Date.now() - t) / 1000) + 's');
   if (it && picked.length < 6 && !picked.some(p => p.site === it.site) && (it.durationSec || 0) < 3600) picked.push(it);
@@ -59,7 +60,7 @@ if (v) {
 {
   const lr = await import(E + 'live-relay.js');
   const t = Date.now();
-  const r = await wm.searchWebMedia('שידור חי מהכותל המערבי');
+  const r = await wm.searchWebMedia('שידור חי מהכותל');
   const lives = r.items.filter(x => x.live);
   log('live search', 'items', r.items.length, 'live', lives.length, 'sec', Math.round((Date.now() - t) / 1000));
   for (const x of lives.slice(0, 4)) log('  live', x.id, x.site, String(x.title).slice(0, 60));
@@ -72,7 +73,7 @@ if (v) {
     relay.stop('check_done');
   }
 }
-log('errors since start', sh('journalctl -u yemot-ext2 -u yemot-main --since "-30min" --no-pager -o cat | grep -c -i -E "uncaught|unhandled|typeerror|referenceerror|syntaxerror"'));
+log('errors in 30 min', sh('journalctl -u yemot-ext2 -u yemot-main --since "-30min" --no-pager -o cat | grep -c -i -E "uncaught|unhandled|typeerror|referenceerror|syntaxerror" || true'));
 log('restarts', sh('systemctl show yemot-main yemot-ext2 -p NRestarts | tr "\\n" " "'));
 log('done');
 process.exit(0);
