@@ -4278,7 +4278,7 @@ async function youtubeCallHandler(call) {
   // The relay itself, for any live source (web search results and the TV channels of key 8).
   async function liveListenItem(item) {
     const it=item;
-    const { startRelay, nextPiece, SEG_SEC } = await import('./live-relay.js');
+    const { startRelay, nextPiece, followingPieces, SEG_SEC } = await import('./live-relay.js');
     const p=(await import('./youtube-authorized-playback.js'))._pipeline;
     const ffmpegPath=(await import('ffmpeg-static')).default;
     const relay=startRelay(item,{ffmpegPath,log:console,
@@ -4289,7 +4289,10 @@ async function youtubeCallHandler(call) {
     const startedAt=Date.now();
     while(true) {
       relay.touch();
-      const piece=nextPiece(relay,last);
+      let piece=nextPiece(relay,last);
+      // In the middle of a broadcast the next piece is usually seconds away:
+      // wait quietly (the line stays silent) instead of speaking a message.
+      for(let i=0;!piece&&last!==null&&!relay.stopped&&i<6;i++) { await new Promise(x=>setTimeout(x,2000)); relay.touch(); piece=nextPiece(relay,last); }
       if(!piece) {
         if(relay.stopped) return {say:last===null?'לא הצלחתי להתחבר לשידור החי הזה. אפשר לבחור תוצאה אחרת. ':'השידור החי הסתיים או נקטע. '};
         if(last===null&&Date.now()-startedAt>150000) { relay.stop('no_pieces'); return {say:'השידור החי לא מגיע כרגע. אפשר לנסות שוב בעוד רגע. '}; }
@@ -4301,8 +4304,10 @@ async function youtubeCallHandler(call) {
         if(k==='#') return {say:'השידור החי נעצר. '};
         continue;
       }
-      waited=0; last=piece.no;
-      const k=String(await call.read([{type:'file',data:piece.play}],'tap',
+      waited=0;
+      const batch=followingPieces(relay,piece,3);
+      last=batch[batch.length-1].no;
+      const k=String(await call.read(batch.map(x=>({type:'file',data:x.play})),'tap',
         {max_digits:1,min_digits:1,sec_wait:1,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'lp'+(++tapNo),timeout:10*60*1000})||'None').trim();
       if(k.includes('*')) return {exit:true};
       if(k==='#'||k==='1') return {say:'השידור החי נעצר. '};
@@ -5445,8 +5450,11 @@ if (process.env.BRANCH2_TV_WARM !== 'off') {
   setInterval(warm,15*60*1000).unref?.();
 }
 app.get('/tv-status', rateLimit(30, 60 * 1000, 'tv-status'), async (req,res)=>{
-  const TV=await import('./branch2-tv.js'); const { _relays }=await import('./live-relay.js');
-  res.json({ channels: TV.tvStatus(_relays) });
+  const TV=await import('./branch2-tv.js'); const { _relays, relayHistory }=await import('./live-relay.js');
+  const host=u=>{ try { return new URL(u).host; } catch { return null; } };
+  res.json({ channels: TV.tvStatus(_relays),
+    live: [..._relays.values()].filter(r=>!r.stopped).map(r=>({ title:r.title, site:host(r.url), pieces:r.next, inYemot:r.pieces.length, error:r.error, events:r.events.slice(-12) })),
+    stopped: relayHistory().map(r=>({ ...r, url:undefined, site:host(r.url) })) });
 });
 app.get('/tv-check', rateLimit(4, 60 * 1000, 'tv-check'), async (req,res)=>{
   const TV=await import('./branch2-tv.js');
