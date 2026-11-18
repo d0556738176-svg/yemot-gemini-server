@@ -1,0 +1,586 @@
+2026-11-18T22:27:37.944Z commit 967e669e48ef test done engines {"ytdlp":"2026.10.26","nm3u8":"0.6.0+df70f0b3da0c630bd413bf617e758051f6b64757","streamlink":"streamlink 8.6.3","browser":"/opt/yemot/browser/chromium_headless_shell-1255/chrome-headless-shell-linux64/chrome-headless-shell"} sites 15
+{
+ "status": "done",
+ "startedAt": "2026-11-18T21:55:40.638Z",
+ "finishedAt": "2026-11-18T22:11:38.230Z",
+ "engines": {
+  "ytdlp": "2026.10.26",
+  "nm3u8": "0.6.0+df70f0b3da0c630bd413bf617e758051f6b64757",
+  "streamlink": "streamlink 8.6.3",
+  "browser": "/opt/yemot/browser/chromium_headless_shell-1255/chrome-headless-shell-linux64/chrome-headless-shell"
+ },
+ "sites": [
+  {
+   "q": "פרק מלא כאן 11",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "kan.org.il",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 6,
+     "title": "לא רק צה\"ל על הראש: מי עושה לחמאס צרות בעזה? | שובר חומות",
+     "why": ""
+    },
+    {
+     "host": "kan.org.il",
+     "ok": false,
+     "engine": "browser/streamlink",
+     "live": false,
+     "sec": 18,
+     "title": "הטלוויזיה של כאן בשידור חי לצפייה ישירה - כאן 11 :Live כאן",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 8,
+     "title": "האמת מאחורי שעת נעילה | הפרק מלא",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 12
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "פרק מלא מאקו קשת",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "mako.co.il",
+     "ok": true,
+     "engine": "yt-dlp",
+     "live": true,
+     "sec": 6,
+     "title": "master 2026-11-18 21:56"
+    },
+    {
+     "host": "mako.co.il",
+     "ok": false,
+     "engine": "browser/streamlink",
+     "live": false,
+     "sec": 32,
+     "title": "ערוץ 12 צפייה ישירה לייב",
+     "why": ""
+    },
+    {
+     "host": "mako.co.il",
+     "ok": true,
+     "engine": "browser/streamlink",
+     "live": true,
+     "sec": 49,
+     "title": "ערוץ 12 בשידור חי | mako"
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "browser/streamlink",
+     "live": false,
+     "sec": 113,
+     "title": "הבריחה עונה 1 פרק 1 - ההחלטה | 12+",
+     "why": ""
+    }
+   ],
+   "found": 2
+  },
+  {
+   "q": "רשת 13 פרק מלא",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "13tv.co.il",
+     "ok": true,
+     "engine": "yt-dlp",
+     "live": true,
+     "sec": 24,
+     "title": "index 2026-11-18 22:00"
+    },
+    {
+     "host": "13tv.co.il",
+     "ok": true,
+     "engine": "yt-dlp",
+     "live": true,
+     "sec": 16,
+     "title": "index 2026-11-18 22:00"
+    },
+    {
+     "host": "13tv.co.il",
+     "ok": true,
+     "engine": "yt-dlp",
+     "live": true,
+     "sec": 17,
+     "title": "index 2026-11-18 22:00"
+    },
+    {
+     "host": "google.com",
+     "ok": true,
+     "engine": "yt-dlp",
+     "live": true,
+     "sec": 28,
+     "title": "index 2026-11-18 22:01"
+    }
+   ],
+   "found": 4
+  },
+  {
+   "q": "שיעור תורה הידברות",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "hidabroot.org",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 11,
+     "title": "למצוא את האור בעלטה: הרבנית פרי כהן בשיעור על צמיחה מתוך משב",
+     "why": ""
+    },
+    {
+     "host": "hidabroot.org",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 5,
+     "title": "הרב זמיר כהן: המקרא - שיעור נ\"ד - הידברות (1)",
+     "why": ""
+    },
+    {
+     "host": "hidabroot.org",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 6,
+     "title": "הרב זמיר כהן: המקרא - שיעור מ\"א - הידברות (1)",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 9,
+     "title": "הרב שניר גואטה - בזכות שיעורי תורה - הידברות (1)",
+     "why": ""
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "שיעור יוטורה",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 8
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 7
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 7
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 8
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "כיכר השבת וידאו",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "kikar.co.il",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 7,
+     "title": "&quot;עושים מנמלה פיל&quot;: קובי ישראל חושף מי מנצל את",
+     "why": ""
+    },
+    {
+     "host": "kikar.co.il",
+     "ok": false,
+     "why": "unsupported",
+     "sec": 20
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 6,
+     "title": "&quot;איך אתם מעזים?&quot; המתקפה החריפה נגד התחקיר שמגלה על",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "unsupported",
+     "sec": 22
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "קול חי שיעור",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "kolhalashon.com",
+     "ok": false,
+     "why": "unsupported",
+     "sec": 20
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 7
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 7
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 7
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "וואלה וידאו",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "facebook.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 6,
+     "title": "3.3K views · 105 reactions | נשיא ארה\"ב דונלד טראמפ, נשיא רו",
+     "why": ""
+    },
+    {
+     "host": "facebook.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 4,
+     "title": "3.8K views · 61 reactions | ילד צעיר ביריד הרובוטים של APEC ",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 5,
+     "title": "17K views · 682 reactions | עימות פוליטי במליאת הכנסת: במהלך",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 5,
+     "title": "4.1K views · 100 reactions | תיעוד קשה מאוטובוס בירושלים: אר",
+     "why": ""
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "ynet וידאו",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "ynet.co.il",
+     "ok": false,
+     "why": "timeout",
+     "sec": 54
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 8
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "timeout",
+     "sec": 75
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "timeout",
+     "sec": 55
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "i24news",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 7
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 11
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 8,
+     "title": "i24NEWS English - Israel and Greece hold joint air exercises",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 8
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "dailymotion",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "dailymotion.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 3,
+     "title": "Moving on Without You- Drama FULL MOVIES ENGLISH SUB",
+     "why": ""
+    },
+    {
+     "host": "dailymotion.com",
+     "ok": false,
+     "why": "unsupported",
+     "sec": 19
+    },
+    {
+     "host": "dailymotion.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 3,
+     "title": "Out of Prison, Invincible | Full Series | Short Drama Englis",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 4,
+     "title": "The Stand-In | Full Series | Short Drama English",
+     "why": ""
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "vimeo",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "vimeo.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 19,
+     "title": "World of Tomorrow",
+     "why": ""
+    },
+    {
+     "host": "vimeo.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 13,
+     "title": "Explore Vimeo's best-in-class video player",
+     "why": ""
+    },
+    {
+     "host": "vimeo.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 9,
+     "title": "ME",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 9
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "soundcloud",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "facebook.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 7,
+     "title": "4.5K views · 17 reactions | music taste at SoundCloud HQ is ",
+     "why": ""
+    },
+    {
+     "host": "instagram.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 5,
+     "title": "Video by soundcloud",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 7,
+     "title": "7.5K views · 28 reactions | If you’re not following… you’re ",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 4,
+     "title": "4.5K views · 17 reactions | music taste at SoundCloud HQ is ",
+     "why": ""
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "archive.org",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "archive.org",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 6,
+     "title": "[Untitled: Anywhere But Here]",
+     "why": ""
+    },
+    {
+     "host": "archive.org",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 4,
+     "title": "DVD ISO (Movie only)",
+     "why": ""
+    },
+    {
+     "host": "archive.org",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 4,
+     "title": "The Internet is Archived in This Former Church",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "yt-dlp",
+     "live": false,
+     "sec": 6,
+     "title": "Shooting Star",
+     "why": ""
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "103fm תוכנית",
+   "candidates": 4,
+   "checked": [
+    {
+     "host": "103fm.maariv.co.il",
+     "ok": false,
+     "why": "youtube",
+     "sec": 8
+    },
+    {
+     "host": "103fm.maariv.co.il",
+     "ok": false,
+     "why": "youtube",
+     "sec": 7
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "engine": "browser/streamlink",
+     "live": false,
+     "sec": 38,
+     "title": "שבת עברית - תוכנית מוזיקה ישראלית | 103fm",
+     "why": ""
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 7
+    }
+   ],
+   "found": 0
+  }
+ ]
+}
+webEvents []
+exit=0
