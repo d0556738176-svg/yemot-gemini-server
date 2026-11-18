@@ -15,6 +15,7 @@ import { ytdlpPath } from './youtube-direct.js';
 export const SEG_SEC = 20;
 const IDLE_MS = 3 * 60 * 1000, MAX_MS = 4 * 3600 * 1000, KEEP = 12;
 const relays = new Map();
+export const SYSTEM_FFMPEG = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
 const history = []; // the last relays that stopped, for the status page
 export const relayHistory = () => history;
 export const liveIdFor = url => 'l' + createHash('sha1').update(String(url)).digest('hex').slice(0, 10);
@@ -84,6 +85,10 @@ export function startRelay(item, deps) {
   (async () => {
     await fs.mkdir(dir, { recursive: true });
     let restarts = 0, src0 = item.url, ref0 = item.referer || null;
+    // The audio engine: the server's own ffmpeg first (the bundled static one
+    // crashes - SIGSEGV - on network streams, 18.11), the bundled one as backup.
+    const bins = [...new Set([...SYSTEM_FFMPEG.filter(b => existsSync(b)), deps.ffmpegPath].filter(Boolean))];
+    let binIdx = 0;
     while (!r.stopped && restarts < 6) {
       // After a drop, a fresh source address (addresses with a time-limited
       // token stop working; the channel's page gives a new one).
@@ -104,12 +109,21 @@ export function startRelay(item, deps) {
         '-f', 'segment', '-segment_time', String(SEG_SEC), '-segment_start_number', String(startNo), '-reset_timestamps', '1', path.join(dir, '%03d.wav')];
       log.info?.('[LIVE] relay listening', { id, restart: restarts });
       await new Promise(res => {
-        r.proc = spawn(deps.ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
-        let err = '';
+        const bin = bins[binIdx];
+        r.proc = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+        let err = '', crashed = false;
         r.proc.stderr.on('data', d => { err = (err + d).slice(-300); });
-        r.proc.on('error', res);
-        r.proc.on('close', c => { if (!r.stopped) { log.warn?.('[LIVE] stream ended', { id, code: c, err: err.trim().slice(-160) }); r.note('stream ended', { code: c, err: err.trim().slice(-200) }); } res(); });
+        r.proc.on('error', e => { crashed = true; r.note('engine failed to start', { engine: bin, message: String(e?.message || e).slice(0, 120) }); });
+        r.proc.on('close', (c, sig) => {
+          if (!r.stopped) {
+            log.warn?.('[LIVE] stream ended', { id, code: c, signal: sig, engine: bin, err: err.trim().slice(-160) });
+            r.note('stream ended', { code: c, signal: sig || null, engine: bin, err: err.trim().slice(-200) });
+          }
+          if ((sig === 'SIGSEGV' || sig === 'SIGILL' || sig === 'SIGABRT' || sig === 'SIGBUS' || crashed) && binIdx < bins.length - 1) { binIdx++; r.engineSwitched = true; }
+          res();
+        });
       });
+      if (r.engineSwitched) { r.engineSwitched = false; r.note('switched audio engine', { engine: bins[binIdx] }); continue; }
       restarts++;
       if (!r.stopped) await new Promise(x => setTimeout(x, 3000));
     }
