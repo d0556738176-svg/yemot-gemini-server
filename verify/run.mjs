@@ -24,10 +24,10 @@ send(r.name, '6');
 r = await step();
 send(r.name, Q);
 // search progress
-for (let i = 0; i < 60; i++) {
+for (let i = 0; i < 200; i++) {
   r = await step();
   if (/לבחירה הקש את מספר התוצאה|לא מצאתי|אין תוצאות|חסם/.test(r.shown) || !r.name) break;
-  send(r.name, 'None');
+  send(r.name, 'None'); await sleep(3000);
 }
 // choose the shortest non-live result
 const items = [...r.shown.matchAll(/(\d+), ([^,]+), מאתר [^,.]+(?:, אורך ([^,.]+))?/g)];
