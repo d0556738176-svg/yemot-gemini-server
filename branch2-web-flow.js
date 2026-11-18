@@ -37,7 +37,9 @@ export function youtubeIdOf(url) {
 // The results of one search as one list: the downloadable recordings found on
 // other sites first, then YouTube links the search found (not repeated).
 export function mergeResults(found) {
-  const out = (found?.items || []).map(x => ({ videoId: x.id, title: x.title, site: x.site, durationSeconds: x.durationSec || null, hasVideo: !!x.hasVideo, web: true }));
+  const out = (found?.items || []).map(x => ({ videoId: x.id, title: x.title, site: x.site, durationSeconds: x.durationSec || null, hasVideo: !!x.hasVideo, web: true, live: !!x.live }));
+  // Live broadcasts first when the caller asked for one.
+  out.sort((a, b) => Number(b.live) - Number(a.live));
   const seen = new Set();
   for (const c of found?.youtube || []) {
     const id = youtubeIdOf(c.url);
@@ -51,7 +53,7 @@ export function mergeResults(found) {
 // "1, <title>, מאתר הידברות, אורך 12 דקות, שמע בלבד."
 export function resultsPageText(items, start, size, { spoken = x => x } = {}) {
   return items.slice(start, start + size).map((x, i) =>
-    (start + i + 1) + ', ' + spoken(x.title) + ', מאתר ' + siteName(x.site) + (lengthText(x.durationSeconds) ? ', ' + lengthText(x.durationSeconds) : '') + (x.hasVideo ? '' : ', שמע בלבד') + '.'
+    (start + i + 1) + ', ' + spoken(x.title) + ', מאתר ' + siteName(x.site) + (x.live ? ', שידור חי עכשיו' : (lengthText(x.durationSeconds) ? ', ' + lengthText(x.durationSeconds) : '') + (x.hasVideo ? '' : ', שמע בלבד')) + '.'
   ).join(' ');
 }
 

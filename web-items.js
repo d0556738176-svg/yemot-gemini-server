@@ -63,7 +63,7 @@ export function webFacts(w) {
     durationSeconds: Number(w.durationSec) || null, publishedAt, viewCount: Number.isFinite(w.views) ? w.views : null,
     title: w.title || null, channel: w.uploader || w.site || null, description: w.description || null,
     tags: Array.isArray(w.tags) ? w.tags : null, categoryId: null, audioLanguage: null, hasCaptions: false,
-    regionAllowed: null, regionBlocked: null, webUrl: w.url, site: w.site || null,
+    regionAllowed: null, regionBlocked: null, webUrl: w.page || w.url, site: w.site || null,
   };
 }
 export const _test = { items, load: () => { loaded = null; return load(); } };

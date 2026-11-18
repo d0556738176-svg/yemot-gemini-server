@@ -4266,6 +4266,44 @@ async function youtubeCallHandler(call) {
   // this server can really download are read out. A choice is confirmed with
   // a key (1 = hear and save to אודיו, 2 = save the video to וידאו) before
   // anything is downloaded. Returns {exit}, {say} or {play} (the playback).
+  // A live broadcast (owner, 18.11): the relay cuts it into 20-second pieces
+  // in Yemot and they play one after another, about a minute behind live.
+  // * = main menu, # = stop and back to the results.
+  async function liveListen(it) {
+    const { startRelay, nextPiece, SEG_SEC } = await import('./live-relay.js');
+    const { webItem } = await import('./web-items.js');
+    const w=await webItem(it.videoId);
+    if(!w?.url) return {say:'השידור לא נמצא. '};
+    const p=(await import('./youtube-authorized-playback.js'))._pipeline;
+    const ffmpegPath=(await import('ffmpeg-static')).default;
+    const relay=startRelay({url:w.url,title:it.title,impersonate:w.impersonate},{ffmpegPath,log:console,
+      upload:(f,r)=>p.uploadToYemot(f,r,undefined,{convertAudio:false,single:true}),
+      del:async remote=>{ const x=new URL(p.YEMOT_API_BASE+'/FileAction'); x.searchParams.set('token',p.yemotApiKey()); x.searchParams.set('action','delete'); x.searchParams.set('what',remote); await fetch(x,{signal:AbortSignal.timeout(8000)}).catch(()=>{}); }});
+    console.info('[LIVE] caller joined',{id:relay.id,title:String(it.title).slice(0,80)});
+    let last=null, waited=0, said=false;
+    const startedAt=Date.now();
+    while(true) {
+      relay.touch();
+      const piece=nextPiece(relay,last);
+      if(!piece) {
+        if(relay.stopped) return {say:last===null?'לא הצלחתי להתחבר לשידור החי הזה. אפשר לבחור תוצאה אחרת. ':'השידור החי הסתיים או נקטע. '};
+        if(last===null&&Date.now()-startedAt>150000) { relay.stop('no_pieces'); return {say:'השידור החי לא מגיע כרגע. אפשר לנסות שוב בעוד רגע. '}; }
+        if(last!==null&&++waited>20) return {say:'השידור החי נקטע. '};
+        const k=String(await call.read([{type:'text',data:sanitizeForYemot(said?'ממשיך להתחבר לשידור, נא להמתין.':'מתחבר לשידור החי של '+it.title+'. ההשמעה תתחיל בעוד כדקה. בזמן השידור, לעצירה הקש סולמית, ולתפריט הראשי כוכבית.')}],'tap',
+          {max_digits:1,min_digits:1,sec_wait:said?5:2,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'lw'+(++tapNo),timeout:10*60*1000})||'None').trim();
+        said=true;
+        if(k.includes('*')) return {exit:true};
+        if(k==='#') return {say:'השידור החי נעצר. '};
+        continue;
+      }
+      waited=0; last=piece.no;
+      const k=String(await call.read([{type:'file',data:piece.play}],'tap',
+        {max_digits:1,min_digits:1,sec_wait:1,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'lp'+(++tapNo),timeout:10*60*1000})||'None').trim();
+      if(k.includes('*')) return {exit:true};
+      if(k==='#'||k==='1') return {say:'השידור החי נעצר. '};
+    }
+  }
+
   async function webFlow(mode) {
     const W=await import('./branch2-web-flow.js');
     const { searchWebMedia } = await import('./web-media.js');
@@ -4288,7 +4326,7 @@ async function youtubeCallHandler(call) {
       q=typed;
     } else {
       for(let tries=0;!q&&tries<3;tries++) {
-        const rec=await call.read([{type:'text',data:sanitizeForYemot(tries?'לא שמעתי טוב. אמור שוב מה לחפש, ולסיום הקש סולמית.':'חיפוש בכל האתרים באינטרנט. אמור איזה סרטון או הקלטה תרצה לשמוע או לראות, ולסיום ההקלטה הקש סולמית.')}],
+        const rec=await call.read([{type:'text',data:sanitizeForYemot(tries?'לא שמעתי טוב. אמור שוב מה לחפש, ולסיום הקש סולמית.':'חיפוש בכל האתרים באינטרנט. אמור איזה סרטון, הקלטה או שידור חי תרצה לשמוע או לראות, ולסיום ההקלטה הקש סולמית.')}],
           'record',{min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
         if(!rec||rec==='None') return {say:'לא נקלטה בקשה.'};
         try {
@@ -4334,6 +4372,14 @@ async function youtubeCallHandler(call) {
       const n=Number(v);
       if(!(/^\d+$/.test(v)&&n>=1&&n<=results.length)) { note='אין תוצאה במספר '+v+'. '; continue; }
       const it=results[n-1];
+      if(it.live) {
+        const c=await tap('בחרת את השידור החי '+it.title+', מאתר '+W.siteName(it.site)+'. להאזנה לשידור החי הקש 1. לחזרה לתוצאות הקש 3. לתפריט הראשי הקש כוכבית.',{sec_wait:15});
+        if(c.includes('*')) return {exit:true};
+        if(c!=='1') { withList=c==='3'; continue; }
+        const l=await liveListen(it);
+        if(l.exit) return {exit:true};
+        note=l.say||''; continue;
+      }
       // Confirmation before any download (owner, 18.11), as with YouTube.
       const about='בחרת את '+it.title+', מאתר '+W.siteName(it.site)+(W.lengthText(it.durationSeconds)?', '+W.lengthText(it.durationSeconds):'')+'. ';
       const choice=await tap(about+'להשמעה ולשמירה בתיקיית אודיו הקש 1. '+(it.hasVideo?'להורדת הסרטון לתיקיית וידאו הקש 2. ':'')+'לחזרה לתוצאות הקש 3. לתפריט הראשי הקש כוכבית.',{sec_wait:15});

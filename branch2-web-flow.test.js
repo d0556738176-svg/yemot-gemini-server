@@ -74,3 +74,38 @@ test('the web searches have their own history list', () => {
   assert.equal(historyPath('0501234567'), 'ivr2:/2/youtubejobs/history/0501234567.json');
   assert.equal(historyPath('0501234567', 'web'), 'ivr2:/2/youtubejobs/history/web-0501234567.json');
 });
+
+test('a page the downloader does not know is read for the media it plays', async () => {
+  const { mediaInHtml } = await import('./web-media.js');
+  const a = mediaInHtml('<html><head><meta property="og:title" content="שיעור בגמרא"><meta property="og:image" content="/p.jpg"></head><body><audio src="/files/a.mp3?x=1"></audio></body></html>', 'https://kol.example/s/1');
+  assert.equal(a.media, 'https://kol.example/files/a.mp3?x=1');
+  assert.equal(a.title, 'שיעור בגמרא');
+  assert.equal(a.image, 'https://kol.example/p.jpg');
+  const b = mediaInHtml('<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ"></iframe>', 'https://x.example/');
+  assert.equal(b.youtube, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  assert.equal(mediaInHtml('<img src="a.jpg">', 'https://x.example/'), null);
+});
+
+test('links that turn out to be YouTube go to the YouTube list', async () => {
+  const r = await searchWebMedia('x', { candidates: [{ url: 'https://blog.example/p' }], inspect: async () => ({ youtube: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', title: 't' }) });
+  assert.equal(r.items.length, 0);
+  assert.equal(r.youtube.length, 1);
+});
+
+test('live: a new caller starts two pieces behind, then follows in order', async () => {
+  const { nextPiece } = await import('./live-relay.js');
+  const r = { pieces: [] };
+  assert.equal(nextPiece(r, null), null);
+  r.pieces = [{ no: 0 }, { no: 1 }];
+  assert.equal(nextPiece(r, null), null);
+  r.pieces.push({ no: 2 }, { no: 3 });
+  assert.equal(nextPiece(r, null).no, 1);
+  assert.equal(nextPiece(r, 1).no, 2);
+  assert.equal(nextPiece(r, 3), null);
+});
+
+test('live results are read first and marked as live', () => {
+  const r = mergeResults({ items: [{ id: 'wAAAAAAAAAA', title: 'שיעור', site: 'a.com', durationSec: 60, hasVideo: false }, { id: 'wCCCCCCCCCC', title: 'כותל', site: 'youtube.com', live: true, hasVideo: false }], youtube: [] });
+  assert.equal(r[0].live, true);
+  assert.match(resultsPageText(r, 0, 5), /^1, כותל, מאתר יוטיוב, שידור חי עכשיו\./);
+});

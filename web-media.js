@@ -46,11 +46,53 @@ function probe(url, { bin = ytdlpPath(), impersonate = false, timeoutMs = 30000 
   });
 }
 
-// One link -> a playable item, or null.
+// A page the downloader does not know: its own HTML is read for the media it
+// plays (og:video/og:audio, <audio>/<video>/<source>, direct .mp3/.mp4/.m3u8
+// links, a YouTube player inside it). Returns {media, title, image} or {youtube}.
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+export function mediaInHtml(html, pageUrl) {
+  const abs = u => { try { return new URL(String(u).replace(/&amp;/g, '&').trim(), pageUrl).href; } catch { return null; } };
+  const meta = name => (html.match(new RegExp('<meta[^>]+(?:property|name)=["\']' + name + '["\'][^>]+content=["\']([^"\']+)', 'i')) ||
+    html.match(new RegExp('<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']' + name + '["\']', 'i')) || [])[1] || null;
+  const title = (meta('og:title') || (html.match(/<title[^>]*>([^<]{2,200})<\/title>/i) || [])[1] || '').replace(/\s+/g, ' ').trim() || null;
+  const image = meta('og:image') ? abs(meta('og:image')) : null;
+  const found = [];
+  for (const n of ['og:video:secure_url', 'og:video:url', 'og:video', 'og:audio:secure_url', 'og:audio', 'twitter:player:stream']) { const v = meta(n); if (v) found.push(abs(v)); }
+  for (const m of html.matchAll(/<(?:audio|video|source)[^>]+src=["']([^"']+)["']/gi)) found.push(abs(m[1]));
+  for (const m of html.matchAll(/["'(=]((?:https?:)?\/\/[^"'()\s<>]+?\.(?:mp3|m4a|aac|ogg|opus|wav|flac|mp4|m4v|webm|m3u8)(?:\?[^"'()\s<>]*)?)["')\s]/gi)) found.push(abs(m[1]));
+  const media = found.filter(u => u && /^https?:/i.test(u) && !/\.(?:jpg|jpeg|png|gif|svg|webp)(?:\?|$)/i.test(u));
+  if (media.length) return { media: media[0], title, image };
+  const yt = html.match(/(?:youtube(?:-nocookie)?\.com\/embed\/|youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  if (yt) return { youtube: 'https://www.youtube.com/watch?v=' + yt[1], title };
+  return null;
+}
+async function scanPage(url, { fetchImpl = fetch, timeoutMs = 12000 } = {}) {
+  try {
+    const r = await fetchImpl(url, { headers: { 'user-agent': UA, 'accept-language': 'he,en;q=0.8' }, redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok || !/html/i.test(r.headers.get('content-type') || '')) return null;
+    const html = (await r.text()).slice(0, 3e6);
+    return mediaInHtml(html, r.url || url);
+  } catch { return null; }
+}
+
+// One link -> a playable item, a YouTube link ({youtube}), or null.
 export async function inspectLink(c, opts = {}) {
   let r = await probe(c.url, opts), impersonate = false;
   if (!r.ok && /403|cloudflare|captcha|forbidden|challenge/i.test(r.err || '')) { r = await probe(c.url, { ...opts, impersonate: true }); impersonate = true; }
-  if (!r.ok) return null;
+  let page = null;
+  if (!r.ok || r.info?.extractor_key === 'Generic' && !(Number(r.info?.duration) > 0) && !(r.info?.formats || []).length) {
+    // Deeper: the page's own HTML (owner, 18.11: "scan every page").
+    const sc = await (opts.scan || scanPage)(c.url);
+    if (sc?.youtube) return { youtube: sc.youtube, title: sc.title || c.title };
+    if (!sc?.media) return null;
+    page = { url: c.url, title: sc.title, image: sc.image };
+    r = await probe(sc.media, opts); impersonate = false;
+    if (!r.ok) return null;
+  }
+  const isLive = j0 => !!(j0?.is_live || j0?.live_status === 'is_live');
+  // A YouTube video goes to extension 2's YouTube path; a YouTube live
+  // broadcast stays here (the live relay plays it).
+  if (YT.test(r.info?.webpage_url || '') && !isLive(r.info)) return { youtube: r.info.webpage_url, title: r.info.title || c.title };
   let j = r.info;
   if (j?._type === 'playlist') j = (j.entries || [])[0];
   if (!j) return null;
@@ -58,17 +100,22 @@ export async function inspectLink(c, opts = {}) {
   const hasVideo = f.some(x => x.vcodec && x.vcodec !== 'none') || (!!j.width && j.vcodec !== 'none');
   const hasAudio = f.some(x => x.acodec && x.acodec !== 'none') || (j.acodec && j.acodec !== 'none') || /^(mp3|m4a|aac|opus|ogg|wav|flac)$/i.test(j.ext || '');
   if (!hasVideo && !hasAudio) return null;
-  if (j.is_live || j.live_status === 'is_live') return null; // a live broadcast is not a file to download
+  const live = isLive(j) || isLive(r.info); // owner, 18.11: live broadcasts are played through the relay
   if (j.extractor_key === 'Generic' && !(Number(j.duration) > 0) && !hasAudio && !hasVideo) return null;
-  const durationSec = Number(j.duration) || null;
-  if (durationSec && durationSec < 5) return null;
-  const pageUrl = j.webpage_url || c.url;
+  const durationSec = live ? null : (Number(j.duration) || null);
+  if (!live && durationSec && durationSec < 5) return null;
+  if (live && !hasAudio) return null;
+  // From a page scan: the file is what is downloaded, the page is its website.
+  const pageUrl = page ? (j.webpage_url || j.url || '') : (j.webpage_url || c.url);
+  const shownUrl = page ? page.url : pageUrl;
+  const bareTitle = page && (!j.title || /^[\w.-]+$/.test(String(j.title)));
   const item = {
-    url: pageUrl, title: String(j.title || c.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || c.title || hostOf(pageUrl),
-    site: hostOf(pageUrl) || c.site, siteName: j.extractor_key && j.extractor_key !== 'Generic' ? j.extractor_key : null,
+    url: pageUrl, page: page ? page.url : null,
+    title: String((bareTitle ? page.title || c.title : j.title) || c.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || hostOf(shownUrl),
+    site: hostOf(shownUrl) || c.site, siteName: j.extractor_key && j.extractor_key !== 'Generic' ? j.extractor_key : null,
     uploader: j.uploader || j.channel || j.creator || c.source || null, description: String(j.description || c.snippet || '').slice(0, 4000),
-    thumbnail: j.thumbnail || c.image || null, durationSec, uploadDate: j.upload_date || null, views: Number.isFinite(j.view_count) ? j.view_count : null,
-    tags: Array.isArray(j.tags) ? j.tags.slice(0, 30) : null, hasVideo, hasAudio, impersonate,
+    thumbnail: j.thumbnail || page?.image || c.image || null, durationSec, uploadDate: j.upload_date || null, views: Number.isFinite(j.view_count) ? j.view_count : null,
+    tags: Array.isArray(j.tags) ? j.tags.slice(0, 30) : null, hasVideo: live ? false : hasVideo, hasAudio, impersonate, live,
   };
   return { ...item, id: registerWebItem(item) };
 }
@@ -76,7 +123,8 @@ export async function inspectLink(c, opts = {}) {
 // The whole search: candidates from the web, then each one checked (4 at a
 // time, within a total budget); YouTube links are kept apart (extension 2
 // already handles YouTube through its own, richer path).
-export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, limit = 30, onProgress = () => {}, candidates = null, inspect = inspectLink } = {}) {
+export const LIVE_WORDS = /(?:שידור חי|שידורים חיים|בשידור חי|בלייב|לייב|\blive\b|ערוץ חי|רדיו)/iu;
+export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, limit = 30, onProgress = () => {}, candidates = null, inspect = inspectLink, live = LIVE_WORDS.test(String(q)) } = {}) {
   const started = Date.now();
   const list = (candidates || await webCandidates(q, { env })).slice(0, 60);
   onProgress({ stage: 'checking', total: list.length, done: 0, found: 0 });
@@ -85,11 +133,13 @@ export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, l
   const worker = async () => {
     while (next < list.length && found.length < limit && Date.now() - started < budgetMs) {
       const c = list[next++];
-      if (YT.test(c.url)) { youtube.push(c); done++; continue; }
+      // Live search: YouTube links are opened too, to find the ones broadcasting now.
+      if (YT.test(c.url) && !live) { youtube.push(c); done++; continue; }
       const left = budgetMs - (Date.now() - started);
       const it = left > 3000 ? await inspect(c, { timeoutMs: Math.min(30000, left) }).catch(() => null) : null;
       done++;
-      if (it && !found.some(x => x.id === it.id)) found.push(it);
+      if (it?.youtube) youtube.push({ url: it.youtube, title: it.title || c.title });
+      else if (it && !found.some(x => x.id === it.id)) found.push(it);
       onProgress({ stage: 'checking', total: list.length, done, found: found.length });
     }
   };
