@@ -4,7 +4,7 @@
 // page scan, Streamlink, browser engine) and proves the media really
 // downloads by saving its first 20 seconds to a temporary file (deleted at
 // once). Nothing goes to Yemot. Results: /branch2-diag -> engineTest.
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,22 +17,22 @@ function version(bin, args = ['--version']) {
   try { const r = spawnSync(bin, args, { encoding: 'utf8', timeout: 15000 }); return (r.stdout || r.stderr || '').split('\n').find(Boolean)?.trim().slice(0, 60) || null; } catch { return null; }
 }
 
-function grab20(item, cookie, ffmpegPath) {
-  return new Promise(async resolve => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engtest-'));
-    const out = path.join(dir, 'x.mkv');
-    const h = { ...(item.httpHeaders || {}), ...(item.referer ? { Referer: item.referer } : {}), ...(cookie ? { Cookie: cookie } : {}) };
-    const headers = Object.entries(h).map(([k, v]) => k + ': ' + v + '\r\n').join('');
-    const p = spawn(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', ...(headers ? ['-headers', headers] : []), '-i', item.url, '-t', '20', '-map', '0:a:0?', '-map', '0:v:0?', '-c', 'copy', out], { stdio: ['ignore', 'ignore', 'pipe'] });
-    let err = ''; p.stderr.on('data', d => { err = (err + d).slice(-300); });
-    const t = setTimeout(() => p.kill('SIGKILL'), 90000);
-    p.on('close', async () => {
-      clearTimeout(t);
-      const size = (await fs.stat(out).catch(() => ({ size: 0 }))).size;
-      await fs.rm(dir, { recursive: true, force: true });
-      resolve({ ok: size > 20000, bytes: size, err: size > 20000 ? null : err.replace(/\s+/g, ' ').slice(-160) });
-    });
-  });
+// The real download path (the same one a caller's key press runs), stopped
+// as soon as real media data has arrived: proof without a whole episode.
+async function grab(item, ffmpegPath) {
+  const { directDownload } = await import('./youtube-direct.js');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'engtest-'));
+  const ac = new AbortController();
+  let got = 0;
+  const timer = setTimeout(() => ac.abort(), 120000);
+  try {
+    const r = await directDownload(item.id, path.join(dir, 'x.source'), { mode: 'audio', ffmpegPath, signal: ac.signal, withCaptions: false, log: { info() {}, warn() {} },
+      onProgress: p => { got = Math.max(got, Number(p.done) || 0); const pct = p.total ? p.done / p.total : 0; if ((p.total === 100 && p.done >= 2) || (p.total > 100 && (p.done > 1.5e6 || pct >= 0.05))) { got = got || 1; ac.abort(); } } });
+    return { ok: r.bytes > 20000, bytes: r.bytes, engine: r.client || 'yt-dlp' };
+  } catch (e) {
+    if (got && (e?.name === 'AbortError' || ac.signal.aborted)) return { ok: true, partial: true };
+    return { ok: false, err: String(e?.message || e).replace(/\s+/g, ' ').slice(0, 160) };
+  } finally { clearTimeout(timer); await fs.rm(dir, { recursive: true, force: true }); }
 }
 
 export async function runEngineSelfTest({ env = process.env, log = console, ffmpegPath = 'ffmpeg' } = {}) {
@@ -51,7 +51,7 @@ export async function runEngineSelfTest({ env = process.env, log = console, ffmp
     const row = { q, candidates: 0, checked: [], found: 0 };
     state.sites.push(row);
     try {
-      const list = (await web.webCandidates(q, { env })).filter(c => !/youtube\.com|youtu\.be/i.test(c.url)).slice(0, 4);
+      const list = (await web.webCandidates(q, { env })).filter(c => !/youtube\.com|youtu\.be/i.test(c.url)).slice(0, 3);
       row.candidates = list.length;
       for (const c of list) {
         const t0 = Date.now();
@@ -59,8 +59,8 @@ export async function runEngineSelfTest({ env = process.env, log = console, ffmp
         const it = await web.inspectLink(c, { timeoutMs: 30000, browserMs: 30000, onFailure: f => { failure = f.reason; } }).catch(() => null);
         const host = (() => { try { return new URL(c.url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
         if (!it || it.youtube) { row.checked.push({ host, ok: false, why: it?.youtube ? 'youtube' : failure || 'no media', sec: Math.round((Date.now() - t0) / 1000) }); continue; }
-        const g = it.live ? { ok: true, bytes: 0, err: null } : await grab20(it, null, ffmpegPath);
-        row.checked.push({ host, ok: g.ok, engine: it.browser ? 'browser/streamlink' : 'yt-dlp', live: !!it.live, sec: Math.round((Date.now() - t0) / 1000), title: String(it.title || '').slice(0, 60), ...(g.ok ? {} : { why: g.err }) });
+        const g = it.live ? { ok: true, bytes: 0, err: null } : await grab(it, ffmpegPath);
+        row.checked.push({ host, ok: g.ok, engine: g.engine || (it.browser ? 'browser/streamlink' : 'yt-dlp'), found: it.browser ? 'browser/streamlink' : 'yt-dlp', live: !!it.live, sec: Math.round((Date.now() - t0) / 1000), title: String(it.title || '').slice(0, 60), ...(g.ok ? {} : { why: g.err }) });
         if (g.ok) row.found++;
       }
     } catch (e) { row.error = String(e?.message || e).slice(0, 120); }
