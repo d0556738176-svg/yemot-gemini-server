@@ -1,22 +1,22 @@
-; Example only. Configure matching PJSIP endpoints tv1..tv6 with
+; Example only. Configure matching PJSIP routing extensions 1..6 with
 ; ACLs permitting only the trusted carrier and appropriate auth.
 ; Route each SIP endpoint into the matching context.
 [tv-inbound]
-exten => tv1,1,Answer()
+exten => 1,1,Answer()
  same => n,MusicOnHold(tv1)
  same => n,Hangup()
-exten => tv2,1,Answer()
+exten => 2,1,Answer()
  same => n,MusicOnHold(tv2)
  same => n,Hangup()
-exten => tv3,1,Answer()
+exten => 3,1,Answer()
  same => n,MusicOnHold(tv3)
  same => n,Hangup()
-exten => tv4,1,Answer()
+exten => 4,1,Answer()
  same => n,MusicOnHold(tv4)
  same => n,Hangup()
-exten => tv5,1,Answer()
+exten => 5,1,Answer()
  same => n,MusicOnHold(tv5)
  same => n,Hangup()
-exten => tv6,1,Answer()
+exten => 6,1,Answer()
  same => n,MusicOnHold(tv6)
  same => n,Hangup()
