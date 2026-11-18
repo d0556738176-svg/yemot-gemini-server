@@ -3,8 +3,13 @@
 const BASE = process.env.EXT2 || 'https://ext2.176-97-205-41.sslip.io';
 const Q = (await import('node:fs')).readFileSync(new URL('./go.txt', import.meta.url), 'utf8').trim();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const d0 = await fetch(BASE + '/branch2-diag').then(r => r.json()).catch(e => ({ err: String(e) }));
-console.log('running version:', d0.commit, d0.startedAt, d0.err || '');
+for (let i = 0; i < 90; i++) {
+  const d0 = await fetch(BASE + '/branch2-diag').then(r => r.json()).catch(e => ({ err: String(e) }));
+  console.log('running version:', d0.commit, d0.startedAt, d0.err || '');
+  if (String(d0.commit || '').startsWith('858f1d71')) break;
+  if (i === 89) process.exit(1);
+  await sleep(20000);
+}
 const id = 'webcheck' + Date.now();
 let params = {}; const t00 = Date.now();
 async function step() {
