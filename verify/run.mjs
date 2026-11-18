@@ -6,7 +6,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 for (let i = 0; i < 90; i++) {
   const d0 = await fetch(BASE + '/branch2-diag').then(r => r.json()).catch(e => ({ err: String(e) }));
   console.log('running version:', d0.commit, d0.startedAt, d0.err || '');
-  if (String(d0.commit || '').length) break;
+  if (String(d0.commit || '').startsWith('aba1727')) break;
   if (i === 89) process.exit(1);
   await sleep(20000);
 }
@@ -35,7 +35,7 @@ for (let i = 0; i < 200; i++) {
   send(r.name, 'None'); await sleep(3000);
 }
 // choose the shortest non-live result
-const items = [...r.shown.matchAll(/(\d+), ([^,]+), מאתר כאן(?:, אורך ([^,.]+))?/g)];
+const items = [...r.shown.matchAll(/(\d+), ([^,]+), מאתר [^,.]+(?:, אורך ([^,.]+))?/g)];
 const sec = s => { if (!s) return 99999; let t = 0; const h = s.match(/(\d+)? ?(שעה|שעתיים|שעות)/); if (h) t += h[2] === 'שעה' ? 3600 : h[2] === 'שעתיים' ? 7200 : Number(h[1]) * 3600; const m = s.match(/(\d+)? ?(דקה|דקות)/); if (m) t += m[2] === 'דקה' ? 60 : Number(m[1]) * 60; const ss = s.match(/(\d+) שניות/); if (ss) t += Number(ss[1]); return t || 99999; };
 let pick = null;
 for (const it of items) { const s = sec(it[3]); if (s >= 60 && (!pick || s < pick.s)) pick = { n: it[1], s, title: it[2] }; }
