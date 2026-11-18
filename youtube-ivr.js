@@ -34,7 +34,8 @@ export function wantsNewestQuery(original) {
 // "הערוץ", "פרק", "המלא" and the like (they are never part of a name).
 export function channelNameFrom(q) {
   return String(q || '')
-    .replace(/(^|[^\p{L}\p{N}])(של הערוץ|הערוץ של|הערוץ|ערוץ|בערוץ|של התוכנית|התוכנית|תוכנית|הפרק המלא|פרק מלא|הפרק|פרק|פרקים|המלא|המלאה|מלא|מלאה|עונה|חדש|חדשה|של)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
+    // "ערוץ 14", "ערוץ 13": with a number the word is part of the name (18.11).
+    .replace(/(^|[^\p{L}\p{N}])(של הערוץ|הערוץ של|הערוץ(?!\s*\d)|ערוץ(?!\s*\d)|בערוץ(?!\s*\d)|של התוכנית|התוכנית|תוכנית|הפרק המלא|פרק מלא|הפרק|פרק|פרקים|המלא|המלאה|מלא|מלאה|עונה|חדש|חדשה|של)(?=$|[^\p{L}\p{N}])/giu, '$1 ')
     .replace(/\s+/g, ' ').trim();
 }
 
@@ -73,15 +74,24 @@ const exhaustedYouTubeKeys = new Map();
  * is tried, so search keeps working when one key's quota runs out.
  */
 export async function searchYouTubeVideos(query, options = {}) {
+  return withYouTubeKey(apiKey => searchYouTubeVideosWithKey(query, { ...options, apiKey }), options);
+}
+
+// The next page of a channel's uploads (newest first), with the same key rotation.
+export async function moreChannelUploads(playlistId, pageToken, options = {}) {
+  return withYouTubeKey(key => channelUploadsPage(playlistId, pageToken, { ...options, key }), options);
+}
+
+async function withYouTubeKey(run, options = {}) {
   const keys = youtubeKeysFrom(process.env, options.apiKey);
-  if (!keys.length) return searchYouTubeVideosWithKey(query, options);
+  if (!keys.length) return run(options.apiKey);
   const now = Date.now();
   const usable = keys.filter(k => !(exhaustedYouTubeKeys.get(k) > now));
   const order = usable.length ? usable : keys;
   let lastError = null;
   for (let i = 0; i < order.length; i++) {
     try {
-      return await searchYouTubeVideosWithKey(query, { ...options, apiKey: order[i] });
+      return await run(order[i]);
     } catch (error) {
       lastError = error;
       if (![403, 429].includes(error?.httpStatus)) throw error;
@@ -97,7 +107,9 @@ async function searchYouTubeVideosWithKey(query, {
   regionCode = process.env.YOUTUBE_REGION_CODE || 'IL',
   fetchImpl = fetch,
   timeoutMs = 15000,
-  pageToken = null
+  pageToken = null,
+  relevanceLanguage = null,
+  newest = null
 } = {}) {
   const key = String(apiKey || '').trim();
   const original = String(query || '').trim();
@@ -106,7 +118,7 @@ async function searchYouTubeVideosWithKey(query, {
   if (!key) throw Object.assign(new Error('YouTube search is not configured'), { status: 503 });
   if (!q) return [];
 
-  const wantsNewest = wantsNewestQuery(original);
+  const wantsNewest = newest == null ? wantsNewestQuery(original) : !!newest;
 
   // For "הסרטון הכי חדש של X", resolve the channel and then read its
   // dedicated uploads playlist. This is more precise than a generic video
@@ -136,6 +148,7 @@ async function searchYouTubeVideosWithKey(query, {
   url.searchParams.set('order', wantsNewest ? 'date' : 'relevance');
   url.searchParams.set('key', key);
   if (pageToken) url.searchParams.set('pageToken', pageToken);
+  if (relevanceLanguage) url.searchParams.set('relevanceLanguage', relevanceLanguage);
 
   const data = await fetchJson(url, fetchImpl, timeoutMs);
   let results = (data.items || [])
@@ -179,7 +192,7 @@ export function orderChannelUploads(videos, name, channelIsTheName, wantsFull) {
   const named = channelIsTheName ? list : list.filter(has);
   const rest = list.filter(v => !named.includes(v));
   const pick = arr => (wantsFull ? [...arr.filter(full), ...arr.filter(v => !full(v))] : arr);
-  return [...pick(named), ...pick(rest)].slice(0, 20);
+  return [...pick(named), ...pick(rest)];
 }
 
 async function newestFromMatchingChannel(q, { key, regionCode, fetchImpl, timeoutMs, wantsFull = false }) {
@@ -210,22 +223,35 @@ async function newestFromMatchingChannel(q, { key, regionCode, fetchImpl, timeou
   const channelDetails = await fetchJson(channelDetailsUrl, fetchImpl, timeoutMs);
   const uploadsPlaylistId = channelDetails.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
   if (!uploadsPlaylistId) return [];
+  const page = await channelUploadsPage(uploadsPlaylistId, null, { key, fetchImpl, timeoutMs, channelTitle: channelDetails.items?.[0]?.snippet?.title });
+  const ordered = orderChannelUploads(page, q, ranked[0].score === words.length, wantsFull);
+  // 18.11: the whole channel, newest first, page after page ("0" = 20 more).
+  Object.defineProperty(ordered, 'uploads', { value: { playlistId: uploadsPlaylistId, token: page.nextPageToken || null, channelTitle: channelDetails.items?.[0]?.snippet?.title || '' }, enumerable: false });
+  return ordered;
+}
+
+// One page (50) of a channel's uploads list, newest first.
+export async function channelUploadsPage(playlistId, pageToken, { key = youtubeKeysFrom(process.env)[0], fetchImpl = fetch, timeoutMs = 15000, channelTitle = '' } = {}) {
   const uploadsUrl = new URL('https://www.googleapis.com/youtube/v3/playlistItems');
   uploadsUrl.searchParams.set('part', 'snippet,contentDetails');
-  uploadsUrl.searchParams.set('playlistId', uploadsPlaylistId);
+  uploadsUrl.searchParams.set('playlistId', playlistId);
   uploadsUrl.searchParams.set('maxResults', '50');
   uploadsUrl.searchParams.set('key', key);
+  if (pageToken) uploadsUrl.searchParams.set('pageToken', pageToken);
   const uploadsData = await fetchJson(uploadsUrl, fetchImpl, timeoutMs);
   const videos = (uploadsData.items || [])
     .filter(item => item.contentDetails?.videoId)
+    .filter(item => !/^(Private|Deleted) video$/.test(String(item.snippet?.title || '')))
     .map(item => ({
       videoId: item.contentDetails.videoId,
       title: String(item.snippet?.title || 'ללא כותרת'),
-      channelTitle: String(item.snippet?.channelTitle || channelDetails.items?.[0]?.snippet?.title || 'ערוץ לא ידוע'),
+      channelTitle: String(item.snippet?.videoOwnerChannelTitle || item.snippet?.channelTitle || channelTitle || 'ערוץ לא ידוע'),
       publishedAt: item.contentDetails?.videoPublishedAt || item.snippet?.publishedAt || null,
       description: String(item.snippet?.description || '')
-    }));
-  return orderChannelUploads(videos, q, ranked[0].score === words.length, wantsFull);
+    }))
+    .sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
+  Object.defineProperty(videos, 'nextPageToken', { value: uploadsData.nextPageToken || null, enumerable: false });
+  return videos;
 }
 
 export function formatYouTubeChoices(videos) {

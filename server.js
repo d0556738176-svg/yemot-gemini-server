@@ -4042,6 +4042,36 @@ function startYouTubePlaybackJob(video, opts = {}) {
   return state;
 }
 
+// Extension 2 storage in Yemot (history, batch queue): same files as the
+// other extension 2 records.
+const branch2Store = {
+  read: async x => (await import('./youtube-authorized-playback.js'))._pipeline.readCacheJson(x),
+  write: async (x, d) => (await import('./youtube-authorized-playback.js'))._pipeline.writeCacheJson(x, d),
+};
+// Many downloads at once (owner, 18.11): one after another in the background,
+// free direct download only (the paid engine needs a key press per video).
+let branch2BatchQueue = null;
+async function batchQueue() {
+  if (branch2BatchQueue) return branch2BatchQueue;
+  const { createBatchQueue } = await import('./branch2-batch.js');
+  branch2BatchQueue = createBatchQueue({
+    store: branch2Store,
+    concurrency: Math.max(1, Math.min(3, Number(process.env.BRANCH2_BATCH_CONCURRENCY || 1))),
+    start: async item => {
+      const v = { videoId: item.videoId, title: item.title, channelTitle: item.channelTitle, durationSeconds: item.durationSeconds ?? null, subtitles: item.subtitles };
+      if (item.kind === 'video') {
+        const gate = await videoStartGate(v).catch(() => null);
+        if (gate) { console.info('[BATCH] video skipped (needs a key press)', { videoId: v.videoId, ask: gate.ask }); return null; }
+        return startYouTubeVideoJob(v);
+      }
+      const cached = await Promise.race([lookupCachedYouTubeAudio(v.videoId).catch(() => null), new Promise(r => setTimeout(() => r(null), 8000))]);
+      if (cached?.playbackPaths?.length) { void ensureDownloadCopy(v.videoId).catch(() => {}); return { status: 'ready' }; }
+      return startYouTubePlaybackJob(v); // no consent: free direct download only
+    },
+  });
+  return branch2BatchQueue;
+}
+
 /**
  * Isolated YouTube IVR flow. Results live only in this call's async context.
  * Uses the same raw-recording -> Gemini transcription convention as the main robot.
@@ -4076,6 +4106,12 @@ async function youtubeCallHandler(call) {
   let pendingPaidVideo=null; // video waiting for a key: paid engine or download again (15.11)
   let searchMode=null, typedOnce=false; // 'voice' | 'type' (owner, 08.11)
   let transcriptFailAttempts=0;
+  // Owner, 18.11: 20 results a page, read at once ("1, ... 2, ..."); several
+  // digits select any result heard; 0 = 20 more (no limit); 0 then # = all
+  // of them downloaded; 4 there = only some, typed in a row (123420#).
+  const PAGE=Math.max(5,Math.min(30,Number(process.env.BRANCH2_PAGE_SIZE||20)));
+  let pageOffersAll=false, allCount=0;
+  const callerPhone=getCallerNumber(call);
 
   // Owner, 10.11: extension 3 recommended a video and the caller asked to
   // hear or download it; it waits here, already selected, for the usual
@@ -4100,16 +4136,123 @@ async function youtubeCallHandler(call) {
   const isVideoConfirm=(text)=>/(?:^|\s)(?:ל|ב|ה)?(?:ה)?(?:וידאו|וידיאו|וידא|ווידאו|ווידיאו|סרטון מלא)(?:\s|$)/u.test(normalizeConfirm(text));
   const isNoConfirm=(text)=>/^(?:לא|לא תודה|לא רוצה|לא זה|אחר|אחרת)(?:\s|$)/u.test(normalizeConfirm(text));
 
-  // Results in any language are read in Hebrew (owner, 07.11).
+  // Results in any language are read in Hebrew (owner, 07.11). Owner, 18.11:
+  // straight to the list, "1, <title>. 2, <title>." (no "מצאתי כמה
+  // תוצאות"); the channel is said only when it changes from the one before.
   async function formatResultsPage() {
-    const page=results.slice(resultOffset,resultOffset+5);
-    if(!page.length) return 'אין עוד תוצאות זמינות לחיפוש הזה. אמור חיפוש חדש אם תרצה.';
-    try { const { hebrewizeResults } = await import('./youtube-title-hebrew.js'); await hebrewizeResults(page); } catch {}
+    const page=results.slice(resultOffset,resultOffset+PAGE);
+    if(!page.length) return 'אין עוד תוצאות זמינות לחיפוש הזה.';
+    try { const { hebrewizeResults } = await import('./youtube-title-hebrew.js'); await hebrewizeResults(page,{timeoutMs:6500}); } catch {}
     const { spokenTitle, spokenChannel } = await import('./youtube-title-hebrew.js');
     pageStart=resultOffset;
-    const lines=page.map((v,i) => 'תוצאה '+(i+1)+': '+sanitizeForYemot(spokenTitle(v))+'. הערוץ: '+sanitizeForYemot(spokenChannel(v))+'.');
+    let lastChannel=resultOffset>0?spokenChannel(results[resultOffset-1]):'';
+    const lines=page.map((v,i) => {
+      const ch=spokenChannel(v), say=ch&&ch!==lastChannel;
+      lastChannel=ch;
+      return (resultOffset+i+1)+', '+sanitizeForYemot(spokenTitle(v))+(say?', ערוץ '+sanitizeForYemot(ch):'')+',';
+    });
     resultOffset += page.length;
-    return 'מצאתי כמה תוצאות. '+lines.join(' ')+' אמור את מספר התוצאה או את השם שלה, או עוד לתוצאות נוספות. אחרי הבחירה אבקש ממך אישור לפני ההשמעה.';
+    return lines.join(' ');
+  }
+  function resultsHint() {
+    return 'לבחירה הקש את מספר התוצאה וסולמית. לעוד '+PAGE+' תוצאות הקש 0 וסולמית. להורדת כל התוצאות הקש 0 וסולמית, ואז שוב סולמית. לחיפוש חדש הקש 0 0 וסולמית. לתפריט הראשי הקש כוכבית.';
+  }
+  // The next results of the same search (50 more each time, for as long as
+  // YouTube has; a channel's uploads continue newest first).
+  async function fetchMore() {
+    try {
+      const { moreYouTubeResults } = await import('./youtube-smart-search.js');
+      const more=await moreYouTubeResults(results,{apiKey:process.env.YOUTUBE_API_KEY,regionCode:process.env.YOUTUBE_REGION_CODE||'IL',timeoutMs:REQUEST_TIMEOUT_MS});
+      if(more?.add?.length){
+        const pages=more.pages;
+        results=[...results,...more.add];
+        Object.defineProperty(results,'pages',{value:pages,enumerable:false});
+      } else if(more?.pages) Object.defineProperty(results,'pages',{value:more.pages,enumerable:false});
+    } catch(e){ console.warn('[YouTube IVR] more results failed',{message:String(e?.message||e).slice(0,120)}); }
+  }
+  // A short question answered only by # (Yemot sends # alone as an empty
+  // answer; silence comes back only after the wait): '#', '*' or null.
+  async function readHashOffer(text) {
+    const spoken=sanitizeForYemot(text), askedAt=Date.now();
+    const v=String(await call.read([{type:'text',data:spoken}],'tap',
+      {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'h'+(++tapNo),timeout:10*60*1000})||'None').trim();
+    const waited=(Date.now()-askedAt)/1000, messageSec=spoken.length/13;
+    console.info('[YouTube IVR] hash offer',{v,waitedSec:Math.round(waited),messageSec:Math.round(messageSec)});
+    if(v.includes('*')) return '*';
+    if((v==='None'||!v)&&waited<messageSec+2.5) return '#';
+    return null;
+  }
+  // Several downloads at once: 1 audio, 2 video, 3 cancel, 4 choose some by
+  // typing their numbers in a row. Returns what to say next, or {exit:true}.
+  async function batchFlow(all) {
+    const { parseSelection, spokenNumbers } = await import('./branch2-batch.js');
+    let chosen=all, nums=null, empty=0, note='';
+    while(true) {
+      const head=nums ? 'בחרת את התוצאות '+spokenNumbers(nums)+'. ' : 'הורדת כל '+all.length+' התוצאות ששמעת. ';
+      const menu=note+head+'להורדה כשמע הקש 1. להורדה כוידאו הקש 2. לביטול הקש 3. '+(nums?'להקלדה מחדש של המספרים הקש 4.':'לבחירת תוצאות מסוימות, בהקשת המספרים שלהן ברצף, הקש 4.');
+      note='';
+      const k=String(await call.read([{type:'text',data:sanitizeForYemot(menu)}],'tap',
+        {max_digits:1,min_digits:1,sec_wait:10,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'b'+(++tapNo),timeout:10*60*1000,
+         digits_allowed:['1','2','3','4','*']})||'None').trim();
+      console.info('[BATCH] menu key',{k,count:chosen.length});
+      if(k.includes('*')) return {exit:true};
+      if(k==='None'||!k) { if(++empty>=3) return 'לא נבחרה הורדה.'; continue; }
+      empty=0;
+      if(k==='3') return 'ההורדה בוטלה, ולא הורד כלום.';
+      if(k==='4') {
+        const typed=String(await call.read([{type:'text',data:sanitizeForYemot('הקש ברצף את מספרי התוצאות שתרצה להוריד, מ 1 עד '+all.length+', ובסוף הקש סולמית. אפשר להפריד בין מספר למספר בכוכבית.')}],'tap',
+          {max_digits:80,min_digits:1,sec_wait:15,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'s'+(++tapNo),timeout:10*60*1000})||'None').trim();
+        const got=parseSelection(typed,all.length);
+        console.info('[BATCH] typed selection',{typed:typed.slice(0,80),got});
+        if(!got.length) { note='לא זיהיתי מספרי תוצאות בהקשה. '; continue; }
+        nums=got; chosen=got.map(n=>all[n-1]).filter(Boolean);
+        continue;
+      }
+      let kind='audio', subtitles=false;
+      if(k==='2') {
+        kind='video';
+        const sub=String(await call.read([{type:'text',data:'להוסיף כתובית בעברית לכל הסרטונים? להוספת כתובית הקש 1. בלי כתובית הקש 2.'}],'tap',
+          {max_digits:1,min_digits:1,sec_wait:10,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'c'+(++tapNo),timeout:10*60*1000,digits_allowed:['1','2','*']})||'None').trim();
+        if(sub.includes('*')) return {exit:true};
+        subtitles=sub==='1';
+      }
+      const q=await batchQueue();
+      const r=await q.add(chosen,{kind,subtitles,phone:callerPhone});
+      console.info('[BATCH] queued by caller',{kind,subtitles,asked:chosen.length,added:r.added,waiting:r.waiting});
+      const already=chosen.length-r.added;
+      return (r.added?'נכנסו '+r.added+' '+(kind==='video'?'סרטונים':'קבצים')+' לתור ההורדות.':'כל מה שבחרת כבר נמצא בתור ההורדות.')+
+        (already&&r.added?' '+already+' מהם כבר היו בתור.':'')+
+        ' הם יורדו אחד אחרי השני, בהורדה החינמית ישירות מיוטיוב, וימשיכו גם אם תנתק.'+
+        (kind==='video'
+          ? ' הסרטונים יישמרו בתיקיית וידאו'+(subtitles?' עם כתובית בעברית':'')+', ומאותה הורדה יוכן גם השמע. סרטון שאי אפשר להוריד בחינם לא יורד כאן; אותו אפשר לבחור לבד ולאשר הורדה במנוע הגיבוי.'
+          : ' השמע יישמר בתיקיית אודיו ובשלוחה 7. שיר שאי אפשר להוריד בחינם לא יורד כאן; אותו אפשר לבחור לבד ולאשר הורדה במנוע הגיבוי.');
+    }
+  }
+  // Owner, 18.11: key 4 at the start = the searches made before, newest
+  // first, 20 at a time; a number runs that search again.
+  async function historyMenu() {
+    const { readHistory, historyPageText } = await import('./branch2-search-history.js');
+    const items=await Promise.race([readHistory(callerPhone,branch2Store),new Promise(r=>setTimeout(()=>r([]),6000))]);
+    if(!items.length) return {say:'עוד אין חיפושים בהיסטוריה שלך.'};
+    let start=0, empty=0, note='', withList=true;
+    while(true) {
+      const more=start+PAGE<items.length;
+      const list=withList?historyPageText(items,start,PAGE,{spoken:sanitizeForYemot})+' ':'';
+      const hint='לחזרה לחיפוש הקש את מספר החיפוש וסולמית. '+(more?'לעוד '+PAGE+' חיפושים הקש 0 וסולמית. ':'')+'לחזרה לתפריט החיפוש הקש 0 0 וסולמית. לתפריט הראשי הקש כוכבית.';
+      const spoken=sanitizeForYemot(note+list+hint);
+      note=''; withList=false;
+      const v=String(await call.read([{type:'text',data:spoken}],'tap',
+        {max_digits:Math.max(2,String(Math.min(items.length,start+PAGE)).length),min_digits:1,sec_wait:10,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'y'+(++tapNo),timeout:10*60*1000})||'None').trim();
+      console.info('[YouTube IVR] history key',{v,start,count:items.length});
+      if(v.includes('*')) return {exit:true};
+      if(v==='None'||!v) { if(++empty>=4) return {say:'לא נבחר חיפוש.'}; continue; }
+      empty=0;
+      if(v==='00') return {};
+      if(v==='0') { if(more) { start+=PAGE; withList=true; } else note='אין עוד חיפושים בהיסטוריה. '; continue; }
+      const n=Number(v);
+      if(/^\d+$/.test(v)&&n>=1&&n<=items.length) return {q:items[n-1].q};
+      note='אין חיפוש במספר '+v+'. ';
+    }
   }
 
   async function playSelected(call, video, playOpts={}) {
@@ -4190,6 +4333,55 @@ async function youtubeCallHandler(call) {
 
       // Which keys mean what in the current step.
       const keyState=(pendingFallbackVideo||pendingPaidVideo)?'fallback':pendingSubtitleVideo?'subtitles':pendingVideo?'confirm':results.length?'results':null;
+      // The results (owner, 18.11): any result number heard, then #.
+      if(keyState==='results'&&!keyTranscript) {
+        const listText=prompt===basePrompt?'':String(prompt);
+        const spoken=sanitizeForYemot((listText?listText+' ':'')+resultsHint());
+        const allOffer=pageOffersAll; pageOffersAll=false;
+        const askedAt=Date.now();
+        const raw=String(await call.read([{type:'text',data:spoken}],'tap',
+          {max_digits:Math.max(2,String(Math.max(1,resultOffset)).length),min_digits:1,sec_wait:10,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'r'+(++tapNo),timeout:10*60*1000})||'None').trim();
+        const waited=(Date.now()-askedAt)/1000, messageSec=spoken.length/13;
+        console.info('[YouTube IVR] results key',{raw,heard:resultOffset,waitedSec:Math.round(waited),messageSec:Math.round(messageSec),allOffer});
+        if(raw.includes('*')) return call.go_to_folder('/');
+        if(raw==='None'||!raw) {
+          // A page that opens with "to download all, press # now": a # in
+          // its first seconds (an empty answer long before the page ended).
+          if(allOffer&&messageSec>20&&waited<Math.min(messageSec*0.5,messageSec-10)) {
+            const out=await batchFlow(results.slice(0,allCount));
+            if(out?.exit) return call.go_to_folder('/');
+            resultOffset=Math.max(allCount,pageStart); nextPrompt=out; continue;
+          }
+          if(++emptyTaps>=4) return call.id_list_message([{type:'text',data:'לא נקלטה הקשה. להתראות'}]);
+          nextPrompt=null; continue; // the keys again, without the whole list
+        }
+        emptyTaps=0;
+        if(raw==='00') { results=[]; resultOffset=0; pageStart=0; searchMode=null; typedOnce=false; continue; }
+        if(raw==='0') {
+          const before=resultOffset;
+          if(resultOffset>=results.length) await fetchMore();
+          if(resultOffset>=results.length) {
+            const b=await readHashOffer('אין עוד תוצאות לחיפוש הזה. להורדת כל '+before+' התוצאות הקש עכשיו סולמית.');
+            if(b==='*') return call.go_to_folder('/');
+            if(b==='#') { const out=await batchFlow(results.slice(0,before)); if(out?.exit) return call.go_to_folder('/'); nextPrompt=out; continue; }
+            nextPrompt=null; continue;
+          }
+          const page=await formatResultsPage();
+          pageOffersAll=true; allCount=before;
+          nextPrompt='להורדת כל '+before+' התוצאות ששמעת, הקש עכשיו סולמית. '+page;
+          continue;
+        }
+        const n=Number(raw);
+        if(/^\d+$/.test(raw)&&n>=1&&n<=resultOffset) {
+          console.info('[YouTube IVR] key',{state:'results',key:raw,as:'תוצאה מספר '+n});
+          pendingVideo=results[n-1];
+          nextPrompt=await confirmPlaybackPrompt(pendingVideo);
+          if(pendingVideo?.geoLimited) pendingVideo=null;
+          continue;
+        }
+        nextPrompt='ההקשה '+raw+' אינה אחת האפשרויות.';
+        continue;
+      }
       if(keyState&&!voiceOnce) {
         const pageCount=Math.max(1,Math.min(5,results.length-pageStart));
         const hint={
@@ -4254,16 +4446,23 @@ async function youtubeCallHandler(call) {
         const said=prompt===basePrompt?'':String(prompt).split(/(?<=[.?!])\s+/).filter(x=>!/אמור|אמרו|הקש סולמית/.test(x)).join(' ');
         if(!searchMode) {
           const choice=String(await call.read(
-            [{type:'text',data:sanitizeForYemot((said?said+' ':'')+'לחיפוש ביוטיוב בדיבור הקש 1. לחיפוש בהקלדה במקשי הטלפון הקש 2. לחזרה לתפריט הראשי הקש כוכבית.')}],
+            [{type:'text',data:sanitizeForYemot((said?said+' ':'')+'לחיפוש ביוטיוב בדיבור הקש 1. לחיפוש בהקלדה במקשי הטלפון הקש 2. להיסטוריית החיפושים הקש 4. לחזרה לתפריט הראשי הקש כוכבית.')}],
             'tap',
             {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'m'+(++tapNo),timeout:10*60*1000,
-             digits_allowed:['1','2','*']}
+             digits_allowed:['1','2','4','*']}
           )||'None').trim();
           console.info('[YouTube IVR] search mode',{choice});
           if(choice.includes('*')) return call.go_to_folder('/');
-          searchMode=choice==='2'?'type':'voice';
+          if(choice==='4') {
+            const h=await historyMenu();
+            if(h.exit) return call.go_to_folder('/');
+            if(!h.q) { nextPrompt=h.say||null; continue; }
+            console.info('[YouTube IVR] search again from history',{q:String(h.q).slice(0,80)});
+            keyTranscript=h.q; searchMode='voice';
+          }
+          else searchMode=choice==='2'?'type':'voice';
         }
-        if(searchMode==='type') {
+        if(searchMode==='type'&&!keyTranscript) {
           const typed=String(await call.read(
             [{type:'text',data:sanitizeForYemot((said&&!typedOnce?said+' ':'')+'הקלד מה לחפש ביוטיוב, בעברית במקשי הטלפון, והקש סולמית אחרי כל אות.')}],
             'tap',
@@ -4496,7 +4695,7 @@ async function youtubeCallHandler(call) {
       // A number (said or pressed) means the result on the page just heard;
       // a pressed key already carries the full position.
       let selectedIndex=-1;
-      if(!fromKeys) { const pi=selectedResultIndex(transcript,results.slice(pageStart,pageStart+5)); if(pi>=0) selectedIndex=pageStart+pi; }
+      if(!fromKeys) { const pi=selectedResultIndex(transcript,results.slice(pageStart,pageStart+PAGE)); if(pi>=0) selectedIndex=pageStart+pi; }
       if(selectedIndex<0) selectedIndex=selectedResultIndex(transcript,results);
       if(selectedIndex>=0) {
         pendingVideo=results[selectedIndex];
@@ -4536,6 +4735,7 @@ async function youtubeCallHandler(call) {
       }
       results=found;
       resultOffset=0;
+      void import('./branch2-search-history.js').then(h=>h.addToHistory(callerPhone,currentQuery,branch2Store,{results:found.length})).catch(()=>{});
       nextPrompt=results.length
         ? await formatResultsPage()
         : 'לא מצאתי תוצאות מתאימות ביוטיוב. נסה שם, נושא או ערוץ אחר.';
@@ -5314,6 +5514,7 @@ app.listen(port,async()=>{
       for(const videoId of pending) startYouTubePlaybackJob({videoId,title:'המשך הורדה'});
     }catch(e){ console.warn('[YouTube IVR] could not list pending downloads',{message:String(e?.message||e).slice(0,120)}); }
   })();
+  void batchQueue().then(q => q.resume()).catch(e => console.warn('[BATCH] could not resume', { message: String(e?.message || e).slice(0, 120) }));
   await loadConversationLog();
   try { await configureYemotStructure(); }
   catch (e) { logDetailedError('Yemot automatic setup', e); }
