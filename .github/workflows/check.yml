@@ -2,7 +2,7 @@ name: ext2 web download check
 on:
   push:
     branches: [verify/ext2-web-download]
-    paths: [verify/run.mjs, verify/go.txt, verify/want.txt, verify/script.txt, verify/diag.mjs]
+    paths: [verify/run.mjs, verify/go.txt, verify/want.txt, verify/script.txt, verify/diag.mjs, verify/diag2.mjs]
 permissions:
   contents: write
 jobs:
@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: WANT=$(cat verify/want.txt) node verify/$(cat verify/script.txt) > verify/report.txt 2>&1; echo "exit=$?" >> verify/report.txt; cat verify/report.txt
+      - run: WANT=$(cat verify/want.txt) Q="$(cat verify/go.txt)" node verify/$(cat verify/script.txt) > verify/report.txt 2>&1; echo "exit=$?" >> verify/report.txt; cat verify/report.txt
       - if: always()
         run: |
           git config user.name "live-check"; git config user.email "live-check@users.noreply.github.com"
