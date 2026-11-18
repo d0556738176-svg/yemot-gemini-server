@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs';
 import { webItem } from './web-items.js';
 import { mediaHeaderArgs } from './media-request-headers.js';
 import { refreshMakoItem } from './mako-public-media.js';
+import { downloadStreamMedia, streamDownloaderPath } from './stream-media-download.js';
 
 const require = createRequire(import.meta.url);
 // /usr/local/bin/yt-dlp is the up-to-date standalone build the server
@@ -99,6 +100,17 @@ export async function directDownload(videoId, output, { mode = 'audio', height, 
   const web = await refreshMakoItem(await webItem(videoId));
   const targets = web ? [web.url, ...(web.alternateUrls || [])] : [];
   if (web) clients = targets.map(() => '');
+  // Use the separately installed, free streaming tool for public web media.
+  // YouTube keeps its existing player/download path.
+  if (web && streamDownloaderPath()) {
+    for (const target of targets) {
+      try { return await downloadStreamMedia({ ...web, url: target }, output, { mode, ffmpegPath, signal, maxBytes, stallMs }); }
+      catch (e) {
+        if (e?.name === 'AbortError' || e?.code === 'too_large') throw e;
+        log.warn?.('[DIRECT] stream tool failed; trying next free path', { videoId, code: e?.code || 'direct_failed' });
+      }
+    }
+  }
   let last = null;
   for (const [attempt, client] of clients.entries()) {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
