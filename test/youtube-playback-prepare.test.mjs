@@ -16,10 +16,10 @@ test('worker ready result is used without fallback', async () => {
   let direct = 0;
   const r = await prepareYouTubePlayback(video, {
     env: workerEnv, log: quiet,
-    fetchImpl: async () => Response.json({ status: 'ready', playbackPaths: ['/2/a-001'] }),
+    fetchImpl: async () => Response.json({ status: 'ready', playbackPaths: ['/2/a_001'] }),
     downloadToYemot: async () => { direct++; return { playbackPaths: ['/x'] }; }
   });
-  assert.deepEqual(r.playbackPaths, ['/2/a-001']);
+  assert.deepEqual(r.playbackPaths, ['/2/a_001']);
   assert.equal(r.via, 'worker');
   assert.equal(direct, 0);
 });
@@ -28,7 +28,7 @@ test('platform 502 HTML from worker is worker_unreachable and falls back', async
   const r = await prepareYouTubePlayback(video, {
     env: workerEnv, log: quiet,
     fetchImpl: async () => new Response('<html>Bad Gateway</html>', { status: 502 }),
-    downloadToYemot: async () => ({ playbackPaths: ['/2/youtube-authorized/x-001'] })
+    downloadToYemot: async () => ({ playbackPaths: ['/2/youtube_authorized/x_001'] })
   });
   assert.equal(r.via, 'direct');
   assert.equal(r.attempts[0].code, 'worker_unreachable');

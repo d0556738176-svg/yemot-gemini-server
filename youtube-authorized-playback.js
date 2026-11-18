@@ -869,7 +869,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
       sourceTitle = local.title || null;
       apifyOk = true;
       console.info('[YouTube IVR] phone audio made from the downloaded video (no second download)', { videoId: id });
-    } else if (isApifyConfigured(process.env)) {
+    } else if (isApifyConfigured(process.env) || await webItem(id)) {
       try {
         ({ title: sourceTitle } = await downloadApifySource(id, source, signal, onProgress, consent));
         apifyOk = true;

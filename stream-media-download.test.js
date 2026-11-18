@@ -43,4 +43,12 @@ test('real streaming adapter downloads protected HLS in video and audio modes', 
   await downloadStreamMedia(web,audio,{bin:process.env.NM_TEST_BIN,mode:'audio',ffmpegPath:'/usr/bin/ffmpeg',maxBytes:1000000});
   const ai=JSON.parse(execFileSync('/usr/bin/ffprobe',['-v','error','-show_entries','stream=codec_type','-of','json',audio],{encoding:'utf8'}));
   assert.deepEqual(ai.streams.map(x=>x.codec_type),['audio']);
+  if(process.env.YTDLP_TEST_BIN){
+    process.env.N_M3U8DL_RE_PATH='/nonexistent/disabled-for-native-test';
+    const native=path.join(dir,'native.source');
+    const n=await directDownload(id,native,{bin:process.env.YTDLP_TEST_BIN,mode:'audio',ffmpegPath:'/usr/bin/ffmpeg',withCaptions:false,maxBytes:1000000,log:{info(){},warn(){}}});
+    assert.ok(n.bytes>0);
+    const ni=JSON.parse(execFileSync('/usr/bin/ffprobe',['-v','error','-show_entries','stream=codec_type','-of','json',native],{encoding:'utf8'}));
+    assert.ok(ni.streams.some(x=>x.codec_type==='audio'));
+  }
 });

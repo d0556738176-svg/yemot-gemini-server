@@ -7,6 +7,8 @@
 // Here every path receives an AbortSignal tied to the remaining budget, so
 // work really stops when the caller can no longer be answered.
 
+import { webItem } from './web-items.js';
+
 const DEFAULT_TOTAL_BUDGET_MS = 75000;
 const DEFAULT_WORKER_SHARE_MS = 45000;
 const MIN_FALLBACK_MS = 5000;
@@ -67,12 +69,16 @@ export async function prepareYouTubePlayback(video, deps) {
     saveCached = async () => {},
     onProgress = () => {},
     log = console,
-    signal: callerSignal
+    signal: callerSignal,
+    isWebMedia = async id => Boolean(await webItem(id))
   } = deps || {};
   const videoId = String(video?.videoId || '').trim();
   if (!videoId) throw codedError('invalid_video', 'Missing video id');
 
-  const totalMs = numberEnv(env, 'YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS', DEFAULT_TOTAL_BUDGET_MS);
+  const webMedia = await isWebMedia(videoId);
+  const totalMs = webMedia
+    ? numberEnv(env, 'WEB_MEDIA_PLAYBACK_TOTAL_BUDGET_MS', 15 * 60 * 1000)
+    : numberEnv(env, 'YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS', DEFAULT_TOTAL_BUDGET_MS);
   const started = Date.now();
   const remaining = () => totalMs - (Date.now() - started);
   const deadline = AbortSignal.timeout(totalMs);
@@ -94,7 +100,7 @@ export async function prepareYouTubePlayback(video, deps) {
   const workerSecret = String(env.YOUTUBE_AUDIO_WORKER_SECRET || '').trim();
   // When Apify is selected, a worker must not independently start another
   // provider run for the same video before the durable run coordinator.
-  if (workerBase && workerSecret && !String(env.APIFY_TOKEN||'').trim()) {
+  if (!webMedia && workerBase && workerSecret && !String(env.APIFY_TOKEN||'').trim()) {
     const workerMs = Math.min(
       numberEnv(env, 'YOUTUBE_AUDIO_WORKER_TIMEOUT_MS', DEFAULT_WORKER_SHARE_MS),
       Math.max(0, remaining() - MIN_FALLBACK_MS)
@@ -137,7 +143,7 @@ export async function prepareYouTubePlayback(video, deps) {
 
   let alternate = null;
   try {
-    alternate = await resolveAlternate(video);
+    alternate = webMedia ? null : await resolveAlternate(video);
     if (alternate) log.info('[YouTube IVR] publisher audio fallback matched', { videoId, source: alternate.source, score: alternate.score });
   } catch (error) {
     log.warn('[YouTube IVR] publisher audio fallback unavailable', { videoId, message: String(error?.message || '').slice(0, 120) });
@@ -200,4 +206,3 @@ export function playbackFailureMessage(code) {
     return 'הכנת ההשמעה לקחה יותר מדי זמן. אפשר לנסות שוב את אותה תוצאה, או לבחור תוצאה אחרת.';
   return 'לא הצלחתי להשמיע את התוצאה הזאת כרגע. התוצאות נשארו זמינות. אמור מספר של תוצאה אחרת, או אמור חיפוש חדש.';
 }
-

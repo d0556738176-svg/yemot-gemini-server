@@ -43,7 +43,7 @@ export function formatFor(mode, height) {
 export function argsFor(videoId, output, { mode = 'audio', height, client = '', ffmpegPath, target = null, impersonate = false, referer = null, httpHeaders = null } = {}) {
   const a = ['--no-warnings', '--no-playlist', '--newline', '--no-part', '--force-overwrites', '--no-cache-dir',
     '--retries', '3', '--fragment-retries', '5', '--socket-timeout', '30', '--concurrent-fragments', '4',
-    '-f', formatFor(mode, height), '-o', output,
+    '-f', target && mode !== 'video' ? 'bestaudio/best/best*' : formatFor(mode, height), '-o', output,
     '--print', 'after_move:TITLE:%(title)s', '--no-simulate', '--progress'];
   if (mode === 'video') a.push('--merge-output-format', 'mp4');
   if (ffmpegPath) a.push('--ffmpeg-location', ffmpegPath);
@@ -153,7 +153,7 @@ export async function directProbe(videoId, { mode = 'audio', height, timeoutMs =
   for (const [attempt, client] of clients.entries()) {
     const left = until - Date.now();
     if (left < 3000) break;
-    const args = ['--no-warnings', '--no-playlist', '--simulate', '-f', formatFor(mode, height), ...(client ? ['--extractor-args', 'youtube:player_client=' + client] : []), ...(web?.impersonate ? ['--impersonate', 'chrome'] : []), ...mediaHeaderArgs(web?.httpHeaders), ...(web?.referer ? ['--referer', web.referer] : []), '--', targets[attempt] || videoId];
+    const args = ['--no-warnings', '--no-playlist', '--simulate', '-f', web && mode !== 'video' ? 'bestaudio/best/best*' : formatFor(mode, height), ...(client ? ['--extractor-args', 'youtube:player_client=' + client] : []), ...(web?.impersonate ? ['--impersonate', 'chrome'] : []), ...mediaHeaderArgs(web?.httpHeaders), ...(web?.referer ? ['--referer', web.referer] : []), '--', targets[attempt] || videoId];
     const ok = await new Promise(resolve => {
       const p = spawn(bin, args, { stdio: 'ignore', env: { ...process.env, PATH: (process.env.PATH || '') + ':/usr/local/bin:/usr/bin' } });
       const t = setTimeout(() => { p.kill('SIGKILL'); resolve(false); }, left);
