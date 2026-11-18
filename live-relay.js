@@ -170,5 +170,30 @@ export function followingPieces(r, first, max = 3) {
   for (const p of r.pieces) if (p.no > out[out.length - 1].no && p.no === out[out.length - 1].no + 1 && out.length < max) out.push(p);
   return out;
 }
+// Check only (status page): plays `sec` seconds of a stream through the same
+// engine and filter as the relay, to nowhere. Nothing is uploaded or kept.
+export async function probeStream(url, { referer = null, impersonate = false, af = 'loudnorm=I=-16:TP=-2', sec = 8, ffmpegPath = null } = {}) {
+  const info = await resolveStreamInfo(url, { impersonate, referer });
+  if (!info?.url) return { ok: false, step: 'resolve', reason: info?.error || null };
+  const bins = [...new Set([...SYSTEM_FFMPEG.filter(b => existsSync(b)), ffmpegPath].filter(Boolean))];
+  const hdr = ffmpegHeaderArgs({ 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36', ...(referer ? { Referer: referer } : {}), ...(info.headers || {}) });
+  const tries = [];
+  for (const bin of bins) {
+    const t0 = Date.now();
+    const out = await new Promise(res => {
+      const p = spawn(bin, ['-hide_banner', '-loglevel', 'error', ...hdr, '-i', info.url, '-vn', '-ac', '1', '-ar', '16000', '-af', af, '-t', String(sec), '-f', 's16le', '-'], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let bytes = 0, err = '';
+      const k = setTimeout(() => p.kill('SIGKILL'), (sec + 40) * 1000);
+      p.stdout.on('data', d => { bytes += d.length; });
+      p.stderr.on('data', d => { err = (err + d).slice(-200); });
+      p.on('error', e => { clearTimeout(k); res({ code: null, signal: 'spawn', bytes, err: String(e?.message || e).slice(0, 120) }); });
+      p.on('close', (code, signal) => { clearTimeout(k); res({ code, signal, bytes, err: err.trim() }); });
+    });
+    const audioSec = Math.round(out.bytes / 32000 * 10) / 10;
+    tries.push({ engine: bin, ...out, audioSec, tookSec: Math.round((Date.now() - t0) / 1000) });
+    if (audioSec >= sec * 0.8) return { ok: true, engine: bin, audioSec, tries };
+  }
+  return { ok: false, step: 'audio', tries };
+}
 export const _relays = relays;
 export const _exists = existsSync;

@@ -5457,6 +5457,23 @@ app.get('/tv-status', rateLimit(30, 60 * 1000, 'tv-status'), async (req,res)=>{
     live: [..._relays.values()].filter(r=>!r.stopped).map(r=>({ title:r.title, site:host(r.url), pieces:r.next, inYemot:r.pieces.length, error:r.error, events:r.events.slice(-12) })),
     stopped: relayHistory().map(r=>({ ...r, url:undefined, site:host(r.url) })) });
 });
+// Plays 8 seconds of every channel through the relay's engine, to nowhere
+// (read-only: no call, no upload, nothing kept). One at a time.
+let tvProbeRun=null;
+app.get('/tv-probe', rateLimit(3, 60 * 1000, 'tv-probe'), async (req,res)=>{
+  const TV=await import('./branch2-tv.js'); const { probeStream }=await import('./live-relay.js');
+  const ffmpegPath=(await import('ffmpeg-static')).default;
+  tvProbeRun ||= (async()=>{ const deps=await tvDeps(); const out=[];
+    for(const ch of TV.TV_CHANNELS) {
+      const src=await TV.findChannelSource(ch,deps).catch(()=>({page:null}));
+      if(!src.page) { out.push({key:ch.key,title:ch.title,ok:false,step:'source'}); continue; }
+      const r=await probeStream(src.page,{referer:src.referer||null,impersonate:!!src.impersonate,af:TV.TV_AUDIO_FILTER,ffmpegPath}).catch(e=>({ok:false,step:'error',reason:String(e?.message||e).slice(0,120)}));
+      out.push({key:ch.key,title:ch.title,...r});
+    }
+    return { at:new Date().toISOString(), channels:out };
+  })().finally(()=>setTimeout(()=>{ tvProbeRun=null; },60000));
+  res.json(await tvProbeRun);
+});
 app.get('/tv-check', rateLimit(4, 60 * 1000, 'tv-check'), async (req,res)=>{
   const TV=await import('./branch2-tv.js');
   res.json({ channels: await TV.checkAllChannels(await tvDeps()) });
