@@ -50,6 +50,9 @@ export function argsFor(videoId, output, { mode = 'audio', height, client = '', 
   if (client) a.push('--extractor-args', 'youtube:player_client=' + client);
   if (impersonate) a.push('--impersonate', 'chrome');
   if (target) a.push('--abort-on-unavailable-fragments');
+  // Phone audio is decoded/remuxed by our shared conversion stage. A second
+  // yt-dlp container-fixup pass can fail after all HLS bytes were downloaded.
+  if (target && mode !== 'video') a.push('--fixup', 'never');
   a.push(...mediaHeaderArgs(httpHeaders));
   // A player found inside another page (e.g. Vimeo) plays only for that page.
   if (referer) a.push('--referer', referer);
@@ -104,7 +107,7 @@ export async function directDownload(videoId, output, { mode = 'audio', height, 
   // YouTube keeps its existing player/download path.
   if (web && streamDownloaderPath()) {
     for (const target of targets) {
-      try { return await downloadStreamMedia({ ...web, url: target }, output, { mode, ffmpegPath, signal, maxBytes, stallMs }); }
+      try { return await downloadStreamMedia({ ...web, url: target }, output, { mode, height, ffmpegPath, signal, maxBytes, stallMs }); }
       catch (e) {
         if (e?.name === 'AbortError' || e?.code === 'too_large') throw e;
         log.warn?.('[DIRECT] stream tool failed; trying next free path', { videoId, code: e?.code || 'direct_failed' });

@@ -7,7 +7,8 @@ produce playable items. No login, paid API, or external decryption key is used.
 When `/usr/local/bin/N_m3u8DL-RE` exists (or `N_M3U8DL_RE_PATH` identifies an
 installed binary), web HLS/DASH items first use that tool. YouTube retains its
 existing path. Without the binary, the existing yt-dlp path remains available.
-The streaming fallback selects the lowest available stream, uses two download
+The streaming fallback follows the regular job's video-resolution ceiling and
+selects the best available audio source. It uses two download
 threads, verifies segment counts, limits stalled jobs, kills its process group
 on cancellation, and removes its temporary directory. FFmpeg creates the
 video or audio-only output consumed by the existing conversion/upload jobs.
