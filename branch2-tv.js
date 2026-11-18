@@ -16,12 +16,12 @@
 // ivr2:/2/8/channels.txt, lines "1=https://..." (one or more, tried in order).
 
 export const TV_CHANNELS = Object.freeze([
-  { key: '1', title: 'כאן 11', pages: ['https://www.kan.org.il/live/'], yt: 'כאן 11 שידור חי', owner: /^כאן\b|כאן 11|kan ?11|כאן \| חדשות|kan news/i, alt: ['כאן חדשות שידור חי'] },
+  { key: '1', title: 'כאן 11', pages: ['https://www.kan.org.il/live/', 'https://kancdn.medonecdn.net/livehls/oil/kancdn-live/live/kan11/live.livx/playlist.m3u8'], yt: 'כאן 11 שידור חי', owner: /^כאן\b|כאן 11|kan ?11|כאן \| חדשות|kan news/i, alt: ['כאן חדשות שידור חי'] },
   { key: '2', title: 'ערוץ 12', pages: ['https://www.mako.co.il/mako-vod-live-tv/VOD-6540b8dcb64fd31006.htm'], yt: 'חדשות 12 שידור חי', owner: /\bN12\b|חדשות 12|קשת 12|keshet ?12|mako/i, alt: ['N12 live'] },
   { key: '3', title: 'ערוץ 13', pages: ['https://13tv.co.il/allshows/2010263/'], yt: 'חדשות 13 שידור חי', owner: /חדשות 13|רשת 13|reshet ?13|13 ?tv|ערוץ 13|כאן 13/i, alt: ['רשת 13 שידור חי'] },
-  { key: '4', title: 'ערוץ 14', pages: ['https://www.c14.co.il/live'], yt: 'ערוץ 14 שידור חי', owner: /\bC14\b|ערוץ 14|עכשיו 14|now ?14/i },
-  { key: '5', title: 'איי 24 ניוז', pages: ['https://www.i24news.co.il/live', 'https://www.i24news.tv/he/live'], yt: 'i24NEWS עברית שידור חי', owner: /i24/i },
-  { key: '6', title: 'ערוץ הכנסת', pages: ['https://www.knesset.tv/live/'], yt: 'ערוץ הכנסת שידור חי', owner: /כנסת|knesset/i, alt: ['ערוץ כנסת שידור חי', 'Knesset live'] },
+  { key: '4', title: 'ערוץ 14', pages: ['https://www.c14.co.il/live', 'https://r.il.cdn-redge.media/livehls/oil/ch14/live/ch14/live.livx/playlist.m3u8'], yt: 'ערוץ 14 שידור חי', owner: /\bC14\b|ערוץ 14|עכשיו 14|now ?14/i },
+  { key: '5', title: 'איי 24 ניוז', pages: ['https://www.i24news.co.il/live', 'https://www.i24news.tv/he/live', 'https://i24newshebrew-cdn.encoders.immergo.tv/master.m3u8'], yt: 'i24NEWS עברית שידור חי', owner: /i24/i },
+  { key: '6', title: 'ערוץ הכנסת', pages: ['https://www.knesset.tv/live/', 'https://contact.gostreaming.tv/Knesset/myStream/playlist.m3u8'], yt: 'ערוץ הכנסת שידור חי', owner: /כנסת|knesset/i, alt: ['ערוץ כנסת שידור חי', 'Knesset live'] },
   { key: '7', title: 'רדיו איי 24 ניוז', pages: ['https://www.i24news.co.il/live-radio'] },
   { key: '8', title: 'רדיו ערוץ 14', pages: ['https://www.c14.co.il/radio'] },
 ]);
