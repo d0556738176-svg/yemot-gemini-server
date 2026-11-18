@@ -10,6 +10,8 @@ const SITES = {
   'jdn.co.il': 'ג\'י די אן', 'behadrey.co.il': 'בחדרי חרדים', 'tiktok.com': 'טיקטוק', 'twitter.com': 'טוויטר', 'x.com': 'אקס',
 };
 
+export const WEB_PAGE_SIZE = 20;
+
 // "hidabroot.org" -> "הידברות"; an unknown site by its name without the ending.
 export function siteName(host) {
   const h = String(host || '').toLowerCase().replace(/^(?:www|m|he|il)\./, '');

@@ -7,6 +7,8 @@
 import { spawn } from 'node:child_process';
 import { ytdlpPath } from './youtube-direct.js';
 import { registerWebItem } from './web-items.js';
+import { mediaRequestHeaders, mediaHeaderArgs } from './media-request-headers.js';
+import { isMakoEpisode, resolveMakoPublic } from './mako-public-media.js';
 
 const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const YT = /(?:youtube\.com|youtu\.be)\//i;
@@ -29,9 +31,9 @@ export async function webCandidates(q, { env = process.env, fetchImpl = fetch, t
   return [];
 }
 
-function probe(url, { bin = ytdlpPath(), impersonate = false, timeoutMs = 30000, referer = null } = {}) {
+function probe(url, { bin = ytdlpPath(), impersonate = false, timeoutMs = 30000, referer = null, httpHeaders = null } = {}) {
   return new Promise(resolve => {
-    const args = ['--no-warnings', '--dump-single-json', '--no-playlist', '--playlist-items', '1', '--socket-timeout', '15', ...(impersonate ? ['--impersonate', 'chrome'] : []), ...(referer ? ['--referer', referer] : []), '--', url];
+    const args = ['--no-warnings', '--ignore-config', '--no-cache-dir', '--dump-single-json', '--no-playlist', '--playlist-items', '1', '--socket-timeout', '10', '--retries', '0', '--extractor-retries', '0', ...(impersonate ? ['--impersonate', 'chrome'] : []), ...mediaHeaderArgs(httpHeaders), ...(referer ? ['--referer', referer] : []), '--', url];
     const p = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: (process.env.PATH || '') + ':/usr/local/bin:/usr/bin' } });
     let out = '', err = '';
     const t = setTimeout(() => { p.kill('SIGKILL'); resolve({ ok: false, err: 'timeout' }); }, timeoutMs);
@@ -73,9 +75,9 @@ export function mediaInHtml(html, pageUrl) {
   }
   for (const n of ['og:video:secure_url', 'og:video:url', 'og:video', 'og:audio:secure_url', 'og:audio', 'twitter:player:stream']) { const v = meta(n); if (v) found.push(abs(v)); }
   for (const m of html.matchAll(/<(?:audio|video|source)[^>]+src=["']([^"']+)["']/gi)) found.push(abs(m[1]));
-  for (const m of html.matchAll(/["'(=]((?:https?:)?\/\/[^"'()\s<>]+?\.(?:mp3|m4a|aac|ogg|opus|wav|flac|mp4|m4v|webm|m3u8)(?:\?[^"'()\s<>]*)?)["')\s]/gi)) found.push(abs(m[1]));
-  const media = found.filter(u => u && /^https?:/i.test(u) && !/\.(?:jpg|jpeg|png|gif|svg|webp)(?:\?|$)/i.test(u));
-  if (media.length) return { media: media[0], title, image };
+  for (const m of html.matchAll(/["'(=]((?:https?:)?\/\/[^"'()\s<>]+?\.(?:mp3|m4a|aac|ogg|opus|wav|flac|mp4|m4v|webm|m3u8|mpd|ism)(?:\?[^"'()\s<>]*)?)["')\s]/gi)) found.push(abs(m[1]));
+  const media = [...new Set(found.filter(u => u && /^https?:/i.test(u) && !/\.(?:jpg|jpeg|png|gif|svg|webp)(?:\?|$)/i.test(u)))];
+  if (media.length) return { media: media[0], mediaUrls: media.slice(0, 6), title, image };
   const yt = html.match(/(?:youtube(?:-nocookie)?\.com\/embed\/|youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
   if (yt) return { youtube: 'https://www.youtube.com/watch?v=' + yt[1], title };
   return null;
@@ -89,23 +91,53 @@ async function scanPage(url, { fetchImpl = fetch, timeoutMs = 12000 } = {}) {
   } catch { return null; }
 }
 
+// Some HLS/DASH playlists omit CODECS, so yt-dlp cannot label their tracks.
+// Ask ffprobe about the real stream instead of discarding it or guessing.
+export function probeMediaStreams(url, { timeoutMs = 8000, headers = {}, bin = process.env.FFPROBE_PATH || 'ffprobe' } = {}) {
+  return new Promise(resolve => {
+    const context = Object.entries(mediaRequestHeaders(headers)).map(([k, v]) => k + ': ' + v + '\r\n').join('');
+    const p = spawn(bin, ['-v', 'error', '-analyzeduration', '2000000', '-probesize', '1000000', ...(context ? ['-headers', context] : []), '-show_entries', 'stream=codec_type:format=duration', '-of', 'json', url], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    const timer = setTimeout(() => { p.kill('SIGKILL'); resolve(null); }, Math.max(1, timeoutMs));
+    p.stdout.on('data', d => { out += d; if (out.length > 100000) p.kill('SIGKILL'); });
+    p.on('error', () => { clearTimeout(timer); resolve(null); });
+    p.on('close', code => { clearTimeout(timer); try { resolve(code === 0 ? JSON.parse(out) : null); } catch { resolve(null); } });
+  });
+}
+
 // One link -> a playable item, a YouTube link ({youtube}), or null.
 export async function inspectLink(c, opts = {}) {
-  const runProbe = opts.probe || probe;
+  // One deadline includes extraction, browser-transport retry and page scan.
+  // Previously each retry received a fresh 30 seconds, overrunning the call.
+  const until = Date.now() + (opts.timeoutMs ?? 30000);
+  const remaining = () => Math.max(0, until - Date.now());
+  const runProbe = (url, extra = {}) => remaining() > 0
+    ? (opts.probe || probe)(url, { ...opts, ...extra, timeoutMs: remaining() })
+    : Promise.resolve({ ok: false, err: 'timeout' });
   const unavailable = result => {
     opts.onFailure?.({ reason: /403|401|forbidden|access denied|captcha|challenge/i.test(result?.err || '') ? 'access_denied' : /timeout/i.test(result?.err || '') ? 'timeout' : 'unsupported' });
     return null;
   };
-  let r = await runProbe(c.url, opts), impersonate = false;
+  const resolved = isMakoEpisode(c.url) ? await (opts.resolveMako || resolveMakoPublic)(c.url, { timeoutMs: Math.min(15000, remaining()), ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}) }) : null;
+  if (resolved?.reason === 'access_denied' && !resolved.media) return unavailable({ err: 'access denied' });
+  let r = resolved?.media ? { ok: false, err: 'resolved public source' } : await runProbe(c.url, opts), impersonate = false;
   if (!r.ok && /403|cloudflare|captcha|forbidden|challenge/i.test(r.err || '')) { r = await runProbe(c.url, { ...opts, impersonate: true }); impersonate = true; }
   let page = null;
   if (!r.ok || r.info?.extractor_key === 'Generic' && !(Number(r.info?.duration) > 0) && !(r.info?.formats || []).length) {
     // Deeper: the page's own HTML (owner, 18.11: "scan every page").
-    const sc = await (opts.scan || scanPage)(c.url);
+    const sc = resolved?.media ? resolved : remaining() > 0 ? await (opts.scan || scanPage)(c.url, { timeoutMs: Math.min(12000, remaining()) }) : null;
     if (sc?.youtube) return { youtube: sc.youtube, title: sc.title || c.title };
     if (!sc?.media) return unavailable(r);
-    page = { url: c.url, title: sc.title, image: sc.image };
-    r = await runProbe(sc.media, { ...opts, referer: c.url }); impersonate = false;
+    page = { url: c.url, title: sc.title, image: sc.image, httpHeaders: sc.httpHeaders };
+    // An advert or embedded player may appear before the actual file. Try a
+    // small bounded set, retaining the same deadline and page Referer.
+    for (const media of (sc.mediaUrls || [sc.media]).slice(0, 6)) {
+      r = await runProbe(media, { referer: sc.httpHeaders?.Referer || c.url, httpHeaders: sc.httpHeaders }); impersonate = false;
+      if (!r.ok && /403|cloudflare|captcha|forbidden|challenge/i.test(r.err || '') && remaining() > 0) {
+        r = await runProbe(media, { referer: sc.httpHeaders?.Referer || c.url, httpHeaders: sc.httpHeaders, impersonate: true }); impersonate = r.ok;
+      }
+      if (r.ok || remaining() <= 0) break;
+    }
     if (!r.ok) return unavailable(r);
   }
   const isLive = j0 => !!(j0?.is_live || j0?.live_status === 'is_live');
@@ -116,8 +148,17 @@ export async function inspectLink(c, opts = {}) {
   if (j?._type === 'playlist') j = (j.entries || [])[0];
   if (!j) return null;
   const f = Array.isArray(j.formats) && j.formats.length ? j.formats : [j];
-  const hasVideo = f.some(x => x.vcodec && x.vcodec !== 'none') || (!!j.width && j.vcodec !== 'none');
-  const hasAudio = f.some(x => x.acodec && x.acodec !== 'none') || (j.acodec && j.acodec !== 'none') || /^(mp3|m4a|aac|opus|ogg|wav|flac)$/i.test(j.ext || '');
+  let hasVideo = f.some(x => x.vcodec && x.vcodec !== 'none') || (!!j.width && j.vcodec !== 'none');
+  let hasAudio = f.some(x => x.acodec && x.acodec !== 'none') || (j.acodec && j.acodec !== 'none') || /^(mp3|m4a|aac|opus|ogg|wav|flac)$/i.test(j.ext || '');
+  if (!hasAudio && remaining() > 0) {
+    const streamUrl = j.url || f.find(x => x.url)?.url;
+    if (streamUrl && /^https?:\/\//i.test(streamUrl)) {
+      const tracks = await (opts.probeStreams || probeMediaStreams)(streamUrl, { timeoutMs: Math.min(8000, remaining()), headers: { ...mediaRequestHeaders(j.http_headers), ...mediaRequestHeaders(page?.httpHeaders), ...(page && !page.httpHeaders?.Referer ? { Referer: page.url } : {}) } });
+      hasVideo = hasVideo || !!tracks?.streams?.some(x => x.codec_type === 'video');
+      hasAudio = hasAudio || !!tracks?.streams?.some(x => x.codec_type === 'audio');
+      if (!Number(j.duration) && Number(tracks?.format?.duration) > 0) j = { ...j, duration: Number(tracks.format.duration) };
+    }
+  }
   if (!hasVideo && !hasAudio) return null;
   const live = isLive(j) || isLive(r.info); // owner, 18.11: live broadcasts are played through the relay
   if (j.extractor_key === 'Generic' && !(Number(j.duration) > 0) && !hasAudio && !hasVideo) return null;
@@ -129,12 +170,13 @@ export async function inspectLink(c, opts = {}) {
   const shownUrl = page ? page.url : pageUrl;
   const bareTitle = page && (!j.title || /^[\w.-]+$/.test(String(j.title)));
   const item = {
-    url: pageUrl, page: page ? page.url : null, referer: page ? page.url : null,
+    url: pageUrl, page: page ? page.url : null, referer: page ? page.httpHeaders?.Referer || page.url : null,
     title: String((bareTitle ? page.title || c.title : j.title) || c.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || hostOf(shownUrl),
     site: hostOf(shownUrl) || c.site, siteName: j.extractor_key && j.extractor_key !== 'Generic' ? j.extractor_key : null,
     uploader: j.uploader || j.channel || j.creator || c.source || null, description: String(j.description || c.snippet || '').slice(0, 4000),
     thumbnail: j.thumbnail || page?.image || c.image || null, durationSec, uploadDate: j.upload_date || null, views: Number.isFinite(j.view_count) ? j.view_count : null,
     tags: Array.isArray(j.tags) ? j.tags.slice(0, 30) : null, hasVideo: live ? false : hasVideo, hasAudio, impersonate, live,
+    httpHeaders: { ...mediaRequestHeaders(j.http_headers), ...mediaRequestHeaders(page?.httpHeaders) },
   };
   return { ...item, id: registerWebItem(item) };
 }
@@ -167,10 +209,10 @@ export function youtubeLiveNow(q, { bin = ytdlpPath(), timeoutMs = 40000, max = 
   });
 }
 export const LIVE_WORDS = /(?:שידור חי|שידורים חיים|בשידור חי|בלייב|לייב|\blive\b|ערוץ חי|רדיו)/iu;
-export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, limit = 30, onProgress = () => {}, candidates = null, inspect = inspectLink, live = LIVE_WORDS.test(String(q)) } = {}) {
+export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, limit = 60, onProgress = () => {}, candidates = null, inspect = inspectLink, live = LIVE_WORDS.test(String(q)) } = {}) {
   const started = Date.now();
   const liveNow = live && !candidates ? youtubeLiveNow(q).catch(() => []) : Promise.resolve([]);
-  const list = (candidates || await webCandidates(q, { env })).slice(0, 60);
+  const list = (candidates || await webCandidates(q, { env })).slice(0, 100);
   onProgress({ stage: 'checking', total: list.length, done: 0, found: 0 });
   const found = [], youtube = [], unavailable = [];
   let next = 0, done = 0;

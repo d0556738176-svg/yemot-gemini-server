@@ -4358,8 +4358,8 @@ async function youtubeCallHandler(call) {
     if(!results.length) return {say:W.noResultsText(found,q)};
     let start=0, note='נמצאו '+results.length+' תוצאות. ', withList=true, empty=0;
     while(true) {
-      const more=start+PAGE<results.length;
-      const list=withList?W.resultsPageText(results,start,PAGE,{spoken:sanitizeForYemot})+' ':'';
+      const more=start+W.WEB_PAGE_SIZE<results.length;
+      const list=withList?W.resultsPageText(results,start,W.WEB_PAGE_SIZE,{spoken:sanitizeForYemot})+' ':'';
       const hint='לבחירה הקש את מספר התוצאה וסולמית. '+(more?'לעוד תוצאות הקש 0 וסולמית. ':'')+'לחיפוש חדש הקש 0 0 וסולמית. לתפריט הראשי הקש כוכבית.';
       const v=await tap(note+list+hint,{max_digits:Math.max(2,String(results.length).length),sec_wait:10});
       note=''; withList=false;
@@ -4368,7 +4368,7 @@ async function youtubeCallHandler(call) {
       if(v==='None'||!v) { if(++empty>=4) return {say:'לא נבחרה תוצאה.'}; continue; }
       empty=0;
       if(v==='00') return {};
-      if(v==='0') { if(more) { start+=PAGE; withList=true; } else note='אין עוד תוצאות. '; continue; }
+      if(v==='0') { if(more) { start+=W.WEB_PAGE_SIZE; withList=true; } else note='אין עוד תוצאות. '; continue; }
       const n=Number(v);
       if(!(/^\d+$/.test(v)&&n>=1&&n<=results.length)) { note='אין תוצאה במספר '+v+'. '; continue; }
       const it=results[n-1];
