@@ -16,12 +16,12 @@
 // ivr2:/2/8/channels.txt, lines "1=https://..." (one or more, tried in order).
 
 export const TV_CHANNELS = Object.freeze([
-  { key: '1', title: 'כאן 11', pages: ['https://www.kan.org.il/live/'], yt: 'כאן 11 שידור חי', owner: /כאן|kan/i },
-  { key: '2', title: 'ערוץ 12', pages: [], yt: 'חדשות 12 שידור חי', owner: /N12|חדשות 12|keshet|קשת|mako/i },
-  { key: '3', title: 'ערוץ 13', pages: [], yt: 'חדשות 13 שידור חי', owner: /13|רשת/i },
-  { key: '4', title: 'ערוץ 14', pages: [], yt: 'ערוץ 14 שידור חי', owner: /14/i },
+  { key: '1', title: 'כאן 11', pages: ['https://www.kan.org.il/live/'], yt: 'כאן 11 שידור חי', owner: /^כאן\b|כאן 11|kan ?11|כאן \| חדשות|kan news/i, alt: ['כאן חדשות שידור חי'] },
+  { key: '2', title: 'ערוץ 12', pages: [], yt: 'חדשות 12 שידור חי', owner: /\bN12\b|חדשות 12|קשת 12|keshet ?12|mako/i, alt: ['N12 live'] },
+  { key: '3', title: 'ערוץ 13', pages: [], yt: 'חדשות 13 שידור חי', owner: /חדשות 13|רשת 13|reshet ?13|13 ?tv|ערוץ 13|כאן 13/i, alt: ['רשת 13 שידור חי'] },
+  { key: '4', title: 'ערוץ 14', pages: [], yt: 'ערוץ 14 שידור חי', owner: /\bC14\b|ערוץ 14|עכשיו 14|now ?14/i },
   { key: '5', title: 'איי 24 ניוז', pages: ['https://www.i24news.tv/he/live'], yt: 'i24NEWS עברית שידור חי', owner: /i24/i },
-  { key: '6', title: 'ערוץ הכנסת', pages: [], yt: 'ערוץ הכנסת שידור חי', owner: /כנסת|knesset/i },
+  { key: '6', title: 'ערוץ הכנסת', pages: [], yt: 'ערוץ הכנסת שידור חי', owner: /כנסת|knesset/i, alt: ['ערוץ כנסת שידור חי', 'Knesset live'] },
 ]);
 
 // Speech-friendly phone sound (owner's spec for shiurim/lessons, 18.11): cut
@@ -64,15 +64,22 @@ export async function findChannelSource(ch, deps, { fresh = false } = {}) {
     tried.push(page);
     if (src) { const r = { page, at: Date.now(), how: 'site', impersonate: true }; cache.set(ch.key, r); return r; }
   }
-  const live = await deps.youtubeLiveNow(ch.yt).catch(() => []);
-  const yt = pickOfficialLive(ch, live);
+  // YouTube "live now": the main search, then the channel's other names.
+  let live = [], yt = null; const seen = [];
+  for (const q of [ch.yt, ...(ch.alt || [])]) {
+    const found = await deps.youtubeLiveNow(q).catch(() => []);
+    live = live.concat(found);
+    for (const e of found) if (e?.uploader && !seen.includes(e.uploader)) seen.push(e.uploader);
+    yt = pickOfficialLive(ch, found);
+    if (yt) break;
+  }
   if (yt) {
     const src = await deps.resolveStream(yt.url, {}).catch(() => null);
     if (src) { const r = { page: yt.url, at: Date.now(), how: 'youtube', uploader: yt.uploader || null, impersonate: false }; cache.set(ch.key, r); return r; }
     tried.push(yt.url);
   }
   cache.delete(ch.key);
-  return { page: null, tried, liveFound: (live || []).length };
+  return { page: null, tried, liveFound: live.length, seen: seen.slice(0, 20) };
 }
 
 export function forget(key) { cache.delete(key); }
@@ -96,7 +103,7 @@ export async function checkAllChannels(deps) {
     const out = [];
     for (const ch of TV_CHANNELS) {
       const r = await findChannelSource(ch, deps, { fresh: true }).catch(e => ({ page: null, reason: String(e?.message || e).slice(0, 100) }));
-      const row = { key: ch.key, title: ch.title, ok: !!r.page, page: r.page || null, how: r.how || null, uploader: r.uploader || null, tried: r.tried || undefined, liveFound: r.liveFound, at: new Date().toISOString() };
+      const row = { key: ch.key, title: ch.title, ok: !!r.page, page: r.page || null, how: r.how || null, uploader: r.uploader || null, tried: r.tried || undefined, liveFound: r.liveFound, seen: r.seen || undefined, at: new Date().toISOString() };
       lastCheck.set(ch.key, row); out.push(row);
     }
     checkedAt = Date.now();
