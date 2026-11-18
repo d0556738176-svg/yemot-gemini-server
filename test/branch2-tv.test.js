@@ -42,3 +42,12 @@ test('source: nothing playable -> no page (caller hears "not available")', async
   const r = await findChannelSource(ch, { resolveStream: async () => null, youtubeLiveNow: async () => [] });
   assert.equal(r.page, null);
 });
+
+test('channel 13 never takes another station with 13 in its name', () => {
+  const ch = TV_CHANNELS.find(c => c.key === '3');
+  assert.equal(pickOfficialLive(ch, [{ url: 'u1', uploader: 'ABC13 Houston' }]), null);
+  assert.equal(pickOfficialLive(ch, [{ url: 'u2', uploader: 'חדשות 13' }]).url, 'u2');
+  const c14 = TV_CHANNELS.find(c => c.key === '4');
+  assert.equal(pickOfficialLive(c14, [{ url: 'x', uploader: 'WFLA 14' }]), null);
+  assert.equal(pickOfficialLive(c14, [{ url: 'y', uploader: 'C14' }]).url, 'y');
+});
