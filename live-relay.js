@@ -60,7 +60,7 @@ export function startRelay(item, deps) {
       if (!src) { r.error = 'no_stream'; if (++restarts >= 3) break; await new Promise(x => setTimeout(x, 5000)); continue; }
       const startNo = r.next;
       const args = ['-hide_banner', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '10',
-        '-i', src, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-af', 'loudnorm=I=-16:TP=-2',
+        '-i', src, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-af', item.af || 'loudnorm=I=-16:TP=-2',
         '-f', 'segment', '-segment_time', String(SEG_SEC), '-segment_start_number', String(startNo), '-reset_timestamps', '1', path.join(dir, '%03d.wav')];
       log.info?.('[LIVE] relay listening', { id, restart: restarts });
       await new Promise(res => {
@@ -77,9 +77,12 @@ export function startRelay(item, deps) {
   })().catch(e => { r.error = 'relay_failed'; log.warn?.('[LIVE] relay failed', { id, message: String(e?.message || e).slice(0, 160) }); r.stop('relay_failed'); });
 
   // A piece is finished when the next one has started: then it is uploaded.
-  let busy = false;
+  let busy = false, beat = Date.now();
   r.timer = setInterval(async () => {
     if (busy || r.stopped) return;
+    // A log line every minute while callers listen: the server's updater
+    // restarts the app only after 90 quiet seconds, so it never cuts a listener.
+    if (Date.now() - beat > 60000) { beat = Date.now(); log.info?.('[LIVE] relay on air', { id, pieces: r.next }); }
     if (Date.now() - r.lastSeen > IDLE_MS) return r.stop('no_listeners');
     if (Date.now() - r.startedAt > MAX_MS) return r.stop('time_limit');
     busy = true;

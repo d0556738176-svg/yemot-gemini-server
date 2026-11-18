@@ -4270,13 +4270,18 @@ async function youtubeCallHandler(call) {
   // in Yemot and they play one after another, about a minute behind live.
   // * = main menu, # = stop and back to the results.
   async function liveListen(it) {
-    const { startRelay, nextPiece, SEG_SEC } = await import('./live-relay.js');
     const { webItem } = await import('./web-items.js');
     const w=await webItem(it.videoId);
     if(!w?.url) return {say:'השידור לא נמצא. '};
+    return liveListenItem({url:w.url,title:it.title,impersonate:w.impersonate,referer:w.referer||null});
+  }
+  // The relay itself, for any live source (web search results and the TV channels of key 8).
+  async function liveListenItem(item) {
+    const it=item;
+    const { startRelay, nextPiece, SEG_SEC } = await import('./live-relay.js');
     const p=(await import('./youtube-authorized-playback.js'))._pipeline;
     const ffmpegPath=(await import('ffmpeg-static')).default;
-    const relay=startRelay({url:w.url,title:it.title,impersonate:w.impersonate,referer:w.referer||null},{ffmpegPath,log:console,
+    const relay=startRelay(item,{ffmpegPath,log:console,
       upload:(f,r)=>p.uploadToYemot(f,r,undefined,{convertAudio:false,single:true}),
       del:async remote=>{ const x=new URL(p.YEMOT_API_BASE+'/FileAction'); x.searchParams.set('token',p.yemotApiKey()); x.searchParams.set('action','delete'); x.searchParams.set('what',remote); await fetch(x,{signal:AbortSignal.timeout(8000)}).catch(()=>{}); }});
     console.info('[LIVE] caller joined',{id:relay.id,title:String(it.title).slice(0,80)});
@@ -4302,6 +4307,32 @@ async function youtubeCallHandler(call) {
       if(k.includes('*')) return {exit:true};
       if(k==='#'||k==='1') return {say:'השידור החי נעצר. '};
     }
+  }
+
+  // Owner, 18.11: key 8 at the start = six live TV channels (audio only),
+  // streamed from our own server through the live relay. * = back.
+  async function tvMenu() {
+    const TV=await import('./branch2-tv.js');
+    let note='';
+    for(let round=0;round<6;round++) {
+      const k=String(await call.read([{type:'text',data:sanitizeForYemot(TV.menuText(note))}],'tap',
+        {max_digits:1,min_digits:1,sec_wait:8,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'tv'+(++tapNo),timeout:10*60*1000,
+         digits_allowed:['1','2','3','4','5','6','*']})||'None').trim();
+      branch2KeyLog('tv',k,0,0);
+      if(k.includes('*')) return {};
+      if(k==='None') { if(round>=1) return {}; note=''; continue; }
+      const ch=TV.TV_CHANNELS.find(c=>c.key===k);
+      if(!ch) { note='ההקשה '+k+' אינה אחת האפשרויות. '; continue; }
+      const deps=await tvDeps();
+      const src=await TV.findChannelSource(ch,deps);
+      console.info('[TV] channel chosen',{key:ch.key,ok:!!src.page,how:src.how||null});
+      if(!src.page) { note='השידור של '+ch.title+' אינו זמין כרגע. '; continue; }
+      const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,af:TV.TV_AUDIO_FILTER});
+      if(r.exit) return {exit:true};
+      if(r.say&&/לא הצלחתי|לא מגיע|נקטע|הסתיים/.test(r.say)) TV.forget(ch.key);
+      note=r.say||'';
+    }
+    return {};
   }
 
   async function webFlow(mode) {
@@ -4605,13 +4636,18 @@ async function youtubeCallHandler(call) {
         }
         if(!searchMode) {
           const choice=String(await call.read(
-            [{type:'text',data:sanitizeForYemot((said?said+' ':'')+'לחיפוש ביוטיוב בדיבור הקש 1. לחיפוש בהקלדה במקשי הטלפון הקש 2. להיסטוריית החיפושים הקש 4. לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3. לחזרה לתפריט הראשי הקש כוכבית.')}],
+            [{type:'text',data:sanitizeForYemot((said?said+' ':'')+'לחיפוש ביוטיוב בדיבור הקש 1. לחיפוש בהקלדה במקשי הטלפון הקש 2. להיסטוריית החיפושים הקש 4. לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3. לשידורים החיים של ערוצי הטלוויזיה הקש 8. לחזרה לתפריט הראשי הקש כוכבית.')}],
             'tap',
             {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'m'+(++tapNo),timeout:10*60*1000,
-             digits_allowed:['1','2','3','4','5','6','*']}
+             digits_allowed:['1','2','3','4','5','6','8','*']}
           )||'None').trim();
           console.info('[YouTube IVR] search mode',{choice}); branch2KeyLog('mode',choice,0,0);
           if(choice.includes('*')) return call.go_to_folder('/');
+          if(choice==='8') {
+            const t=await tvMenu();
+            if(t.exit) return call.go_to_folder('/');
+            continue;
+          }
           if(choice==='5'||choice==='6'||choice==='3') {
             const w=await webFlow(choice==='5'?'voice':choice==='6'?'type':'history');
             if(w.exit) return call.go_to_folder('/');
@@ -5386,6 +5422,36 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
   totalCallers:new Set(conversationLog.map(x=>x.phone)).size,
   serverTime:new Date().toISOString()
 }));
+// Extension 2 key 8 (live TV): sources and status. Read-only: no calls,
+// no Yemot changes, no keys shown.
+async function tvDeps() {
+  const { resolveStream } = await import('./live-relay.js');
+  const { youtubeLiveNow } = await import('./web-media.js');
+  const { parseOverrides } = await import('./branch2-tv.js');
+  let overrides={};
+  try {
+    const p=(await import('./youtube-authorized-playback.js'))._pipeline;
+    const u=new URL(p.YEMOT_API_BASE+'/GetTextFile'); u.searchParams.set('token',p.yemotApiKey()); u.searchParams.set('what','ivr2:/2/8/channels.txt');
+    const j=await (await fetch(u,{signal:AbortSignal.timeout(6000)})).json().catch(()=>null);
+    if(j?.responseStatus==='OK') overrides=parseOverrides(j.contents);
+  } catch {}
+  return { resolveStream, youtubeLiveNow, overrides };
+}
+// Keep the six channel sources found in advance (every 15 minutes), so a
+// caller who presses a channel starts at once instead of waiting for a lookup.
+if (process.env.BRANCH2_TV_WARM !== 'off') {
+  const warm=async()=>{ try { const TV=await import('./branch2-tv.js'); const r=await TV.checkAllChannels(await tvDeps()); console.info('[TV] sources',JSON.stringify(r.map(x=>x.key+':'+(x.ok?x.how:'none')))); } catch(e) { console.warn('[TV] warm failed',String(e?.message||e).slice(0,120)); } };
+  setTimeout(warm,90*1000).unref?.();
+  setInterval(warm,15*60*1000).unref?.();
+}
+app.get('/tv-status', rateLimit(30, 60 * 1000, 'tv-status'), async (req,res)=>{
+  const TV=await import('./branch2-tv.js'); const { _relays }=await import('./live-relay.js');
+  res.json({ channels: TV.tvStatus(_relays) });
+});
+app.get('/tv-check', rateLimit(4, 60 * 1000, 'tv-check'), async (req,res)=>{
+  const TV=await import('./branch2-tv.js');
+  res.json({ channels: await TV.checkAllChannels(await tvDeps()) });
+});
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
 app.get('/branch2-diag',(req,res)=>{ let commit=''; try { commit=String(readFileSync(new URL('./.git/HEAD',import.meta.url),'utf8')).trim(); if(commit.startsWith('ref:')) commit=String(readFileSync(new URL('./.git/'+commit.slice(5).trim(),import.meta.url),'utf8')).trim(); } catch {} res.json({commit:commit.slice(0,12), startedAt:BRANCH2_STARTED_AT, keys:branch2Keys.slice(-100)}); });
 
