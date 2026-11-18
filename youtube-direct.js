@@ -12,6 +12,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { webItem } from './web-items.js';
+import { mediaHeaderArgs } from './media-request-headers.js';
+import { refreshMakoItem } from './mako-public-media.js';
 
 const require = createRequire(import.meta.url);
 // /usr/local/bin/yt-dlp is the up-to-date standalone build the server
@@ -37,7 +39,7 @@ export function formatFor(mode, height) {
   return `bestvideo[height<=${h}][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`;
 }
 
-export function argsFor(videoId, output, { mode = 'audio', height, client = '', ffmpegPath, target = null, impersonate = false, referer = null } = {}) {
+export function argsFor(videoId, output, { mode = 'audio', height, client = '', ffmpegPath, target = null, impersonate = false, referer = null, httpHeaders = null } = {}) {
   const a = ['--no-warnings', '--no-playlist', '--newline', '--no-part', '--force-overwrites', '--no-cache-dir',
     '--retries', '3', '--fragment-retries', '5', '--socket-timeout', '30', '--concurrent-fragments', '4',
     '-f', formatFor(mode, height), '-o', output,
@@ -46,6 +48,7 @@ export function argsFor(videoId, output, { mode = 'audio', height, client = '', 
   if (ffmpegPath) a.push('--ffmpeg-location', ffmpegPath);
   if (client) a.push('--extractor-args', 'youtube:player_client=' + client);
   if (impersonate) a.push('--impersonate', 'chrome');
+  a.push(...mediaHeaderArgs(httpHeaders));
   // A player found inside another page (e.g. Vimeo) plays only for that page.
   if (referer) a.push('--referer', referer);
   a.push('--', target || videoId);
@@ -92,15 +95,16 @@ function runOnce(bin, args, { signal, stallMs, onProgress }) {
 export async function directDownload(videoId, output, { mode = 'audio', height, ffmpegPath, signal, onProgress, log = console, maxBytes = Infinity, stallMs = 60000, clients = CLIENTS, bin = ytdlpPath(), withCaptions = true } = {}) {
   if (!/^[A-Za-z0-9_-]{11}$/.test(String(videoId || ''))) throw Object.assign(new Error('invalid video id'), { code: 'invalid_video' });
   // A video from another website (web-items.js): its own link, no YouTube player types.
-  const web = await webItem(videoId);
-  if (web) clients = [''];
+  const web = await refreshMakoItem(await webItem(videoId));
+  const targets = web ? [web.url, ...(web.alternateUrls || [])] : [];
+  if (web) clients = targets.map(() => '');
   let last = null;
-  for (const client of clients) {
+  for (const [attempt, client] of clients.entries()) {
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     const t0 = Date.now();
     try {
       await fs.rm(output, { force: true });
-      const title = await runOnce(bin, argsFor(videoId, output, { mode, height, client, ffmpegPath, target: web?.url, impersonate: !!web?.impersonate, referer: web?.referer || null }), { signal, stallMs, onProgress });
+      const title = await runOnce(bin, argsFor(videoId, output, { mode, height, client, ffmpegPath, target: targets[attempt], impersonate: !!web?.impersonate, referer: web?.referer || null, httpHeaders: web?.httpHeaders }), { signal, stallMs, onProgress });
       const { size } = await fs.stat(output);
       if (!size) throw Object.assign(new Error('empty file'), { code: 'direct_failed' });
       if (size > maxBytes) { await fs.rm(output, { force: true }); throw Object.assign(new Error('Source exceeds supported size'), { code: 'too_large' }); }
@@ -108,7 +112,7 @@ export async function directDownload(videoId, output, { mode = 'audio', height, 
       // Captions (owner, 15.11): fetched separately, never able to fail the download.
       let captions = [];
       if (withCaptions) {
-        captions = await directCaptions(videoId, output, { bin, client, log, target: web?.url, impersonate: !!web?.impersonate }).catch(() => []);
+        captions = await directCaptions(videoId, output, { bin, client, log, target: targets[attempt], impersonate: !!web?.impersonate, referer: web?.referer, httpHeaders: web?.httpHeaders }).catch(() => []);
         if (captions.length && mode === 'video' && ffmpegPath) await embedCaptions(output, captions, ffmpegPath).catch(e => log.warn?.('[DIRECT] captions not embedded', { videoId, message: String(e?.message || e).slice(0, 120) }));
         if (captions.length && mode !== 'video') await fs.writeFile(output + '.lyrics.txt', lyricsText(captions)).catch(() => {});
       }
@@ -128,13 +132,15 @@ export async function directDownload(videoId, output, { mode = 'audio', height, 
 // when the free way cannot work (15.11). Same player types as the download.
 export async function directProbe(videoId, { mode = 'audio', height, timeoutMs = 45000, clients = CLIENTS, bin = ytdlpPath(), log = console } = {}) {
   if (!/^[A-Za-z0-9_-]{11}$/.test(String(videoId || ''))) return false;
-  const web = await webItem(videoId);
-  if (web) clients = [''];
+  let web;
+  try { web = await refreshMakoItem(await webItem(videoId), { timeoutMs: Math.min(15000, timeoutMs) }); } catch { return false; }
+  const targets = web ? [web.url, ...(web.alternateUrls || [])] : [];
+  if (web) clients = targets.map(() => '');
   const until = Date.now() + timeoutMs;
-  for (const client of clients) {
+  for (const [attempt, client] of clients.entries()) {
     const left = until - Date.now();
     if (left < 3000) break;
-    const args = ['--no-warnings', '--no-playlist', '--simulate', '-f', formatFor(mode, height), ...(client ? ['--extractor-args', 'youtube:player_client=' + client] : []), ...(web?.impersonate ? ['--impersonate', 'chrome'] : []), ...(web?.referer ? ['--referer', web.referer] : []), '--', web?.url || videoId];
+    const args = ['--no-warnings', '--no-playlist', '--simulate', '-f', formatFor(mode, height), ...(client ? ['--extractor-args', 'youtube:player_client=' + client] : []), ...(web?.impersonate ? ['--impersonate', 'chrome'] : []), ...mediaHeaderArgs(web?.httpHeaders), ...(web?.referer ? ['--referer', web.referer] : []), '--', targets[attempt] || videoId];
     const ok = await new Promise(resolve => {
       const p = spawn(bin, args, { stdio: 'ignore', env: { ...process.env, PATH: (process.env.PATH || '') + ':/usr/local/bin:/usr/bin' } });
       const t = setTimeout(() => { p.kill('SIGKILL'); resolve(false); }, left);
@@ -151,11 +157,11 @@ export async function directProbe(videoId, { mode = 'audio', height, timeoutMs =
 // video (written by the uploader first, else automatic), as SRT files next to
 // `output`. Returns [{ lang, file }]. At most a minute; failures give [].
 export const CAPTION_LANGS = 'he,iw,en,.*-orig';
-export async function directCaptions(videoId, output, { bin = ytdlpPath(), client = '', log = console, timeoutMs = 60000, target = null, impersonate = false } = {}) {
+export async function directCaptions(videoId, output, { bin = ytdlpPath(), client = '', log = console, timeoutMs = 60000, target = null, impersonate = false, referer = null, httpHeaders = null } = {}) {
   const dir = path.dirname(output), base = path.basename(output) + '.cap';
   const args = ['--no-warnings', '--no-playlist', '--skip-download', '--write-subs', '--write-auto-subs', '--sub-langs', CAPTION_LANGS,
     '--sub-format', 'srt/vtt/best', '--convert-subs', 'srt', '--sleep-subtitles', '1', '-o', path.join(dir, base + '.%(ext)s'),
-    ...(client ? ['--extractor-args', 'youtube:player_client=' + client] : []), ...(impersonate ? ['--impersonate', 'chrome'] : []), '--', target || videoId];
+    ...(client ? ['--extractor-args', 'youtube:player_client=' + client] : []), ...(impersonate ? ['--impersonate', 'chrome'] : []), ...mediaHeaderArgs(httpHeaders), ...(referer ? ['--referer', referer] : []), '--', target || videoId];
   await new Promise(resolve => {
     const p = spawn(bin, args, { stdio: 'ignore', env: { ...process.env, PATH: (process.env.PATH || '') + ':/usr/local/bin:/usr/bin' } });
     const t = setTimeout(() => { p.kill('SIGKILL'); resolve(); }, timeoutMs);
