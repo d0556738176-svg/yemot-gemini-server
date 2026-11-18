@@ -21,10 +21,16 @@ if ! command -v asterisk >/dev/null; then
 fi
 # Never enable a media route unless real server-side media feeds have been supplied.
 FEEDS=(TV_KAN11_URL TV_12_URL TV_13_URL TV_14_URL TV_I24_URL TV_KNESSET_URL)
+missing=0
 for key in "${FEEDS[@]}"; do
-  if [ -z "${!key:-}" ]; then echo "MISSING $key in shell environment (no example or placeholder feeds accepted)"; exit 2; fi
+  if [ -z "${!key:-}" ]; then echo "MISSING $key (authorised streaming source)"; missing=$((missing+1)); fi
 done
-if [ "$MODE" = '--check' ]; then echo 'Prerequisites present. No changes were made.'; exit 0; fi
+if [ "$MODE" = '--check' ]; then
+  echo "Read-only diagnostics completed; missing source definitions: $missing"
+  echo 'No changes were made.'
+  exit 0
+fi
+if [ "$missing" -gt 0 ]; then echo 'Refusing installation without authorised live media sources'; exit 2; fi
 mkdir -p "$PREREQ"
 # Configuration is deliberately not installed over existing Asterisk files.
 # Operator must inspect and integrate the example dialplan & MOH definitions
