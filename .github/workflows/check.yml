@@ -1,0 +1,20 @@
+name: ext2 web download check
+on:
+  push:
+    branches: [verify/ext2-web-download]
+    paths: [verify/run.mjs, verify/go.txt]
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node verify/run.mjs > verify/report.txt 2>&1; echo "exit=$?" >> verify/report.txt; cat verify/report.txt
+      - if: always()
+        run: |
+          git config user.name "live-check"; git config user.email "live-check@users.noreply.github.com"
+          git add verify/report.txt; git commit -m "web download check report" && git push
