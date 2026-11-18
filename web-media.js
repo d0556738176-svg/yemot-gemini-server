@@ -168,8 +168,19 @@ export async function hlsIsLive(url, { headers = {}, cookie = null, fetchImpl = 
   } catch { return false; }
 }
 
+// Google's own redirect links (e.g. vertexaisearch...grounding-api-redirect):
+// the real page address, so the site is named and opened directly.
+export async function followGoogleRedirect(url, { fetchImpl = fetch } = {}) {
+  try {
+    if (!/(^|\.)google(?:apis)?\.com$/i.test(new URL(url).hostname)) return url;
+    const r = await fetchImpl(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(6000) });
+    const loc = r.headers.get('location');
+    return loc && /^https?:\/\//i.test(loc) ? loc : url;
+  } catch { return url; }
+}
+
 export async function inspectLink(c0, opts = {}) {
-  const c = { ...c0, url: unwrapRedirect(c0.url) };
+  const c = { ...c0, url: await (opts.followRedirect || followGoogleRedirect)(unwrapRedirect(c0.url)) };
   if (c.url !== c0.url && !c0.site) c.site = hostOf(c.url);
   let failure = null;
   const r = await inspectLinkPlain(c, { ...opts, onFailure: f => { failure = f; } });

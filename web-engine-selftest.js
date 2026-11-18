@@ -51,7 +51,8 @@ export async function runEngineSelfTest({ env = process.env, log = console, ffmp
     const row = { q, candidates: 0, checked: [], found: 0 };
     state.sites.push(row);
     try {
-      const list = (await web.webCandidates(q, { env })).filter(c => !/youtube\.com|youtu\.be/i.test(web.unwrapRedirect(c.url))).slice(0, perQuery);
+      const list0 = await Promise.all((await web.webCandidates(q, { env })).map(async c => ({ ...c, url: await web.followGoogleRedirect(web.unwrapRedirect(c.url)) })));
+      const list = list0.filter(c => !/youtube\.com|youtu\.be/i.test(web.unwrapRedirect(c.url))).slice(0, perQuery);
       row.candidates = list.length;
       for (const c of list) {
         const t0 = Date.now();
