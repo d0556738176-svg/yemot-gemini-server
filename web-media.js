@@ -29,9 +29,9 @@ export async function webCandidates(q, { env = process.env, fetchImpl = fetch, t
   return [];
 }
 
-function probe(url, { bin = ytdlpPath(), impersonate = false, timeoutMs = 30000 } = {}) {
+function probe(url, { bin = ytdlpPath(), impersonate = false, timeoutMs = 30000, referer = null } = {}) {
   return new Promise(resolve => {
-    const args = ['--no-warnings', '--dump-single-json', '--no-playlist', '--playlist-items', '1', '--socket-timeout', '15', ...(impersonate ? ['--impersonate', 'chrome'] : []), '--', url];
+    const args = ['--no-warnings', '--dump-single-json', '--no-playlist', '--playlist-items', '1', '--socket-timeout', '15', ...(impersonate ? ['--impersonate', 'chrome'] : []), ...(referer ? ['--referer', referer] : []), '--', url];
     const p = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: (process.env.PATH || '') + ':/usr/local/bin:/usr/bin' } });
     let out = '', err = '';
     const t = setTimeout(() => { p.kill('SIGKILL'); resolve({ ok: false, err: 'timeout' }); }, timeoutMs);
@@ -86,7 +86,7 @@ export async function inspectLink(c, opts = {}) {
     if (sc?.youtube) return { youtube: sc.youtube, title: sc.title || c.title };
     if (!sc?.media) return null;
     page = { url: c.url, title: sc.title, image: sc.image };
-    r = await probe(sc.media, opts); impersonate = false;
+    r = await probe(sc.media, { ...opts, referer: c.url }); impersonate = false;
     if (!r.ok) return null;
   }
   const isLive = j0 => !!(j0?.is_live || j0?.live_status === 'is_live');
@@ -110,7 +110,7 @@ export async function inspectLink(c, opts = {}) {
   const shownUrl = page ? page.url : pageUrl;
   const bareTitle = page && (!j.title || /^[\w.-]+$/.test(String(j.title)));
   const item = {
-    url: pageUrl, page: page ? page.url : null,
+    url: pageUrl, page: page ? page.url : null, referer: page ? page.url : null,
     title: String((bareTitle ? page.title || c.title : j.title) || c.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || hostOf(shownUrl),
     site: hostOf(shownUrl) || c.site, siteName: j.extractor_key && j.extractor_key !== 'Generic' ? j.extractor_key : null,
     uploader: j.uploader || j.channel || j.creator || c.source || null, description: String(j.description || c.snippet || '').slice(0, 4000),
@@ -123,9 +123,34 @@ export async function inspectLink(c, opts = {}) {
 // The whole search: candidates from the web, then each one checked (4 at a
 // time, within a total budget); YouTube links are kept apart (extension 2
 // already handles YouTube through its own, richer path).
+// Live broadcasts on YouTube right now: YouTube's own search with its
+// "live" filter (yt-dlp reads the results page; no key needed).
+export function youtubeLiveNow(q, { bin = ytdlpPath(), timeoutMs = 40000, max = 10 } = {}) {
+  const words = String(q).replace(LIVE_WORDS, ' ').replace(/\s+/g, ' ').trim() || String(q);
+  const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(words) + '&sp=EgJAAQ%253D%253D';
+  return new Promise(resolve => {
+    const p = spawn(bin, ['--no-warnings', '--flat-playlist', '--dump-single-json', '--playlist-items', '1-' + max, '--', url], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    const t = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
+    p.stdout.on('data', d => { out += d; });
+    p.on('error', () => { clearTimeout(t); resolve([]); });
+    p.on('close', () => {
+      clearTimeout(t);
+      let j = null; try { j = JSON.parse(out); } catch {}
+      const list = (j?.entries || []).filter(e => e?.id && /^[A-Za-z0-9_-]{11}$/.test(e.id) && (e.live_status ? e.live_status === 'is_live' : true));
+      resolve(list.map(e => {
+        const item = { url: 'https://www.youtube.com/watch?v=' + e.id, title: String(e.title || '').slice(0, 200), site: 'youtube.com', uploader: e.channel || e.uploader || null,
+          description: '', thumbnail: Array.isArray(e.thumbnails) && e.thumbnails.length ? e.thumbnails[e.thumbnails.length - 1].url : null, durationSec: null, uploadDate: null, views: null, tags: null,
+          hasVideo: false, hasAudio: true, impersonate: false, live: true };
+        return { ...item, id: registerWebItem(item) };
+      }));
+    });
+  });
+}
 export const LIVE_WORDS = /(?:שידור חי|שידורים חיים|בשידור חי|בלייב|לייב|\blive\b|ערוץ חי|רדיו)/iu;
 export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, limit = 30, onProgress = () => {}, candidates = null, inspect = inspectLink, live = LIVE_WORDS.test(String(q)) } = {}) {
   const started = Date.now();
+  const liveNow = live && !candidates ? youtubeLiveNow(q).catch(() => []) : Promise.resolve([]);
   const list = (candidates || await webCandidates(q, { env })).slice(0, 60);
   onProgress({ stage: 'checking', total: list.length, done: 0, found: 0 });
   const found = [], youtube = [];
@@ -144,5 +169,6 @@ export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, l
     }
   };
   await Promise.all([worker(), worker(), worker(), worker(), worker()]);
-  return { items: found.slice(0, limit), youtube, checked: done, candidates: list.length, seconds: Math.round((Date.now() - started) / 1000) };
+  for (const it of await liveNow) if (!found.some(x => x.id === it.id)) found.unshift(it);
+  return { items: found.slice(0, limit + 10), youtube, checked: done, candidates: list.length, seconds: Math.round((Date.now() - started) / 1000) };
 }

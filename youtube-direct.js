@@ -37,7 +37,7 @@ export function formatFor(mode, height) {
   return `bestvideo[height<=${h}][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`;
 }
 
-export function argsFor(videoId, output, { mode = 'audio', height, client = '', ffmpegPath, target = null, impersonate = false } = {}) {
+export function argsFor(videoId, output, { mode = 'audio', height, client = '', ffmpegPath, target = null, impersonate = false, referer = null } = {}) {
   const a = ['--no-warnings', '--no-playlist', '--newline', '--no-part', '--force-overwrites', '--no-cache-dir',
     '--retries', '3', '--fragment-retries', '5', '--socket-timeout', '30', '--concurrent-fragments', '4',
     '-f', formatFor(mode, height), '-o', output,
@@ -46,6 +46,8 @@ export function argsFor(videoId, output, { mode = 'audio', height, client = '', 
   if (ffmpegPath) a.push('--ffmpeg-location', ffmpegPath);
   if (client) a.push('--extractor-args', 'youtube:player_client=' + client);
   if (impersonate) a.push('--impersonate', 'chrome');
+  // A player found inside another page (e.g. Vimeo) plays only for that page.
+  if (referer) a.push('--referer', referer);
   a.push('--', target || videoId);
   return a;
 }
@@ -98,7 +100,7 @@ export async function directDownload(videoId, output, { mode = 'audio', height, 
     const t0 = Date.now();
     try {
       await fs.rm(output, { force: true });
-      const title = await runOnce(bin, argsFor(videoId, output, { mode, height, client, ffmpegPath, target: web?.url, impersonate: !!web?.impersonate }), { signal, stallMs, onProgress });
+      const title = await runOnce(bin, argsFor(videoId, output, { mode, height, client, ffmpegPath, target: web?.url, impersonate: !!web?.impersonate, referer: web?.referer || null }), { signal, stallMs, onProgress });
       const { size } = await fs.stat(output);
       if (!size) throw Object.assign(new Error('empty file'), { code: 'direct_failed' });
       if (size > maxBytes) { await fs.rm(output, { force: true }); throw Object.assign(new Error('Source exceeds supported size'), { code: 'too_large' }); }
@@ -132,7 +134,7 @@ export async function directProbe(videoId, { mode = 'audio', height, timeoutMs =
   for (const client of clients) {
     const left = until - Date.now();
     if (left < 3000) break;
-    const args = ['--no-warnings', '--no-playlist', '--simulate', '-f', formatFor(mode, height), ...(client ? ['--extractor-args', 'youtube:player_client=' + client] : []), ...(web?.impersonate ? ['--impersonate', 'chrome'] : []), '--', web?.url || videoId];
+    const args = ['--no-warnings', '--no-playlist', '--simulate', '-f', formatFor(mode, height), ...(client ? ['--extractor-args', 'youtube:player_client=' + client] : []), ...(web?.impersonate ? ['--impersonate', 'chrome'] : []), ...(web?.referer ? ['--referer', web.referer] : []), '--', web?.url || videoId];
     const ok = await new Promise(resolve => {
       const p = spawn(bin, args, { stdio: 'ignore', env: { ...process.env, PATH: (process.env.PATH || '') + ':/usr/local/bin:/usr/bin' } });
       const t = setTimeout(() => { p.kill('SIGKILL'); resolve(false); }, left);

@@ -4276,7 +4276,7 @@ async function youtubeCallHandler(call) {
     if(!w?.url) return {say:'השידור לא נמצא. '};
     const p=(await import('./youtube-authorized-playback.js'))._pipeline;
     const ffmpegPath=(await import('ffmpeg-static')).default;
-    const relay=startRelay({url:w.url,title:it.title,impersonate:w.impersonate},{ffmpegPath,log:console,
+    const relay=startRelay({url:w.url,title:it.title,impersonate:w.impersonate,referer:w.referer||null},{ffmpegPath,log:console,
       upload:(f,r)=>p.uploadToYemot(f,r,undefined,{convertAudio:false,single:true}),
       del:async remote=>{ const x=new URL(p.YEMOT_API_BASE+'/FileAction'); x.searchParams.set('token',p.yemotApiKey()); x.searchParams.set('action','delete'); x.searchParams.set('what',remote); await fetch(x,{signal:AbortSignal.timeout(8000)}).catch(()=>{}); }});
     console.info('[LIVE] caller joined',{id:relay.id,title:String(it.title).slice(0,80)});

@@ -18,10 +18,10 @@ const relays = new Map();
 export const liveIdFor = url => 'l' + createHash('sha1').update(String(url)).digest('hex').slice(0, 10);
 
 // The stream address the page plays (YouTube live, HLS, Icecast...).
-export function resolveStream(url, { bin = ytdlpPath(), timeoutMs = 45000, impersonate = false } = {}) {
+export function resolveStream(url, { bin = ytdlpPath(), timeoutMs = 45000, impersonate = false, referer = null } = {}) {
   return new Promise(resolve => {
     if (/\.(?:m3u8|mp3|aac|ogg|opus)(?:\?|$)/i.test(url)) return resolve(url);
-    const p = spawn(bin, ['--no-warnings', '-g', '-f', 'bestaudio/best[height<=480]/best', '--no-playlist', ...(impersonate ? ['--impersonate', 'chrome'] : []), '--', url], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(bin, ['--no-warnings', '-g', '-f', 'bestaudio/best[height<=480]/best', '--no-playlist', ...(impersonate ? ['--impersonate', 'chrome'] : []), ...(referer ? ['--referer', referer] : []), '--', url], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     const t = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
     p.stdout.on('data', d => { out += d; });
@@ -56,7 +56,7 @@ export function startRelay(item, deps) {
     await fs.mkdir(dir, { recursive: true });
     let restarts = 0;
     while (!r.stopped && restarts < 6) {
-      const src = await resolveStream(item.url, { impersonate: !!item.impersonate });
+      const src = await resolveStream(item.url, { impersonate: !!item.impersonate, referer: item.referer || null });
       if (!src) { r.error = 'no_stream'; if (++restarts >= 3) break; await new Promise(x => setTimeout(x, 5000)); continue; }
       const startNo = r.next;
       const args = ['-hide_banner', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '10',
