@@ -83,9 +83,15 @@ export function startRelay(item, deps) {
   relays.set(id, r);
   (async () => {
     await fs.mkdir(dir, { recursive: true });
-    let restarts = 0;
+    let restarts = 0, src0 = item.url, ref0 = item.referer || null;
     while (!r.stopped && restarts < 6) {
-      const info = await resolveStreamInfo(item.url, { impersonate: !!item.impersonate, referer: item.referer || null });
+      // After a drop, a fresh source address (addresses with a time-limited
+      // token stop working; the channel's page gives a new one).
+      if (restarts > 0 && item.refresh) {
+        const fresh = await item.refresh().catch(() => null);
+        if (fresh?.url) { src0 = fresh.url; ref0 = fresh.referer || ref0; r.note('source refreshed'); }
+      }
+      const info = await resolveStreamInfo(src0, { impersonate: !!item.impersonate, referer: ref0 });
       const src = info?.url;
       if (!src) { r.error = 'no_stream'; r.note('no stream', { reason: info?.error || null }); if (++restarts >= 3) break; await new Promise(x => setTimeout(x, 5000)); continue; }
       let host = ''; try { host = new URL(src).host; } catch {}

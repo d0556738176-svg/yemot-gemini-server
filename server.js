@@ -4332,7 +4332,8 @@ async function youtubeCallHandler(call) {
       const src=await TV.findChannelSource(ch,deps);
       console.info('[TV] channel chosen',{key:ch.key,ok:!!src.page,how:src.how||null});
       if(!src.page) { note='השידור של '+ch.title+' אינו זמין כרגע. '; continue; }
-      const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,referer:src.referer||null,af:TV.TV_AUDIO_FILTER});
+      const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,referer:src.referer||null,af:TV.TV_AUDIO_FILTER,
+        refresh:async()=>{ TV.forget(ch.key); const f=await TV.findChannelSource(ch,await tvDeps(),{fresh:true}); return f.page?{url:f.page,referer:f.referer||null}:null; }});
       if(r.exit) return {exit:true};
       if(r.say&&/לא הצלחתי|לא מגיע|נקטע|הסתיים/.test(r.say)) TV.forget(ch.key);
       note=r.say||'';
