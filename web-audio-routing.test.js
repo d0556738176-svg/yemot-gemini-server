@@ -22,8 +22,10 @@ test('web audio bypasses the YouTube worker and publisher fallback with its own 
 test('web audio allows a combined HLS stream; YouTube format choice stays unchanged',()=>{
   const web=argsFor('w1234567890','/tmp/source',{mode:'audio',target:'https://cdn.example/stream.m3u8'});
   assert.equal(web[web.indexOf('-f')+1],'bestaudio/best/best*');
+  assert.equal(web[web.indexOf('--fixup')+1],'never');
   const yt=argsFor('abcdefghijk','/tmp/source',{mode:'audio'});
   assert.equal(yt[yt.indexOf('-f')+1],'bestaudio/best');
+  assert.ok(!yt.includes('--fixup'));
 });
 
 const source=await fs.readFile(new URL('./youtube-authorized-playback.js',import.meta.url),'utf8');

@@ -10,9 +10,34 @@ export function streamDownloaderPath(env = process.env) {
   return existsSync(bin) ? bin : null;
 }
 
-export function streamDownloadArgs(web, dir, ffmpegPath) {
+// A compact decimal range, with no ':' (RE uses ':' between filter options).
+function heightPattern(max) {
+  const digits=String(max), terms=[];
+  for(let n=1;n<digits.length;n++) terms.push(n===1?'[1-9]':'[1-9][0-9]{'+(n-1)+'}');
+  for(let i=0;i<digits.length;i++) {
+    const low=i===0?1:0, high=Number(digits[i])-1;
+    if(high<low)continue;
+    const digit=low===high?String(low):'['+low+'-'+high+']';
+    const rest=digits.length-i-1;
+    terms.push(digits.slice(0,i)+digit+(rest?'[0-9]{'+rest+'}':''));
+  }
+  terms.push(digits);
+  return '('+terms.join('|')+')';
+}
+
+export function streamVideoSelection(mode, height) {
+  // Audio: keep the best source, including muxed HLS when no separate audio
+  // track exists. Video: match the caller's existing resolution ceiling.
+  if(mode!=='video')return 'for=best';
+  const ceiling=Math.max(1,Math.min(8640,Math.floor(Number(height)||720)));
+  // A direct media playlist can omit resolution entirely; keep that source
+  // eligible, as the regular downloader's final best-format fallback does.
+  return 'res=^([0-9]+x'+heightPattern(ceiling)+')?$:for=best';
+}
+
+export function streamDownloadArgs(web, dir, ffmpegPath, {mode='audio',height}={}) {
   return [web.url, '--save-dir', dir, '--tmp-dir', path.join(dir, 'parts'), '--save-name', 'media',
-    '--select-video', 'for=worst', '--select-audio', 'for=worst', '--drop-subtitle', 'all',
+    '--select-video', streamVideoSelection(mode,height), '--select-audio', 'for=best', '--drop-subtitle', 'all',
     '--thread-count', '2', '--download-retry-count', '2', '--http-request-timeout', '15',
     '--check-segments-count', 'true',
     '--no-log', '--write-meta-json', 'false', '--disable-update-check', '--no-ansi-color', '--log-level', 'OFF',
@@ -33,7 +58,9 @@ function run(bin, args, { signal, timeoutMs, stallMs = timeoutMs, dir, maxBytes 
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
     const grouped = process.platform !== 'win32';
-    const p = spawn(bin, args, { detached: grouped, stdio: 'ignore', env: { ...process.env, COLUMNS: '180', LINES: '60', TERM: 'xterm' } });
+    const p = spawn(bin, args, { detached: grouped, stdio: ['ignore','ignore','pipe'], env: { ...process.env, COLUMNS: '180', LINES: '60', TERM: 'xterm' } });
+    let diagnostic='';
+    p.stderr.on('data',d=>{diagnostic=(diagnostic+d).slice(-2048);});
     let done = false, lastBytes = 0, lastChange = Date.now(), checking = false;
     const stop = () => { try { grouped && p.pid ? process.kill(-p.pid, 'SIGKILL') : p.kill('SIGKILL'); } catch {} };
     const finish = error => {
@@ -55,17 +82,24 @@ function run(bin, args, { signal, timeoutMs, stallMs = timeoutMs, dir, maxBytes 
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
     p.on('error', () => finish(Object.assign(new Error('stream tool unavailable'), { code: 'stream_unavailable' })));
-    p.on('close', code => finish(code === 0 ? null : Object.assign(new Error('stream tool failed'), { code: 'direct_failed' })));
+    p.on('close', code => finish(code === 0 ? null : Object.assign(new Error('stream tool failed'), { code: /No stream found to download/i.test(diagnostic)?'stream_no_matching_tracks':'direct_failed' })));
   });
 }
 
-// Lowest available stream is intentional: keep the fallback affordable for the
-// phone service. Complete segment-count verification remains enabled in RE.
-export async function downloadStreamMedia(web, output, { bin = streamDownloaderPath(), ffmpegPath = 'ffmpeg', mode = 'audio', signal, maxBytes = Infinity, stallMs = 60000, timeoutMs = 15 * 60 * 1000 } = {}) {
+// Use the same quality requested by the regular download job. The shared
+// conversion/upload pipeline still chooses the final format and folder.
+export async function downloadStreamMedia(web, output, { bin = streamDownloaderPath(), ffmpegPath = 'ffmpeg', mode = 'audio', height, signal, maxBytes = Infinity, stallMs = 60000, timeoutMs = 15 * 60 * 1000 } = {}) {
   if (!bin || !/^https?:\/\//i.test(web?.url || '') || !/\.(?:m3u8|mpd)(?:\?|$)/i.test(web.url)) throw Object.assign(new Error('stream fallback unavailable'), { code: 'stream_unavailable' });
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ivr-stream-'));
   try {
-    await run(bin, streamDownloadArgs(web, dir, ffmpegPath), { signal, timeoutMs, stallMs, dir, maxBytes });
+    try {
+      await run(bin, streamDownloadArgs(web, dir, ffmpegPath, {mode,height}), { signal, timeoutMs, stallMs, dir, maxBytes });
+    } catch(e) {
+      // Direct HLS playlists can have no resolution labels to filter. This
+      // matches the regular downloader's final best-available fallback.
+      if(mode!=='video'||e.code!=='stream_no_matching_tracks')throw e;
+      await run(bin, streamDownloadArgs(web, dir, ffmpegPath, {mode:'audio'}), { signal, timeoutMs, stallMs, dir, maxBytes });
+    }
     const files = (await fs.readdir(dir)).filter(x => /\.(?:mp4|m4a|mkv|ts|aac)$/i.test(x));
     // A single combined track is expected. Never silently choose one of
     // several independently downloaded DASH tracks.
