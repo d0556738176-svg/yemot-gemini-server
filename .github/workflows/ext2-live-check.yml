@@ -2,6 +2,9 @@ name: ext2 live check
 on:
   push:
     branches: [verify/ext2-live]
+    paths: [verify/ext2-live.mjs, .github/workflows/ext2-live-check.yml, verify/want.txt]
+permissions:
+  contents: write
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -10,6 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node verify/ext2-live.mjs
-        env:
-          WANT_COMMIT: cf50c45
+      - run: WANT_COMMIT=$(cat verify/want.txt) node verify/ext2-live.mjs > verify/report.txt 2>&1; echo "exit=$?" >> verify/report.txt; cat verify/report.txt
+      - run: |
+          git config user.name "live-check"; git config user.email "live-check@users.noreply.github.com"
+          git add verify/report.txt; git commit -m "live check report" && git push
