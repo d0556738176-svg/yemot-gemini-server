@@ -2,15 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TV_CHANNELS, parseOverrides, candidatesFor, pickOfficialLive, findChannelSource, menuText, forget } from '../branch2-tv.js';
 
-test('six channels on keys 1-6 in the owner\'s order', () => {
-  assert.deepEqual(TV_CHANNELS.map(c => c.key), ['1', '2', '3', '4', '5', '6']);
+test('eight channels on keys 1-8 in the owner\'s order', () => {
+  assert.deepEqual(TV_CHANNELS.map(c => c.key), ['1', '2', '3', '4', '5', '6', '7', '8']);
+  assert.equal(TV_CHANNELS[7].title, 'רדיו ערוץ 14');
   assert.equal(TV_CHANNELS[5].title, 'ערוץ הכנסת');
   assert.match(menuText(), /^ברוכים הבאים לשידורים החיים\. לכאן 11 הקישו 1, /);
   assert.match(menuText(), /לחזרה הקישו כוכבית\.$/);
 });
 
 test('owner overrides: only keys 1-6 and real web addresses', () => {
-  const o = parseOverrides('1=https://a.example/live.m3u8\n7=https://x.example\n2=ftp://bad\n2 = http://b.example/p\njunk');
+  const o = parseOverrides('1=https://a.example/live.m3u8\n9=https://x.example\n2=ftp://bad\n2 = http://b.example/p\njunk');
   assert.deepEqual(o, { 1: ['https://a.example/live.m3u8'], 2: ['http://b.example/p'] });
   assert.deepEqual(candidatesFor(TV_CHANNELS[0], o), ['https://a.example/live.m3u8', ...TV_CHANNELS[0].pages]);
 });
@@ -50,4 +51,22 @@ test('channel 13 never takes another station with 13 in its name', () => {
   const c14 = TV_CHANNELS.find(c => c.key === '4');
   assert.equal(pickOfficialLive(c14, [{ url: 'x', uploader: 'WFLA 14' }]), null);
   assert.equal(pickOfficialLive(c14, [{ url: 'y', uploader: 'C14' }]).url, 'y');
+});
+
+test('a page without a direct stream: its own player is found inside it', async () => {
+  const ch = TV_CHANNELS.find(c => c.key === '7'); forget(ch.key);
+  const r = await findChannelSource(ch, {
+    resolveStream: async () => null, youtubeLiveNow: async () => [],
+    inspect: async () => ({ url: 'https://cdn.example/radio.m3u8', hasAudio: true, live: true, referer: 'https://www.i24news.co.il/live-radio' }),
+  });
+  assert.equal(r.how, 'page');
+  assert.equal(r.page, 'https://cdn.example/radio.m3u8');
+  assert.equal(r.referer, 'https://www.i24news.co.il/live-radio');
+});
+
+test('radio with no stream and no YouTube: reason is kept for the check page', async () => {
+  const ch = TV_CHANNELS.find(c => c.key === '8'); forget(ch.key);
+  const r = await findChannelSource(ch, { resolveStream: async () => null, youtubeLiveNow: async () => [], inspect: async (c, o) => { o.onFailure({ reason: 'access_denied' }); return null; } });
+  assert.equal(r.page, null);
+  assert.match(r.tried[0], /access_denied/);
 });
