@@ -6026,6 +6026,17 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
   serverTime:new Date().toISOString()
 }));
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
+// Owner's call report (18.11): deploy/vps/report.mjs, run by the owner on the
+// server, writes it under a long random name; it is served only for 2 hours.
+app.get('/owner-report/:name', rateLimit(30, 60 * 1000, 'owner-report'), async (req,res)=>{
+  const name=String(req.params.name||'');
+  if(!/^[a-f0-9]{24}$/.test(name)) return res.status(404).end();
+  const { stat, readFile } = await import('node:fs/promises');
+  const file='/var/lib/yemot-report/'+name+'.txt';
+  const st=await stat(file).catch(()=>null);
+  if(!st || Date.now()-st.mtimeMs>2*3600*1000) return res.status(404).end();
+  res.set('cache-control','no-store').type('text/plain; charset=utf-8').send(await readFile(file,'utf8'));
+});
 // Web search for extension 2's misheard names (12.11): the extension 2 server
 // has no web keys, so it asks here. Only with the shared secret set in Render.
 app.post('/internal/web-hints', rateLimit(60, 60 * 1000, 'web-hints'), async (req,res)=>{

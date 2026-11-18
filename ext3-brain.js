@@ -24,6 +24,8 @@
 //
 // Everything external is injected (deps), so this file is testable offline.
 
+import { isZmanimQuestion, isNearbyQuestion, nearbyKind, spokenTime, sameTown, zmanimFacts as realZmanim, nearbyFacts as realNearby, spokenDistance } from './place-tools.js';
+
 const HE_NUMBER_WORDS = { 'אחת': 1, 'אחד': 1, 'שתיים': 2, 'שניים': 2, 'שלוש': 3, 'שלושה': 3 };
 
 // ---------- context ----------
@@ -89,7 +91,7 @@ export function activeLesson(current = []) {
 
 // ---------- planner ----------
 
-export const INTENTS = ['library', 'chat', 'web', 'video_find', 'video_about', 'video_play', 'media_status', 'cancel', 'read_page', 'recall'];
+export const INTENTS = ['library', 'chat', 'web', 'zmanim', 'nearby', 'video_find', 'video_about', 'video_play', 'media_status', 'cancel', 'read_page', 'recall'];
 
 export function plannerPrompt({ context, utterance, now, video, older = null, media = '', prefs = [] }) {
   return [
@@ -98,6 +100,8 @@ export function plannerPrompt({ context, utterance, now, video, older = null, me
     'אפשרויות intent:',
     'chat = שיחה, הסבר, לימוד, עצה, ידע כללי, המשך של שיעור או של הצעה קודמת ("כן", "תמשיכי", "אחת", "בטח").',
     'web = צריך מידע עדכני או מדויק מהאינטרנט: חדשות, מחירים, מי מכהן היום, פרטי עסק, אירועים אחרונים, נתונים שמשתנים, או כשהמתקשר מבקש לחפש.',
+    'zmanim = שאלה על זמן הלכתי של היום במקום מסוים (סוף זמן קריאת שמע או תפילה לפי הגר"א או המגן אברהם, הנץ, שקיעה, עלות השחר, חצות, מנחה, פלג המנחה, צאת הכוכבים, כניסת שבת והדלקת נרות, צאת שבת). אלה זמנים שמחשבים לפי מיקום ותאריך, לא מחפשים באינטרנט.',
+    'nearby = המתקשר שואל איפה יש מקום מסוג מסוים (בית כנסת, מקווה, בית מרקחת, סופר, מסעדה, כספומט, תחנת דלק, מרפאה, חניון וכו\') הכי קרוב או ליד מקום מסוים (רחוב, שכונה, חוף, מקום מוכר, יישוב).',
     'video_find = המתקשר רוצה שתמליצי או תמצאי לו סרטון, הרצאה, סיפור או סרט ביוטיוב.',
     'video_about = שאלה על סרטון שכבר הוזכר בשיחה (מה השם, תרגום השם, אורך, ערוץ, על מה הוא, האם הוא בעברית).',
     'video_play = המתקשר מבקש עכשיו לשמוע, להשמיע, להפעיל או להוריד סרטון או שיר מסוים (הסרטון שהוזכר, או שיר/סרטון שהוא מתאר בשמו). שאלה על מצב הורדה אינה video_play.',
@@ -108,7 +112,8 @@ export function plannerPrompt({ context, utterance, now, video, older = null, me
     'recall = שאלה על שיחות קודמות או על פרטים שהמתקשר סיפר על עצמו.',
     'בנוסף: כשהמתקשר נותן הוראה קבועה לגבי איך לדבר איתו או על מה לא לדבר (למשל "אל תדברי איתי על חדשות", "תמיד תעני קצר", "תקראי לי בשם דוד"), כתבי אותה בשדה instruction כמשפט ברור, אחרת השאירי ריק.',
     'החזר JSON בלבד, בלי טקסט נוסף, בצורה:',
-    '{"intent":"...","standalone":"השאלה כמשפט עצמאי וברור בעברית עם כל הפרטים מההקשר","search":"שאילתת חיפוש קצרה לאינטרנט אם intent=web או read_page","searches":["כששאל כמה דברים שונים שצריך לחפש (למשל מזג אוויר וגם שער הדולר): שאילתה קצרה נפרדת לכל אחד, עד 3; אחרת רשימה ריקה"],"yt_he":"שאילתת חיפוש ביוטיוב בעברית: לסרטון/שיר שהמתקשר מתכוון אליו לפי ההקשר (למשל שם הזמר והשיר שדובר עליהם), לא המשפט שאמר","yt_en":"אותה שאילתה באנגלית אם מתאים","min_minutes":0,"max_minutes":0,"recent_days":0,"order":"relevance או date או views","play":"audio או video","continue_offer":false,"instruction":""}',
+    '{"intent":"...","standalone":"השאלה כמשפט עצמאי וברור בעברית עם כל הפרטים מההקשר","search":"שאילתת חיפוש קצרה לאינטרנט אם intent=web או read_page","searches":["כששאל כמה דברים שונים שצריך לחפש (למשל מזג אוויר וגם שער הדולר): שאילתה קצרה נפרדת לכל אחד, עד 3; אחרת רשימה ריקה"],"yt_he":"שאילתת חיפוש ביוטיוב בעברית: לסרטון/שיר שהמתקשר מתכוון אליו לפי ההקשר (למשל שם הזמר והשיר שדובר עליהם), לא המשפט שאמר","yt_en":"אותה שאילתה באנגלית אם מתאים","min_minutes":0,"max_minutes":0,"recent_days":0,"order":"relevance או date או views","play":"audio או video","continue_offer":false,"instruction":"","place":"ל-zmanim/nearby: המקום עצמו (רחוב, שכונה, חוף, מקום מוכר או יישוב) בלי מילות יחס, ואם לא נאמר עכשיו - המקום שדובר עליו קודם בשיחה, אחרת ריק","town":"ל-zmanim/nearby: העיר או היישוב שבו המקום נמצא, ריק אם לא ידוע","date":"ל-zmanim: התאריך שעליו שאל בפורמט YYYY-MM-DD לפי הזמן עכשיו, ריק = היום","kind":"ל-nearby: סוג המקום שהוא מחפש, למשל בית כנסת"}',
+    'שימי לב לשיבושי תמלול בשמות מקומות: "משוב" הוא כמעט תמיד "מושב", "קיבוצ" = "קיבוץ". כתבי את שם היישוב הנכון כפי שהוא מוכר בישראל.',
     'recent_days: כשביקש משהו חדש (השבוע=7, לאחרונה/חדש=30, היום=2). order: date כשביקש "הכי חדש", views כשביקש "הכי הרבה צפיות". שיר בודד = max_minutes 8, ואם אמר שאינו רוצה סט/רשימה/מיקס אל תחפשי סט.',
     'play = "video" רק כשהמתקשר ביקש במפורש להוריד את הווידאו/הסרטון עצמו. continue_offer = true כשהמתקשר רק מסכים להמשיך את מה שהוצע לו בתשובה הקודמת.',
     'min_minutes/max_minutes רק אם ביקש אורך (למשל "כשעה" = min 40).',
@@ -149,7 +154,11 @@ export function parsePlan(text) {
     continueOffer: j.continue_offer === true,
     recentDays: Math.max(0, Math.min(365, Number(j.recent_days) || 0)),
     order: ['date', 'views'].includes(j.order) ? j.order : 'relevance',
-    instruction: str(j.instruction)
+    instruction: str(j.instruction),
+    place: str(j.place).slice(0, 80),
+    town: str(j.town).slice(0, 60),
+    date: /^\d{4}-\d{2}-\d{2}$/.test(String(j.date || '').trim()) ? String(j.date).trim() : '',
+    kind: str(j.kind).slice(0, 40)
   };
 }
 
@@ -176,10 +185,30 @@ export function ordinalOption(text, options) {
 const VIDEO_WORD = /(?:סרטון|סרטונים|סרט|הרצאה|וידאו|וידיאו|דוקו|תיעודי)/u;
 const SONG_WORD = /(?:שיר|שירים|קליפ|סינגל|להיט|להיטים|הופעה|סט |מחרוזת|פרק|פרקים)/u;
 
+// "...ליד החוף הנפרד באשקלון" -> { place: 'החוף הנפרד', town: 'אשקלון' };
+// "...במושב עוצם" -> { place: '', town: 'עוצם' }. Only a fallback: the
+// planner model reads places better, and its fields win when it answers.
+export function placeFromText(text) {
+  const t = String(text || '').replace(/[?!.,]/g, ' ').replace(/\bמשוב\b|(?<=\s|^)ב?משוב(?=\s)/gu, m => m.replace('משוב', 'מושב')).replace(/\s+/g, ' ').trim();
+  const near = t.match(/(?:הכי קרוב|הקרוב ביותר|הקרובה ביותר|הכי קרובה|קרוב|קרובה|ליד|בסביבת|באזור של|בקרבת|מסביב)\s+(?:ל|אל\s+)?(.+)$/u);
+  let rest = near ? near[1] : '';
+  if (!rest) {
+    // The place is in the last few words, after its "ב": the earliest such word
+    // among the last three ("בבני ברק", not "ברק").
+    const w = t.replace(/(?:היום|מחר|מחרתיים|השבוע|בבקשה|עכשיו)\s*$/u, '').trim().split(' ');
+    for (let i = Math.max(0, w.length - 3); i < w.length; i++) if (/^ב[\u0590-\u05FF]{2,}/u.test(w[i])) { rest = [w[i].slice(1), ...w.slice(i + 1)].join(' '); break; }
+  }
+  rest = rest.replace(/(?:היום|מחר|מחרתיים|השבוע|בבקשה|עכשיו|לפי הגר[״"]?א|לפי הגרא|לפי המגן אברהם|במוצאי שבת|בשבת)/gu, ' ').replace(/^(?:ה?מושב|ה?קיבוץ|ה?יישוב|ה?עיר)\s+/u, '').replace(/\s+/g, ' ').trim();
+  const town = near && rest.match(/^(.+?)\s+ב(?:עיר\s+|מושב\s+|קיבוץ\s+)?([\u0590-\u05FF][\u0590-\u05FF ]{1,25})$/u);
+  if (town) return { place: town[1].trim(), town: town[2].trim() };
+  const bare = rest;
+  return /^(?:ה)?(?:חוף|רחוב|שכונת|כיכר|גן|פארק|מרכז|קניון|תחנת)/u.test(bare) ? { place: bare, town: '' } : { place: '', town: bare };
+}
+
 /** Used when every planner model is down: plain, conservative rules. */
 export function heuristicPlan(utterance, { video = null } = {}) {
   const u = String(utterance || '').trim();
-  const base = { standalone: u, search: u, ytHe: u.replace(YT_WORD, ' ').replace(/\s+/g, ' ').trim(), ytEn: '', minMinutes: 0, maxMinutes: 0, recentDays: /(?:השבוע|לאחרונה|חדש|חדשים|הכי טרי)/u.test(u) ? 30 : 0, order: 'relevance', instruction: '', play: /(?:להוריד|תוריד|הורד).{0,20}(?:וידאו|וידיאו|סרטון עצמו)|כן לוידאו/u.test(u) ? 'video' : 'audio', continueOffer: false };
+  const base = { standalone: u, search: u, ytHe: u.replace(YT_WORD, ' ').replace(/\s+/g, ' ').trim(), ytEn: '', minMinutes: 0, maxMinutes: 0, recentDays: /(?:השבוע|לאחרונה|חדש|חדשים|הכי טרי)/u.test(u) ? 30 : 0, order: 'relevance', instruction: '', place: '', town: '', date: '', kind: '', play: /(?:להוריד|תוריד|הורד).{0,20}(?:וידאו|וידיאו|סרטון עצמו)|כן לוידאו/u.test(u) ? 'video' : 'audio', continueOffer: false };
   // A key choice that names something to hear ("לשמיעת השיר X") is a play request.
   const chosen = u.match(/^בחרתי באפשרות\s*\d+\s*:?\s*(.*)$/u);
   if (chosen && /(?:לשמיעת|להשמעת|לשמוע|להשמיע|לנגן|השיר|שיר|הסרטון|סרטון|הפרק|פרק)/u.test(chosen[1]) && !/(?:ביטול|המשך השיחה|לחיפוש|להמשך|שיחה על)/u.test(chosen[1]))
@@ -191,6 +220,10 @@ export function heuristicPlan(utterance, { video = null } = {}) {
   if (/(?:תקריא|תקריאי|תקראי|תקרא|להקריא).{0,30}(?:כתבה|מאמר|דף|אתר|סיפור מ)/u.test(u)) return { ...base, intent: 'read_page' };
   if (/^(?:כן|כן בבקשה|בטח|בוודאי|תמשיכי|תמשיך|המשיכי|נמשיך|אחת|אחד|1|יאללה|סבבה|אוקיי|אוקי)[.!? ]*$/u.test(u)) return { ...base, intent: 'chat', continueOffer: true };
   if (/(?:זוכר|זוכרת|דיברנו|אמרתי לך|שאלתי אותך|בפעם הקודמת|בשיחה הקודמת)/u.test(u) && !VIDEO_WORD.test(u)) return { ...base, intent: 'recall' };
+  // Halachic times and "the nearest X to Y" are computed from the map, not
+  // searched (18.11: both got poor web answers).
+  if (isZmanimQuestion(u)) return { ...base, intent: 'zmanim', ...placeFromText(u) };
+  if (isNearbyQuestion(u)) return { ...base, intent: 'nearby', kind: nearbyKind(u).label, ...placeFromText(u) };
   // The video named in the request, not the whole sentence, is what gets searched.
   if (PLAY_WORD.test(u) && !/^(?:לא|אל)(?=$|[\s,.!?])/u.test(u)) return { ...base, intent: 'video_play', ytHe: video && POINT_WORD.test(u) ? '' : u.replace(PLAY_WORD_G, ' ').replace(/(?:הלו|נו|כן|בבקשה|אני רוצה|ש?תשמיעי|לי|את|השיר|הסרטון|הפרק|ה?ו?וידי?או|קובץ שמע|ביוטיוב|יוטיוב)/gu, ' ').replace(/\s+/g, ' ').trim() };
   if (video && /(?:השם|איך קוראים|איך נקרא|כמה זמן|אורך|ארוך|הערוץ|באנגלית|בעברית|תתרגם|תתרגמי|על מה הוא|מה יש ב)/u.test(u) && (VIDEO_WORD.test(u) || /(?:אותו|שלו|זה)/u.test(u))) return { ...base, intent: 'video_about' };
@@ -671,6 +704,13 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // A song or video to find stays a YouTube search even when the planner
   // called it a web question (12.11: "a new song by Shwekey" got a web answer).
   if (rules.intent === 'video_find' && ['web', 'chat'].includes(plan.intent)) plan = { ...plan, intent: 'video_find', ytHe: plan.ytHe || rules.ytHe, recentDays: plan.recentDays || rules.recentDays };
+  // A halachic time or "the nearest X" is computed from the map even when the
+  // planner called it a web question; his own place words fill what it left out.
+  if (['zmanim', 'nearby'].includes(rules.intent) && ['web', 'chat', 'recall'].includes(plan.intent)) plan = { ...plan, intent: rules.intent };
+  if (['zmanim', 'nearby'].includes(plan.intent)) {
+    if (!plan.place && !plan.town) { plan.place = rules.place || ''; plan.town = rules.town || ''; }
+    if (plan.intent === 'nearby' && !nearbyKind(plan.kind || '')) plan.kind = rules.kind || nearbyKind(utterance + ' ' + plan.standalone)?.label || plan.kind || '';
+  }
   // A standing instruction said in plain words is kept even when the planner missed it.
   // Only when he really said a standing rule (the planner sometimes fills the
   // field with a description of the request).
@@ -885,6 +925,42 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     });
   }
 
+  if (plan.intent === 'zmanim') {
+    const facts = await (deps.zmanimFacts || realZmanim)({ place: plan.place, town: plan.town, date: plan.date, utterance: utterance + ' ' + plan.standalone }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() }).catch(e => { log.warn?.('[ZMANIM] failed', String(e?.message || e).slice(0, 100)); return null; });
+    if (facts?.unknownPlace) return out({ reply: 'לא מצאתי במפה את המקום ' + facts.unknownPlace + '. ' + 'תוכל' + ' לומר לי את שם היישוב או העיר הקרובה, ואחשב לך את הזמנים בדיוק לפיה?' });
+    if (facts) {
+      log.info?.('[ZMANIM] computed', { place: facts.loc?.label, town: facts.loc?.town, date: facts.date, source: facts.source, approx: !!facts.loc?.approx });
+      const direct = zmanReply(facts, utterance + ' ' + plan.standalone);
+      if (direct) return out({ reply: direct });
+      const reply = await ask('המתקשר שואל על זמני היום ההלכתיים. לפניך הזמנים המדויקים שחושבו עכשיו בדיוק למקום ולתאריך שעליהם שאל. עני רק לפיהם, בלי לשנות אף זמן ובלי זמנים מהזיכרון: קודם בדיוק מה ששאל, ואם שאל על כל הזמנים, מני את העיקריים לפי הסדר. אמרי את הזמנים במילים בדיוק כפי שהם כתובים (למשל שמונה וארבעים ותשע דקות בבוקר), ואמרי לאיזה מקום וליום החישוב. בסוף משפט קצר שבלוחות שונים יש לפעמים הבדל של דקה או שתיים, ושכדאי לנהוג לפי הלוח והרב של המקום.', facts.text, { maxTokens: 900, budgetMs: 10000, ctx: smallContext })
+        .catch(() => 'הנה זמני היום ' + facts.when + ' לפי ' + facts.loc.label + '. ' + facts.text.split('\n').slice(1, 9).map(l => l.replace(/\s*\(\d{1,2}:\d{2}\)/, '')).join('. ') + '.');
+      return out({ reply });
+    }
+    log.warn?.('[ZMANIM] no calculation; falling back to the web');
+    plan.intent = 'web'; plan.search = plan.search || plan.standalone || utterance;
+  }
+
+  if (plan.intent === 'nearby') {
+    const kindText = plan.kind || utterance;
+    const [facts, web] = await Promise.all([
+      (deps.nearbyFacts || realNearby)({ kindText: kindText + ' ' + utterance, place: plan.place, town: plan.town }, { fetchImpl: deps.fetchImpl || fetch, log }).catch(e => { log.warn?.('[PLACE] nearby failed', String(e?.message || e).slice(0, 100)); return null; }),
+      deps.webSearch ? deps.webSearch(plan.search || plan.standalone || utterance, { timeoutMs: 4500 }).catch(() => []) : Promise.resolve([])
+    ]);
+    if (facts?.unknownPlace && !(web || []).length) return out({ reply: 'לא מצאתי במפה את המקום ' + facts.unknownPlace + '. אפשר לומר לי שם של רחוב או של מקום מוכר לידו, ובאיזו עיר, ואחפש שוב?' });
+    if (facts?.items?.length || (web || []).length) {
+      log.info?.('[PLACE] nearby', { kind: facts?.kind, place: facts?.loc?.label, town: facts?.loc?.town, found: facts?.items?.length || 0, web: (web || []).length, approx: !!facts?.loc?.approx });
+      const webText = (web || []).slice(0, 5).map((r, i) => 'תוצאת חיפוש ' + (i + 1) + ': ' + clip(r.title, 110) + ' (' + hostOf(r.url).slice(0, 40) + ')\n' + clip(r.snippet, 300)).join('\n');
+      const reply = await ask('המתקשר שואל איפה יש ' + (facts?.kind || 'מקום') + ' קרוב למקום מסוים. ' +
+        (facts?.items?.length ? 'לפניך רשימה מהמפה, ממוינת מהקרוב לרחוק, עם המרחק בקו אווירי והכתובת. התחילי בתשובה ישירה: הקרוב ביותר, שמו, כמה רחוק ובאיזה רחוב, ואיך להגיע אליו בכמה מילים אם הכתובת מאפשרת. אחר כך עוד אחד או שניים קרובים. אם במפה אין לו שם, אמרי שזה ' + facts.kind + ' שמופיע במפה בלי שם, עם הכתובת. ' : 'במפה לא נמצאו תוצאות, ענה רק לפי תוצאות החיפוש. ') +
+        'תוצאות החיפוש באינטרנט עוזרות רק כשהן מדברות בבירור על אותו מקום ממש (למשל בית כנסת שנמצא בתוך החוף או צמוד אליו); אל תמציאי מרחקים, כתובות או שמות שלא מופיעים. אם הוא שאל על מקום בעיר מסוימת, אל תציעי מקומות בעיר אחרת. בלי זמני תפילה אם אינם כתובים; אפשר להציע לברר במקום.',
+        [facts?.text || '', webText ? 'חיפוש באינטרנט:\n' + webText : ''].filter(Boolean).join('\n\n'), { maxTokens: 900, budgetMs: 11000, ctx: smallContext })
+        .catch(() => facts?.items?.length ? nearbyReply(facts) : '');
+      if (reply) return out({ reply });
+    }
+    log.warn?.('[PLACE] nothing on the map; falling back to the web');
+    plan.intent = 'web'; plan.search = plan.search || plan.standalone || utterance;
+  }
+
   if (plan.intent === 'web') {
     const q1 = plan.search || plan.standalone || utterance;
     const hours = /(?:פתוח|פתוחה|סגור|סגורה|שעות|עד מתי|מתי נפתח|מתי נסגר)/u.test(utterance + ' ' + plan.standalone);
@@ -992,6 +1068,62 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
 }
 
 export { HE_NUMBER_WORDS };
+
+// The halachic time he asked about, said straight from the calculation (no
+// model in between, so no time can be changed on the way). Null when he asked
+// for something general ("the times of today") - the model then lists them.
+const ZMAN_ASK = [
+  [/קריאת שמע|ק״ש|ק"ש|זמן ק\s*ש|קש של/u, 'sofZmanShma', 'sofZmanShmaMGA', 'סוף זמן קריאת שמע'],
+  [/סוף זמן תפילה|זמן תפילה|סוף זמן תפלה/u, 'sofZmanTfilla', 'sofZmanTfillaMGA', 'סוף זמן תפילה'],
+  [/עלות השחר|עלות/u, 'alotHaShachar', '', 'עלות השחר'],
+  [/משיכיר|זמן ציצית|זמן תפילין/u, 'misheyakir', '', 'הזמן המוקדם לציצית ותפילין, משיכיר,'],
+  [/הנץ|נץ החמה|זריחה|הזריחה/u, 'sunrise', '', 'הנץ החמה'],
+  [/מנחה גדולה/u, 'minchaGedola', '', 'מנחה גדולה'],
+  [/מנחה קטנה/u, 'minchaKetana', '', 'מנחה קטנה'],
+  [/פלג המנחה/u, 'plagHaMincha', '', 'פלג המנחה'],
+  [/חצות הלילה|חצות לילה/u, 'chatzotNight', '', 'חצות הלילה'],
+  [/חצות/u, 'chatzot', '', 'חצות היום'],
+  [/צאת השבת|יציאת השבת|מוצאי שבת|מוצ״ש|הבדלה/u, 'tzeit85deg', 'tzeit72min', 'צאת השבת'],
+  [/צאת הכוכבים|צאת הצום|סוף הצום/u, 'tzeit7083deg', 'tzeit85deg', 'צאת הכוכבים'],
+  [/שקיעה|השקיעה|שקיעת/u, 'sunset', '', 'השקיעה']
+];
+export function zmanReply(facts, text) {
+  const t = String(text || ''), times = facts?.times || {};
+  if (/(?:זמני היום|כל הזמנים|זמני תפילה|זמנים הלכתיים|זמני הלכה)/u.test(t)) return null;
+  if (/הדלקת נרות|כניסת השבת|זמן הדלקה/u.test(t)) {
+    const line = facts.text.split('\n').find(l => l.startsWith('הדלקת נרות'));
+    if (!line) return null;
+    return 'הדלקת נרות שבת ' + facts.when + ' ב' + facts.loc.label + ' היא ב' + line.split(': ').pop() + ', ' + line.slice(line.indexOf('(') + 1, line.indexOf(')')) + '. השקיעה ב' + spokenTime(times.sunset) + '. בלוחות שונים יש לפעמים הבדל של דקה או שתיים, וכדאי לנהוג לפי הלוח של המקום.';
+  }
+  let asked = ZMAN_ASK.filter(([rx]) => rx.test(t));
+  // "Shema on motzaei Shabbat": the Shabbat words only name the day.
+  if (asked.some(a => /^sofZman/.test(a[1]))) asked = asked.filter(a => /^sofZman/.test(a[1]));
+  if (asked.length !== 1) return null;
+  const [, main, second, label] = asked[0];
+  if (!times[main]) return null;
+  const mga = /מגן אברהם|המג״א|מג"א|מגא(?![\u0590-\u05FF])/u.test(t);
+  const where = facts.loc.label + (facts.loc.town && !sameTown(facts.loc.label, facts.loc.town) ? ' שב' + facts.loc.town : '');
+  const placeNote = facts.loc.assumed ? ' לפי ירושלים, כי לא אמרת מקום' : ' ' + prep('ב', where) + (facts.loc.approx ? ' (לפי מרכז היישוב)' : '');
+  let reply;
+  if (main === 'sofZmanShma' || main === 'sofZmanTfilla') {
+    const [a, b] = mga ? [second, main] : [main, second];
+    const name = k => k.endsWith('MGA') ? 'לפי המגן אברהם' : 'לפי הגר״א';
+    reply = label + ' ' + name(a) + placeNote + ' ' + facts.when + ' הוא ב' + spokenTime(times[a]) + '.' + (times[b] ? ' ' + name(b) + ' הוא מוקדם יותר, ב' + spokenTime(times[b]) + '.' : '') + ' הנץ החמה שם ב' + spokenTime(times.sunrise) + '.';
+  } else if (main === 'tzeit85deg') {
+    reply = 'צאת השבת' + placeNote + ' ' + facts.when + ' היא ב' + spokenTime(times.tzeit85deg) + ', לפי שמונה וחצי מעלות.' + (times.tzeit72min ? ' לפי רבנו תם, ב' + spokenTime(times.tzeit72min) + '.' : '');
+  } else {
+    reply = label + placeNote + ' ' + facts.when + ' ב' + spokenTime(times[main]) + '.' + (second && times[second] ? ' ולפי שיטה מחמירה יותר, ב' + spokenTime(times[second]) + '.' : '');
+  }
+  return reply + ' זה חישוב לפי המיקום המדויק; בלוחות שונים יש לפעמים הבדל של דקה או שתיים, וכדאי לנהוג לפי הלוח והרב של המקום.';
+}
+// "ל" + "החוף" = "לחוף"; "ב" + "הרב קוק 3" = "ברחוב הרב קוק 3".
+const prep = (p, w) => p + String(w || '').replace(/^ה(?=[\u0590-\u05FF]{2})/u, '');
+const street = a => /^(?:רחוב|רח |שדרות|שד |דרך|סמטת|כיכר|מעלה|שביל)/u.test(a) ? a : 'רחוב ' + a;
+function nearbyReply(facts) {
+  const [a, ...rest] = facts.items;
+  const one = x => (x.name || facts.kind + ' בלי שם במפה') + ', במרחק ' + spokenDistance(x.km) + (x.address ? ', ב' + street(x.address) : '');
+  return 'לפי המפה, ' + facts.kind + ' הקרוב ביותר ' + prep('ל', facts.loc.label) + ' הוא ' + one(a) + '.' + (rest.length ? ' עוד קרובים: ' + rest.slice(0, 2).map(one).join('; ') + '.' : '') + ' המרחקים בקו אווירי.';
+}
 
 /**
  * Numbered choices in a reply ("ללימוד קוד הקש 1, ללימוד פריסה הקש 2"):
