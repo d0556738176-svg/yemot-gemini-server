@@ -6,7 +6,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 for (let i = 0; i < 90; i++) {
   const d0 = await fetch(BASE + '/branch2-diag').then(r => r.json()).catch(e => ({ err: String(e) }));
   console.log('running version:', d0.commit, d0.startedAt, d0.err || '');
-  if (String(d0.commit || '').startsWith('aba1727')) break;
+  if (String(d0.commit || '').startsWith('bff5eef')) break;
   if (i === 89) process.exit(1);
   await sleep(20000);
 }
@@ -54,4 +54,4 @@ for (let i = 0; i < 400; i++) {
 }
 const u = new URL(BASE + '/yemot-youtube'); for (const [k, v] of Object.entries({ ApiCallId: id, ApiPhone: '0500000099', hangup: 'yes' })) u.searchParams.set(k, v);
 await fetch(u).catch(() => {});
-console.log('total seconds', Math.round((Date.now() - t00) / 1000));
+const dz = await fetch(BASE + '/branch2-diag').then(r => r.json()).catch(() => ({})); console.log('webEvents', JSON.stringify((dz.webEvents||[]).slice(-6), null, 1)); console.log('total seconds', Math.round((Date.now() - t00) / 1000));
