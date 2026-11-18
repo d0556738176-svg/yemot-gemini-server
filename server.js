@@ -5016,7 +5016,17 @@ async function callHandler(call) {
             userTranscript='תמצאי לי ביוטיוב את השיר '+q;
           } }
         const fixed=answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
-        if(fixed) { replyText=fixed; ext3Done=true; }
+        // Owner, 18.11: "search the whole web for a recording/video of ..." =
+        // extension 2's deep web search, with the results read there and a
+        // key press before any download.
+        const webQ=fixed?null:(await import('./web-media-intent.js')).webSearchIntent(userTranscript);
+        if(webQ) {
+          turnContext.ext3Handoff={webQuery:webQ,title:webQ,mode:'web'};
+          replyText='מעביר אותך לחיפוש עמוק בכל האתרים באינטרנט, בשלוחת ההורדות. שם תשמע את התוצאות, ותאשר בהקשה לפני כל הורדה.';
+          console.info('[WEB_HANDOFF] whole-web search requested',{callId:activeKey,query:webQ.slice(0,120)});
+          ext3Done=true;
+        }
+        else if(fixed) { replyText=fixed; ext3Done=true; }
         else if(callMedia.pendingPaid && ext3SubsChoice(userTranscript)!==null) {
           // 15.11: 1 = the paid engine / download again, 2 = cancel.
           const yes=ext3SubsChoice(userTranscript), job=callMedia.pendingPaid; callMedia.pendingPaid=null;
@@ -5478,7 +5488,7 @@ async function callHandler(call) {
     if(turnContext.ext3Handoff && !call.selfTest) {
       const saved=await writeExt2Handoff(callerPhone,turnContext.ext3Handoff).catch(e=>{ console.warn('[EXT3_HANDOFF] not saved',{message:String(e?.message||e).slice(0,160)}); return false; });
       if(saved) {
-        console.info('[EXT3_HANDOFF] caller sent to extension 2',{callId:activeKey,videoId:turnContext.ext3Handoff.videoId,mode:turnContext.ext3Handoff.mode});
+        console.info('[EXT3_HANDOFF] caller sent to extension 2',{callId:activeKey,videoId:turnContext.ext3Handoff.videoId||null,web:!!turnContext.ext3Handoff.webQuery,mode:turnContext.ext3Handoff.mode});
         activeCalls.delete(activeKey);
         call.id_list_message(branch1SpeechItems(replyText),{prependToNextAction:true});
         return call.go_to_folder('/2');
@@ -6028,6 +6038,20 @@ app.post('/internal/web-hints', rateLimit(60, 60 * 1000, 'web-hints'), async (re
   const h=await webYouTubeHints(q,{localOnly:true}).catch(()=>null);
   console.info('[WEB_HINTS] served',{provider:h?.provider||null,videos:h?.videos?.length||0});
   res.json(h||{});
+});
+
+// Whole-web video search for extension 2 (keys 5/6) and extensions 1/3
+// (owner, 18.11). Same shared secret as the web hints.
+app.post('/internal/web-videos', rateLimit(60, 60 * 1000, 'web-videos'), async (req,res)=>{
+  const secret=String(process.env.WEB_HINTS_SECRET||'').trim(), got=String(req.get('x-web-hints-secret')||'');
+  const { timingSafeEqual } = await import('node:crypto');
+  if(!secret||got.length!==secret.length||!timingSafeEqual(Buffer.from(got),Buffer.from(secret))) return res.status(403).json({error:'forbidden'});
+  const q=String(req.body?.q||'').trim().slice(0,200);
+  if(!q) return res.json({items:[]});
+  const { searchWebVideos } = await import('./web-video-search.js');
+  const r=await searchWebVideos(q,{max:50}).catch(()=>({items:[]}));
+  console.info('[WEB_VIDEOS] served',{items:r.items.length,engines:r.engines||null});
+  res.json(r);
 });
 
 // End-to-end check of branch 1 after each build: one simulated call runs the
