@@ -95,3 +95,29 @@ test('a general request for the times goes to the model, a single time does not'
   assert.equal(zmanReply(facts, 'מה זמני היום בירושלים'), null);
   assert.match(zmanReply(facts, 'מתי השקיעה בירושלים'), /השקיעה בירושלים היום בארבע וארבעים ואחת/);
 });
+
+// ---- 17-18.11 call logs: what went wrong, and must not happen again ----
+const noLlm = async () => { throw Object.assign(new Error('busy'), { status: 503 }); };
+const quiet = { info() {}, warn() {} };
+function planned(intent, extra = {}) {
+  return async (prompt, o = {}) => o.planner ? JSON.stringify({ intent, standalone: '', search: '', searches: [], yt_he: '', yt_en: '', ...extra }) : JSON.stringify({ answer: 'תשובה' });
+}
+test('a greeting is a greeting, not a web search', async () => {
+  let searched = false;
+  const r = await ext3Turn({ utterance: 'מה נשמע כפרה', now: 'x' }, { llm: planned('web'), webSearch: async () => { searched = true; return []; }, log: quiet });
+  assert.equal(r.intent, 'chat'); assert.equal(searched, false);
+});
+test('who sings / which bus line: from the web, not from memory', async () => {
+  let searched = 0;
+  const r = await ext3Turn({ utterance: 'איך נקרא הצמד שתמר יהלומי שרה איתו', now: 'x' }, { llm: planned('chat'), webSearch: async () => { searched++; return [{ title: 't', url: 'https://ynet.co.il/a/123456', snippet: 'תמר ויונתן' }]; }, log: quiet });
+  assert.equal(r.intent, 'web'); assert.ok(searched >= 1);
+});
+test('"stop finding English videos" is a standing rule, not "cancel the download"', async () => {
+  const r = await ext3Turn({ utterance: 'תפסיקי למצוא סרטונים באנגלית', now: 'x' }, { llm: planned('cancel'), log: quiet });
+  assert.notEqual(r.intent, 'cancel'); assert.ok(r.instruction);
+});
+test('"download all the songs" is never answered "I am not downloading anything"', async () => {
+  const r = await ext3Turn({ utterance: 'תורידי לי את כל השירים של תמר ויונתן', now: 'x' }, { llm: planned('cancel'), log: quiet, library: async () => [] });
+  assert.notEqual(r.cancel, true);
+  assert.doesNotMatch(r.reply || '', /לא מורידה כלום/);
+});

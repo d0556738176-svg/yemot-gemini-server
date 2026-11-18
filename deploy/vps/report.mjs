@@ -56,12 +56,18 @@ if (token) {
 
 // ---- B. How each turn went (server log) ----
 const j = spawnSync('journalctl', ['-u', 'yemot-main', '--since', DAYS + ' days ago', '-o', 'short-iso', '--no-pager', '-q'], { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
-const lines = String(j.stdout || '').split('\n');
-const keep = /\[(REPLY_PREVIEW|BRANCH1_ROUTER|ZMANIM|PLACE|E2E_SELFTEST)\]|\[EXT3_BRAIN\] (plan|web research|turn failed|no answer|answer models busy|planner unavailable|web answer not written|web search found nothing)|\[CALL_FLOW\] (reply_ready|long_answer_trimmed)|\[ASR|\[BRANCH1_WEB_SYNTH\] answered|transcri/i;
+// A logged object spans several journal lines: join them back into one.
+const lines = [];
+for (const raw of String(j.stdout || '').split('\n')) {
+  const body = raw.replace(/^\S+\s+\S+\s+\S+\s+/, '');
+  if (lines.length && !/^\[/.test(body.trim())) lines[lines.length - 1] += ' ' + body.trim();
+  else lines.push(raw);
+}
+const keep = /\[(REPLY_PREVIEW|BRANCH1_ROUTER|ZMANIM|PLACE|E2E_SELFTEST)\]|\[EXT3_BRAIN\] (plan|web research|turn failed|no answer|answer models busy|planner unavailable|web answer not written|web search found nothing)|\[CALL_FLOW\] (reply_ready|long_answer_trimmed)|\[ASR|\[TRANSCRIBE\] Deepgram primary failed/i;
 const counts = new Map(), errors = new Map(), latency = [];
 const picked = [];
 for (const l of lines) {
-  const tag = (l.match(/\[([A-Z0-9_ ]+)\]\s*([a-z_ ]{0,40})/i) || [])[0];
+  const tag = (l.match(/\[([A-Z][A-Z0-9_ ]+)\]\s*([a-z_ ]{0,40})/i) || [])[0];
   if (tag) counts.set(tag.trim(), (counts.get(tag.trim()) || 0) + 1);
   const ms = l.match(/reply_ready.*elapsedMs:\s*(\d+)/); if (ms) latency.push(Number(ms[1]));
   if (/warn|error|fail|crash|unavailable|HTTP [45]\d\d|timeout|timed out/i.test(l) && !keep.test(l)) {

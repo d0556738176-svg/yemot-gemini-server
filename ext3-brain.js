@@ -98,8 +98,8 @@ export function plannerPrompt({ context, utterance, now, video, older = null, me
     'אתה המתכנן של עוזרת טלפונית חכמה. קרא את ההקשר ואת מה שהמתקשר אמר עכשיו, והחלט מה התור הזה צריך. אל תענה למתקשר.',
     'התמלול של הטלפון לפעמים משבש מילים (למשל "יויוטב" במקום "יוטיוב", או שם של חברה שלא נאמר). פרש לפי ההקשר והכוונה, לא לפי מילה בודדת.',
     'אפשרויות intent:',
-    'chat = שיחה, הסבר, לימוד, עצה, ידע כללי, המשך של שיעור או של הצעה קודמת ("כן", "תמשיכי", "אחת", "בטח").',
-    'web = צריך מידע עדכני או מדויק מהאינטרנט: חדשות, מחירים, מי מכהן היום, פרטי עסק, אירועים אחרונים, נתונים שמשתנים, או כשהמתקשר מבקש לחפש.',
+    'chat = שיחה, ברכה ("מה נשמע", "מה שלומך"), הסבר, לימוד, עצה, ידע כללי שאינו תלוי בפרטים מדויקים, המשך של שיעור או של הצעה קודמת ("כן", "תמשיכי", "אחת", "בטח").',
+    'web = צריך מידע עדכני או מדויק מהאינטרנט: חדשות, מחירים, מי מכהן היום, פרטי עסק, אירועים אחרונים, נתונים שמשתנים, או כשהמתקשר מבקש לחפש. גם כל שאלה על פרט ספציפי מהעולם האמיתי שאפשר לטעות בו: מי שר שיר, איך נקרא זמר או צמד, אילו שירים יש לזמר, איך מגיעים ממקום למקום ובאיזה קו אוטובוס או רכבת, פרטים טכניים של שירות או מוצר. אלה web ולא chat, כדי לא לענות מהזיכרון.',
     'zmanim = שאלה על זמן הלכתי של היום במקום מסוים (סוף זמן קריאת שמע או תפילה לפי הגר"א או המגן אברהם, הנץ, שקיעה, עלות השחר, חצות, מנחה, פלג המנחה, צאת הכוכבים, כניסת שבת והדלקת נרות, צאת שבת). אלה זמנים שמחשבים לפי מיקום ותאריך, לא מחפשים באינטרנט.',
     'nearby = המתקשר שואל איפה יש מקום מסוג מסוים (בית כנסת, מקווה, בית מרקחת, סופר, מסעדה, כספומט, תחנת דלק, מרפאה, חניון וכו\') הכי קרוב או ליד מקום מסוים (רחוב, שכונה, חוף, מקום מוכר, יישוב).',
     'video_find = המתקשר רוצה שתמליצי או תמצאי לו סרטון, הרצאה, סיפור או סרט ביוטיוב.',
@@ -113,7 +113,7 @@ export function plannerPrompt({ context, utterance, now, video, older = null, me
     'בנוסף: כשהמתקשר נותן הוראה קבועה לגבי איך לדבר איתו או על מה לא לדבר (למשל "אל תדברי איתי על חדשות", "תמיד תעני קצר", "תקראי לי בשם דוד"), כתבי אותה בשדה instruction כמשפט ברור, אחרת השאירי ריק.',
     'החזר JSON בלבד, בלי טקסט נוסף, בצורה:',
     '{"intent":"...","standalone":"השאלה כמשפט עצמאי וברור בעברית עם כל הפרטים מההקשר","search":"שאילתת חיפוש קצרה לאינטרנט אם intent=web או read_page","searches":["כששאל כמה דברים שונים שצריך לחפש (למשל מזג אוויר וגם שער הדולר): שאילתה קצרה נפרדת לכל אחד, עד 3; אחרת רשימה ריקה"],"yt_he":"שאילתת חיפוש ביוטיוב בעברית: לסרטון/שיר שהמתקשר מתכוון אליו לפי ההקשר (למשל שם הזמר והשיר שדובר עליהם), לא המשפט שאמר","yt_en":"אותה שאילתה באנגלית אם מתאים","min_minutes":0,"max_minutes":0,"recent_days":0,"order":"relevance או date או views","play":"audio או video","continue_offer":false,"instruction":"","place":"ל-zmanim/nearby: המקום עצמו (רחוב, שכונה, חוף, מקום מוכר או יישוב) בלי מילות יחס, ואם לא נאמר עכשיו - המקום שדובר עליו קודם בשיחה, אחרת ריק","town":"ל-zmanim/nearby: העיר או היישוב שבו המקום נמצא, ריק אם לא ידוע","date":"ל-zmanim: התאריך שעליו שאל בפורמט YYYY-MM-DD לפי הזמן עכשיו, ריק = היום","kind":"ל-nearby: סוג המקום שהוא מחפש, למשל בית כנסת"}',
-    'שימי לב לשיבושי תמלול בשמות מקומות: "משוב" הוא כמעט תמיד "מושב", "קיבוצ" = "קיבוץ". כתבי את שם היישוב הנכון כפי שהוא מוכר בישראל.',
+    'שימי לב לשיבושי תמלול בשמות מקומות: "משוב" הוא כמעט תמיד "מושב", "קיבוצ" = "קיבוץ", "קביעת גאט" = "קריית גת". כשהמילה נשמעת כמו שם של יישוב בישראל, כתבי את שם היישוב הנכון כפי שהוא מוכר. כשהמתקשר אומר עכשיו מקום חדש, הוא מחליף את המקום שדובר עליו קודם.',
     'recent_days: כשביקש משהו חדש (השבוע=7, לאחרונה/חדש=30, היום=2). order: date כשביקש "הכי חדש", views כשביקש "הכי הרבה צפיות". שיר בודד = max_minutes 8, ואם אמר שאינו רוצה סט/רשימה/מיקס אל תחפשי סט.',
     'play = "video" רק כשהמתקשר ביקש במפורש להוריד את הווידאו/הסרטון עצמו. continue_offer = true כשהמתקשר רק מסכים להמשיך את מה שהוצע לו בתשובה הקודמת.',
     'min_minutes/max_minutes רק אם ביקש אורך (למשל "כשעה" = min 40).',
@@ -417,11 +417,12 @@ function candidatesText(videos) {
 export const PHONE_STYLE = [
   'את מדברת בטלפון, בעברית טבעית, חמה וזורמת, כמו מומחית אמיתית שאוהבת להסביר. התשובה מוקראת בקול, אז בלי סימני עיצוב, בלי רשימות עם כוכביות, בלי קוד מוקלד ובלי קישורים.',
   'המתקשר הוא גבר: פני אליו תמיד בלשון זכר (אתה, תרצה, תגיד). את עצמך מדברת בלשון נקבה.',
-  'ענה בהרחבה ובפירוט מלא, כמו מומחית שמסבירה לחבר בכיף ובזרימה: קודם תשובה ישירה, אחר כך הסבר עשיר ומסודר עם הפרטים החשובים, דוגמאות מהחיים ותובנות מעניינות, ובסוף משפט סיכום או שאלת המשך אחת שמקדמת את השיחה. תשובה רגילה: לפחות 10 משפטים מלאים. כשמבקשים "בהרחבה" או "בפירוט": 15 עד 25 משפטים. רק כשהמתקשר מבקש לקצר, או כשהתשובה באמת קצרה מטבעה (שעה, שם, מספר, כן או לא), ענה קצר.',
+  'ענה בהרחבה ובפירוט מלא, כמו מומחית שמסבירה לחבר בכיף ובזרימה: קודם תשובה ישירה, אחר כך הסבר עשיר ומסודר עם הפרטים החשובים, דוגמאות מהחיים ותובנות מעניינות, ובסוף משפט סיכום או שאלת המשך אחת שמקדמת את השיחה. תשובה רגילה: כ-10 משפטים מלאים כשיש באמת מה להסביר. כשמבקשים "בהרחבה" או "בפירוט": 15 עד 25 משפטים. כשהמתקשר מבקש לקצר, או כשהתשובה קצרה מטבעה (שעה, שם, מספר, כן או לא, ברכה), ענה קצר. האורך לעולם לא בא על חשבון האמת: אסור להוסיף פרטים שאינך בטוחה בהם רק כדי להאריך. עדיף תשובה קצרה ונכונה מאשר ארוכה עם המצאות.',
   'עני על כל חלקי השאלה. כשאת לא יודעת פרט, אמרי זאת במפורש ("את שמך עוד לא אמרת לי") והמשיכי לשאר השאלה.',
   'אל תאמרי "המקורות שסופקו" או "לפי ההקשר": דברי בטבעיות, למשל "לפי מה שמצאתי עכשיו".',
   'כשאת מציעה למתקשר לבחור בין כמה אפשרויות, קודם הסבירי במשפט או שניים מה כל אפשרות, ואז אמרי אותן בפורמט קבוע עם השם האמיתי של כל אפשרות לפני המקש, למשל: "למשתנים ונתונים הקש 1, לתנאים והחלטות הקש 2, ללולאות הקש 3", עד 6 אפשרויות, ואמרי שאפשר גם לומר את המספר. אסור לכתוב "הנושא הראשון" במקום שם אמיתי. המקשים האלה באמת עובדים בשיחה. כשהמתקשר בחר אפשרות, התחילי מיד את מה שבחר, בפירוט, בלי לחזור על הרשימה.',
-  'אל תמציא שמות, מספרים, מחירים, תאריכים, סרטונים, ערוצים או ציטוטים. כשאינך בטוחה בפרט, אמור זאת בפשטות.',
+  'אל תמציאי שום עובדה: שמות של אנשים, זמרים, צמדים ולהקות, שמות שירים ואלבומים, קווי אוטובוס ומסלולים, כתובות, טלפונים, מחירים, תאריכים, סרטונים, ערוצים או ציטוטים. כשאינך בטוחה בפרט, אמרי זאת בפשטות והציעי לחפש באינטרנט (הוא יכול לומר "תחפשי באינטרנט"). אל תסתירי אי ודאות מאחורי תשובה ארוכה.',
+  'מה שהמערכת באמת יודעת לעשות בשיחה: לחפש באינטרנט, למצוא סרטון או שיר ביוטיוב, להוריד שיר או סרטון אחד בכל פעם אחרי שהמתקשר בוחר במקשים, להשמיע שירים שכבר שמורים, להקריא כתבה מאתר, לחשב זמני היום ההלכתיים, ולמצוא במפה מקומות קרובים. אסור להבטיח דברים אחרים: לא קבצי ZIP, לא קישורים להורדה, לא שליחת הודעות או מיילים, לא הורדה של אלבום שלם או של כל השירים של זמר בבת אחת, לא איכות 320 ולא "אעדכן אותך אחר כך" על משהו שלא קורה באמת.',
   // Owner, 12.11: no stock phrases; talk like a real, warm person.
   'פתחי ישר בתוכן עצמו. אסור לפתוח במילות נימוס קבועות כמו "שמחתי לשמוע", "שמחה לעזור", "שאלה מצוינת", "שאלה טובה", "בשמחה", "בהחלט", "כמובן", "תודה ששאלת", ואסור לחזור מתשובה לתשובה על אותם ביטויים, אותה פתיחה או אותה שאלת סיום. דברי כמו אדם אמיתי: חם, נעים, סקרן ומגוון, עם הומור עדין כשמתאים, כמו חבר חכם שכיף לדבר איתו.',
   'את לא משמיעה ולא מורידה בעצמך דרך מה שאת כותבת: אל תאמרי "משמיעה עכשיו" ואל תבטיחי להשמיע. כשהמתקשר רוצה לשמוע משהו, אמרי לו לומר "תשמיעי לי את" ואת שם השיר או הסרטון.'
@@ -707,6 +708,17 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // A halachic time or "the nearest X" is computed from the map even when the
   // planner called it a web question; his own place words fill what it left out.
   if (['zmanim', 'nearby'].includes(rules.intent) && ['web', 'chat', 'recall'].includes(plan.intent)) plan = { ...plan, intent: rules.intent };
+  // 18.11 "מה נשמע כפרה" was searched on the web and explained like a dictionary.
+  if (GREETING.test(utterance.trim()) && ['web', 'read_page', 'recall'].includes(plan.intent)) plan = { ...plan, intent: 'chat' };
+  // Facts about real people, songs and routes come from the web, never from a
+  // small model's memory (17.11: an invented duo "אישואשה", invented albums,
+  // invented bus lines through Ramat Gan).
+  if (plan.intent === 'chat' && !plan.continueOffer && !lessonRef && FACTUAL.test(utterance + ' ' + plan.standalone)) { plan = { ...plan, intent: 'web', search: plan.search || plan.standalone || utterance }; log.info?.('[EXT3_BRAIN] factual question sent to the web'); }
+  // "Cancel" only means stopping a download that exists (17.11: "תפסיקי למצוא
+  // סרטונים באנגלית" and "תורידי לי את כל השירים" were both answered
+  // "בסדר, אני לא מורידה כלום").
+  if (plan.intent === 'cancel' && !/(?:תבטל|תבטלי|לבטל|ביטול|תעצור|תעצרי|עצור|עצרי|אל תוריד|לא רוצה (?:ש)?(?:ת)?וריד|לא להוריד|תפסיקי? (?:את )?ה?הורדה|תפסיקי? להוריד)/u.test(utterance))
+    plan = { ...plan, intent: PLAY_WORD.test(utterance) ? 'video_play' : 'chat' };
   if (['zmanim', 'nearby'].includes(plan.intent)) {
     if (!plan.place && !plan.town) { plan.place = rules.place || ''; plan.town = rules.town || ''; }
     if (plan.intent === 'nearby' && !nearbyKind(plan.kind || '')) plan.kind = rules.kind || nearbyKind(utterance + ' ' + plan.standalone)?.label || plan.kind || '';
@@ -714,7 +726,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // A standing instruction said in plain words is kept even when the planner missed it.
   // Only when he really said a standing rule (the planner sometimes fills the
   // field with a description of the request).
-  const ruleWords = /(?:אל תדברי|אל תדבר|תפסיקי לדבר|תפסיק לדבר|אל תספרי|אל תזכירי|אני לא רוצה שתדברי|אני לא רוצה שתזכירי|מעכשיו|מהיום והלאה|מהיום ת|תמיד ת|אף פעם אל|אף פעם לא|תזכרי ש|תזכור ש|בפעם הבאה ש|תדברי איתי ב|תדברי אליי ב|תפני אליי)/u.test(utterance);
+  const ruleWords = /(?:אל תדברי|אל תדבר|תפסיקי לדבר|תפסיק לדבר|אל תספרי|אל תזכירי|אני לא רוצה שתדברי|אני לא רוצה שתזכירי|מעכשיו|מהיום והלאה|מהיום ת|תמיד ת|אף פעם אל|אף פעם לא|תזכרי ש|תזכור ש|בפעם הבאה ש|תדברי איתי ב|תדברי אליי ב|תפני אליי|תפסיקי ל|תפסיק ל|אל תמצאי|אל תביאי|אל תמליצי|אל תציעי)/u.test(utterance);
   const styleAsk = styleRequest(utterance);
   if (styleAsk) {
     plan.intent = 'chat';
@@ -764,6 +776,13 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   };
 
   if (plan.intent === 'media_status') return out({ mediaStatus: true, reply: '' });
+  // "Download them all": one at a time, and he picks which one first.
+  if (['video_play', 'cancel'].includes(plan.intent) && /(?:את כל|את כולם|הכל|כל השירים|כל הסרטונים|כולם)(?=$|[\s,.!?])/u.test(utterance) && PLAY_WORD.test(utterance)) {
+    const opts = (lastVideo?.options || []).slice(0, 3);
+    const choices = {}; opts.forEach((v, i) => { choices[String(i + 1)] = { type: 'video', video: v }; });
+    return out({ ...(opts.length ? { choices } : {}), reply: 'אני מורידה שיר או סרטון אחד בכל פעם, כדי שתשמע בדיוק מה יורד ותאשר. ' +
+      (opts.length ? 'נתחיל באחד מהם: ' + opts.map((v, i) => 'ל' + clip(cleanTitle(v.title), 55) + ' הקש ' + (i + 1)).join(', ') + '. אחרי שהוא יורד, נעבור לבא בתור.' : 'אמור לי את שם השיר הראשון שתרצה, ואחריו נמשיך לבא.') });
+  }
   if (plan.intent === 'cancel') return out({ cancel: true, reply: '' });
 
   if (plan.intent === 'library') {
@@ -837,6 +856,14 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     if (!found.length && own && own !== ytSubject(queries[0])) found = await search([own, plan.ytEn].filter(Boolean), {});
     if (!found.length && plan.minMinutes) { found = await search([own || queries[0], ...queries].slice(0, 3), { minMinutes: 0, recentDays: 0 }); if (found.length) relaxed = 'length'; }
     if (!found.length && plan.recentDays) { found = await search(queries, { recentDays: 0 }); if (found.length) relaxed = 'date'; }
+    // 17.11: "סט שירים חדש" brought Chinese dramas and art-supply videos.
+    // A Hebrew request keeps Hebrew results unless he asked for another language.
+    if (found.length && /[\u0590-\u05FF]/.test(queries[0]) && !/(?:באנגלית|בערבית|ברוסית|בצרפתית|לועזי|בשפה זרה|english)/iu.test(utterance)) {
+      const heb = found.filter(v => /[\u0590-\u05FF]/.test(v.title + ' ' + v.channelTitle));
+      if (heb.length) found = heb.concat(found.filter(v => !heb.includes(v) && /(?:israel|hebrew|jewish|mizrahi|ישראל)/i.test(v.title + ' ' + v.description))).slice(0, 10);
+    }
+    // "סט" means a long mix, not a 1-minute short.
+    if (found.length && /(?:^|\s)(?:סט|מחרוזת|מיקס|ברצף|רצף)(?=$|\s)/u.test(utterance) && !plan.maxMinutes) { const long = found.filter(v => v.durationSec >= 15 * 60); if (long.length) found = long; }
     if (!found.length) return out({ reply: 'חיפשתי ביוטיוב את ' + (own || queries[0]) + ' בכמה דרכים, ולא מצאתי סרטון שמתאים למה שביקשת. ייתכן שזה פשוט לא עלה ליוטיוב. אפשר לומר לי את השם בצורה אחרת, למשל שם הערוץ או שם הפרק, ואחפש שוב.' });
     const instruction = 'המתקשר ביקש המלצה על סרטון. לפניך רשימת סרטונים אמיתיים שנמצאו עכשיו ביוטיוב, עם הכותרת המדויקת, הערוץ, האורך בדקות, מספר הצפיות, תאריך הפרסום והתיאור. ' +
       'בחרי את הסרטון המתאים ביותר לבקשה: קודם שיתאים בדיוק לנושא, לסוג (שיר בודד, סט, הרצאה), לשפה, לאורך ולמידת החדשות שביקש, ובין המתאימים עדיף סרטון איכותי ופופולרי. אסור להמליץ על סרטון שאינו ברשימה, ואסור לשנות את הכותרת, הערוץ, האורך או התאריך. ' +
@@ -964,6 +991,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   if (plan.intent === 'web') {
     const q1 = plan.search || plan.standalone || utterance;
     const hours = /(?:פתוח|פתוחה|סגור|סגורה|שעות|עד מתי|מתי נפתח|מתי נסגר)/u.test(utterance + ' ' + plan.standalone);
+    const route = ROUTE.test(utterance + ' ' + plan.standalone);
     // News: today's real headlines (with time and outlet) instead of news-site home pages.
     const news = deps.newsSearch && /(?:חדשות|מבזק|מבזקים|כותרות|מה קורה בארץ|מה קרה היום|מה חדש בעולם|מה חדש בארץ)/u.test(utterance + ' ' + plan.standalone);
     if (news) {
@@ -982,7 +1010,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     // one search for each, and sources from each of them (13.11: the dollar was lost).
     const parts = (plan.searches || []).length >= 2 ? plan.searches : splitRequests(utterance);
     const multi = parts.length >= 2;
-    const queries = multi ? parts.slice(0, 3) : [...new Set([q1, plan.standalone, hours ? q1.replace(/\s*(?:עכשיו|כרגע|היום)\s*/g, ' ') + ' שעות פתיחה' : ''].filter(Boolean))].slice(0, 3);
+    const queries = multi ? parts.slice(0, 3) : [...new Set([q1, plan.standalone, hours ? q1.replace(/\s*(?:עכשיו|כרגע|היום)\s*/g, ' ') + ' שעות פתיחה' : '', route ? q1.replace(/\s*(?:עכשיו|כרגע|היום|הכי מהר|הכי מהיר|בבקשה)\s*/g, ' ') + ' קווי אוטובוס moovit' : ''].filter(Boolean))].slice(0, 3);
     const sets = await Promise.allSettled(queries.map(q => deps.webSearch(q, { timeoutMs: 4500 })));
     const seen = new Set(), results = [];
     const lists = sets.map(s => (s.status === 'fulfilled' ? s.value || [] : []).filter(r => r?.url).sort((a, b) => sourceRank(a.url) - sourceRank(b.url)));
@@ -1020,6 +1048,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     }).join('\n\n').slice(0, 6500);
     log.info?.('[EXT3_BRAIN] web research', { queries, results: results.length, pagesRead: pages.length, official: results.filter(r => sourceRank(r.url) === 0).length, sourceChars: sourceText.length });
     const verify = 'בדיקת אמינות לפני שאת עונה: השווי בין המקורות. כשהם סותרים, העדיפי את האתר הרשמי, אחריו את המקור העדכני ביותר, ואמרי במפורש על איזה מקור את מתבססת ("לפי האתר הרשמי של כללית"). אל תצטטי שני מקורות סותרים בלי להכריע או להסביר. ' +
+      (route ? 'זו שאלה על איך מגיעים ממקום למקום: אמרי רק קווים, חברות, תחנות וזמני נסיעה שכתובים במפורש במקורות, בדיוק כפי שהם, ובדקי שהם באמת בין שני המקומות שהוא אמר (לא עיר אחרת). אם המקורות לא נותנים מסלול ברור, אמרי בכנות שלא מצאת מסלול מאומת, תני את מה שכן ידוע בוודאות, והציעי לבדוק באפליקציית מוביט או במוקד המידע של התחבורה הציבורית בטלפון כוכבית 8787. אסור להמציא קו, החלפה, רכבת או זמן נסיעה. ' : '') +
       (hours ? 'זו שאלה על שעות פתיחה, ולכן כאן עני ממוקד וקצר יחסית (5 עד 8 משפטים) גם אם בדרך כלל את מרחיבה: האם פתוח עכשיו ועד מתי, השעות של היום ושל מחר, הכתובת והטלפון. בלי עצות שלא נשאלו. כתבי שעות תמיד מהמוקדמת למאוחרת, למשל משמונה בבוקר עד אחת בצהריים. אם אין לך התאמה ודאית למקום שביקש, אמרי זאת בשני משפטים ושאלי באיזו עיר הוא נמצא, בלי לפרט נתונים לא ודאיים. אם הסניף שמופיע במקורות נמצא בעיר או בשכונה אחרת ממה שהמתקשר אמר, אמרי איזה סניף מצאת ושאלי אם לזה התכוון. זו שאלה על שעות פתיחה: מצאי את שעות היום הנוכחי (' + now + '), חשבי בעצמך לפי השעה עכשיו האם המקום פתוח או סגור ברגע זה ועד מתי, ואמרי את זה בתחילת התשובה בבירור. אם אין שעות מפורשות ליום הזה, אמרי שאין לך שעות מאומתות להיום והציעי להתקשר למקום, עם מספר הטלפון אם מופיע. ' : '');
     const reply = await ask('המתקשר צריך מידע עדכני ומדויק. לפניך מקורות אמיתיים מהאינטרנט שנאספו ונקראו עכשיו לשאלה הזאת בלבד. אל תערבבי בתשובה מידע מתשובות קודמות שאינו קשור לשאלה הזאת. ' + verify +
       (multi ? 'הוא שאל כמה דברים: ' + parts.join('; ') + '. עני על כל אחד מהם בנפרד ולפי הסדר, ואם לאחד מהם אין תשובה במקורות, אמרי זאת. ' : '') +
@@ -1068,6 +1097,10 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
 }
 
 export { HE_NUMBER_WORDS };
+
+const GREETING = /^(?:שלום|היי|הי|הלו|אהלן|בוקר טוב|ערב טוב|לילה טוב|צהריים טובים|מה נשמע|מה שלומך|מה שלומך היום|מה קורה|מה המצב|מה העניינים|מה איתך|תודה|תודה רבה|יופי|מעולה|אחלה)(?:\s+(?:כפרה|אחי|חביבי|מותק|יקירתי|יקירי|גבר|נשמה|לך|רבה|לך רבה|בבקשה|עליך))*[\s?!.,]*$/u;
+const FACTUAL = /(?:איך נקרא|איך קוראים ל|איך הם נקראים|מי שר|מי שרה|מי שרים|מי הזמר|מי הזמרת|מי המלחין|מי כתב את השיר|צמד|להקת|אלבום|אלבומים|שירים של|שיר של|דיסקוגרפיה|איך מגיעים|איך אני מגיע|איך להגיע|באיזה קו|איזה קו|קו אוטובוס|קווי אוטובוס|תחבורה ציבורית|מסלול נסיעה|כמה זמן נסיעה|מספר הטלפון|מה הטלפון|טלפון של|כתובת של|מה הכתובת|כמה עולה|מה המחיר|מחיר של|באיזו איכות|איזה פורמט|מי המנהל|מי הבעלים|מי ראש|מי שר ה|מי נשיא|מתי נולד|מתי נפטר|בן כמה|בת כמה)/u;
+const ROUTE = /(?:איך מגיעים|איך אני מגיע|איך להגיע|להגיע ל|באיזה קו|איזה קו|קו אוטובוס|קווי אוטובוס|תחבורה ציבורית|אוטובוס ל|רכבת ל|מסלול נסיעה|הדרך הכי מהירה|הכי מהר ל|נסיעה ל)/u;
 
 // A map or calendar service that hangs must not keep the caller waiting.
 function within(ms, p) { return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('place tools too slow'), { status: 504 })), ms).unref?.())]); }
