@@ -57,6 +57,20 @@ export function mediaInHtml(html, pageUrl) {
   const title = (meta('og:title') || (html.match(/<title[^>]*>([^<]{2,200})<\/title>/i) || [])[1] || '').replace(/\s+/g, ' ').trim() || null;
   const image = meta('og:image') ? abs(meta('og:image')) : null;
   const found = [];
+  // VideoObject is often nested in a TVEpisode or @graph. Parse JSON rather
+  // than treating an embedded player URL as the media itself.
+  const visit = value => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    const types = [].concat(value['@type'] || []);
+    if (types.some(t => /^(?:VideoObject|AudioObject)$/.test(t)) && typeof value.contentUrl === 'string') {
+      found.push(abs(value.contentUrl));
+    }
+    for (const child of Object.values(value)) if (child && typeof child === 'object') visit(child);
+  };
+  for (const script of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+    try { visit(JSON.parse(script[1])); } catch { /* other metadata remains usable */ }
+  }
   for (const n of ['og:video:secure_url', 'og:video:url', 'og:video', 'og:audio:secure_url', 'og:audio', 'twitter:player:stream']) { const v = meta(n); if (v) found.push(abs(v)); }
   for (const m of html.matchAll(/<(?:audio|video|source)[^>]+src=["']([^"']+)["']/gi)) found.push(abs(m[1]));
   for (const m of html.matchAll(/["'(=]((?:https?:)?\/\/[^"'()\s<>]+?\.(?:mp3|m4a|aac|ogg|opus|wav|flac|mp4|m4v|webm|m3u8)(?:\?[^"'()\s<>]*)?)["')\s]/gi)) found.push(abs(m[1]));
@@ -77,17 +91,22 @@ async function scanPage(url, { fetchImpl = fetch, timeoutMs = 12000 } = {}) {
 
 // One link -> a playable item, a YouTube link ({youtube}), or null.
 export async function inspectLink(c, opts = {}) {
-  let r = await probe(c.url, opts), impersonate = false;
-  if (!r.ok && /403|cloudflare|captcha|forbidden|challenge/i.test(r.err || '')) { r = await probe(c.url, { ...opts, impersonate: true }); impersonate = true; }
+  const runProbe = opts.probe || probe;
+  const unavailable = result => {
+    opts.onFailure?.({ reason: /403|401|forbidden|access denied|captcha|challenge/i.test(result?.err || '') ? 'access_denied' : /timeout/i.test(result?.err || '') ? 'timeout' : 'unsupported' });
+    return null;
+  };
+  let r = await runProbe(c.url, opts), impersonate = false;
+  if (!r.ok && /403|cloudflare|captcha|forbidden|challenge/i.test(r.err || '')) { r = await runProbe(c.url, { ...opts, impersonate: true }); impersonate = true; }
   let page = null;
   if (!r.ok || r.info?.extractor_key === 'Generic' && !(Number(r.info?.duration) > 0) && !(r.info?.formats || []).length) {
     // Deeper: the page's own HTML (owner, 18.11: "scan every page").
     const sc = await (opts.scan || scanPage)(c.url);
     if (sc?.youtube) return { youtube: sc.youtube, title: sc.title || c.title };
-    if (!sc?.media) return null;
+    if (!sc?.media) return unavailable(r);
     page = { url: c.url, title: sc.title, image: sc.image };
-    r = await probe(sc.media, { ...opts, referer: c.url }); impersonate = false;
-    if (!r.ok) return null;
+    r = await runProbe(sc.media, { ...opts, referer: c.url }); impersonate = false;
+    if (!r.ok) return unavailable(r);
   }
   const isLive = j0 => !!(j0?.is_live || j0?.live_status === 'is_live');
   // A YouTube video goes to extension 2's YouTube path; a YouTube live
@@ -153,7 +172,7 @@ export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, l
   const liveNow = live && !candidates ? youtubeLiveNow(q).catch(() => []) : Promise.resolve([]);
   const list = (candidates || await webCandidates(q, { env })).slice(0, 60);
   onProgress({ stage: 'checking', total: list.length, done: 0, found: 0 });
-  const found = [], youtube = [];
+  const found = [], youtube = [], unavailable = [];
   let next = 0, done = 0;
   const worker = async () => {
     while (next < list.length && found.length < limit && Date.now() - started < budgetMs) {
@@ -161,7 +180,7 @@ export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, l
       // Live search: YouTube links are opened too, to find the ones broadcasting now.
       if (YT.test(c.url) && !live) { youtube.push(c); done++; continue; }
       const left = budgetMs - (Date.now() - started);
-      const it = left > 3000 ? await inspect(c, { timeoutMs: Math.min(30000, left) }).catch(() => null) : null;
+      const it = left > 3000 ? await inspect(c, { timeoutMs: Math.min(30000, left), onFailure: failure => unavailable.push({ title: c.title, site: c.site || hostOf(c.url), reason: failure.reason }) }).catch(() => null) : null;
       done++;
       if (it?.youtube) youtube.push({ url: it.youtube, title: it.title || c.title });
       else if (it && !found.some(x => x.id === it.id)) found.push(it);
@@ -170,5 +189,5 @@ export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, l
   };
   await Promise.all([worker(), worker(), worker(), worker(), worker()]);
   for (const it of await liveNow) if (!found.some(x => x.id === it.id)) found.unshift(it);
-  return { items: found.slice(0, limit + 10), youtube, checked: done, candidates: list.length, seconds: Math.round((Date.now() - started) / 1000) };
+  return { items: found.slice(0, limit + 10), youtube, unavailable, checked: done, candidates: list.length, seconds: Math.round((Date.now() - started) / 1000) };
 }

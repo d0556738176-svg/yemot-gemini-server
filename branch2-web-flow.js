@@ -63,3 +63,10 @@ export function searchProgressText(p, q, first) {
   if (p?.stage === 'checking' && p.total) return 'נבדקו ' + p.done + ' מתוך ' + p.total + ' קישורים. נמצאו עד עכשיו ' + p.found + ' הקלטות שאפשר להוריד. ממשיך לחפש, נא להמתין.';
   return 'מחפש באתרים, נא להמתין.';
 }
+
+export function noResultsText(found, q) {
+  const failures = found?.unavailable || [];
+  if (failures.some(x => x.reason === 'access_denied')) return 'נמצאו קישורים עבור ' + q + ', אבל האתר חסם את הגישה למדיה בבדיקה. כרגע אי אפשר להציע אותם להורדה. אפשר לנסות קישור אחר או לחפש שוב מאוחר יותר.';
+  if (failures.some(x => x.reason === 'timeout')) return 'החיפוש עבור ' + q + ' מצא קישורים, אבל בדיקת המדיה לא הסתיימה בזמן. אפשר לנסות שוב.';
+  return 'לא מצאתי באתרים הקלטה או סרטון שאפשר להוריד עבור ' + q + '. אפשר לנסות במילים אחרות.';
+}
