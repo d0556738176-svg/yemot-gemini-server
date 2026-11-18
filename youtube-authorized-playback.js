@@ -414,10 +414,15 @@ async function ensureUploadedAndVerified(filePath, remotePath, { expectedDuratio
       console.info('[YouTube IVR] playback step 8: verifying Yemot file', { remotePath });
       verified = await getYemotFile(remotePath);
       if (yemotFileReady(verified) && durationMatches(verified, expectedDurationSec)) { lastErr = null; break; }
+      // 18.11: a 16kHz file Yemot kept unconverted reads twice as long (Yemot
+      // reads every WAV as 8kHz); no point sending the same file again.
+      const kept = Number(verified?.file?.duration);
+      if (yemotFileReady(verified) && Number.isFinite(expectedDurationSec) && expectedDurationSec > 3 && Math.abs(kept / expectedDurationSec - 2) < 0.05)
+        throw Object.assign(new Error('Yemot kept the 16kHz file unconverted'), { code: 'yemot_kept_rate' });
       lastErr = new Error('Yemot file upload was not verified: ' + (verified?.message || 'file missing after upload'));
     } catch (e) {
       lastErr = e;
-      if (e?.code === 'too_large_for_yemot' || e?.name === 'AbortError' || signal?.aborted) throw e;
+      if (e?.code === 'too_large_for_yemot' || e?.code === 'yemot_kept_rate' || e?.name === 'AbortError' || signal?.aborted) throw e;
     }
     console.warn('[YouTube IVR] phone file did not go up; trying again', { remotePath, attempt: i + 1, message: String(lastErr?.message || lastErr).slice(0, 140) });
   }
@@ -798,6 +803,37 @@ async function saveDownloadCopyInner(id,source,title,temp,policy,durationSec=nul
     tagCount:seen?Object.keys(seen.tags).length:null,ms:Date.now()-t});
 }
 
+// 16kHz phone files (owner, 18.11). Yemot converts uploads (convertAudio=1);
+// if it is ever seen keeping a 16kHz file unconverted, that is remembered on
+// the account and phone files are made at 8kHz from then on.
+const PHONE_RATE_RESULT='ivr2:/2/selftest/phone_rate16_v1.json';
+let phoneRateCache=null;
+async function phoneRate(){
+  const wanted=Number(process.env.BRANCH2_PHONE_RATE)===8000?8000:16000;
+  if(wanted===8000)return 8000;
+  if(phoneRateCache===null){const r=await readCacheJson(PHONE_RATE_RESULT).catch(()=>null);phoneRateCache=r?.ok===false?false:r?.ok===true?true:null;}
+  return phoneRateCache===false?8000:16000;
+}
+async function notePhoneRate(ok){
+  if(phoneRateCache===ok)return;
+  phoneRateCache=ok;
+  await writeCacheJson(PHONE_RATE_RESULT,{ok,at:new Date().toISOString()}).catch(()=>{});
+  console.info('[YouTube IVR] phone file rate result saved',{rate16Converted:ok});
+}
+async function resamplePhoneTo8k(phone,mastered,signal){
+  const tmp=phone+'.8k.wav';
+  await new Promise((resolve,reject)=>{
+    const c=spawn(ffmpegPath,['-hide_banner','-loglevel','error','-y','-i',phone,'-af','aresample=8000:filter_size=64:cutoff=0.97,aresample=osf=s16:dither_method=triangular',
+      '-ac','1','-ar','8000','-c:a','pcm_s16le','-map_metadata','-1','-fflags','+bitexact','-flags:a','+bitexact',tmp],{stdio:['ignore','ignore','pipe']});
+    let err='';c.stderr.on('data',d=>{err=(err+d).slice(-300);});
+    const stop=()=>c.kill('SIGKILL');signal?.addEventListener?.('abort',stop,{once:true});
+    c.on('error',reject);c.on('close',code=>{signal?.removeEventListener?.('abort',stop);code===0?resolve():reject(new Error('8k resample failed: '+err));});
+  });
+  await fs.rename(tmp,phone);
+  const bytes=(await fs.stat(phone)).size;
+  return {...mastered,sampleRate:8000,bytes,durationSec:Number(Math.max(0,(bytes-44)/16000).toFixed(1))};
+}
+
 // Result of the one-time account test (branch2-cover-selftest.js); read once.
 let coverPolicyCache=null;
 async function coverPolicy(){
@@ -862,7 +898,10 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     // Master the whole song for the phone line once (level, clarity, no
     // clipping), then upload it to Yemot as ONE complete file.
     const phone=path.join(temp,'phone.wav');
-    const mastered=await preparePhoneAudio(source,phone,{signal,onPercent:percent=>onProgress({stage:'converting',percent})});
+    // Owner, 18.11: 16kHz/16-bit/mono WAV, peak -2dB (lessons) / -3dB (songs),
+    // lessons cleaned below 100Hz. 8kHz only if Yemot proved it keeps 16kHz
+    // files unconverted (it would then play them wrong), see below.
+    let mastered=await preparePhoneAudio(source,phone,{signal,title:sourceTitle,sampleRate:await phoneRate(),onPercent:percent=>onProgress({stage:'converting',percent})});
     // The original audio is kept only when a downloadable MP3 copy will be
     // made from it (after the song is ready); otherwise free the disk now.
     const mp3Policy=await downloadCopyPolicy();
@@ -888,7 +927,19 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
       try{
         onProgress({stage:'uploading',completed:0,total:1});
         const t=Date.now();
-        await ensureUploadedAndVerified(phone,'ivr2:'+fullPath+'.wav',{expectedDurationSec:mastered.durationSec,signal,replace:true});
+        try{
+          await ensureUploadedAndVerified(phone,'ivr2:'+fullPath+'.wav',{expectedDurationSec:mastered.durationSec,signal,replace:true});
+          if(mastered.sampleRate>8000)void notePhoneRate(true);
+        }catch(e){
+          if(e?.code!=='yemot_kept_rate'||signal?.aborted)throw e;
+          // Yemot stored the 16kHz file as is (reads it as 8kHz = wrong
+          // length/speed): same mastering, resampled once to 8kHz, and every
+          // later song goes straight to 8kHz.
+          console.warn('[YouTube IVR] Yemot did not convert the 16kHz file; sending it at 8kHz',{videoId:id});
+          void notePhoneRate(false);
+          mastered=await resamplePhoneTo8k(phone,mastered,signal);covered=false;
+          await ensureUploadedAndVerified(phone,'ivr2:'+fullPath+'.wav',{expectedDurationSec:mastered.durationSec,signal,replace:true});
+        }
         paths.push(fullPath);single=true;
         console.info('[YouTube IVR] single full file uploaded',{videoId:id,bytes:mastered.bytes,durationSec:mastered.durationSec,uploadMs:Date.now()-t});
       }catch(e){
@@ -912,7 +963,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     // background, AFTER it is ready here, so playback is never delayed.
     if(single&&String(process.env.BRANCH2_EXT7||'on').toLowerCase()!=='off'){
       ext7Job=publishToExt7(id,phone,sourceTitle,{readJson:readCacheJson,writeJson:writeCacheJson,
-        upload:(file,remote)=>uploadToYemot(file,remote,undefined,{convertAudio:!(covered&&!cover.convert)}),log:console})
+        upload:(file,remote)=>uploadToYemot(file,remote,undefined,{convertAudio:mastered.sampleRate>8000||!(covered&&!cover.convert)}),log:console})
         .catch(e=>console.warn('[EXT7] song not added',{videoId:id,message:String(e?.message||e).slice(0,200)}));
     }
     // Downloadable copy with the video's picture, in the background.
@@ -948,7 +999,7 @@ export async function downloadAuthorizedAudioToYemot(videoId, options={}) {
 // Narrow exports for the branch 2 self-test (branch2-selftest.js). They use
 // the same conversion and upload code as real playback, so a passing
 // self-test proves the production path, not a copy of it.
-export const _pipeline = { uploadToYemotInParts, lastDoneVariant: () => doneVariant, makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE, ensureUploadedAndVerified, getYemotFile, transferProviderFile, readCacheJson, writeCacheJson, downloadApifySource, preparePhoneAudio, saveDownloadCopy, downloadCopyPolicy };
+export const _pipeline = { uploadToYemotInParts, lastDoneVariant: () => doneVariant, makeChunks, uploadToYemot, yemotApiKey, YEMOT_API_BASE, ensureUploadedAndVerified, getYemotFile, transferProviderFile, readCacheJson, writeCacheJson, downloadApifySource, preparePhoneAudio, saveDownloadCopy, downloadCopyPolicy, phoneRate };
 
 
 

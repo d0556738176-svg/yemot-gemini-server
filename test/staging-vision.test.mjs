@@ -19,7 +19,7 @@ test('branch 2 uses vision audio and sends WAV to simulated Yemot', {skip:!ffmpe
    if(url.hostname==='mock.googlevideo.com')return new Response(audio);
    if(url.hostname==='www.call2all.co.il'&&url.pathname.endsWith('/GetFile'))return Response.json({responseStatus:uploaded?'OK':'ERROR'});
    if(url.hostname==='www.call2all.co.il'&&url.pathname.endsWith('/UploadFile')){
-    let wav=Buffer.from(await options.body.get('file').arrayBuffer());assert.equal(wav.subarray(0,4).toString(),'RIFF');assert.equal(wav.readUInt32LE(24),8000);count++;uploaded=true;return Response.json({responseStatus:'OK'});
+    let wav=Buffer.from(await options.body.get('file').arrayBuffer());assert.equal(wav.subarray(0,4).toString(),'RIFF');assert.equal(wav.readUInt32LE(24),16000);count++;uploaded=true;return Response.json({responseStatus:'OK'});
    }
    throw new Error('Unexpected request');
   };
@@ -65,7 +65,7 @@ test('HTML returned instead of audio is rejected before any upload', {skip:!ffmp
   globalThis.fetch=async input=>{const u=new URL(input);
    if(u.hostname==='www.youtube.com')return Response.json({playabilityStatus:{status:'OK'},streamingData:{adaptiveFormats:[{mimeType:'audio/mp4',url:'https://mock.googlevideo.com/h',contentLength:String(html.length),bitrate:1}]}});
    if(u.hostname==='mock.googlevideo.com')return new Response(html);
-   uploads++;return Response.json({responseStatus:'OK'});};
+   if(u.pathname.endsWith('/UploadFile'))uploads++;return Response.json({responseStatus:'OK'});};
   await assert.rejects(downloadAuthorizedAudioToYemot('testvideo04'),/ffmpeg failed/);assert.equal(uploads,0);
  } finally {globalThis.fetch=saved;process.env=env;}
 });

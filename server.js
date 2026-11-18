@@ -5058,7 +5058,7 @@ function startDubJob(videoId, title) {
     const r = await dubToHebrew({ videoId: id, title }, {
       ffmpegPath,
       fetchSource: (vid, out) => p.downloadApifySource(vid, out),
-      preparePhone: (src, out) => p.preparePhoneAudio(src, out, {}),
+      preparePhone: async (src, out) => p.preparePhoneAudio(src, out, { sampleRate: await p.phoneRate(), title }),
       publishExt7: (key, wav, t) => publishToExt7(key, wav, t, { readJson: x => p.readCacheJson(x), writeJson: (x, d) => p.writeCacheJson(x, d), upload: (f, rr) => p.uploadToYemot(f, rr, undefined, { convertAudio: true }), log: console }),
       saveDownload: async (vid, mix, t, temp, dur, suffix) => { const policy = await p.downloadCopyPolicy(); if (policy) return p.saveDownloadCopy(vid, mix, t, temp, policy, dur, suffix); },
     });
@@ -5861,7 +5861,7 @@ app.listen(port,async()=>{
     const ffmpegPath=(await import('ffmpeg-static')).default;
     const t=Date.now();
     const r=await dub.dubToHebrew({videoId:'jNQXAC9IVRw',title:'Me at the zoo'},{
-      ffmpegPath,fetchSource:(vid,o)=>p.downloadApifySource(vid,o),preparePhone:(src,o)=>p.preparePhoneAudio(src,o,{}),
+      ffmpegPath,fetchSource:(vid,o)=>p.downloadApifySource(vid,o),preparePhone:async(src,o)=>p.preparePhoneAudio(src,o,{sampleRate:await p.phoneRate()}),
       publishExt7:async(key,wav)=>{await p.uploadToYemot(wav,'ivr2:/2/selftest/dub_test.wav',undefined,{convertAudio:true});return {file:'test'};},
       saveDownload:async()=>{},
     }).catch(e=>({state:'failed',message:String(e?.message||e).slice(0,200)}));

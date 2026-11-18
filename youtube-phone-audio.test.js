@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { preparePhoneAudio, runFfmpeg, parseIntegratedLufs, gainFor, phoneAudioSettings } from './youtube-phone-audio.js';
+import { preparePhoneAudio, runFfmpeg, parseIntegratedLufs, gainFor, phoneAudioSettings, audioKind } from './youtube-phone-audio.js';
 
 async function measure(file) {
   const report = await runFfmpeg(['-hide_banner', '-nostats', '-i', file, '-af', 'ebur128=peak=true', '-f', 'null', '-'], { collect: true });
@@ -23,25 +23,39 @@ async function source(dir, name, filter) {
   return file;
 }
 
-test('loud and quiet songs both come out at a moderate phone level with no clipping', async () => {
+async function header(file) {
+  const b = await fs.readFile(file);
+  return { fmt: b.readUInt16LE(20), channels: b.readUInt16LE(22), rate: b.readUInt32LE(24), bits: b.readUInt16LE(34) };
+}
+
+test('owner spec 18.11: WAV PCM mono 16kHz 16-bit, songs peak -3dB, lessons peak -2dB, no clipping', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'phone-audio-'));
   try {
     // A brick-walled master hitting full scale, and a quiet upload ~24dB lower.
     const loud = await source(dir, 'loud', 'volume=6dB,alimiter=limit=0.99:level=disabled');
     const quiet = await source(dir, 'quiet', 'volume=-18dB');
-    const results = {};
-    for (const [name, file] of Object.entries({ loud, quiet })) {
+    for (const [name, file, kind, peak] of [['loud', loud, 'song', -3], ['quiet', quiet, 'song', -3], ['lesson', quiet, 'lesson', -2], ['loudLesson', loud, 'lesson', -2]]) {
       const out = path.join(dir, name + '-phone.wav');
-      const info = await preparePhoneAudio(file, out);
+      const info = await preparePhoneAudio(file, out, { kind });
       const m = await measure(out);
-      results[name] = m;
-      assert.ok(m.lufs > -23 && m.lufs < -16, name + ' loudness ' + m.lufs);
-      assert.ok(m.samplePeakDb <= -4, name + ' peak ' + m.samplePeakDb);
+      const h = await header(out);
+      console.log(name, JSON.stringify({ lufs: m.lufs, samplePeakDb: +m.samplePeakDb.toFixed(2), truePeak: m.truePeak, h, kind: info.kind }));
+      assert.deepEqual(h, { fmt: 1, channels: 1, rate: 16000, bits: 16 });
+      assert.ok(Math.abs(m.samplePeakDb - peak) <= 0.3, name + ' peak ' + m.samplePeakDb);
       assert.equal(m.clipped, 0, name + ' must not clip');
       assert.ok(Math.abs(info.durationSec - 20) < 0.5, 'duration kept');
     }
-    assert.ok(Math.abs(results.loud.lufs - results.quiet.lufs) < 2.5, 'songs end up at the same level');
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('lesson or song from the title (song words win), long unclear files are lessons', () => {
+  assert.equal(audioKind({ title: 'שיעור בגמרא - הרב כהן' }), 'lesson');
+  assert.equal(audioKind({ title: 'Rabbi Cohen - weekly shiur' }), 'lesson');
+  assert.equal(audioKind({ title: 'מחרוזת ניגונים לשבת' }), 'song');
+  assert.equal(audioKind({ title: 'הרב כהן - ניגון' }), 'song');
+  assert.equal(audioKind({ title: 'Something', durationSec: 3600 }), 'lesson');
+  assert.equal(audioKind({ title: 'Something', durationSec: 240 }), 'song');
+  assert.equal(audioKind({ title: 'שיעור', env: { BRANCH2_AUDIO_KIND: 'song' } }), 'song');
 });
 
 test('gain is bounded and silence is never amplified', () => {
