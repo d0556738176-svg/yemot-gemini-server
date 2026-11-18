@@ -13,6 +13,8 @@ test('download arguments retain the extracted context without changing YouTube d
   assert.ok(!before.includes('--add-headers'));
   const after = argsFor('abcdefghijk', '/tmp/out', { target: 'https://cdn.example/master.m3u8', referer: 'https://site.example/episode', httpHeaders: { Origin: 'https://site.example' } });
   assert.ok(after.includes('Origin:https://site.example'));
+  assert.ok(after.includes('--abort-on-unavailable-fragments'));
+  assert.ok(!before.includes('--abort-on-unavailable-fragments'));
   assert.equal(after.at(-1), 'https://cdn.example/master.m3u8');
   assert.deepEqual(mediaHeaderArgs({ Cookie: 'secret' }), []);
 });

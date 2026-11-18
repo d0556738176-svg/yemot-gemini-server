@@ -48,6 +48,7 @@ export function argsFor(videoId, output, { mode = 'audio', height, client = '', 
   if (ffmpegPath) a.push('--ffmpeg-location', ffmpegPath);
   if (client) a.push('--extractor-args', 'youtube:player_client=' + client);
   if (impersonate) a.push('--impersonate', 'chrome');
+  if (target) a.push('--abort-on-unavailable-fragments');
   a.push(...mediaHeaderArgs(httpHeaders));
   // A player found inside another page (e.g. Vimeo) plays only for that page.
   if (referer) a.push('--referer', referer);
