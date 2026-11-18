@@ -4,6 +4,8 @@ import { playbackAwake } from './playback-awake.js';
 import express from 'express';
 import crypto from 'node:crypto';
 import { YemotRouter, ExitError } from 'yemot-router2';
+import { readFileSync } from 'node:fs';
+const BRANCH2_STARTED_AT = new Date().toISOString();
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { tavily } from '@tavily/core';
 import YemotApi from 'yemot-api';
@@ -4042,6 +4044,13 @@ function startYouTubePlaybackJob(video, opts = {}) {
   return state;
 }
 
+// The last keys callers pressed in extension 2 (no phone numbers): what Yemot
+// really sent and how long it took, to check the keypad behaviour live.
+const branch2Keys = [];
+function branch2KeyLog(state, raw, waitedSec, messageSec) {
+  branch2Keys.push({ at: new Date().toISOString(), state, raw: String(raw).slice(0, 40), waitedSec: Math.round(waitedSec * 10) / 10, messageSec: Math.round(messageSec) });
+  if (branch2Keys.length > 200) branch2Keys.shift();
+}
 // Extension 2 storage in Yemot (history, batch queue): same files as the
 // other extension 2 records.
 const branch2Store = {
@@ -4110,7 +4119,6 @@ async function youtubeCallHandler(call) {
   // digits select any result heard; 0 = 20 more (no limit); 0 then # = all
   // of them downloaded; 4 there = only some, typed in a row (123420#).
   const PAGE=Math.max(5,Math.min(30,Number(process.env.BRANCH2_PAGE_SIZE||20)));
-  let pageOffersAll=false, allCount=0;
   const callerPhone=getCallerNumber(call);
 
   // Owner, 10.11: extension 3 recommended a video and the caller asked to
@@ -4155,7 +4163,7 @@ async function youtubeCallHandler(call) {
     return lines.join(' ');
   }
   function resultsHint() {
-    return 'לבחירה הקש את מספר התוצאה וסולמית. לעוד '+PAGE+' תוצאות הקש 0 וסולמית. להורדת כל התוצאות הקש 0 וסולמית, ואז שוב סולמית. לחיפוש חדש הקש 0 0 וסולמית. לתפריט הראשי הקש כוכבית.';
+    return 'לבחירה הקש את מספר התוצאה. לעוד '+PAGE+' תוצאות הקש 0. להורדת כל התוצאות הקש 0 0. לחיפוש חדש הקש 0 0 0. לתפריט הראשי הקש כוכבית.';
   }
   // The next results of the same search (50 more each time, for as long as
   // YouTube has; a channel's uploads continue newest first).
@@ -4170,18 +4178,6 @@ async function youtubeCallHandler(call) {
       } else if(more?.pages) Object.defineProperty(results,'pages',{value:more.pages,enumerable:false});
     } catch(e){ console.warn('[YouTube IVR] more results failed',{message:String(e?.message||e).slice(0,120)}); }
   }
-  // A short question answered only by # (Yemot sends # alone as an empty
-  // answer; silence comes back only after the wait): '#', '*' or null.
-  async function readHashOffer(text) {
-    const spoken=sanitizeForYemot(text), askedAt=Date.now();
-    const v=String(await call.read([{type:'text',data:spoken}],'tap',
-      {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'h'+(++tapNo),timeout:10*60*1000})||'None').trim();
-    const waited=(Date.now()-askedAt)/1000, messageSec=spoken.length/13;
-    console.info('[YouTube IVR] hash offer',{v,waitedSec:Math.round(waited),messageSec:Math.round(messageSec)});
-    if(v.includes('*')) return '*';
-    if((v==='None'||!v)&&waited<messageSec+2.5) return '#';
-    return null;
-  }
   // Several downloads at once: 1 audio, 2 video, 3 cancel, 4 choose some by
   // typing their numbers in a row. Returns what to say next, or {exit:true}.
   async function batchFlow(all) {
@@ -4189,21 +4185,21 @@ async function youtubeCallHandler(call) {
     let chosen=all, nums=null, empty=0, note='';
     while(true) {
       const head=nums ? 'בחרת את התוצאות '+spokenNumbers(nums)+'. ' : 'הורדת כל '+all.length+' התוצאות ששמעת. ';
-      const menu=note+head+'להורדה כשמע הקש 1. להורדה כוידאו הקש 2. לביטול הקש 3. '+(nums?'להקלדה מחדש של המספרים הקש 4.':'לבחירת תוצאות מסוימות, בהקשת המספרים שלהן ברצף, הקש 4.');
+      const menu=note+head+'להורדה כשמע הקש 1. להורדה כוידאו הקש 2. לביטול וחזרה לתוצאות הקש 3. '+(nums?'להקלדה מחדש של המספרים הקש 4.':'לבחירת תוצאות מסוימות, בהקשת המספרים שלהן ברצף, הקש 4.');
       note='';
       const k=String(await call.read([{type:'text',data:sanitizeForYemot(menu)}],'tap',
         {max_digits:1,min_digits:1,sec_wait:10,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'b'+(++tapNo),timeout:10*60*1000,
          digits_allowed:['1','2','3','4','*']})||'None').trim();
-      console.info('[BATCH] menu key',{k,count:chosen.length});
+      console.info('[BATCH] menu key',{k,count:chosen.length}); branch2KeyLog('batch-menu',k,0,0);
       if(k.includes('*')) return {exit:true};
       if(k==='None'||!k) { if(++empty>=3) return 'לא נבחרה הורדה.'; continue; }
       empty=0;
-      if(k==='3') return 'ההורדה בוטלה, ולא הורד כלום.';
+      if(k==='3') return 'ההורדה בוטלה, ולא הורד כלום. חזרת לתוצאות.';
       if(k==='4') {
-        const typed=String(await call.read([{type:'text',data:sanitizeForYemot('הקש ברצף את מספרי התוצאות שתרצה להוריד, מ 1 עד '+all.length+', ובסוף הקש סולמית. אפשר להפריד בין מספר למספר בכוכבית.')}],'tap',
+        const typed=String(await call.read([{type:'text',data:sanitizeForYemot('הקש ברצף את מספרי התוצאות שתרצה להוריד, מ 1 עד '+all.length+', ובסוף הקש סולמית. למשל 1 2 3 4 7 וסולמית. אפשר להפריד בין מספר למספר בכוכבית.')}],'tap',
           {max_digits:80,min_digits:1,sec_wait:15,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'s'+(++tapNo),timeout:10*60*1000})||'None').trim();
         const got=parseSelection(typed,all.length);
-        console.info('[BATCH] typed selection',{typed:typed.slice(0,80),got});
+        console.info('[BATCH] typed selection',{typed:typed.slice(0,80),got}); branch2KeyLog('batch-typed',typed+' -> '+got.join(','),0,0);
         if(!got.length) { note='לא זיהיתי מספרי תוצאות בהקשה. '; continue; }
         nums=got; chosen=got.map(n=>all[n-1]).filter(Boolean);
         continue;
@@ -4238,14 +4234,14 @@ async function youtubeCallHandler(call) {
     while(true) {
       const more=start+PAGE<items.length;
       const list=withList?historyPageText(items,start,PAGE,{spoken:sanitizeForYemot})+' ':'';
-      const hint='לחזרה לחיפוש הקש את מספר החיפוש וסולמית. '+(more?'לעוד '+PAGE+' חיפושים הקש 0 וסולמית. ':'')+'לחזרה לתפריט החיפוש הקש 0 0 וסולמית. לתפריט הראשי הקש כוכבית.';
+      const hint='לחזרה לחיפוש הקש את מספר החיפוש. '+(more?'לעוד '+PAGE+' חיפושים הקש 0. ':'')+'לחזרה לתפריט החיפוש הקש 0 0. לתפריט הראשי הקש כוכבית.';
       const spoken=sanitizeForYemot(note+list+hint);
       note=''; withList=false;
       const v=String(await call.read([{type:'text',data:spoken}],'tap',
-        {max_digits:Math.max(2,String(Math.min(items.length,start+PAGE)).length),min_digits:1,sec_wait:10,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'y'+(++tapNo),timeout:10*60*1000})||'None').trim();
-      console.info('[YouTube IVR] history key',{v,start,count:items.length});
+        {max_digits:Math.max(3,String(Math.min(items.length,start+PAGE)).length),min_digits:1,sec_wait:4,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'y'+(++tapNo),timeout:10*60*1000})||'None').trim();
+      console.info('[YouTube IVR] history key',{v,start,count:items.length}); branch2KeyLog('history',v,0,0);
       if(v.includes('*')) return {exit:true};
-      if(v==='None'||!v) { if(++empty>=4) return {say:'לא נבחר חיפוש.'}; continue; }
+      if(v==='None'||!v) { if(++empty>=8) return {say:'לא נבחר חיפוש.'}; continue; }
       empty=0;
       if(v==='00') return {};
       if(v==='0') { if(more) { start+=PAGE; withList=true; } else note='אין עוד חיפושים בהיסטוריה. '; continue; }
@@ -4333,42 +4329,36 @@ async function youtubeCallHandler(call) {
 
       // Which keys mean what in the current step.
       const keyState=(pendingFallbackVideo||pendingPaidVideo)?'fallback':pendingSubtitleVideo?'subtitles':pendingVideo?'confirm':results.length?'results':null;
-      // The results (owner, 18.11): any result number heard, then #.
+      // The results (owner, 18.11, second round): any result number heard;
+      // 0 = 20 more (no limit); 00 = the download-all menu; 000 = a new
+      // search. Yemot ends typing with # and never sends the # itself, so
+      // "0" and "0#" reach the server the same: the menu is "00".
       if(keyState==='results'&&!keyTranscript) {
         const listText=prompt===basePrompt?'':String(prompt);
         const spoken=sanitizeForYemot((listText?listText+' ':'')+resultsHint());
-        const allOffer=pageOffersAll; pageOffersAll=false;
         const askedAt=Date.now();
         const raw=String(await call.read([{type:'text',data:spoken}],'tap',
-          {max_digits:Math.max(2,String(Math.max(1,resultOffset)).length),min_digits:1,sec_wait:10,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'r'+(++tapNo),timeout:10*60*1000})||'None').trim();
+          {max_digits:Math.max(3,String(Math.max(1,resultOffset)).length),min_digits:1,sec_wait:4,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'r'+(++tapNo),timeout:10*60*1000})||'None').trim();
         const waited=(Date.now()-askedAt)/1000, messageSec=spoken.length/13;
-        console.info('[YouTube IVR] results key',{raw,heard:resultOffset,waitedSec:Math.round(waited),messageSec:Math.round(messageSec),allOffer});
+        console.info('[YouTube IVR] results key',{raw,heard:resultOffset,waitedSec:Math.round(waited),messageSec:Math.round(messageSec)});
+        branch2KeyLog('results',raw,waited,messageSec);
         if(raw.includes('*')) return call.go_to_folder('/');
         if(raw==='None'||!raw) {
-          // A page that opens with "to download all, press # now": a # in
-          // its first seconds (an empty answer long before the page ended).
-          if(allOffer&&messageSec>20&&waited<Math.min(messageSec*0.5,messageSec-10)) {
-            const out=await batchFlow(results.slice(0,allCount));
-            if(out?.exit) return call.go_to_folder('/');
-            resultOffset=Math.max(allCount,pageStart); nextPrompt=out; continue;
-          }
-          if(++emptyTaps>=4) return call.id_list_message([{type:'text',data:'לא נקלטה הקשה. להתראות'}]);
+          if(++emptyTaps>=8) return call.id_list_message([{type:'text',data:'לא נקלטה הקשה. להתראות'}]);
           nextPrompt=null; continue; // the keys again, without the whole list
         }
         emptyTaps=0;
-        if(raw==='00') { results=[]; resultOffset=0; pageStart=0; searchMode=null; typedOnce=false; continue; }
+        if(raw==='000') { results=[]; resultOffset=0; pageStart=0; searchMode=null; typedOnce=false; continue; }
+        if(raw==='00') {
+          const out=await batchFlow(results.slice(0,resultOffset));
+          if(out?.exit) return call.go_to_folder('/');
+          nextPrompt=out; continue;
+        }
         if(raw==='0') {
-          const before=resultOffset;
           if(resultOffset>=results.length) await fetchMore();
-          if(resultOffset>=results.length) {
-            const b=await readHashOffer('אין עוד תוצאות לחיפוש הזה. להורדת כל '+before+' התוצאות הקש עכשיו סולמית.');
-            if(b==='*') return call.go_to_folder('/');
-            if(b==='#') { const out=await batchFlow(results.slice(0,before)); if(out?.exit) return call.go_to_folder('/'); nextPrompt=out; continue; }
-            nextPrompt=null; continue;
-          }
-          const page=await formatResultsPage();
-          pageOffersAll=true; allCount=before;
-          nextPrompt='להורדת כל '+before+' התוצאות ששמעת, הקש עכשיו סולמית. '+page;
+          nextPrompt=resultOffset>=results.length
+            ? 'אין עוד תוצאות לחיפוש הזה.'
+            : await formatResultsPage();
           continue;
         }
         const n=Number(raw);
@@ -4379,7 +4369,7 @@ async function youtubeCallHandler(call) {
           if(pendingVideo?.geoLimited) pendingVideo=null;
           continue;
         }
-        nextPrompt='ההקשה '+raw+' אינה אחת האפשרויות.';
+        nextPrompt=/^\d+$/.test(raw)&&n>resultOffset ? 'אין תוצאה במספר '+raw+'.' : 'ההקשה '+raw+' אינה אחת האפשרויות.';
         continue;
       }
       if(keyState&&!voiceOnce) {
@@ -4405,7 +4395,7 @@ async function youtubeCallHandler(call) {
         // whole message + 60 s, so an earlier empty answer is a # press.
         const waited=(Date.now()-askedAt)/1000, messageSec=spoken.length/13;
         if(key==='None'&&waited<messageSec+45) key='#';
-        console.info('[YouTube IVR] key read',{state:keyState,key,waitedSec:Math.round(waited),messageSec:Math.round(messageSec)});
+        console.info('[YouTube IVR] key read',{state:keyState,key,waitedSec:Math.round(waited),messageSec:Math.round(messageSec)}); branch2KeyLog(keyState,key,waited,messageSec);
         if(key.includes('*')) return call.go_to_folder('/');
         // 0 = more results (owner, 07.11); # works the same as a backup.
         if(key==='0'&&keyState==='results') key='#';
@@ -4451,7 +4441,7 @@ async function youtubeCallHandler(call) {
             {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'m'+(++tapNo),timeout:10*60*1000,
              digits_allowed:['1','2','4','*']}
           )||'None').trim();
-          console.info('[YouTube IVR] search mode',{choice});
+          console.info('[YouTube IVR] search mode',{choice}); branch2KeyLog('mode',choice,0,0);
           if(choice.includes('*')) return call.go_to_folder('/');
           if(choice==='4') {
             const h=await historyMenu();
@@ -5221,6 +5211,7 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
   serverTime:new Date().toISOString()
 }));
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
+app.get('/branch2-diag',(req,res)=>{ let commit=''; try { commit=String(readFileSync(new URL('./.git/HEAD',import.meta.url),'utf8')).trim(); if(commit.startsWith('ref:')) commit=String(readFileSync(new URL('./.git/'+commit.slice(5).trim(),import.meta.url),'utf8')).trim(); } catch {} res.json({commit:commit.slice(0,12), startedAt:BRANCH2_STARTED_AT, keys:branch2Keys.slice(-100)}); });
 
 // Owner test source for the segmented-playback trial (only when enabled).
 app.get('/branch2-selftest/source.m4a',(req,res,next)=>process.env.BRANCH2_SEGMENT_TEST==='1'?serveTestSource(req,res):next());
