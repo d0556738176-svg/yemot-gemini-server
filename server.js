@@ -4317,7 +4317,7 @@ async function youtubeCallHandler(call) {
     for(let round=0;round<6;round++) {
       const k=String(await call.read([{type:'text',data:sanitizeForYemot(TV.menuText(note))}],'tap',
         {max_digits:1,min_digits:1,sec_wait:8,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'tv'+(++tapNo),timeout:10*60*1000,
-         digits_allowed:['1','2','3','4','5','6','*']})||'None').trim();
+         digits_allowed:['1','2','3','4','5','6','7','8','*']})||'None').trim();
       branch2KeyLog('tv',k,0,0);
       if(k.includes('*')) return {};
       if(k==='None') { if(round>=1) return {}; note=''; continue; }
@@ -4327,7 +4327,7 @@ async function youtubeCallHandler(call) {
       const src=await TV.findChannelSource(ch,deps);
       console.info('[TV] channel chosen',{key:ch.key,ok:!!src.page,how:src.how||null});
       if(!src.page) { note='השידור של '+ch.title+' אינו זמין כרגע. '; continue; }
-      const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,af:TV.TV_AUDIO_FILTER});
+      const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,referer:src.referer||null,af:TV.TV_AUDIO_FILTER});
       if(r.exit) return {exit:true};
       if(r.say&&/לא הצלחתי|לא מגיע|נקטע|הסתיים/.test(r.say)) TV.forget(ch.key);
       note=r.say||'';
@@ -4636,7 +4636,7 @@ async function youtubeCallHandler(call) {
         }
         if(!searchMode) {
           const choice=String(await call.read(
-            [{type:'text',data:sanitizeForYemot((said?said+' ':'')+'לחיפוש ביוטיוב בדיבור הקש 1. לחיפוש בהקלדה במקשי הטלפון הקש 2. להיסטוריית החיפושים הקש 4. לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3. לשידורים החיים של ערוצי הטלוויזיה הקש 8. לחזרה לתפריט הראשי הקש כוכבית.')}],
+            [{type:'text',data:sanitizeForYemot((said?said+' ':'')+'לחיפוש ביוטיוב בדיבור הקש 1. לחיפוש בהקלדה במקשי הטלפון הקש 2. להיסטוריית החיפושים הקש 4. לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3. לשידורים החיים של ערוצי הטלוויזיה והרדיו הקש 8. לחזרה לתפריט הראשי הקש כוכבית.')}],
             'tap',
             {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'m'+(++tapNo),timeout:10*60*1000,
              digits_allowed:['1','2','3','4','5','6','8','*']}
@@ -5426,7 +5426,7 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
 // no Yemot changes, no keys shown.
 async function tvDeps() {
   const { resolveStream } = await import('./live-relay.js');
-  const { youtubeLiveNow } = await import('./web-media.js');
+  const { youtubeLiveNow, inspectLink } = await import('./web-media.js');
   const { parseOverrides } = await import('./branch2-tv.js');
   let overrides={};
   try {
@@ -5435,7 +5435,7 @@ async function tvDeps() {
     const j=await (await fetch(u,{signal:AbortSignal.timeout(6000)})).json().catch(()=>null);
     if(j?.responseStatus==='OK') overrides=parseOverrides(j.contents);
   } catch {}
-  return { resolveStream, youtubeLiveNow, overrides };
+  return { resolveStream, youtubeLiveNow, inspect: inspectLink, overrides };
 }
 // Keep the six channel sources found in advance (every 15 minutes), so a
 // caller who presses a channel starts at once instead of waiting for a lookup.

@@ -59,8 +59,10 @@ export function startRelay(item, deps) {
       const src = await resolveStream(item.url, { impersonate: !!item.impersonate, referer: item.referer || null });
       if (!src) { r.error = 'no_stream'; if (++restarts >= 3) break; await new Promise(x => setTimeout(x, 5000)); continue; }
       const startNo = r.next;
+      // Some broadcasters' servers send the stream only to their own player page.
+      const hdr = item.referer && !/youtube|googlevideo/i.test(src) ? ['-headers', 'Referer: ' + item.referer + '\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36\r\n'] : [];
       const args = ['-hide_banner', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '10',
-        '-i', src, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-af', item.af || 'loudnorm=I=-16:TP=-2',
+        ...hdr, '-i', src, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-af', item.af || 'loudnorm=I=-16:TP=-2',
         '-f', 'segment', '-segment_time', String(SEG_SEC), '-segment_start_number', String(startNo), '-reset_timestamps', '1', path.join(dir, '%03d.wav')];
       log.info?.('[LIVE] relay listening', { id, restart: restarts });
       await new Promise(res => {
