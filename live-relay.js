@@ -15,20 +15,44 @@ import { ytdlpPath } from './youtube-direct.js';
 export const SEG_SEC = 20;
 const IDLE_MS = 3 * 60 * 1000, MAX_MS = 4 * 3600 * 1000, KEEP = 12;
 const relays = new Map();
+const history = []; // the last relays that stopped, for the status page
+export const relayHistory = () => history;
 export const liveIdFor = url => 'l' + createHash('sha1').update(String(url)).digest('hex').slice(0, 10);
 
 // The stream address the page plays (YouTube live, HLS, Icecast...).
-export function resolveStream(url, { bin = ytdlpPath(), timeoutMs = 45000, impersonate = false, referer = null } = {}) {
+export async function resolveStream(url, opts = {}) {
+  const info = await resolveStreamInfo(url, opts);
+  return info?.url || null;
+}
+// The address and the request headers the broadcaster's server expects
+// (User-Agent, Referer, Origin, cookies the extractor got). Many live streams
+// answer 403 to a request without them, which was a cause of failed relays.
+export function resolveStreamInfo(url, { bin = ytdlpPath(), timeoutMs = 45000, impersonate = false, referer = null } = {}) {
   return new Promise(resolve => {
-    if (/\.(?:m3u8|mp3|aac|ogg|opus)(?:\?|$)/i.test(url)) return resolve(url);
-    const p = spawn(bin, ['--no-warnings', '-g', '-f', 'bestaudio/best[height<=480]/best', '--no-playlist', ...(impersonate ? ['--impersonate', 'chrome'] : []), ...(referer ? ['--referer', referer] : []), '--', url], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
+    if (/\.(?:m3u8|mp3|aac|ogg|opus)(?:\?|$)/i.test(url)) return resolve({ url, headers: referer ? { Referer: referer } : {} });
+    const p = spawn(bin, ['--no-warnings', '-j', '-f', 'bestaudio/best[height<=480]/best', '--no-playlist', ...(impersonate ? ['--impersonate', 'chrome'] : []), ...(referer ? ['--referer', referer] : []), '--', url], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
     const t = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
-    p.stdout.on('data', d => { out += d; });
-    p.on('error', () => { clearTimeout(t); resolve(null); });
-    p.on('close', c => { clearTimeout(t); resolve(c === 0 ? out.trim().split('\n')[0] || null : null); });
+    p.stdout.on('data', d => { out += d; if (out.length > 20e6) p.kill('SIGKILL'); });
+    p.stderr.on('data', d => { err = (err + d).slice(-400); });
+    p.on('error', e => { clearTimeout(t); resolve({ url: null, error: String(e?.message || e).slice(0, 160) }); });
+    p.on('close', c => {
+      clearTimeout(t);
+      if (c !== 0) return resolve({ url: null, error: err.trim().split('\n').pop()?.slice(0, 200) || 'exit ' + c });
+      try {
+        const j = JSON.parse(out);
+        const u = j.url || (j.requested_formats || [])[0]?.url || null;
+        const headers = { ...(j.http_headers || {}), ...((j.requested_formats || [])[0]?.http_headers || {}) };
+        if (referer && !headers.Referer) headers.Referer = referer;
+        resolve({ url: u, headers, live: !!(j.is_live || j.live_status === 'is_live') });
+      } catch { resolve({ url: null, error: 'bad answer' }); }
+    });
   });
 }
+const ffmpegHeaderArgs = headers => {
+  const keep = Object.entries(headers || {}).filter(([k, v]) => /^(user-agent|referer|origin|cookie|accept-language)$/i.test(k) && v && !/[\r\n]/.test(String(v)));
+  return keep.length ? ['-headers', keep.map(([k, v]) => k + ': ' + v + '\r\n').join('')] : [];
+};
 
 // deps: { ffmpegPath, upload(file, remote), del(remote), log }
 export function startRelay(item, deps) {
@@ -37,7 +61,9 @@ export function startRelay(item, deps) {
   if (old && !old.stopped) { old.touch(); return old; }
   const log = deps.log || console;
   const dir = path.join(os.tmpdir(), 'live-' + id);
-  const r = { id, title: item.title, url: item.url, pieces: [], next: 0, stopped: false, error: null, startedAt: Date.now(), lastSeen: Date.now(), proc: null };
+  const r = { id, title: item.title, url: item.url, pieces: [], next: 0, stopped: false, error: null, startedAt: Date.now(), lastSeen: Date.now(), proc: null, events: [] };
+  // What happened, kept for the read-only status page (no keys, no tokens).
+  r.note = (what, extra = {}) => { r.events.push({ at: new Date().toISOString(), what, ...extra }); if (r.events.length > 25) r.events.shift(); };
   r.touch = () => { r.lastSeen = Date.now(); };
   r.stop = why => {
     if (r.stopped) return;
@@ -45,6 +71,9 @@ export function startRelay(item, deps) {
     try { r.proc?.kill('SIGKILL'); } catch {}
     clearInterval(r.timer);
     log.info?.('[LIVE] relay stopped', { id, why, pieces: r.next });
+    r.note('stopped', { why });
+    history.unshift({ id, title: r.title, url: r.url, startedAt: new Date(r.startedAt).toISOString(), pieces: r.next, why, events: r.events.slice(-12) });
+    history.length = Math.min(history.length, 10);
     setTimeout(async () => {
       for (const p of r.pieces) await deps.del?.(p.remote).catch?.(() => {});
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -56,11 +85,14 @@ export function startRelay(item, deps) {
     await fs.mkdir(dir, { recursive: true });
     let restarts = 0;
     while (!r.stopped && restarts < 6) {
-      const src = await resolveStream(item.url, { impersonate: !!item.impersonate, referer: item.referer || null });
-      if (!src) { r.error = 'no_stream'; if (++restarts >= 3) break; await new Promise(x => setTimeout(x, 5000)); continue; }
+      const info = await resolveStreamInfo(item.url, { impersonate: !!item.impersonate, referer: item.referer || null });
+      const src = info?.url;
+      if (!src) { r.error = 'no_stream'; r.note('no stream', { reason: info?.error || null }); if (++restarts >= 3) break; await new Promise(x => setTimeout(x, 5000)); continue; }
+      let host = ''; try { host = new URL(src).host; } catch {}
+      r.note('stream found', { host, live: info.live ?? null, headers: Object.keys(info.headers || {}) });
       const startNo = r.next;
-      // Some broadcasters' servers send the stream only to their own player page.
-      const hdr = item.referer && !/youtube|googlevideo/i.test(src) ? ['-headers', 'Referer: ' + item.referer + '\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36\r\n'] : [];
+      // The broadcaster's own request headers (its player page, its user agent).
+      const hdr = ffmpegHeaderArgs({ 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36', ...(item.referer ? { Referer: item.referer } : {}), ...(info.headers || {}) });
       const args = ['-hide_banner', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '10',
         ...hdr, '-i', src, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-af', item.af || 'loudnorm=I=-16:TP=-2',
         '-f', 'segment', '-segment_time', String(SEG_SEC), '-segment_start_number', String(startNo), '-reset_timestamps', '1', path.join(dir, '%03d.wav')];
@@ -70,7 +102,7 @@ export function startRelay(item, deps) {
         let err = '';
         r.proc.stderr.on('data', d => { err = (err + d).slice(-300); });
         r.proc.on('error', res);
-        r.proc.on('close', c => { if (!r.stopped) log.warn?.('[LIVE] stream ended', { id, code: c, err: err.trim().slice(-160) }); res(); });
+        r.proc.on('close', c => { if (!r.stopped) { log.warn?.('[LIVE] stream ended', { id, code: c, err: err.trim().slice(-160) }); r.note('stream ended', { code: c, err: err.trim().slice(-200) }); } res(); });
       });
       restarts++;
       if (!r.stopped) await new Promise(x => setTimeout(x, 3000));
@@ -94,7 +126,7 @@ export function startRelay(item, deps) {
         const no = Number(n.slice(0, 3)), file = path.join(dir, n);
         const remote = 'ivr2:/2/live/' + id + '/' + n;
         try { await deps.upload(file, remote); r.pieces.push({ no, remote, play: '/2/live/' + id + '/' + n.slice(0, 3) }); r.next = Math.max(r.next, no + 1); }
-        catch (e) { log.warn?.('[LIVE] upload failed', { id, no, message: String(e?.message || e).slice(0, 120) }); }
+        catch (e) { log.warn?.('[LIVE] upload failed', { id, no, message: String(e?.message || e).slice(0, 120) }); r.note('upload failed', { no, message: String(e?.message || e).slice(0, 120) }); }
         await fs.rm(file, { force: true }).catch(() => {});
       }
       while (r.pieces.length > KEEP) { const p = r.pieces.shift(); deps.del?.(p.remote)?.catch?.(() => {}); }
@@ -110,6 +142,13 @@ export function startRelay(item, deps) {
 export function nextPiece(r, last = null, { buffer = 2 } = {}) {
   if (last === null) return r.pieces.length > buffer ? r.pieces[r.pieces.length - 1 - buffer] : null;
   return r.pieces.find(p => p.no > last) || null;
+}
+// The pieces after `first` that are already in Yemot, played together in one
+// prompt (no pause between them): up to `max`.
+export function followingPieces(r, first, max = 3) {
+  const out = [first];
+  for (const p of r.pieces) if (p.no > out[out.length - 1].no && p.no === out[out.length - 1].no + 1 && out.length < max) out.push(p);
+  return out;
 }
 export const _relays = relays;
 export const _exists = existsSync;

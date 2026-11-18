@@ -70,3 +70,13 @@ test('radio with no stream and no YouTube: reason is kept for the check page', a
   assert.equal(r.page, null);
   assert.match(r.tried[0], /access_denied/);
 });
+
+test('relay: consecutive pieces are played together, up to three', async () => {
+  const { followingPieces, resolveStreamInfo } = await import('../live-relay.js');
+  const r = { pieces: [3, 4, 5, 7, 8].map(no => ({ no, play: '/p/' + no })) };
+  assert.deepEqual(followingPieces(r, r.pieces[0]).map(p => p.no), [3, 4, 5]);
+  assert.deepEqual(followingPieces(r, r.pieces[2]).map(p => p.no), [5], 'a missing piece is never skipped over');
+  const direct = await resolveStreamInfo('https://cdn.example/live.m3u8?t=1', { referer: 'https://site.example/live' });
+  assert.equal(direct.url, 'https://cdn.example/live.m3u8?t=1');
+  assert.equal(direct.headers.Referer, 'https://site.example/live');
+});
