@@ -3,6 +3,12 @@
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 const E = '/opt/yemot/ext2/';
+// The console cannot type capitals, so ext2's settings are read here.
+for (const line of fs.readFileSync('/opt/yemot/ext2.env', 'utf8').split('\n')) {
+  const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+  if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
+}
+process.chdir('/opt/yemot/ext2');
 const sh = c => { try { return execSync(c, { encoding: 'utf8' }).trim(); } catch (e) { return 'ERR ' + String(e.message).slice(0, 80); } };
 const log = (...a) => console.log('[WV]', ...a);
 log('services', sh('systemctl is-active yemot-main yemot-ext2 caddy | tr "\\n" " "'));
