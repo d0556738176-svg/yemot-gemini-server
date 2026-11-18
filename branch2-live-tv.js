@@ -19,12 +19,12 @@ export const TV_CHANNELS=Object.freeze([
 ]);
 const enabled=env=>/^(1|yes|true|on)$/i.test(String(env.BRANCH2_LIVE_TV_ENABLED||''));
 const say=t=>[{type:'text',data:t}];
-export const configuredTvChannels=(env=process.env)=>TV_CHANNELS.map(c=>({...c,destination:String(env[c.env]||'').trim()}));
+export const configuredTvChannels=(env=process.env)=>TV_CHANNELS.map(c=>({...c,destination:String(env[c.env]||env.BRANCH2_TV_SIP_HOST||'').trim()}));
 // Never allow injection into UpdateExtension or routing outside the approved SIP domain.
 // Hostnames and trusted IPs are supplied by the operator, not by the caller.
 export function validSipDestination(input) {
   if(!input || input.length>160 || /[\s\r\n=&?#]/.test(input)) return false;
-  return /^(?:[a-z0-9_.-]+@)?[a-z0-9.-]+(?::[0-9]{2,5})?$/i.test(input);
+  return /^(?:[a-z0-9-]+\.)*[a-z0-9-]+(?::[0-9]{2,5})?$/i.test(input);
 }
 export function branch2TvStatus(env=process.env) {
   const missing=configuredTvChannels(env).filter(c=>!validSipDestination(c.destination)).map(c=>c.key);
@@ -52,6 +52,8 @@ export async function configureBranch2Tv({updateExtension,publicUrl,env=process.
     await updateExtension('ivr2:/2/8/'+channel.key,{
       type:'routing_ip',
       routing_ip:channel.destination,
+      // Yemot requires a separate numeric extension (no @ or : in extension).
+      routing_extension:channel.key,
       routing_ip_end_goto:'/2/8',
       title:channel.title
     });
