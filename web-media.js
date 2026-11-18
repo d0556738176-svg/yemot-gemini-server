@@ -151,8 +151,12 @@ export function unwrapRedirect(url) {
 
 // Live or recorded: a playlist without #EXT-X-ENDLIST is a live broadcast.
 export async function hlsIsLive(url, { headers = {}, cookie = null, fetchImpl = fetch } = {}) {
-  if (!/\.m3u8/i.test(url)) return false;
   const h = { ...mediaRequestHeaders(headers), ...(cookie ? { Cookie: cookie } : {}) };
+  // DASH (.mpd, Redge's .livx): a manifest of type "dynamic" is live.
+  if (/\.(?:mpd|livx)(?:[?#]|$)|\/manifest/i.test(url)) {
+    try { const x = await (await fetchImpl(url, { headers: h, signal: AbortSignal.timeout(8000) })).text(); return /<MPD[^>]*type=["']dynamic/i.test(x) || /IsLive=["']TRUE/i.test(x); } catch { return /\.livx/i.test(url); }
+  }
+  if (!/\.m3u8/i.test(url)) return false;
   try {
     let text = await (await fetchImpl(url, { headers: h, signal: AbortSignal.timeout(8000) })).text();
     if (/#EXT-X-STREAM-INF/i.test(text)) {

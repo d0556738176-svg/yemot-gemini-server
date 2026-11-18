@@ -12,7 +12,7 @@ import path from 'node:path';
 
 export const BROWSER_DIR = process.env.PLAYWRIGHT_BROWSERS_PATH || '/opt/yemot/browser';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
-const MEDIA_EXT = /\.(?:m3u8|mpd|mp4|m4a|m4v|mp3|aac|ogg|opus|webm|flac|wav)(?:[?#]|$)/i;
+const MEDIA_EXT = /\.(?:m3u8|mpd|livx|isml?\/manifest|mp4|m4a|m4v|mp3|aac|ogg|opus|webm|flac|wav)(?:[?#]|$)/i;
 const SEGMENT = /(?:\.(?:ts|m4s)(?:[?#]|$))|(?:[/_-](?:seg|segment|chunk|frag)[-_]?\d+)|(?:\binit\.mp4)|(?:\/range\/\d)/i;
 const MEDIA_TYPE = /^(?:video\/|audio\/|application\/(?:vnd\.apple\.mpegurl|x-mpegurl|dash\+xml))/i;
 const ADS = /doubleclick|googlesyndication|googleads|imasdk|adservice|adnxs|taboola|outbrain|spotx|springserve|teads|innovid|moatads|vidazoo|aniview|connatix|primis|\/ads?\//i;
@@ -39,7 +39,7 @@ export function rankMedia(found) {
     if (ADS.test(m.url)) return -1;
     if (SEGMENT.test(m.url) && !/\.(?:m3u8|mpd)/i.test(m.url)) return -1;
     if (/\.m3u8|mpegurl/i.test(m.url + ' ' + (m.type || ''))) return /master|index|playlist|manifest/i.test(m.url) ? 100 : 90;
-    if (/\.mpd|dash\+xml/i.test(m.url + ' ' + (m.type || ''))) return 85;
+    if (/\.mpd|\.livx|\/manifest|dash\+xml/i.test(m.url + ' ' + (m.type || ''))) return 85;
     const len = Number(m.length) || 0;
     if (len && len < 300 * 1024) return -1; // a short sound / preview, not the recording
     return 50 + Math.min(30, Math.floor(len / (20 * 1024 * 1024)));
@@ -82,12 +82,28 @@ async function slot(fn) {
 // `deadline` (a time) stops a page that waited for its turn too long.
 export function sniffPage(pageUrl, { timeoutMs = 25000, deadline = Infinity, env = process.env, log = console } = {}) {
   if (!/^https?:\/\//i.test(String(pageUrl || '')) || !browserAvailable(env)) return Promise.resolve(null);
-  return slot(async () => {
+  return slot(() => {
+    const t0 = Date.now(), limit = Math.min(timeoutMs, deadline - t0);
+    if (limit < 6000) return null;
+    // A hard limit: a page full of advert frames can hang a call inside the
+    // browser (c14.co.il took 3 minutes); the page is closed when it is up.
+    let kill;
+    const hard = new Promise(r => { kill = setTimeout(() => r('timeout'), limit + 4000); });
+    const work = sniffOnce(pageUrl, limit, env, log, ctxOut => { work.ctx = ctxOut; });
+    return Promise.race([work, hard]).then(async r => {
+      clearTimeout(kill);
+      if (r === 'timeout') { log.warn?.('[BROWSER] page hard timeout', { ms: Date.now() - t0 }); await work.ctx?.close().catch(() => {}); return work.partial?.() || null; }
+      return r;
+    });
+  });
+}
+
+async function sniffOnce(pageUrl, timeoutMs, env, log, onCtx) {
+  {
     const started = Date.now();
-    timeoutMs = Math.min(timeoutMs, deadline - started);
-    if (timeoutMs < 6000) return null;
     const b = await getBrowser(env);
     const ctx = await b.newContext({ userAgent: UA, locale: 'he-IL', viewport: { width: 1280, height: 720 }, ignoreHTTPSErrors: true });
+    onCtx(ctx);
     const found = new Map();
     const note = async (req, res) => {
       try {
@@ -113,23 +129,24 @@ export function sniffPage(pageUrl, { timeoutMs = 25000, deadline = Infinity, env
       // every frame, then click the usual play buttons.
       for (let round = 0; round < 6 && left() > 1500 && wantMore(); round++) {
         for (const f of page.frames()) {
-          await f.evaluate(() => { for (const m of document.querySelectorAll('video,audio')) { try { m.muted = true; const p = m.play(); p?.catch?.(() => {}); } catch {} } }).catch(() => {});
+          await Promise.race([f.evaluate(() => { for (const m of document.querySelectorAll('video,audio')) { try { m.muted = true; const p = m.play(); p?.catch?.(() => {}); } catch {} } }).catch(() => {}), new Promise(r => setTimeout(r, 1500))]);
+          if (left() < 1500) break;
         }
         if (round === 1 || round === 3) {
           for (const sel of ['button[aria-label*="play" i]', '[class*="play" i]:not(a[href])', '.vjs-big-play-button', '.jw-icon-playback', '.plyr__control--overlaid', '[data-testid*="play" i]', 'video']) {
             for (const f of page.frames()) {
-              const el = await f.$(sel).catch(() => null);
+              const el = await Promise.race([f.$(sel).catch(() => null), new Promise(r => setTimeout(() => r(null), 1000))]);
               if (el) { await el.click({ timeout: 1500, force: true }).catch(() => {}); break; }
             }
           }
         }
         await page.waitForTimeout(Math.min(2500, Math.max(0, left() - 1000)));
       }
-      const info = await page.evaluate(() => {
+      const info = await Promise.race([new Promise(r => setTimeout(() => r({}), 2000)), page.evaluate(() => {
         const meta = n => document.querySelector('meta[property="' + n + '"],meta[name="' + n + '"]')?.content || null;
         const v = document.querySelector('video,audio');
         return { title: meta('og:title') || document.title || null, image: meta('og:image'), durationSec: v && Number.isFinite(v.duration) ? Math.round(v.duration) : null };
-      }).catch(() => ({}));
+      }).catch(() => ({}))]);
       // Cookies the page set, for this one download only (never stored).
       const cookies = await ctx.cookies().catch(() => []);
       const media = rankMedia([...found.values()]).slice(0, 6).map(m => {
@@ -147,7 +164,7 @@ export function sniffPage(pageUrl, { timeoutMs = 25000, deadline = Infinity, env
     } finally {
       await ctx.close().catch(() => {});
     }
-  });
+  }
 }
 
 // Installs Chromium for this engine once (owner, 18.11), in the background at
