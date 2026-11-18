@@ -5,28 +5,29 @@
 // caller, so it survives restarts and server moves. Never throws.
 
 export const HISTORY_MAX = 500;
-export const historyPath = phone => 'ivr2:/2/youtubejobs/history/' + String(phone || '').replace(/[^0-9]/g, '') + '.json';
+// kind 'web' (owner, 18.11: key 3, the whole-web searches) has its own list.
+export const historyPath = (phone, kind = '') => 'ivr2:/2/youtubejobs/history/' + (kind === 'web' ? 'web-' : '') + String(phone || '').replace(/[^0-9]/g, '') + '.json';
 const usablePhone = phone => String(phone || '').replace(/[^0-9]/g, '').length >= 5;
 const same = (a, b) => String(a || '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().toLowerCase() === String(b || '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().toLowerCase();
 
 // The list, newest first: [{ q, at, n }] (n = results found that time).
-export async function readHistory(phone, store) {
+export async function readHistory(phone, store, { kind = '' } = {}) {
   if (!usablePhone(phone)) return [];
   try {
-    const data = await store.read(historyPath(phone));
+    const data = await store.read(historyPath(phone, kind));
     return Array.isArray(data?.items) ? data.items.filter(x => x && String(x.q || '').trim()) : [];
   } catch { return []; }
 }
 
 // The same search again moves to the top instead of appearing twice.
-export async function addToHistory(phone, query, store, { results = null, now = Date.now() } = {}) {
+export async function addToHistory(phone, query, store, { results = null, now = Date.now(), kind = '' } = {}) {
   const q = String(query || '').replace(/\s+/g, ' ').trim().slice(0, 200);
   if (!q || !usablePhone(phone)) return null;
   try {
-    const items = (await readHistory(phone, store)).filter(x => !same(x.q, q));
+    const items = (await readHistory(phone, store, { kind })).filter(x => !same(x.q, q));
     items.unshift({ q, at: new Date(now).toISOString(), ...(results != null ? { n: results } : {}) });
     const data = { items: items.slice(0, HISTORY_MAX) };
-    await store.write(historyPath(phone), data);
+    await store.write(historyPath(phone, kind), data);
     return data.items;
   } catch { return null; }
 }

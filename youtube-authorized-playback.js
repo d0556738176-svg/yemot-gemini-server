@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { webItem } from './web-items.js';
 import { playbackAwake } from './playback-awake.js';
 import fs from 'node:fs/promises';
 import { openAsBlob, createWriteStream, createReadStream } from 'node:fs';
@@ -567,7 +568,10 @@ export function lookupCachedYouTubeAudio(videoId) {
 async function downloadApifySource(id, output, signal, onProgress=()=>{}, consent=false) {
   // First straight from YouTube on our own server (owner, 15.11); the paid
   // engines below only when that fails.
-  if (directEnabled(process.env)) {
+  // A video from another website (owner, 18.11): only our own server's
+  // downloader; the paid engines are YouTube-only.
+  const web = await webItem(id);
+  if (directEnabled(process.env) || web) {
     try {
       onProgress({stage:'transferring',direct:true,bytes:0,totalBytes:null});
       const r = await directDownload(id, output, { mode:'audio', ffmpegPath, signal, maxBytes:4096*1024*1024 /* 15.11: free download, up to 4 GB */, onProgress:p=>onProgress({stage:'transferring',direct:true,bytes:p.done,totalBytes:p.total}) });
@@ -575,7 +579,8 @@ async function downloadApifySource(id, output, signal, onProgress=()=>{}, consen
       return { bytes: r.bytes, title: r.title || null };
     } catch (e) {
       if (signal?.aborted || e?.code === 'too_large') throw e;
-      console.warn('[YouTube IVR] direct download failed', { videoId: id, consent, message: String(e?.message || e).slice(0, 160) });
+      console.warn('[YouTube IVR] direct download failed', { videoId: id, consent, web: !!web, message: String(e?.message || e).slice(0, 160) });
+      if (web) throw Object.assign(new Error('the website did not give the recording'), { code: 'web_download_failed' });
       // Owner, 15.11: the paid engine only after the caller agreed with a key
       // (a run already paid for, e.g. before a restart, is still finished).
       if (!consent && String(process.env.BRANCH2_PAID_NEEDS_CONSENT || 'on') !== 'off') {

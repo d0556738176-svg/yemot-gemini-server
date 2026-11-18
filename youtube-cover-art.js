@@ -7,6 +7,7 @@
 // canonical 44 bytes the phone line needs (measured earlier: an extra chunk
 // before the audio was misread). The data chunk keeps its exact size, so a
 // player that respects it never plays the picture.
+import { webItem } from './web-items.js';
 import { promises as fs } from 'node:fs';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -18,6 +19,18 @@ const THUMBS = ['maxresdefault', 'sddefault', 'hqdefault', 'mqdefault'];
 // placeholder, not 404, for some missing sizes: those are skipped).
 export async function fetchThumbnail(videoId, { fetchImpl = fetch, timeoutMs = 10000 } = {}) {
   if (!/^[A-Za-z0-9_-]{11}$/.test(String(videoId || ''))) return null;
+  // A video from another website: that site's own picture (any image type;
+  // coverFor turns it into JPEG).
+  const web = await webItem(videoId);
+  if (web) {
+    if (!/^https?:\/\//i.test(String(web.thumbnail || ''))) return null;
+    try {
+      const r = await fetchImpl(web.thumbnail, { signal: AbortSignal.timeout(timeoutMs) });
+      if (!r.ok) return null;
+      const buf = Buffer.from(await r.arrayBuffer());
+      return buf.length > 1000 ? { name: 'web', jpeg: buf, web: true } : null;
+    } catch { return null; }
+  }
   for (const name of THUMBS) {
     try {
       const r = await fetchImpl('https://i.ytimg.com/vi/' + videoId + '/' + name + '.jpg', { signal: AbortSignal.timeout(timeoutMs) });
@@ -181,7 +194,7 @@ export function descriptionCredits(description = '') {
 }
 
 export function downloadMetadata(videoId, facts = {}, fallbackTitle = null) {
-  const url = 'https://www.youtube.com/watch?v=' + videoId;
+  const url = facts?.webUrl || 'https://www.youtube.com/watch?v=' + videoId;
   // The exact moment YouTube shows as the publish time, in Israel time.
   const t = Date.parse(facts.publishedAt || '');
   const published = Number.isFinite(t) ? publishedText(t) : '';
@@ -202,7 +215,7 @@ export function downloadMetadata(videoId, facts = {}, fallbackTitle = null) {
     lyrics: credits.lyrics || null,
     keywords: Array.isArray(facts.tags) && facts.tags.length ? facts.tags.join(', ').slice(0, 500) : null,
     copyright: facts.channel ? '© ' + facts.channel : null,
-    publisher: 'YouTube', website: url, encoded_by: 'Yemot branch 2',
+    publisher: facts?.webUrl ? (facts.site || 'Web') : 'YouTube', website: url, encoded_by: 'Yemot branch 2',
   };
   return Object.fromEntries(Object.entries(m).filter(([, v]) => v !== null && v !== undefined && v !== ''));
 }
@@ -283,5 +296,6 @@ export async function retrying(fn, { tries = 3, waits = [2000, 6000], ok = x => 
 export async function coverFor(videoId, { ffmpegPath, maxWidth = 1280, quality = 2, fetchThumbnailImpl = fetchThumbnail, normalize = normalizeCover } = {}) {
   const thumb = await retrying(() => fetchThumbnailImpl(videoId));
   if (!thumb?.jpeg) return null;
-  try { return await normalize(thumb.jpeg, { ffmpegPath, maxWidth, quality }); } catch { return thumb.jpeg; }
+  const isJpeg = b => b?.[0] === 0xff && b?.[1] === 0xd8;
+  try { const out = await normalize(thumb.jpeg, { ffmpegPath, maxWidth, quality }); return isJpeg(out) ? out : null; } catch { return isJpeg(thumb.jpeg) ? thumb.jpeg : null; }
 }

@@ -4057,6 +4057,9 @@ const branch2Store = {
   read: async x => (await import('./youtube-authorized-playback.js'))._pipeline.readCacheJson(x),
   write: async (x, d) => (await import('./youtube-authorized-playback.js'))._pipeline.writeCacheJson(x, d),
 };
+// Links from other websites (keys 5/6/3) are kept in the same storage, so a
+// download resumed after a restart still knows its link.
+import('./web-items.js').then(m => m.useStore(branch2Store)).catch(() => {});
 // Many downloads at once (owner, 18.11): one after another in the background,
 // free direct download only (the paid engine needs a key press per video).
 let branch2BatchQueue = null;
@@ -4091,7 +4094,8 @@ async function readExt3Handoff(phone) {
   const { _pipeline } = await import('./youtube-authorized-playback.js');
   const remote='ivr2:/2/youtubejobs/handoff/'+digits+'.json';
   const data=await Promise.race([_pipeline.readCacheJson(remote).catch(()=>null),new Promise(r=>setTimeout(()=>r(null),3000))]);
-  if(!data||!/^[A-Za-z0-9_-]{11}$/.test(String(data.videoId||''))) return null;
+  // A whole-web search sent from extension 1 or 3 (owner, 18.11) carries words, not a video.
+  if(!data||!(/^[A-Za-z0-9_-]{11}$/.test(String(data.videoId||''))||String(data.webQuery||'').trim())) return null;
   // Used once: deleted now, whether fresh or stale.
   try { const x=new URL(_pipeline.YEMOT_API_BASE+'/FileAction'); x.searchParams.set('token',_pipeline.yemotApiKey()); x.searchParams.set('action','delete'); x.searchParams.set('what',remote); void fetch(x,{signal:AbortSignal.timeout(8000)}).catch(()=>{}); } catch {}
   if(Date.now()-Date.parse(data.at||0)>30*60*1000) return null;
@@ -4120,13 +4124,18 @@ async function youtubeCallHandler(call) {
   // of them downloaded; 4 there = only some, typed in a row (123420#).
   const PAGE=Math.max(5,Math.min(30,Number(process.env.BRANCH2_PAGE_SIZE||20)));
   const callerPhone=getCallerNumber(call);
+  let handedWebQuery=null; // words sent from extension 1/3 for the whole-web search
 
   // Owner, 10.11: extension 3 recommended a video and the caller asked to
   // hear or download it; it waits here, already selected, for the usual
   // confirmation (1 = play, 2 = video). Read once, then deleted.
   try {
     const handed=await readExt3Handoff(getCallerNumber(call));
-    if(handed) {
+    if(handed&&String(handed.webQuery||'').trim()&&!handed.videoId) {
+      handedWebQuery=String(handed.webQuery).trim().slice(0,200);
+      console.info('[EXT3_HANDOFF] whole-web search received',{query:handedWebQuery.slice(0,120)});
+    }
+    else if(handed) {
       pendingVideo={videoId:handed.videoId,title:handed.title||'',channelTitle:handed.channelTitle||'',durationSeconds:Number(handed.durationSec)||null,publishedAt:null};
       searchMode='voice';
       const confirmText=await confirmPlaybackPrompt(pendingVideo);
@@ -4226,10 +4235,10 @@ async function youtubeCallHandler(call) {
   }
   // Owner, 18.11: key 4 at the start = the searches made before, newest
   // first, 20 at a time; a number runs that search again.
-  async function historyMenu() {
+  async function historyMenu(kind='') {
     const { readHistory, historyPageText } = await import('./branch2-search-history.js');
-    const items=await Promise.race([readHistory(callerPhone,branch2Store),new Promise(r=>setTimeout(()=>r([]),6000))]);
-    if(!items.length) return {say:'עוד אין חיפושים בהיסטוריה שלך.'};
+    const items=await Promise.race([readHistory(callerPhone,branch2Store,{kind}),new Promise(r=>setTimeout(()=>r([]),6000))]);
+    if(!items.length) return {say:kind==='web'?'עוד אין חיפושים באינטרנט בהיסטוריה שלך.':'עוד אין חיפושים בהיסטוריה שלך.'};
     let start=0, empty=0, note='', withList=true;
     while(true) {
       const more=start+PAGE<items.length;
@@ -4248,6 +4257,112 @@ async function youtubeCallHandler(call) {
       const n=Number(v);
       if(/^\d+$/.test(v)&&n>=1&&n<=items.length) return {q:items[n-1].q};
       note='אין חיפוש במספר '+v+'. ';
+    }
+  }
+
+  // Owner, 18.11: keys 5 (speech) / 6 (typing) / 3 (earlier searches) at the
+  // start = a deep search across the whole web, not only YouTube. Every link
+  // the search engines give is opened with the downloader; only recordings
+  // this server can really download are read out. A choice is confirmed with
+  // a key (1 = hear and save to אודיו, 2 = save the video to וידאו) before
+  // anything is downloaded. Returns {exit}, {say} or {play} (the playback).
+  async function webFlow(mode) {
+    const W=await import('./branch2-web-flow.js');
+    const { searchWebMedia } = await import('./web-media.js');
+    const { addToHistory } = await import('./branch2-search-history.js');
+    const tap=async (text,opts={})=>String(await call.read([{type:'text',data:sanitizeForYemot(text)}],'tap',
+      {max_digits:1,min_digits:1,sec_wait:10,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'w'+(++tapNo),timeout:10*60*1000,...opts})||'None').trim();
+    let q=null;
+    if(mode&&typeof mode==='object'&&mode.q) q=mode.q;
+    else if(mode==='history') {
+      const h=await historyMenu('web');
+      if(h.exit) return {exit:true};
+      if(!h.q) return {say:h.say||null};
+      q=h.q;
+    } else if(mode==='type') {
+      const typed=String(await call.read(
+        [{type:'text',data:sanitizeForYemot('חיפוש בכל האתרים באינטרנט. הקלד מה לחפש, בעברית במקשי הטלפון, והקש סולמית אחרי כל אות.')}],
+        'tap',{min_digits:1,max_digits:'',sec_wait:60,typing_playback_mode:'HebrewKeyboard',allow_empty:true,empty_val:'None',val_name:'wt'+(++tapNo),timeout:10*60*1000})||'None').trim();
+      console.info('[WEB_SEARCH] typed',{chars:typed.length,typed:typed.slice(0,120)});
+      if(typed==='None'||/^[*#\s]*$/.test(typed)) return {say:'לא נקלטה הקלדה.'};
+      q=typed;
+    } else {
+      for(let tries=0;!q&&tries<3;tries++) {
+        const rec=await call.read([{type:'text',data:sanitizeForYemot(tries?'לא שמעתי טוב. אמור שוב מה לחפש, ולסיום הקש סולמית.':'חיפוש בכל האתרים באינטרנט. אמור איזה סרטון או הקלטה תרצה לשמוע או לראות, ולסיום ההקלטה הקש סולמית.')}],
+          'record',{min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
+        if(!rec||rec==='None') return {say:'לא נקלטה בקשה.'};
+        try {
+          const audio=await withTimeout(yemotApi.download_file('ivr2:'+rec),REQUEST_TIMEOUT_MS,'web search recording download');
+          q=String(await transcribePhoneAudio(audio.data)||'').trim()||null;
+        } catch(e) { console.warn('[WEB_SEARCH] transcription failed',{status:geminiErrorStatus(e)}); }
+      }
+      if(!q) return {say:'לא הצלחתי להבין את הבקשה.'};
+      console.info('[WEB_SEARCH] spoken',{q:q.slice(0,120)});
+    }
+    q=String(q).replace(/\s+/g,' ').trim().slice(0,200);
+    // The search runs in the background; the caller hears how far it got.
+    const progress={};
+    const startedAt=Date.now();
+    const job=searchWebMedia(q,{env:process.env,onProgress:p=>Object.assign(progress,p)}).then(r=>({r}),e=>({e}));
+    let outcome=null, first=true;
+    job.then(x=>{outcome=x;});
+    while(!outcome) {
+      const k=await tap(W.searchProgressText(progress,q,first),{sec_wait:first?2:6});
+      first=false;
+      if(k.includes('*')) return {exit:true};
+      await Promise.race([job,new Promise(r=>setTimeout(r,200))]);
+    }
+    if(outcome.e) console.warn('[WEB_SEARCH] failed',{message:String(outcome.e?.message||outcome.e).slice(0,160)});
+    const found=outcome.r||{items:[],youtube:[]};
+    const results=W.mergeResults(found);
+    console.info('[WEB_SEARCH] done',{q:q.slice(0,80),candidates:found.candidates||0,checked:found.checked||0,web:(found.items||[]).length,youtube:(found.youtube||[]).length,sec:Math.round((Date.now()-startedAt)/1000)});
+    void addToHistory(callerPhone,q,branch2Store,{results:results.length,kind:'web'});
+    if(!results.length) return {say:'לא מצאתי באתרים הקלטה או סרטון שאפשר להוריד עבור '+q+'. אפשר לנסות במילים אחרות.'};
+    let start=0, note='נמצאו '+results.length+' תוצאות. ', withList=true, empty=0;
+    while(true) {
+      const more=start+PAGE<results.length;
+      const list=withList?W.resultsPageText(results,start,PAGE,{spoken:sanitizeForYemot})+' ':'';
+      const hint='לבחירה הקש את מספר התוצאה וסולמית. '+(more?'לעוד תוצאות הקש 0 וסולמית. ':'')+'לחיפוש חדש הקש 0 0 וסולמית. לתפריט הראשי הקש כוכבית.';
+      const v=await tap(note+list+hint,{max_digits:Math.max(2,String(results.length).length),sec_wait:10});
+      note=''; withList=false;
+      console.info('[WEB_SEARCH] results key',{v,start,count:results.length});
+      if(v.includes('*')) return {exit:true};
+      if(v==='None'||!v) { if(++empty>=4) return {say:'לא נבחרה תוצאה.'}; continue; }
+      empty=0;
+      if(v==='00') return {};
+      if(v==='0') { if(more) { start+=PAGE; withList=true; } else note='אין עוד תוצאות. '; continue; }
+      const n=Number(v);
+      if(!(/^\d+$/.test(v)&&n>=1&&n<=results.length)) { note='אין תוצאה במספר '+v+'. '; continue; }
+      const it=results[n-1];
+      // Confirmation before any download (owner, 18.11), as with YouTube.
+      const about='בחרת את '+it.title+', מאתר '+W.siteName(it.site)+(W.lengthText(it.durationSeconds)?', '+W.lengthText(it.durationSeconds):'')+'. ';
+      const choice=await tap(about+'להשמעה ולשמירה בתיקיית אודיו הקש 1. '+(it.hasVideo?'להורדת הסרטון לתיקיית וידאו הקש 2. ':'')+'לחזרה לתוצאות הקש 3. לתפריט הראשי הקש כוכבית.',{sec_wait:15});
+      console.info('[WEB_SEARCH] choice',{videoId:it.videoId,web:it.web,choice});
+      if(choice.includes('*')) return {exit:true};
+      if(choice==='1') {
+        try {
+          return {play:await playSelected(call,{videoId:it.videoId,title:it.title,durationSeconds:it.durationSeconds})};
+        } catch(e) {
+          if(e instanceof ExitError||isCallerHangupError(e)) throw e;
+          console.warn('[WEB_SEARCH] playback failed',{videoId:it.videoId,code:e?.code||'unknown'});
+          note=(e?.code==='paid_needs_consent'
+            ? 'ההורדה החינמית של הסרטון הזה מיוטיוב לא הצליחה. אפשר למצוא אותו בחיפוש ביוטיוב, ושם לאשר את מנוע הגיבוי. '
+            : 'האתר לא נתן את ההקלטה הזאת להורדה. אפשר לבחור תוצאה אחרת. ');
+          continue;
+        }
+      }
+      if(choice==='2'&&it.hasVideo) {
+        const sub=await tap('להוספת כתובית בעברית לסרטון הקש 1. בלי כתובית הקש 2.',{sec_wait:15});
+        if(sub.includes('*')) return {exit:true};
+        const v={videoId:it.videoId,title:it.title,durationSeconds:it.durationSeconds,subtitles:sub==='1'};
+        if(!it.web) { const gate=await videoStartGate(v); if(gate) { note='ההורדה החינמית של הסרטון הזה מיוטיוב לא זמינה כרגע. אפשר למצוא אותו בחיפוש ביוטיוב ושם לאשר את מנוע הגיבוי. '; continue; } }
+        const st=startYouTubeVideoJob(v);
+        console.info('[WEB_SEARCH] video requested',{videoId:it.videoId,web:it.web,status:st.status,subtitles:v.subtitles});
+        note='הורדת הסרטון התחילה'+(v.subtitles?', עם כתובית בעברית':'')+'. הוא יישמר בתיקיית וידאו עם התמונה והפרטים שלו, ומאותה הורדה יוכן גם השמע. אין צורך להמתין על הקו. ';
+        continue;
+      }
+      note='';
+      withList=choice==='3';
     }
   }
 
@@ -4434,15 +4549,30 @@ async function youtubeCallHandler(call) {
       // No key = speech. The choice holds until a new search (7).
       if(!keyState&&!keyTranscript) {
         const said=prompt===basePrompt?'':String(prompt).split(/(?<=[.?!])\s+/).filter(x=>!/אמור|אמרו|הקש סולמית/.test(x)).join(' ');
+        if(!searchMode&&handedWebQuery) {
+          const hq=handedWebQuery; handedWebQuery=null;
+          const w=await webFlow({q:hq});
+          if(w.exit) return call.go_to_folder('/');
+          if(w.play) return w.play;
+          nextPrompt=w.say?w.say+' ':null;
+          continue;
+        }
         if(!searchMode) {
           const choice=String(await call.read(
-            [{type:'text',data:sanitizeForYemot((said?said+' ':'')+'לחיפוש ביוטיוב בדיבור הקש 1. לחיפוש בהקלדה במקשי הטלפון הקש 2. להיסטוריית החיפושים הקש 4. לחזרה לתפריט הראשי הקש כוכבית.')}],
+            [{type:'text',data:sanitizeForYemot((said?said+' ':'')+'לחיפוש ביוטיוב בדיבור הקש 1. לחיפוש בהקלדה במקשי הטלפון הקש 2. להיסטוריית החיפושים הקש 4. לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3. לחזרה לתפריט הראשי הקש כוכבית.')}],
             'tap',
             {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'m'+(++tapNo),timeout:10*60*1000,
-             digits_allowed:['1','2','4','*']}
+             digits_allowed:['1','2','3','4','5','6','*']}
           )||'None').trim();
           console.info('[YouTube IVR] search mode',{choice}); branch2KeyLog('mode',choice,0,0);
           if(choice.includes('*')) return call.go_to_folder('/');
+          if(choice==='5'||choice==='6'||choice==='3') {
+            const w=await webFlow(choice==='5'?'voice':choice==='6'?'type':'history');
+            if(w.exit) return call.go_to_folder('/');
+            if(w.play) return w.play;
+            nextPrompt=w.say?w.say+' ':null;
+            continue;
+          }
           if(choice==='4') {
             const h=await historyMenu();
             if(h.exit) return call.go_to_folder('/');

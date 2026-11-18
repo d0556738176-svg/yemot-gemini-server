@@ -160,8 +160,10 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
     for (const f of done.files || []) await deps.deleteFile?.(f.remote).catch?.(() => {});
     log.info?.('[VIDEO] saved earlier without subtitles; making it again with Hebrew subtitles', { videoId, removed: (done.files || []).length });
   }
+  const { webItem } = await import('./web-items.js');
+  const web = await webItem(videoId);
   const tokens = apifyTokens(env);
-  if (!tokens.length) throw err('apify_not_configured', 'No engine keys');
+  if (!tokens.length && !web) throw err('apify_not_configured', 'No engine keys');
   const { retrying, coverFor } = await import('./youtube-cover-art.js');
   const facts = await retrying(() => deps.fetchVideoFacts(videoId, env), { ok: x => !!(x && x.title) });
   const durationSec = facts?.durationSeconds || video.durationSeconds || null;
@@ -170,7 +172,7 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
   let order = Object.entries(costs).sort((a, b) => a[1] - b[1]).map(([a]) => a);
   // Only a video YouTube allows only in Israel goes to our Israel engine
   // (owner, 13.11), on every backup key in turn; the others never do.
-  if (String(env.BRANCH2_ISRAEL_ENGINE || 'on') !== 'off') {
+  if (!web && String(env.BRANCH2_ISRAEL_ENGINE || 'on') !== 'off') {
     const { engineCannotReach } = await import('./youtube-video-facts.js');
     if (facts && engineCannotReach(facts, env)) order = [ISRAEL_ACTOR];
   }
@@ -181,7 +183,7 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
   // First straight from YouTube on our own server (owner, 15.11); the engines
   // and their backup keys only when that fails.
   let directDir = null;
-  if (directEnabled(env) && done?.state !== 'running') {
+  if ((directEnabled(env) || web) && done?.state !== 'running') {
     directDir = await fs.mkdtemp(path.join(os.tmpdir(), 'video-direct-'));
     try {
       // Free download: the best picture up to 1080p (owner, 15.11), unless the
@@ -192,6 +194,8 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
     } catch (e) {
       log.warn?.('[VIDEO] direct download failed', { videoId, consent: !!video.paidConsent, message: String(e?.message || e).slice(0, 160) });
       await fs.rm(directDir, { recursive: true, force: true }).catch(() => {}); directDir = null;
+      // Another website: the paid engines are YouTube-only.
+      if (web) throw err('web_download_failed', 'the website did not give the video');
       // Owner, 15.11: the paid engines only after the caller agreed with a key.
       if (!video.paidConsent && String(env.BRANCH2_PAID_NEEDS_CONSENT || 'on') !== 'off') throw err('paid_needs_consent', 'free direct download failed; the paid engine needs the caller\'s consent');
     }

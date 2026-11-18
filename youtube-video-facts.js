@@ -2,8 +2,12 @@
 // length, how long ago it was published, and how many views it has.
 // One YouTube Data API call (videos.list, 1 quota unit) returns all three.
 import { parseIsoDurationSeconds } from './youtube-engine-select.js';
+import { webItem, webFacts } from './web-items.js';
 
 export async function fetchVideoFacts(videoId, env = process.env, fetchImpl = fetch) {
+  // A video from another website: what that site itself said about it.
+  const web = await webItem(videoId);
+  if (web) return webFacts(web);
   const key = String(env.YOUTUBE_API_KEY || '').trim();
   if (!key || !/^[A-Za-z0-9_-]{11}$/.test(String(videoId || ''))) return null;
   const url = new URL('https://www.googleapis.com/youtube/v3/videos');
