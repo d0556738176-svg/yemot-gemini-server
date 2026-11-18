@@ -6060,7 +6060,7 @@ app.post('/internal/web-videos', rateLimit(60, 60 * 1000, 'web-videos'), async (
   const q=String(req.body?.q||'').trim().slice(0,200);
   if(!q) return res.json({items:[]});
   const { searchWebVideos } = await import('./web-video-search.js');
-  const r=await searchWebVideos(q,{max:50}).catch(()=>({items:[]}));
+  const r=await searchWebVideos(q,{max:100}).catch(()=>({items:[]}));
   console.info('[WEB_VIDEOS] served',{items:r.items.length,engines:r.engines||null});
   res.json(r);
 });

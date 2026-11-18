@@ -44,7 +44,7 @@ export async function searchWebVideos(query, { env = process.env, fetchImpl = fe
   const q = String(query || '').replace(/\s+/g, ' ').trim().slice(0, 200);
   if (!q) return { items: [] };
   const base = { gl: 'il', hl: 'iw' };
-  const [vids, vidsEn, web, webVideo, webLesson, tv] = await Promise.all([
+  const [vids, vidsEn, web, webVideo, webLesson, webDownload, webRecording, tv] = await Promise.all([
     serper('videos', { q, ...base, num: 20 }, env, fetchImpl, timeoutMs),
     serper('videos', { q, num: 10 }, env, fetchImpl, timeoutMs),
     serper('search', { q, ...base, num: 20 }, env, fetchImpl, timeoutMs),
@@ -58,7 +58,14 @@ export async function searchWebVideos(query, { env = process.env, fetchImpl = fe
   const add = (x, from, weight) => {
     const url = String(x.link || x.url || '').trim();
     if (!/^https?:\/\//i.test(url) || SKIP.test(url)) return;
-    const key = url.replace(/[#?].*$/, '').replace(/\/+$/, '').toLowerCase();
+    // Query strings frequently identify the video. Strip tracking fields only;
+    // removing every query collapsed all YouTube watch links into one result.
+    let canonical;
+    try { canonical = new URL(url); } catch { return; }
+    canonical.hash = '';
+    for (const k of [...canonical.searchParams.keys()]) if (/^(?:utm_.+|fbclid|gclid)$/i.test(k)) canonical.searchParams.delete(k);
+    canonical.searchParams.sort();
+    const key = canonical.href.replace(/\/$/, '');
     if (seen.has(key)) return;
     seen.add(key);
     out.push({ url, title: clean(x.title), site: hostOf(url), source: x.source || x.channel || null, date: x.date || null,
@@ -66,7 +73,7 @@ export async function searchWebVideos(query, { env = process.env, fetchImpl = fe
   };
   for (const x of vids?.videos || []) add(x, 'video', 3);
   for (const x of vidsEn?.videos || []) add(x, 'video-en', 2);
-  for (const r of [web, webVideo, webLesson]) for (const x of r?.organic || []) add(x, 'web', MEDIA_HINT.test(x.link + ' ' + x.title) ? 2 : 1);
+  for (const r of [web, webVideo, webLesson, webDownload, webRecording]) for (const x of r?.organic || []) add(x, 'web', MEDIA_HINT.test(x.link + ' ' + x.title) ? 2 : 1);
   for (const x of tv?.results || []) add(x, 'tavily', MEDIA_HINT.test(x.url + ' ' + x.title) ? 2 : 1);
   // Video results first, then pages that look like they hold media; the
   // original order of each engine is kept within the same weight.
