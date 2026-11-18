@@ -17,12 +17,12 @@
 ### משתני סביבה (בשרת Node)
 ```ini
 BRANCH2_LIVE_TV_ENABLED=false
-BRANCH2_TV_KAN11_SIP=tv1@your-sip-host.example
-BRANCH2_TV_12_SIP=tv2@your-sip-host.example
-BRANCH2_TV_13_SIP=tv3@your-sip-host.example
-BRANCH2_TV_14_SIP=tv4@your-sip-host.example
-BRANCH2_TV_I24_SIP=tv5@your-sip-host.example
-BRANCH2_TV_KNESSET_SIP=tv6@your-sip-host.example
+BRANCH2_TV_KAN11_SIP=176.97.205.41
+BRANCH2_TV_12_SIP=176.97.205.41
+BRANCH2_TV_13_SIP=176.97.205.41
+BRANCH2_TV_14_SIP=176.97.205.41
+BRANCH2_TV_I24_SIP=176.97.205.41
+BRANCH2_TV_KNESSET_SIP=176.97.205.41
 ```
 
 Replace example placeholders only after the SIP service has been tested. Set
@@ -36,11 +36,11 @@ Below is illustrative, *not* a ready production installation. Run FFmpeg as
 an external audio source for Asterisk (custom MOH source on **Asterisk**, not Yemot).
 Make a separate class per permitted media feed; each class is sourced by a command
 using `ffmpeg -re -i <AUTHORIZED_FEED_URL> -vn -ac 1 -ar 8000 -f s16le pipe:1`.
-Configure the SIP dialplan to answer the six SIP users and play the matching
+Configure the SIP dialplan to answer routing extensions 1..6 and play the matching
 Asterisk media class until hangup. Protect SIP ingress from untrusted calls,
 limit concurrency and reconnect failed FFmpeg processes. Keep feed URLs and tokens
 in server secrets, never in GitHub.
 
-**No test stream URLs or SIP credentials are configured here.** The user must not
+**The IP is only the target address, not proof that SIP is listening. No test stream URLs or SIP credentials are configured here.** The user must not
 be told playback works until the server has valid feeds, routes and an actual
 telephone test passes.
