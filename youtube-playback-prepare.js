@@ -77,7 +77,10 @@ export async function prepareYouTubePlayback(video, deps) {
 
   const webMedia = await isWebMedia(videoId);
   const totalMs = webMedia
-    ? numberEnv(env, 'WEB_MEDIA_PLAYBACK_TOTAL_BUDGET_MS', 15 * 60 * 1000)
+    // 18.11: the same budget as a regular extension 2 job (6 hours from the
+    // background job), never less than 15 minutes; 15 minutes alone cut long
+    // episodes off in the middle of the download.
+    ? numberEnv(env, 'WEB_MEDIA_PLAYBACK_TOTAL_BUDGET_MS', Math.max(15 * 60 * 1000, numberEnv(env, 'YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS', 0)))
     : numberEnv(env, 'YOUTUBE_PLAYBACK_TOTAL_BUDGET_MS', DEFAULT_TOTAL_BUDGET_MS);
   const started = Date.now();
   const remaining = () => totalMs - (Date.now() - started);

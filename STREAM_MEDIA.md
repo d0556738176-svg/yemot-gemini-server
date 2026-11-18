@@ -31,3 +31,14 @@ on the production VPS must be verified separately from a repository merge.
   video job routing, audio-only results, and 00 for a new search.
 - Production VPS installation and an actual Yemot telephone call remain separate
   acceptance checks; repository tests do not prove either one.
+
+## 18.11 fix: runs inside a terminal, reports percent, one combined file
+
+- The tool crashes at a random moment ("Offset and length were out of bounds",
+  Spectre.Console) when its output is not a terminal, so long downloads failed
+  silently. It now runs inside a pseudo-terminal (`script`), which is also where
+  its progress bars are read from: the caller hears real percent (segments done).
+- `-M format=mkv` joins separate audio and video tracks into one file (before,
+  two files failed the job).
+- Web downloads get the same time budget as a regular extension 2 job (6 hours,
+  a stalled download still stops after a minute), instead of 15 minutes.

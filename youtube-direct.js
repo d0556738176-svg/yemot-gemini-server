@@ -107,7 +107,7 @@ export async function directDownload(videoId, output, { mode = 'audio', height, 
   // YouTube keeps its existing player/download path.
   if (web && streamDownloaderPath()) {
     for (const target of targets) {
-      try { return await downloadStreamMedia({ ...web, url: target }, output, { mode, height, ffmpegPath, signal, maxBytes, stallMs }); }
+      try { return await downloadStreamMedia({ ...web, url: target }, output, { mode, height, ffmpegPath, signal, maxBytes, stallMs, onProgress: p => onProgress?.({ done: p.percent, total: 100 }) }); }
       catch (e) {
         if (e?.name === 'AbortError' || e?.code === 'too_large') throw e;
         log.warn?.('[DIRECT] stream tool failed; trying next free path', { videoId, code: e?.code || 'direct_failed' });

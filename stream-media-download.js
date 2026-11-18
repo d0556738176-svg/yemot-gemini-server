@@ -40,9 +40,37 @@ export function streamDownloadArgs(web, dir, ffmpegPath, {mode='audio',height}={
     '--select-video', streamVideoSelection(mode,height), '--select-audio', 'for=best', '--drop-subtitle', 'all',
     '--thread-count', '2', '--download-retry-count', '2', '--http-request-timeout', '15',
     '--check-segments-count', 'true',
+    // Separate audio and video tracks (common on TV sites) become one file;
+    // without this the job failed with two files and fell back to yt-dlp.
+    '-M', 'format=mkv',
     '--no-log', '--write-meta-json', 'false', '--disable-update-check', '--no-ansi-color', '--log-level', 'OFF',
     '--ffmpeg-binary-path', ffmpegPath,
     ...Object.entries(mediaRequestHeaders({ ...web.httpHeaders, ...(web.referer ? { Referer: web.referer } : {}) })).flatMap(([k, v]) => ['-H', k + ': ' + v])];
+}
+
+// The tool's own progress bars ("Vid 1280x720 ━━━ 45/300 15.00%"): one per
+// track. Overall = segments done / segments in all tracks, as measured.
+export function parseStreamProgress(text, tracks = new Map()) {
+  const clean = String(text).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+  for (const m of clean.matchAll(/(Vid|Aud|Sub)\b([^━\r\n]{0,80}?)\s*━+\s*(\d+)\/(\d+)\s+[\d.]+%/g)) {
+    const done = Number(m[3]), total = Number(m[4]);
+    if (total > 0 && done <= total) tracks.set(m[1] + '|' + m[2].replace(/\d{2}:\d{2}:\d{2}\.\d+.*$/, '').trim(), { done, total }); // a track's "0/100" placeholder is replaced by its real count
+  }
+  let done = 0, total = 0;
+  for (const t of tracks.values()) { done += t.done; total += t.total; }
+  return total ? { done, total, percent: Math.floor(done / total * 100) } : null;
+}
+
+// The tool crashes (Spectre.Console: "Offset and length were out of bounds")
+// when its output is not a terminal, at a random moment of a long download:
+// it ran with no screen, so long episodes failed after minutes of work and no
+// percent was ever heard (18.11). It runs inside a pseudo-terminal instead,
+// which is also where its progress bars come from.
+const SCRIPT_BIN = ['/usr/bin/script', '/bin/script'].find(x => existsSync(x)) || null;
+const shq = a => "'" + String(a).replace(/'/g, "'\\''") + "'";
+export function terminalCommand(bin, args, scriptBin = SCRIPT_BIN) {
+  if (!scriptBin) return { bin, args, tty: false };
+  return { bin: scriptBin, args: ['-qfec', [bin, ...args].map(shq).join(' '), '/dev/null'], tty: true };
 }
 
 async function treeBytes(dir) {
@@ -54,13 +82,25 @@ async function treeBytes(dir) {
   return n;
 }
 
-function run(bin, args, { signal, timeoutMs, stallMs = timeoutMs, dir, maxBytes = Infinity }) {
+function run(bin0, args0, { signal, timeoutMs, stallMs = timeoutMs, dir, maxBytes = Infinity, onProgress, tty = false }) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
     const grouped = process.platform !== 'win32';
-    const p = spawn(bin, args, { detached: grouped, stdio: ['ignore','ignore','pipe'], env: { ...process.env, COLUMNS: '180', LINES: '60', TERM: 'xterm' } });
-    let diagnostic='';
-    p.stderr.on('data',d=>{diagnostic=(diagnostic+d).slice(-2048);});
+    // On a terminal the bars are drawn only above log level OFF.
+    const ttyArgs = tty ? args0.map((a, i) => a === 'OFF' && args0[i - 1] === '--log-level' ? 'ERROR' : a) : args0;
+    const { bin, args } = tty ? terminalCommand(bin0, ttyArgs) : { bin: bin0, args: args0 };
+    const p = spawn(bin, args, { detached: grouped, stdio: ['ignore','pipe','pipe'], env: { ...process.env, COLUMNS: '180', LINES: '60', TERM: 'xterm' } });
+    let diagnostic='', tail='', lastPct=-1;
+    const tracks=new Map();
+    const take=d=>{
+      diagnostic=(diagnostic+d).slice(-2048);
+      if(!onProgress)return;
+      tail=(tail+d).slice(-4000);
+      const pr=parseStreamProgress(tail,tracks);
+      if(pr&&pr.percent!==lastPct){lastPct=pr.percent;try{onProgress(pr);}catch{}}
+    };
+    p.stdout.on('data',take);
+    p.stderr.on('data',take);
     let done = false, lastBytes = 0, lastChange = Date.now(), checking = false;
     const stop = () => { try { grouped && p.pid ? process.kill(-p.pid, 'SIGKILL') : p.kill('SIGKILL'); } catch {} };
     const finish = error => {
@@ -88,17 +128,17 @@ function run(bin, args, { signal, timeoutMs, stallMs = timeoutMs, dir, maxBytes 
 
 // Use the same quality requested by the regular download job. The shared
 // conversion/upload pipeline still chooses the final format and folder.
-export async function downloadStreamMedia(web, output, { bin = streamDownloaderPath(), ffmpegPath = 'ffmpeg', mode = 'audio', height, signal, maxBytes = Infinity, stallMs = 60000, timeoutMs = 15 * 60 * 1000 } = {}) {
+export async function downloadStreamMedia(web, output, { bin = streamDownloaderPath(), ffmpegPath = 'ffmpeg', mode = 'audio', height, signal, maxBytes = Infinity, stallMs = 60000, onProgress, timeoutMs = Number(process.env.WEB_STREAM_TIMEOUT_MS) || 6 * 3600 * 1000 /* 18.11: long episodes too, as in extension 2; a stall still stops it after a minute */ } = {}) {
   if (!bin || !/^https?:\/\//i.test(web?.url || '') || !/\.(?:m3u8|mpd)(?:\?|$)/i.test(web.url)) throw Object.assign(new Error('stream fallback unavailable'), { code: 'stream_unavailable' });
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ivr-stream-'));
   try {
     try {
-      await run(bin, streamDownloadArgs(web, dir, ffmpegPath, {mode,height}), { signal, timeoutMs, stallMs, dir, maxBytes });
+      await run(bin, streamDownloadArgs(web, dir, ffmpegPath, {mode,height}), { signal, timeoutMs, stallMs, dir, maxBytes, onProgress, tty: true });
     } catch(e) {
       // Direct HLS playlists can have no resolution labels to filter. This
       // matches the regular downloader's final best-available fallback.
       if(mode!=='video'||e.code!=='stream_no_matching_tracks')throw e;
-      await run(bin, streamDownloadArgs(web, dir, ffmpegPath, {mode:'audio'}), { signal, timeoutMs, stallMs, dir, maxBytes });
+      await run(bin, streamDownloadArgs(web, dir, ffmpegPath, {mode:'audio'}), { signal, timeoutMs, stallMs, dir, maxBytes, onProgress, tty: true });
     }
     const files = (await fs.readdir(dir)).filter(x => /\.(?:mp4|m4a|mkv|ts|aac)$/i.test(x));
     // A single combined track is expected. Never silently choose one of

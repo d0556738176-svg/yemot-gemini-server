@@ -573,8 +573,8 @@ async function downloadApifySource(id, output, signal, onProgress=()=>{}, consen
   const web = await webItem(id);
   if (directEnabled(process.env) || web) {
     try {
-      onProgress({stage:'transferring',direct:true,bytes:0,totalBytes:null});
-      const r = await directDownload(id, output, { mode:'audio', ffmpegPath, signal, maxBytes:4096*1024*1024 /* 15.11: free download, up to 4 GB */, onProgress:p=>onProgress({stage:'transferring',direct:true,bytes:p.done,totalBytes:p.total}) });
+      onProgress({stage:'transferring',direct:true,web:!!web,bytes:0,totalBytes:null});
+      const r = await directDownload(id, output, { mode:'audio', ffmpegPath, signal, maxBytes:4096*1024*1024 /* 15.11: free download, up to 4 GB */, onProgress:p=>onProgress({stage:'transferring',direct:true,web:!!web,bytes:p.done,totalBytes:p.total}) });
       onProgress({stage:'downloaded',bytes:r.bytes,totalBytes:r.bytes});
       return { bytes: r.bytes, title: r.title || null };
     } catch (e) {

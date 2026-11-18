@@ -75,3 +75,15 @@ test('real streaming adapter downloads protected HLS in video and audio modes', 
     assert.ok(ni.streams.some(x=>x.codec_type==='audio'));
   }
 });
+
+test('progress is read from the tool bars; a track placeholder is replaced by its real count (18.11)',async()=>{
+  const { parseStreamProgress, terminalCommand } = await import('./stream-media-download.js');
+  const t=new Map();
+  assert.equal(parseStreamProgress('nothing yet',t),null);
+  parseStreamProgress('Vid 320x240 | 75 Kbps ━━━━━━ 1/3 33.33% Aud audio_1   ━━━━ 0/100 0.00% -',t);
+  assert.equal(parseStreamProgress('Vid 320x240 | 75 Kbps ━━━━━━ 3/3 100.00% Aud audio_1   ━━━━ 8/16 50.00% 1MB',t).percent,57);
+  assert.deepEqual(parseStreamProgress('\x1b[2KAud audio_1   ━━━━ 16/16 100.00%',t),{done:19,total:19,percent:100});
+  const c=terminalCommand('/usr/local/bin/N_m3u8DL-RE',['https://x/a.m3u8?a=1&b=2','-H',"User-Agent: it's"],'/usr/bin/script');
+  assert.equal(c.bin,'/usr/bin/script'); assert.equal(c.args[0],'-qfec');
+  assert.equal(c.args[1],"'/usr/local/bin/N_m3u8DL-RE' 'https://x/a.m3u8?a=1&b=2' '-H' 'User-Agent: it'\\''s'");
+});
