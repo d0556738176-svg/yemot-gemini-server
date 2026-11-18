@@ -4428,6 +4428,7 @@ async function youtubeCallHandler(call) {
         } catch(e) {
           if(e instanceof ExitError||isCallerHangupError(e)) throw e;
           console.warn('[WEB_SEARCH] playback failed',{videoId:it.videoId,code:e?.code||'unknown'});
+          try { (await import('./youtube-direct.js')).webEvents.push({at:new Date().toISOString(),where:String(it.site||''),title:String(it.title||'').slice(0,60),ok:false,engine:'playback',message:String((e?.code||'')+' '+(e?.cause?.message||e?.message||'')).replace(/token=[^&\s]+/g,'token=[redacted]').slice(0,220)}); } catch {}
           note=(e?.code==='paid_needs_consent'
             ? 'ההורדה החינמית של הסרטון הזה מיוטיוב לא הצליחה. אפשר למצוא אותו בחיפוש ביוטיוב, ושם לאשר את מנוע הגיבוי. '
             : 'האתר לא נתן את ההקלטה הזאת להורדה. אפשר לבחור תוצאה אחרת. ');
