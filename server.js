@@ -4355,7 +4355,7 @@ async function youtubeCallHandler(call) {
     const results=W.mergeResults(found);
     console.info('[WEB_SEARCH] done',{q:q.slice(0,80),candidates:found.candidates||0,checked:found.checked||0,web:(found.items||[]).length,youtube:(found.youtube||[]).length,sec:Math.round((Date.now()-startedAt)/1000)});
     void addToHistory(callerPhone,q,branch2Store,{results:results.length,kind:'web'});
-    if(!results.length) return {say:'לא מצאתי באתרים הקלטה או סרטון שאפשר להוריד עבור '+q+'. אפשר לנסות במילים אחרות.'};
+    if(!results.length) return {say:W.noResultsText(found,q)};
     let start=0, note='נמצאו '+results.length+' תוצאות. ', withList=true, empty=0;
     while(true) {
       const more=start+PAGE<results.length;
