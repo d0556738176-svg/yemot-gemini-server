@@ -55,5 +55,24 @@ if (v) {
   catch (e) { log('download video FAIL', v.site, e.code || '', String(e.message).slice(0, 120)); }
   fs.rmSync(out, { force: true });
 }
+// Live broadcast: search, then the relay for 75 seconds (pieces kept here, not uploaded).
+{
+  const lr = await import(E + 'live-relay.js');
+  const t = Date.now();
+  const r = await wm.searchWebMedia('שידור חי מהכותל המערבי');
+  const lives = r.items.filter(x => x.live);
+  log('live search', 'items', r.items.length, 'live', lives.length, 'sec', Math.round((Date.now() - t) / 1000));
+  for (const x of lives.slice(0, 4)) log('  live', x.id, x.site, String(x.title).slice(0, 60));
+  if (lives[0]) {
+    const sizes = [];
+    const relay = lr.startRelay({ url: lives[0].url, title: lives[0].title }, { ffmpegPath: ff, log: { info() {}, warn: (...a) => log('relay warn', JSON.stringify(a).slice(0, 160)) },
+      upload: async (f) => { sizes.push(fs.statSync(f).size); }, del: async () => {} });
+    for (let i = 0; i < 15; i++) { await new Promise(x => setTimeout(x, 5000)); relay.touch(); }
+    log('live relay pieces', relay.pieces.length, 'bytes', sizes.join(','), 'first piece for a caller', lr.nextPiece(relay, null)?.no ?? 'none', 'stopped', relay.stopped, relay.error || '');
+    relay.stop('check_done');
+  }
+}
+log('errors since start', sh('journalctl -u yemot-ext2 -u yemot-main --since "-30min" --no-pager -o cat | grep -c -i -E "uncaught|unhandled|typeerror|referenceerror|syntaxerror"'));
+log('restarts', sh('systemctl show yemot-main yemot-ext2 -p NRestarts | tr "\\n" " "'));
 log('done');
 process.exit(0);
