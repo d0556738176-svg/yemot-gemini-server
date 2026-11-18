@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { geocode, zmanimFacts, nearbyFacts, spokenTime, resolveDate, localZmanim, isZmanimQuestion, isNearbyQuestion } from '../place-tools.js';
+import { clearPlaceCache, geocode, zmanimFacts, nearbyFacts, spokenTime, resolveDate, localZmanim, isZmanimQuestion, isNearbyQuestion } from '../place-tools.js';
 import { ext3Turn, placeFromText, heuristicPlan, zmanReply } from '../ext3-brain.js';
 
 const HEBCAL = { times: { alotHaShachar: '2026-11-18T04:56:00+02:00', misheyakir: '2026-11-18T05:19:00+02:00', sunrise: '2026-11-18T06:12:00+02:00', sofZmanShmaMGA: '2026-11-18T08:13:00+02:00', sofZmanShma: '2026-11-18T08:49:00+02:00', sofZmanTfillaMGA: '2026-11-18T09:17:00+02:00', sofZmanTfilla: '2026-11-18T09:41:00+02:00', chatzot: '2026-11-18T11:26:00+02:00', sunset: '2026-11-18T16:41:00+02:00', tzeit7083deg: '2026-11-18T17:12:00+02:00', tzeit85deg: '2026-11-18T17:19:00+02:00', tzeit72min: '2026-11-18T17:53:00+02:00' } };
 const json = (j, status = 200) => ({ ok: status < 400, status, json: async () => j, text: async () => JSON.stringify(j) });
 // Ashdod's separate beach first, as Nominatim really answered on 18.11.
 function fakeFetch(log = []) {
+  clearPlaceCache();
   return async (url, opts = {}) => {
     const u = String(url); log.push(u);
     if (u.includes('nominatim') && u.includes('/search')) {

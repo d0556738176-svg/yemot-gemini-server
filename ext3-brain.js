@@ -926,7 +926,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   }
 
   if (plan.intent === 'zmanim') {
-    const facts = await (deps.zmanimFacts || realZmanim)({ place: plan.place, town: plan.town, date: plan.date, utterance: utterance + ' ' + plan.standalone }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() }).catch(e => { log.warn?.('[ZMANIM] failed', String(e?.message || e).slice(0, 100)); return null; });
+    const facts = await within(Number(deps.placeBudgetMs || 11000), (deps.zmanimFacts || realZmanim)({ place: plan.place, town: plan.town, date: plan.date, utterance: utterance + ' ' + plan.standalone }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() })).catch(e => { log.warn?.('[ZMANIM] failed', String(e?.message || e).slice(0, 100)); return null; });
     if (facts?.unknownPlace) return out({ reply: 'לא מצאתי במפה את המקום ' + facts.unknownPlace + '. ' + 'תוכל' + ' לומר לי את שם היישוב או העיר הקרובה, ואחשב לך את הזמנים בדיוק לפיה?' });
     if (facts) {
       log.info?.('[ZMANIM] computed', { place: facts.loc?.label, town: facts.loc?.town, date: facts.date, source: facts.source, approx: !!facts.loc?.approx });
@@ -943,7 +943,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   if (plan.intent === 'nearby') {
     const kindText = plan.kind || utterance;
     const [facts, web] = await Promise.all([
-      (deps.nearbyFacts || realNearby)({ kindText: kindText + ' ' + utterance, place: plan.place, town: plan.town }, { fetchImpl: deps.fetchImpl || fetch, log }).catch(e => { log.warn?.('[PLACE] nearby failed', String(e?.message || e).slice(0, 100)); return null; }),
+      within(Number(deps.placeBudgetMs || 13000), (deps.nearbyFacts || realNearby)({ kindText: kindText + ' ' + utterance, place: plan.place, town: plan.town }, { fetchImpl: deps.fetchImpl || fetch, log })).catch(e => { log.warn?.('[PLACE] nearby failed', String(e?.message || e).slice(0, 100)); return null; }),
       deps.webSearch ? deps.webSearch(plan.search || plan.standalone || utterance, { timeoutMs: 4500 }).catch(() => []) : Promise.resolve([])
     ]);
     if (facts?.unknownPlace && !(web || []).length) return out({ reply: 'לא מצאתי במפה את המקום ' + facts.unknownPlace + '. אפשר לומר לי שם של רחוב או של מקום מוכר לידו, ובאיזו עיר, ואחפש שוב?' });
@@ -1068,6 +1068,9 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
 }
 
 export { HE_NUMBER_WORDS };
+
+// A map or calendar service that hangs must not keep the caller waiting.
+function within(ms, p) { return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('place tools too slow'), { status: 504 })), ms).unref?.())]); }
 
 // The halachic time he asked about, said straight from the calculation (no
 // model in between, so no time can be changed on the way). Null when he asked

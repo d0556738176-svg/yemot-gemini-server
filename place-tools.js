@@ -102,7 +102,20 @@ async function getJson(url, { fetchImpl = fetch, timeoutMs = 6000, headers = {},
   return r.json();
 }
 function townOf(addr = {}) { return addr.city || addr.town || addr.village || addr.municipality || addr.suburb || addr.hamlet || ''; }
-async function nominatim(q, { fetchImpl, timeoutMs = 6000, limit = 6 } = {}) {
+// Answers are kept for a day: the same place costs nothing the second time,
+// and the public map servers are asked as little as possible (their rules).
+const cache = new Map();
+function cached(key, fn) {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < 24 * 3600 * 1000) return hit.p;
+  const p = fn().catch(e => { cache.delete(key); throw e; });
+  cache.set(key, { at: Date.now(), p });
+  if (cache.size > 500) cache.delete(cache.keys().next().value);
+  return p;
+}
+export function clearPlaceCache() { cache.clear(); }
+function nominatim(q, opts = {}) { return cached('n|' + q + '|' + (opts.limit || 6), () => nominatimRaw(q, opts)); }
+async function nominatimRaw(q, { fetchImpl, timeoutMs = 6000, limit = 6 } = {}) {
   const u = new URL('https://nominatim.openstreetmap.org/search');
   u.searchParams.set('q', q); u.searchParams.set('countrycodes', 'il'); u.searchParams.set('format', 'jsonv2');
   u.searchParams.set('accept-language', 'he'); u.searchParams.set('addressdetails', '1'); u.searchParams.set('limit', String(limit));
@@ -117,7 +130,7 @@ async function openMeteoGeo(q, { fetchImpl, timeoutMs = 5000 } = {}) {
   return (j?.results || []).map(x => ({ lat: Number(x.latitude), lon: Number(x.longitude), name: x.name || '', display: [x.name, x.admin2, x.admin1].filter(Boolean).join(', '), town: x.name || '', type: 'town', kind: 'place', bbox: [] }));
 }
 // Overpass with several public servers; the first that answers wins.
-export async function overpass(query, { fetchImpl = fetch, timeoutMs = 9000, servers = OVERPASS } = {}) {
+export async function overpass(query, { fetchImpl = fetch, timeoutMs = 7000, servers = OVERPASS } = {}) {
   const tries = servers.slice(0, 3).map(s => getJson(s, { fetchImpl, timeoutMs, method: 'POST', body: 'data=' + encodeURIComponent(query), headers: { 'content-type': 'application/x-www-form-urlencoded' } })
     .then(j => { if (!Array.isArray(j?.elements)) throw new Error('bad overpass answer'); return j.elements; }));
   return Promise.any(tries);
@@ -185,7 +198,8 @@ const ZMAN_ORDER = [
   ['chatzotNight', 'חצות הלילה']
 ];
 const hhmm = iso => { const m = String(iso || '').match(/T(\d{2}):(\d{2})/); return m ? m[1] + ':' + m[2] : ''; };
-async function hebcalZmanim(lat, lon, date, { fetchImpl, timeoutMs = 6000 } = {}) {
+function hebcalZmanim(lat, lon, date, opts = {}) { return cached('h|' + lat.toFixed(3) + '|' + lon.toFixed(3) + '|' + date, () => hebcalRaw(lat, lon, date, opts)); }
+async function hebcalRaw(lat, lon, date, { fetchImpl, timeoutMs = 6000 } = {}) {
   const u = new URL('https://www.hebcal.com/zmanim');
   u.searchParams.set('cfg', 'json'); u.searchParams.set('latitude', lat.toFixed(4)); u.searchParams.set('longitude', lon.toFixed(4));
   u.searchParams.set('tzid', 'Asia/Jerusalem'); u.searchParams.set('date', date);
@@ -317,7 +331,7 @@ export async function nearbyFacts({ kindText = '', place = '', town = '' } = {},
   const loc = await geocode({ place, town }, { fetchImpl, log }).catch(() => null);
   if (!loc) return { unknownPlace: place || town, kind: kind.label };
   let items = [];
-  for (const radius of [1500, 4000, 12000]) {
+  for (const radius of [3000, 12000]) {
     const q = '[out:json][timeout:15];(' + kind.filters.map(f => `nwr${f}(around:${radius},${loc.lat},${loc.lon});`).join('') + ');out center tags 60;';
     const els = await overpass(q, { fetchImpl }).catch(e => { log.warn?.('[PLACE] nearby search failed', String(e?.message || e).slice(0, 80)); return null; });
     if (els === null) return { loc, kind: kind.label, mapDown: true, items: [] };
@@ -327,7 +341,7 @@ export async function nearbyFacts({ kindText = '', place = '', town = '' } = {},
       .map(x => ({ name: x.tags['name:he'] || x.tags.name || '', address: addressOf(x.tags), km: km(loc, x), lat: x.lat, lon: x.lon, phone: x.tags.phone || x.tags['contact:phone'] || '', hours: x.tags.opening_hours || '', denomination: x.tags.denomination || '' }))
       .filter(x => { const k = (x.name || '') + '|' + Math.round(x.lat * 2000) + '|' + Math.round(x.lon * 2000); if (seen.has(k)) return false; seen.add(k); return true; })
       .sort((a, b) => a.km - b.km).slice(0, 5);
-    if (items.length >= 2 || (items.length && radius >= 4000)) break;
+    if (items.length) break;
   }
   // Street address for the nearest ones the map lists without one.
   for (const x of items.slice(0, 2)) if (!x.address) x.address = await reverseAddress(x.lat, x.lon, { fetchImpl }).catch(() => '');
