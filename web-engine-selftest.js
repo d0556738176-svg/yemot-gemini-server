@@ -32,10 +32,10 @@ async function grab(item, ffmpegPath) {
   } catch (e) {
     if (got && (e?.name === 'AbortError' || ac.signal.aborted)) return { ok: true, partial: true };
     return { ok: false, err: String(e?.message || e).replace(/\s+/g, ' ').slice(0, 160) };
-  } finally { clearTimeout(timer); await fs.rm(dir, { recursive: true, force: true }); }
+  } finally { clearTimeout(timer); await new Promise(r => setTimeout(r, 1500)); await fs.rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
 
-export async function runEngineSelfTest({ env = process.env, log = console, ffmpegPath = 'ffmpeg' } = {}) {
+export async function runEngineSelfTest({ env = process.env, log = console, ffmpegPath = 'ffmpeg', queries = QUERIES, perQuery = 3 } = {}) {
   if (state.status === 'running') return state;
   Object.assign(state, { status: 'running', startedAt: new Date().toISOString(), finishedAt: null, sites: [] });
   const { ytdlpPath } = await import('./youtube-direct.js');
@@ -47,17 +47,17 @@ export async function runEngineSelfTest({ env = process.env, log = console, ffmp
     streamlink: streamlinkPath() ? version(streamlinkPath()) : null, browser: browserPath() || null,
   };
   const web = await import('./web-media.js');
-  for (const q of QUERIES) {
+  for (const q of queries) {
     const row = { q, candidates: 0, checked: [], found: 0 };
     state.sites.push(row);
     try {
-      const list = (await web.webCandidates(q, { env })).filter(c => !/youtube\.com|youtu\.be/i.test(c.url)).slice(0, 3);
+      const list = (await web.webCandidates(q, { env })).filter(c => !/youtube\.com|youtu\.be/i.test(web.unwrapRedirect(c.url))).slice(0, perQuery);
       row.candidates = list.length;
       for (const c of list) {
         const t0 = Date.now();
         let failure = null;
         const it = await web.inspectLink(c, { timeoutMs: 30000, browserMs: 30000, onFailure: f => { failure = f.reason; } }).catch(() => null);
-        const host = (() => { try { return new URL(c.url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+        const host = (() => { try { return new URL(web.unwrapRedirect(c.url)).hostname.replace(/^www\./, ''); } catch { return ''; } })();
         if (!it || it.youtube) { row.checked.push({ host, ok: false, why: it?.youtube ? 'youtube' : failure || 'no media', sec: Math.round((Date.now() - t0) / 1000) }); continue; }
         const g = it.live ? { ok: true, bytes: 0, err: null } : await grab(it, ffmpegPath);
         row.checked.push({ host, ok: g.ok, engine: g.engine || (it.browser ? 'browser/streamlink' : 'yt-dlp'), found: it.browser ? 'browser/streamlink' : 'yt-dlp', live: !!it.live, sec: Math.round((Date.now() - t0) / 1000), title: String(it.title || '').slice(0, 60), ...(g.ok ? {} : { why: g.err }) });

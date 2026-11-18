@@ -61,6 +61,7 @@ async function getBrowser(env) {
     .then(b => { browser = b; return b; }).finally(() => { launching = null; });
   return launching;
 }
+export const browserEvents = [];
 let busy = 0;
 const waiting = [];
 function idleClose() {
@@ -136,6 +137,8 @@ export function sniffPage(pageUrl, { timeoutMs = 25000, deadline = Infinity, env
         const c = cookies.filter(k => host === k.domain.replace(/^\./, '') || host.endsWith(k.domain.startsWith('.') ? k.domain : '.' + k.domain)).map(k => k.name + '=' + k.value).join('; ');
         return { url: m.url, type: m.type, length: m.length, headers: m.headers, cookie: c || null };
       });
+      browserEvents.push({ at: new Date().toISOString(), page: (() => { try { const u = new URL(pageUrl); return u.hostname + u.pathname.slice(0, 60); } catch { return ''; } })(), requests: found.size, media: media.map(m => m.url.replace(/\?.*/, '').slice(-70)), ms: Date.now() - started });
+      if (browserEvents.length > 60) browserEvents.shift();
       log.info?.('[BROWSER] page opened', { host: (() => { try { return new URL(pageUrl).hostname; } catch { return ''; } })(), media: media.length, first: media[0]?.url.replace(/\?.*/, '').slice(0, 120) || null, ms: Date.now() - started });
       return { media, title: String(info.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || null, image: info.image || null, durationSec: info.durationSec || null };
     } catch (e) {

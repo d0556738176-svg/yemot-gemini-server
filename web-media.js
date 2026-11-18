@@ -120,8 +120,8 @@ export async function viaBrowser(c, opts = {}) {
     const streams = tracks?.streams || [];
     const hasAudio = streams.some(x => x.codec_type === 'audio'), hasVideo = streams.some(x => x.codec_type === 'video');
     if (!hasAudio) continue; // the phone needs sound
-    const dur = Number(tracks?.format?.duration) || Number(s.durationSec) || null;
-    const live = !dur && /\.m3u8/i.test(m.url);
+    const live = await (opts.isLive || hlsIsLive)(m.url, { headers: m.headers, cookie: m.cookie });
+    const dur = live ? null : Number(tracks?.format?.duration) || Number(s.durationSec) || null;
     if (!live && dur && dur < 5) continue;
     const item = {
       url: m.url, page: c.url, referer: m.headers?.Referer || c.url, browser: true,
@@ -136,7 +136,37 @@ export async function viaBrowser(c, opts = {}) {
 }
 
 // One link -> a playable item, a YouTube link ({youtube}), or null.
-export async function inspectLink(c, opts = {}) {
+// A search result that is a Google redirect ("google.com/url?q=...") is the
+// page it points to (the site is then named correctly too).
+export function unwrapRedirect(url) {
+  try {
+    const u = new URL(url);
+    if (/(^|\.)google\.[a-z.]+$/i.test(u.hostname) && /^\/url$/i.test(u.pathname)) {
+      const t = u.searchParams.get('q') || u.searchParams.get('url');
+      if (t && /^https?:\/\//i.test(t)) return t;
+    }
+  } catch {}
+  return url;
+}
+
+// Live or recorded: a playlist without #EXT-X-ENDLIST is a live broadcast.
+export async function hlsIsLive(url, { headers = {}, cookie = null, fetchImpl = fetch } = {}) {
+  if (!/\.m3u8/i.test(url)) return false;
+  const h = { ...mediaRequestHeaders(headers), ...(cookie ? { Cookie: cookie } : {}) };
+  try {
+    let text = await (await fetchImpl(url, { headers: h, signal: AbortSignal.timeout(8000) })).text();
+    if (/#EXT-X-STREAM-INF/i.test(text)) {
+      const line = text.split(/\r?\n/).find((l, i, a) => l && !l.startsWith('#') && /#EXT-X-STREAM-INF/i.test(a[i - 1] || ''));
+      if (!line) return false;
+      text = await (await fetchImpl(new URL(line.trim(), url).href, { headers: h, signal: AbortSignal.timeout(8000) })).text();
+    }
+    return /#EXTINF/i.test(text) && !/#EXT-X-ENDLIST/i.test(text) && !/#EXT-X-PLAYLIST-TYPE:\s*VOD/i.test(text);
+  } catch { return false; }
+}
+
+export async function inspectLink(c0, opts = {}) {
+  const c = { ...c0, url: unwrapRedirect(c0.url) };
+  if (c.url !== c0.url && !c0.site) c.site = hostOf(c.url);
   let failure = null;
   const r = await inspectLinkPlain(c, { ...opts, onFailure: f => { failure = f; } });
   if (r) return r;
@@ -253,7 +283,7 @@ export const LIVE_WORDS = /(?:שידור חי|שידורים חיים|בשידו
 export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, limit = 60, onProgress = () => {}, candidates = null, inspect = inspectLink, live = LIVE_WORDS.test(String(q)) } = {}) {
   const started = Date.now();
   const liveNow = live && !candidates ? youtubeLiveNow(q).catch(() => []) : Promise.resolve([]);
-  const list = (candidates || await webCandidates(q, { env })).slice(0, 100);
+  const list = (candidates || await webCandidates(q, { env })).slice(0, 100).map(c => ({ ...c, url: unwrapRedirect(c.url) }));
   onProgress({ stage: 'checking', total: list.length, done: 0, found: 0 });
   const found = [], youtube = [], unavailable = [];
   let next = 0, done = 0;

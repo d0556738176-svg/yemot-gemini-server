@@ -13,7 +13,7 @@ test('browser engine ranks whole playlists first and drops pieces and adverts', 
 
 test('a page only a browser can play becomes a downloadable item (cookie never stored)', async () => {
   const it = await viaBrowser({ url: 'https://site.example/ep/7', title: 'פרק 7' }, {
-    browserOn: true, streamlinkOn: false,
+    browserOn: true, streamlinkOn: false, isLive: async () => false,
     sniff: async () => ({ title: 'פרק 7 המלא', media: [{ url: 'https://cdn.example/m.m3u8', headers: { 'User-Agent': 'UA', Referer: 'https://site.example/ep/7' }, cookie: 's=1' }] }),
     probeStreams: async (u, o) => { assert.equal(o.cookie, 's=1'); return { streams: [{ codec_type: 'video' }, { codec_type: 'audio' }], format: { duration: '1800' } }; },
   });

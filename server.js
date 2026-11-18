@@ -5479,7 +5479,17 @@ app.get('/tv-check', rateLimit(4, 60 * 1000, 'tv-check'), async (req,res)=>{
   res.json({ channels: await TV.checkAllChannels(await tvDeps()) });
 });
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
-app.get('/branch2-diag',async (req,res)=>{ let commit=''; try { commit=String(readFileSync(new URL('./.git/HEAD',import.meta.url),'utf8')).trim(); if(commit.startsWith('ref:')) commit=String(readFileSync(new URL('./.git/'+commit.slice(5).trim(),import.meta.url),'utf8')).trim(); } catch {} let engineTest=null, webEvents=[]; try { engineTest=(await import('./web-engine-selftest.js')).state; webEvents=(await import('./youtube-direct.js')).webEvents; } catch {} res.json({commit:commit.slice(0,12), startedAt:BRANCH2_STARTED_AT, keys:branch2Keys.slice(-100), engineTest, webEvents:webEvents.slice(-40)}); });
+app.get('/branch2-diag',async (req,res)=>{ let commit=''; try { commit=String(readFileSync(new URL('./.git/HEAD',import.meta.url),'utf8')).trim(); if(commit.startsWith('ref:')) commit=String(readFileSync(new URL('./.git/'+commit.slice(5).trim(),import.meta.url),'utf8')).trim(); } catch {} let engineTest=null, webEvents=[], browserEvents=[]; try { engineTest=(await import('./web-engine-selftest.js')).state; webEvents=(await import('./youtube-direct.js')).webEvents; browserEvents=(await import('./browser-media.js')).browserEvents; } catch {} res.json({commit:commit.slice(0,12), startedAt:BRANCH2_STARTED_AT, keys:branch2Keys.slice(-100), engineTest, webEvents:webEvents.slice(-40), browserEvents:browserEvents.slice(-40)}); });
+// Owner, 18.11: run the engine check again for given searches (search words
+// only, never an address; one run at a time; nothing goes to Yemot).
+app.get('/branch2-engine-test',rateLimit(6,60*1000,'engine-test'),async (req,res)=>{
+  const t=await import('./web-engine-selftest.js');
+  if(t.state.status==='running') return res.json({ok:false,status:'running'});
+  const queries=String(req.query.q||'').split('|').map(x=>x.trim().slice(0,80)).filter(Boolean).slice(0,8);
+  if(!queries.length) return res.status(400).json({ok:false});
+  void t.runEngineSelfTest({ffmpegPath:(await import('ffmpeg-static')).default,queries,perQuery:Math.min(5,Math.max(1,Number(req.query.n)||3))}).catch(()=>{});
+  res.json({ok:true,started:queries});
+});
 
 // Owner test source for the segmented-playback trial (only when enabled).
 app.get('/branch2-selftest/source.m4a',(req,res,next)=>process.env.BRANCH2_SEGMENT_TEST==='1'?serveTestSource(req,res):next());
