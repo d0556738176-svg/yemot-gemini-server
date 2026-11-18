@@ -45,7 +45,9 @@ export function streamDownloadArgs(web, dir, ffmpegPath, {mode='audio',height}={
     '-M', 'format=mkv',
     '--no-log', '--write-meta-json', 'false', '--disable-update-check', '--no-ansi-color', '--log-level', 'OFF',
     '--ffmpeg-binary-path', ffmpegPath,
-    ...Object.entries(mediaRequestHeaders({ ...web.httpHeaders, ...(web.referer ? { Referer: web.referer } : {}) })).flatMap(([k, v]) => ['-H', k + ': ' + v])];
+    ...Object.entries(mediaRequestHeaders({ ...web.httpHeaders, ...(web.referer ? { Referer: web.referer } : {}) })).flatMap(([k, v]) => ['-H', k + ': ' + v]),
+    // A cookie the page set in the browser engine: this download only, never stored.
+    ...(web.cookie && !/[\r\n]/.test(web.cookie) ? ['-H', 'Cookie: ' + web.cookie] : [])];
 }
 
 // The tool's own progress bars ("Vid 1280x720 ━━━ 45/300 15.00%"): one per

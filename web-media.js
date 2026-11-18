@@ -9,6 +9,8 @@ import { ytdlpPath } from './youtube-direct.js';
 import { registerWebItem } from './web-items.js';
 import { mediaRequestHeaders, mediaHeaderArgs } from './media-request-headers.js';
 import { isMakoEpisode, resolveMakoPublic } from './mako-public-media.js';
+import { sniffPage, browserAvailable } from './browser-media.js';
+import { streamlinkResolve, streamlinkPath } from './streamlink-media.js';
 
 const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const YT = /(?:youtube\.com|youtu\.be)\//i;
@@ -93,9 +95,9 @@ async function scanPage(url, { fetchImpl = fetch, timeoutMs = 12000 } = {}) {
 
 // Some HLS/DASH playlists omit CODECS, so yt-dlp cannot label their tracks.
 // Ask ffprobe about the real stream instead of discarding it or guessing.
-export function probeMediaStreams(url, { timeoutMs = 8000, headers = {}, bin = process.env.FFPROBE_PATH || 'ffprobe' } = {}) {
+export function probeMediaStreams(url, { timeoutMs = 8000, headers = {}, cookie = null, bin = process.env.FFPROBE_PATH || 'ffprobe' } = {}) {
   return new Promise(resolve => {
-    const context = Object.entries(mediaRequestHeaders(headers)).map(([k, v]) => k + ': ' + v + '\r\n').join('');
+    const context = Object.entries({ ...mediaRequestHeaders(headers), ...(cookie && !/[\r\n]/.test(cookie) ? { Cookie: cookie } : {}) }).map(([k, v]) => k + ': ' + v + '\r\n').join('');
     const p = spawn(bin, ['-v', 'error', '-analyzeduration', '2000000', '-probesize', '1000000', ...(context ? ['-headers', context] : []), '-show_entries', 'stream=codec_type:format=duration', '-of', 'json', url], { stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     const timer = setTimeout(() => { p.kill('SIGKILL'); resolve(null); }, Math.max(1, timeoutMs));
@@ -105,8 +107,47 @@ export function probeMediaStreams(url, { timeoutMs = 8000, headers = {}, bin = p
   });
 }
 
+// The browser engine (browser-media.js): the page opened in a real browser
+// and its player started; the media it requests becomes the item.
+export async function viaBrowser(c, opts = {}) {
+  // Streamlink's site plugins first (quick), then the page in a real browser.
+  const sl = (opts.streamlinkOn ?? !!streamlinkPath()) ? await (opts.streamlink || streamlinkResolve)(c.url).catch(() => null) : null;
+  const s = sl ? { media: [{ url: sl.url, headers: sl.headers, cookie: null }], title: null, image: null, durationSec: null }
+    : (opts.browserOn ?? browserAvailable()) ? await (opts.sniff || sniffPage)(c.url, { timeoutMs: opts.browserMs ?? 25000, deadline: opts.browserDeadline ?? Infinity }) : null;
+  for (const m of s?.media || []) {
+    if (YT.test(m.url)) continue;
+    const tracks = await (opts.probeStreams || probeMediaStreams)(m.url, { timeoutMs: 10000, headers: m.headers, cookie: m.cookie });
+    const streams = tracks?.streams || [];
+    const hasAudio = streams.some(x => x.codec_type === 'audio'), hasVideo = streams.some(x => x.codec_type === 'video');
+    if (!hasAudio) continue; // the phone needs sound
+    const dur = Number(tracks?.format?.duration) || Number(s.durationSec) || null;
+    const live = !dur && /\.m3u8/i.test(m.url);
+    if (!live && dur && dur < 5) continue;
+    const item = {
+      url: m.url, page: c.url, referer: m.headers?.Referer || c.url, browser: true,
+      title: String(s.title || c.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || hostOf(c.url),
+      site: hostOf(c.url) || c.site, siteName: null, uploader: c.source || null, description: String(c.snippet || '').slice(0, 4000),
+      thumbnail: s.image || c.image || null, durationSec: live ? null : dur, uploadDate: null, views: null, tags: null,
+      hasVideo: live ? false : hasVideo, hasAudio, impersonate: false, live, httpHeaders: mediaRequestHeaders(m.headers),
+    };
+    return { ...item, id: registerWebItem(item) };
+  }
+  return null;
+}
+
 // One link -> a playable item, a YouTube link ({youtube}), or null.
 export async function inspectLink(c, opts = {}) {
+  let failure = null;
+  const r = await inspectLinkPlain(c, { ...opts, onFailure: f => { failure = f; } });
+  if (r) return r;
+  // Nothing the downloader could read: the page in a real browser (18.11).
+  const b = await viaBrowser(c, opts).catch(() => null);
+  if (b) return b;
+  if (failure) opts.onFailure?.(failure);
+  return null;
+}
+
+async function inspectLinkPlain(c, opts = {}) {
   // One deadline includes extraction, browser-transport retry and page scan.
   // Previously each retry received a fresh 30 seconds, overrunning the call.
   const until = Date.now() + (opts.timeoutMs ?? 30000);
@@ -222,7 +263,7 @@ export async function searchWebMedia(q, { env = process.env, budgetMs = 90000, l
       // Live search: YouTube links are opened too, to find the ones broadcasting now.
       if (YT.test(c.url) && !live) { youtube.push(c); done++; continue; }
       const left = budgetMs - (Date.now() - started);
-      const it = left > 3000 ? await inspect(c, { timeoutMs: Math.min(30000, left), onFailure: failure => unavailable.push({ title: c.title, site: c.site || hostOf(c.url), reason: failure.reason }) }).catch(() => null) : null;
+      const it = left > 3000 ? await inspect(c, { timeoutMs: Math.min(30000, left), browserDeadline: started + budgetMs - 1000, onFailure: failure => unavailable.push({ title: c.title, site: c.site || hostOf(c.url), reason: failure.reason }) }).catch(() => null) : null;
       done++;
       if (it?.youtube) youtube.push({ url: it.youtube, title: it.title || c.title });
       else if (it && !found.some(x => x.id === it.id)) found.push(it);

@@ -12,9 +12,11 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { webItem } from './web-items.js';
-import { mediaHeaderArgs } from './media-request-headers.js';
+import { mediaHeaderArgs, mediaRequestHeaders } from './media-request-headers.js';
 import { refreshMakoItem } from './mako-public-media.js';
 import { downloadStreamMedia, streamDownloaderPath } from './stream-media-download.js';
+import { sniffPage, browserAvailable } from './browser-media.js';
+import { streamlinkResolve, streamlinkPath } from './streamlink-media.js';
 
 const require = createRequire(import.meta.url);
 // /usr/local/bin/yt-dlp is the up-to-date standalone build the server
@@ -40,7 +42,7 @@ export function formatFor(mode, height) {
   return `bestvideo[height<=${h}][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`;
 }
 
-export function argsFor(videoId, output, { mode = 'audio', height, client = '', ffmpegPath, target = null, impersonate = false, referer = null, httpHeaders = null } = {}) {
+export function argsFor(videoId, output, { mode = 'audio', height, client = '', ffmpegPath, target = null, impersonate = false, referer = null, httpHeaders = null, cookie = null } = {}) {
   const a = ['--no-warnings', '--no-playlist', '--newline', '--no-part', '--force-overwrites', '--no-cache-dir',
     '--retries', '3', '--fragment-retries', '5', '--socket-timeout', '30', '--concurrent-fragments', '4',
     '-f', target && mode !== 'video' ? 'bestaudio/best/best*' : formatFor(mode, height), '-o', output,
@@ -54,6 +56,7 @@ export function argsFor(videoId, output, { mode = 'audio', height, client = '', 
   // yt-dlp container-fixup pass can fail after all HLS bytes were downloaded.
   if (target && mode !== 'video') a.push('--fixup', 'never');
   a.push(...mediaHeaderArgs(httpHeaders));
+  if (cookie && !/[\r\n]/.test(cookie)) a.push('--add-headers', 'Cookie:' + cookie); // browser engine, this download only
   // A player found inside another page (e.g. Vimeo) plays only for that page.
   if (referer) a.push('--referer', referer);
   a.push('--', target || videoId);
@@ -97,10 +100,55 @@ function runOnce(bin, args, { signal, stallMs, onProgress }) {
 
 // Downloads to `output`; returns { bytes, title, client }. Throws when every
 // player type failed (the caller then uses the engines).
-export async function directDownload(videoId, output, { mode = 'audio', height, ffmpegPath, signal, onProgress, log = console, maxBytes = Infinity, stallMs = 60000, clients = CLIENTS, bin = ytdlpPath(), withCaptions = true } = {}) {
+// The last downloads from other websites, for /branch2-diag (no tokens:
+// site and path only).
+export const webEvents = [];
+function webEvent(web, ok, engine, message) {
+  if (!web) return;
+  let where = ''; try { const u = new URL(web.page || web.url); where = u.hostname + u.pathname.slice(0, 80); } catch {}
+  webEvents.push({ at: new Date().toISOString(), where, title: String(web.title || '').slice(0, 60), ok, engine, ...(message ? { message: String(message).slice(0, 160) } : {}) });
+  if (webEvents.length > 100) webEvents.shift();
+}
+
+export async function directDownload(videoId, output, opts = {}) {
+  try {
+    const r = await directDownloadPlain(videoId, output, opts);
+    webEvent(await webItem(videoId).catch(() => null), true, r.client || 'yt-dlp');
+    return r;
+  }
+  catch (e) {
+    if (e?.name === 'AbortError' || e?.code === 'too_large' || opts.signal?.aborted) throw e;
+    const web = await webItem(videoId).catch(() => null);
+    if (!web) throw e;
+    if (!(browserAvailable() || streamlinkPath())) { webEvent(web, false, 'plain', e?.message || e); throw e; }
+    // Owner, 18.11: every site we can. The page is opened again in the
+    // browser engine (fresh addresses and cookies, which expire) and what its
+    // player plays is downloaded with the same tools.
+    const log = opts.log || console;
+    const pageUrl = web.page || web.url;
+    const sl = await streamlinkResolve(pageUrl).catch(() => null);
+    const s = await sniffPage(pageUrl, { timeoutMs: 30000, log }).catch(() => null);
+    for (const m of [...(sl ? [{ url: sl.url, headers: sl.headers, cookie: null }] : []), ...(s?.media || [])]) {
+      try {
+        const fresh = { ...web, url: m.url, alternateUrls: [], referer: m.headers?.Referer || web.page || web.url, httpHeaders: mediaRequestHeaders(m.headers), cookie: m.cookie || null, impersonate: false };
+        const r = await directDownloadPlain(videoId, output, { ...opts, webOverride: fresh });
+        log.info?.('[DIRECT] downloaded through the browser engine', { videoId, bytes: r.bytes });
+        webEvent(web, true, 'browser/streamlink');
+        return r;
+      } catch (e2) {
+        if (e2?.name === 'AbortError' || e2?.code === 'too_large') throw e2;
+        log.warn?.('[DIRECT] browser engine address failed', { videoId, message: String(e2?.message || e2).slice(0, 160) });
+      }
+    }
+    webEvent(web, false, 'all', (e?.message || e) + (s ? ' | browser found ' + (s.media?.length || 0) + ' media' : ' | browser not run'));
+    throw e;
+  }
+}
+
+async function directDownloadPlain(videoId, output, { mode = 'audio', height, ffmpegPath, signal, onProgress, log = console, maxBytes = Infinity, stallMs = 60000, clients = CLIENTS, bin = ytdlpPath(), withCaptions = true, webOverride = null } = {}) {
   if (!/^[A-Za-z0-9_-]{11}$/.test(String(videoId || ''))) throw Object.assign(new Error('invalid video id'), { code: 'invalid_video' });
   // A video from another website (web-items.js): its own link, no YouTube player types.
-  const web = await refreshMakoItem(await webItem(videoId));
+  const web = webOverride || await refreshMakoItem(await webItem(videoId));
   const targets = web ? [web.url, ...(web.alternateUrls || [])] : [];
   if (web) clients = targets.map(() => '');
   // Use the separately installed, free streaming tool for public web media.
@@ -120,7 +168,7 @@ export async function directDownload(videoId, output, { mode = 'audio', height, 
     const t0 = Date.now();
     try {
       await fs.rm(output, { force: true });
-      const title = await runOnce(bin, argsFor(videoId, output, { mode, height, client, ffmpegPath, target: targets[attempt], impersonate: !!web?.impersonate, referer: web?.referer || null, httpHeaders: web?.httpHeaders }), { signal, stallMs, onProgress });
+      const title = await runOnce(bin, argsFor(videoId, output, { mode, height, client, ffmpegPath, target: targets[attempt], impersonate: !!web?.impersonate, referer: web?.referer || null, httpHeaders: web?.httpHeaders, cookie: web?.cookie || null }), { signal, stallMs, onProgress });
       const { size } = await fs.stat(output);
       if (!size) throw Object.assign(new Error('empty file'), { code: 'direct_failed' });
       if (size > maxBytes) { await fs.rm(output, { force: true }); throw Object.assign(new Error('Source exceeds supported size'), { code: 'too_large' }); }

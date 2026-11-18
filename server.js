@@ -5462,7 +5462,7 @@ app.get('/tv-check', rateLimit(4, 60 * 1000, 'tv-check'), async (req,res)=>{
   res.json({ channels: await TV.checkAllChannels(await tvDeps()) });
 });
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
-app.get('/branch2-diag',(req,res)=>{ let commit=''; try { commit=String(readFileSync(new URL('./.git/HEAD',import.meta.url),'utf8')).trim(); if(commit.startsWith('ref:')) commit=String(readFileSync(new URL('./.git/'+commit.slice(5).trim(),import.meta.url),'utf8')).trim(); } catch {} res.json({commit:commit.slice(0,12), startedAt:BRANCH2_STARTED_AT, keys:branch2Keys.slice(-100)}); });
+app.get('/branch2-diag',async (req,res)=>{ let commit=''; try { commit=String(readFileSync(new URL('./.git/HEAD',import.meta.url),'utf8')).trim(); if(commit.startsWith('ref:')) commit=String(readFileSync(new URL('./.git/'+commit.slice(5).trim(),import.meta.url),'utf8')).trim(); } catch {} let engineTest=null, webEvents=[]; try { engineTest=(await import('./web-engine-selftest.js')).state; webEvents=(await import('./youtube-direct.js')).webEvents; } catch {} res.json({commit:commit.slice(0,12), startedAt:BRANCH2_STARTED_AT, keys:branch2Keys.slice(-100), engineTest, webEvents:webEvents.slice(-40)}); });
 
 // Owner test source for the segmented-playback trial (only when enabled).
 app.get('/branch2-selftest/source.m4a',(req,res,next)=>process.env.BRANCH2_SEGMENT_TEST==='1'?serveTestSource(req,res):next());
@@ -5737,6 +5737,21 @@ async function runSegmentSelfTest() {
 const port=process.env.PORT||3000;
 app.listen(port,async()=>{
   console.log('server running on port '+port);
+  // Owner, 18.11: every engine for downloading from as many sites as possible
+  // is installed here by itself (once; nothing waits for it), then checked
+  // live on real sites (results in /branch2-diag -> engineTest).
+  void (async()=>{
+    const { streamDownloaderPath } = await import('./stream-media-download.js');
+    const { spawn } = await import('node:child_process');
+    if(!streamDownloaderPath()) await new Promise(r=>{ const p=spawn('bash',[new URL('./install-stream-downloader.sh',import.meta.url).pathname],{stdio:'ignore'}); p.on('close',c=>{console.info('[ENGINES] N_m3u8DL-RE install',{ok:c===0}); r();}); p.on('error',()=>r()); });
+    await (await import('./streamlink-media.js')).ensureStreamlink().catch(()=>false);
+    await (await import('./browser-media.js')).ensureBrowserInstalled().catch(()=>false);
+    if(String(process.env.ENGINE_SELFTEST||'on')!=='off') {
+      await new Promise(r=>setTimeout(r,60000));
+      const t=await import('./web-engine-selftest.js');
+      await t.runEngineSelfTest({ffmpegPath:(await import('ffmpeg-static')).default}).catch(e=>console.warn('[ENGINE_TEST] failed',{message:String(e?.message||e).slice(0,120)}));
+    }
+  })().catch(()=>{});
   // Report how many Apify accounts are configured (count only — never values),
   // so multi-account fallback can be verified in the logs.
   console.info('[YouTube IVR] youtube search keys configured',{count:youtubeKeysFrom(process.env).length});
