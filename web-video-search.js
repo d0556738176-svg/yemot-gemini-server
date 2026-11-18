@@ -6,7 +6,7 @@
 // what answers is merged, duplicates removed. The extension 2 server then
 // checks each link really holds media it can download. Never throws.
 const MEDIA_HINT = /(video|watch|vod|player|play|media|embed|shiur|lecture|audio|podcast|episode|mp3|mp4|m3u8|וידאו|שיעור|הרצאה|האזנה|צפייה)/i;
-const SKIP = /\.(pdf|docx?|xlsx?|pptx?|zip|rar|exe|apk)(\?|$)|\/(search|tag|tags|category|login|signin|account)\b|facebook\.com\/(groups|pages)\//i;
+const SKIP = /(?:wikipedia\.org|wikimedia\.org|google\.[a-z.]+\/(?:search|maps)|spotify\.com)|\.(pdf|docx?|xlsx?|pptx?|zip|rar|exe|apk)(\?|$)|\/(search|tag|tags|category|login|signin|account)\b|facebook\.com\/(groups|pages)\//i;
 
 const clean = t => String(t || '').replace(/\s*[-|–]\s*(YouTube|Vimeo)\s*$/i, '').replace(/\s+/g, ' ').trim();
 const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
@@ -50,6 +50,8 @@ export async function searchWebVideos(query, { env = process.env, fetchImpl = fe
     serper('search', { q, ...base, num: 20 }, env, fetchImpl, timeoutMs),
     serper('search', { q: q + ' וידאו', ...base, num: 10 }, env, fetchImpl, timeoutMs),
     serper('search', { q: q + ' שיעור להאזנה', ...base, num: 10 }, env, fetchImpl, timeoutMs),
+    serper('search', { q: q + ' mp3 הורדה', ...base, num: 10 }, env, fetchImpl, timeoutMs),
+    serper('search', { q: q + ' הקלטה', ...base, num: 10 }, env, fetchImpl, timeoutMs),
     tavily(q + ' video', env, fetchImpl, timeoutMs),
   ]);
   const out = [], seen = new Set();

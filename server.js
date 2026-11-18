@@ -5022,7 +5022,7 @@ async function callHandler(call) {
         const webQ=fixed?null:(await import('./web-media-intent.js')).webSearchIntent(userTranscript);
         if(webQ) {
           turnContext.ext3Handoff={webQuery:webQ,title:webQ,mode:'web'};
-          replyText='מעביר אותך לחיפוש עמוק בכל האתרים באינטרנט, בשלוחת ההורדות. שם תשמע את התוצאות, ותאשר בהקשה לפני כל הורדה.';
+          replyText=/שידור|לייב/.test(webQ)?'מעביר אותך לחיפוש השידור החי, בשלוחת ההורדות. שם תשמע את השידורים שנמצאו, ותבחר בהקשה.':'מעביר אותך לחיפוש עמוק בכל האתרים באינטרנט, בשלוחת ההורדות. שם תשמע את התוצאות, ותאשר בהקשה לפני כל הורדה.';
           console.info('[WEB_HANDOFF] whole-web search requested',{callId:activeKey,query:webQ.slice(0,120)});
           ext3Done=true;
         }

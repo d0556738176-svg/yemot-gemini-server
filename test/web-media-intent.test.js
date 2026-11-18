@@ -13,3 +13,9 @@ test('ordinary questions are not sent to the web search', () => {
   assert.equal(webSearchIntent('תחפש באינטרנט מה שעות הפתיחה של הדואר'), null);
   assert.equal(webSearchIntent('תמצא לי ביוטיוב שיר של שוואקי'), null);
 });
+
+test('a live broadcast request keeps its words for extension 2', () => {
+  assert.equal(webSearchIntent('תשמיע לי שידור חי של קול חי'), 'שידור חי של קול חי');
+  assert.match(webSearchIntent('אני רוצה לשמוע את השידור החי מהכותל ביוטיוב'), /השידור החי מהכותל/);
+  assert.match(webSearchIntent('תפתח לי לייב של הרב'), /לייב של הרב/);
+});
