@@ -1,0 +1,33 @@
+PAGE https://www.kolhalashon.com/he/regularSite/playShiur/1193473/-1/0/false title רק רגע... len 44928 audio tags []
+307  https://www.kolhalashon.com/he/regularSite/playShiur/1193473/-1/0/false
+403 text/html; charset=UTF-8 https://www.kolhalashon.com/he/regularSite/playShiur/1193473/-1/0/false
+200 application/javascript; charse https://www.kolhalashon.com/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1?ray=a5cab32c6f380605
+200 application/javascript; charse https://challenges.cloudflare.com/turnstile/v0/b/f8df4d4a0cd6/api.js?onload=_f7698ad01f499d5d9b158fd7&render=explicit
+200 text/plain; charset=UTF-8 https://www.kolhalashon.com/cdn-cgi/challenge-platform/h/b/fo/1318466565:1795040426:sJjN8kH6rmc3MuUpOc4FbV-HMwJTvVorYUJEVSpyqg8/a5cab32c6f380605/GsXKbuN7qBsf6Mo
+200 text/javascript blob:https://www.kolhalashon.com/940f9cb7-8e8f-426a-bb92-8d6fc01444a4
+200 text/html; charset=UTF-8 https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/0h0t7/0x4AAAAAAADnPIDROrmt1Wwj/light/fbE/new/normal?lang=auto
+200 text/plain; charset=UTF-8 https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/fo/1636278403:1795040427:PXPwOo9HcrLmAVLlH3c58YOTN8PHoU4nNk3YCt2loVE/a5cab32e5e7e7ae9/CgLeghj6l
+200 text/javascript blob:https://challenges.cloudflare.com/200be14e-40f0-4450-9b93-afc15c1c49d7
+401 text/plain; charset=utf-8 https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/pat/a5cab32e5e7e7ae9/1795043965554/118c9de74ed9ea83ebf9d0c6fe0d366bfee1cb38fd61146bc3446c123764
+200 text/javascript blob:https://challenges.cloudflare.com/200be14e-40f0-4450-9b93-afc15c1c49d7
+200 text/javascript blob:https://challenges.cloudflare.com/200be14e-40f0-4450-9b93-afc15c1c49d7
+200 image/png https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/ci/a5cab32e5e7e7ae9/1795043965557/Ck9j0K9ujD2k9rn40qHDIaDtnbnLd1eYg1-t0QeC4qKcVAY8eESthpEvw36PK
+200 text/plain; charset=UTF-8 https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/fo/1636278403:1795040427:PXPwOo9HcrLmAVLlH3c58YOTN8PHoU4nNk3YCt2loVE/a5cab32e5e7e7ae9/CgLeghj6l
+200 text/javascript blob:https://challenges.cloudflare.com/0968bb76-2eaf-4fe7-b760-2a00067ae72c
+PAGE https://www.yutorah.org/lectures/1103850/ title רק רגע... len 44791 audio tags []
+307  https://www.yutorah.org/lectures/1103850/
+403 text/html; charset=UTF-8 https://www.yutorah.org/lectures/1103850/
+200 application/javascript; charse https://www.yutorah.org/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1?ray=a5cab352ca7b3dd6
+200 application/javascript; charse https://challenges.cloudflare.com/turnstile/v0/b/f8df4d4a0cd6/api.js?onload=_a4f41adebfb5646b96b6c940&render=explicit
+200 text/plain; charset=UTF-8 https://www.yutorah.org/cdn-cgi/challenge-platform/h/b/fo/1318466565:1795040426:sJjN8kH6rmc3MuUpOc4FbV-HMwJTvVorYUJEVSpyqg8/a5cab352ca7b3dd6/L00z76hWTofKFFMgwxi
+200 text/javascript blob:https://www.yutorah.org/27254e34-0e26-42c6-8e61-434d6e99a6d1
+200 text/html; charset=UTF-8 https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/av0/rch/kkq5h/0x4AAAAAAADnPIDROrmt1Wwj/light/fbE/new/normal?lang=auto
+200 text/plain; charset=UTF-8 https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/fo/1636278403:1795040427:PXPwOo9HcrLmAVLlH3c58YOTN8PHoU4nNk3YCt2loVE/a5cab3547e585e53/CnvbIggg4
+200 text/javascript blob:https://challenges.cloudflare.com/fa505645-9b97-4365-8848-119c63ca2916
+401 text/plain; charset=utf-8 https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/pat/a5cab3547e585e53/1795043971699/ecb9d8eac2dedbfee57bf956a8feeed66182db598bf9accaf2c952d38c76
+200 text/javascript blob:https://challenges.cloudflare.com/fa505645-9b97-4365-8848-119c63ca2916
+200 text/javascript blob:https://challenges.cloudflare.com/fa505645-9b97-4365-8848-119c63ca2916
+200 image/png https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/ci/a5cab3547e585e53/1795043971701/CipLDzxCVU1D0RUlJVjp4AcraACstHWpjGGnTj3FmxGUzrmYLQ9SQlYbZk4uB
+200 text/plain; charset=UTF-8 https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/fo/1636278403:1795040427:PXPwOo9HcrLmAVLlH3c58YOTN8PHoU4nNk3YCt2loVE/a5cab3547e585e53/CnvbIggg4
+200 text/javascript blob:https://challenges.cloudflare.com/3abfbd72-b155-4a47-9e5e-c69a5f6ac449
+exit=0
