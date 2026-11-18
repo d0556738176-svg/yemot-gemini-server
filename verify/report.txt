@@ -1,0 +1,474 @@
+2026-11-18T22:53:48.387Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:54:08.904Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:54:29.428Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:54:49.935Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:55:10.430Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:55:30.943Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:55:51.447Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:56:11.942Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:56:32.415Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:56:52.945Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:57:13.464Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:57:33.998Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:57:54.514Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:58:15.197Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:58:35.723Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:58:56.193Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:59:16.667Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:59:37.146Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T22:59:57.674Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:00:18.137Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:00:38.798Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:00:59.518Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:01:20.164Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:01:40.813Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:02:01.546Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:02:22.213Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:02:42.828Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:03:03.397Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:03:24.062Z commit 7b3f03df18d0 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:03:44.737Z commit 280003704862 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:04:05.358Z commit 280003704862 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:04:26.092Z commit 280003704862 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:04:46.713Z commit 280003704862 started 2026-11-18T22:31:38.034Z test done 2026-11-18T22:32:38.094Z sites 15
+2026-11-18T23:05:07.248Z commit 280003704862 started 2026-11-18T23:04:58.390Z test idle null sites 0
+trigger {"ok":true,"started":["שיעור יוטורה","קול הלשון שיעור","ערוץ 12 שידור חי","כאן 11 שידור חי","dailymotion","ערוץ 14 פרק מלא"]}
+2026-11-18T23:05:28.630Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 1
+2026-11-18T23:05:49.140Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 2
+2026-11-18T23:06:09.674Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 2
+2026-11-18T23:06:30.195Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 2
+2026-11-18T23:06:50.665Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 3
+2026-11-18T23:07:11.158Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 3
+2026-11-18T23:07:31.828Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 3
+2026-11-18T23:07:52.444Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 4
+2026-11-18T23:08:13.012Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 4
+2026-11-18T23:08:33.612Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 4
+2026-11-18T23:08:54.224Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 4
+2026-11-18T23:09:14.872Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 4
+2026-11-18T23:09:35.509Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 4
+2026-11-18T23:09:56.129Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 4
+2026-11-18T23:10:16.679Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 4
+2026-11-18T23:10:37.142Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 4
+2026-11-18T23:10:57.666Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 5
+2026-11-18T23:11:18.244Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 6
+2026-11-18T23:11:38.834Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 6
+2026-11-18T23:11:59.302Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 6
+2026-11-18T23:12:19.969Z commit 280003704862 started 2026-11-18T23:04:58.390Z test running 2026-11-18T23:05:08.034Z sites 6
+2026-11-18T23:12:40.550Z commit 280003704862 started 2026-11-18T23:04:58.390Z test done 2026-11-18T23:05:08.034Z sites 6
+{
+ "status": "done",
+ "startedAt": "2026-11-18T23:05:08.034Z",
+ "finishedAt": "2026-11-18T23:12:20.326Z",
+ "engines": {
+  "ytdlp": "2026.10.26",
+  "nm3u8": "0.6.0+df70f0b3da0c630bd413bf617e758051f6b64757",
+  "streamlink": "streamlink 8.6.3",
+  "browser": "/opt/yemot/browser/chromium_headless_shell-1255/chrome-headless-shell-linux64/chrome-headless-shell"
+ },
+ "sites": [
+  {
+   "q": "שיעור יוטורה",
+   "candidates": 3,
+   "checked": [
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 8
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 7
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "youtube",
+     "sec": 7
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "קול הלשון שיעור",
+   "candidates": 3,
+   "checked": [
+    {
+     "host": "kolhalashon.com",
+     "ok": false,
+     "why": "unsupported",
+     "sec": 21
+    },
+    {
+     "host": "kolhalashon.com",
+     "ok": false,
+     "why": "unsupported",
+     "sec": 20
+    },
+    {
+     "host": "kolhalashon.com",
+     "ok": false,
+     "why": "unsupported",
+     "sec": 20
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "ערוץ 12 שידור חי",
+   "candidates": 3,
+   "checked": [
+    {
+     "host": "mako.co.il",
+     "ok": true,
+     "engine": "yt-dlp",
+     "found": "yt-dlp",
+     "live": true,
+     "sec": 12,
+     "title": "master 2026-11-18 23:06"
+    },
+    {
+     "host": "mako.co.il",
+     "ok": true,
+     "engine": "browser/streamlink",
+     "found": "browser/streamlink",
+     "live": true,
+     "sec": 22,
+     "title": "ערוץ 12 בשידור חי | mako"
+    },
+    {
+     "host": "mako.co.il",
+     "ok": true,
+     "engine": "browser/streamlink",
+     "found": "browser/streamlink",
+     "live": true,
+     "sec": 31,
+     "title": "ערוץ 12 צפייה ישירה לייב"
+    }
+   ],
+   "found": 3
+  },
+  {
+   "q": "כאן 11 שידור חי",
+   "candidates": 3,
+   "checked": [
+    {
+     "host": "kan.org.il",
+     "ok": false,
+     "engine": "browser/streamlink",
+     "found": "browser/streamlink",
+     "live": false,
+     "sec": 33,
+     "title": "הטלוויזיה של כאן בשידור חי לצפייה ישירה - כאן 11 :Live כאן",
+     "why": "ERROR: ffmpeg exited with code -11"
+    },
+    {
+     "host": "kan.org.il",
+     "ok": false,
+     "engine": "browser/streamlink",
+     "found": "browser/streamlink",
+     "live": false,
+     "sec": 36,
+     "title": "שידור ישיר | כאן 11",
+     "why": "ERROR: ffmpeg exited with code -11"
+    },
+    {
+     "host": "kan.org.il",
+     "ok": false,
+     "engine": "browser/streamlink",
+     "found": "browser/streamlink",
+     "live": false,
+     "sec": 99,
+     "title": "שידור ישיר | כאן 11",
+     "why": "ERROR: ffmpeg exited with code -11"
+    }
+   ],
+   "found": 0
+  },
+  {
+   "q": "dailymotion",
+   "candidates": 3,
+   "checked": [
+    {
+     "host": "dailymotion.com",
+     "ok": true,
+     "engine": "yt-dlp",
+     "found": "yt-dlp",
+     "live": false,
+     "sec": 6,
+     "title": "Moving on Without You- Drama FULL MOVIES ENGLISH SUB"
+    },
+    {
+     "host": "dailymotion.com",
+     "ok": false,
+     "why": "unsupported",
+     "sec": 19
+    },
+    {
+     "host": "dailymotion.com",
+     "ok": true,
+     "engine": "yt-dlp",
+     "found": "yt-dlp",
+     "live": false,
+     "sec": 7,
+     "title": "Out of Prison, Invincible | Full Series | Short Drama Englis"
+    }
+   ],
+   "found": 2
+  },
+  {
+   "q": "ערוץ 14 פרק מלא",
+   "candidates": 3,
+   "checked": [
+    {
+     "host": "tv.c14.co.il",
+     "ok": false,
+     "why": "unsupported",
+     "sec": 24
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "unsupported",
+     "sec": 21
+    },
+    {
+     "host": "google.com",
+     "ok": false,
+     "why": "unsupported",
+     "sec": 20
+    }
+   ],
+   "found": 0
+  }
+ ]
+}
+browserEvents [
+ {
+  "at": "2026-11-18T23:06:00.325Z",
+  "page": "www.kolhalashon.com/he/regularSite/playShiur/1193473/-1/0/false",
+  "requests": 0,
+  "media": [],
+  "ms": 17308
+ },
+ {
+  "at": "2026-11-18T23:06:20.291Z",
+  "page": "www.kolhalashon.com/he/regularSite/playShiur/31696338/-1/0/false",
+  "requests": 0,
+  "media": [],
+  "ms": 16482
+ },
+ {
+  "at": "2026-11-18T23:06:40.422Z",
+  "page": "www.kolhalashon.com/he/regularSite/playShiur/1108390/-1/0/false",
+  "requests": 0,
+  "media": [],
+  "ms": 16390
+ },
+ {
+  "at": "2026-11-18T23:06:42.966Z",
+  "page": "www.kan.org.il/live/",
+  "requests": 7,
+  "media": [
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx"
+  ],
+  "ms": 4263
+ },
+ {
+  "at": "2026-11-18T23:07:14.220Z",
+  "page": "www.mako.co.il/culture-tv/articles/Article-c75a4149b6ef091027.htm",
+  "requests": 3,
+  "media": [
+   "streaming.akamaized.net/stream/hls/live/20000821/k12makowad/index.m3u8",
+   "2a8328ce20be5cee659d34d0d57d6d01cfa0d013a5d2e66af/profileManifest.m3u8",
+   "ivecdn.com/MTDTXWualsalQU4oQFIQW8Y0vkOEcWte/main/video/video_16x9.webm"
+  ],
+  "ms": 12406
+ },
+ {
+  "at": "2026-11-18T23:07:46.606Z",
+  "page": "www.mako.co.il/news-channel2/Channel-2-Newscast-q3_2019/Article-3bf5c3a8e9",
+  "requests": 2,
+  "media": [
+   "-streaming.akamaized.net/stream/hls/live/20000821/k12n12wad/index.m3u8",
+   "ed771528210f1097e16532874ca49268de0ac3ce0a5b68303/profileManifest.m3u8"
+  ],
+  "ms": 12471
+ },
+ {
+  "at": "2026-11-18T23:08:02.391Z",
+  "page": "www.kan.org.il/live/",
+  "requests": 7,
+  "media": [
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx"
+  ],
+  "ms": 4643
+ },
+ {
+  "at": "2026-11-18T23:08:12.826Z",
+  "page": "www.kan.org.il/live/",
+  "requests": 7,
+  "media": [
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx"
+  ],
+  "ms": 4948
+ },
+ {
+  "at": "2026-11-18T23:08:36.896Z",
+  "page": "www.kan.org.il/content/kan-news/politic/live-1101367/liveid-1101368/",
+  "requests": 7,
+  "media": [
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx"
+  ],
+  "ms": 6973
+ },
+ {
+  "at": "2026-11-18T23:08:48.641Z",
+  "page": "www.kan.org.il/content/kan-news/politic/live-1101367/liveid-1101368/",
+  "requests": 7,
+  "media": [
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx"
+  ],
+  "ms": 7095
+ },
+ {
+  "at": "2026-11-18T23:09:13.631Z",
+  "page": "www.kan.org.il/content/kan-news/defense/live-1113526/liveid-1113527/",
+  "requests": 7,
+  "media": [
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx"
+  ],
+  "ms": 8042
+ },
+ {
+  "at": "2026-11-18T23:09:35.670Z",
+  "page": "www.kan.org.il/content/kan-news/defense/live-1113526/liveid-1113527/",
+  "requests": 9,
+  "media": [
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx"
+  ],
+  "ms": 9578
+ },
+ {
+  "at": "2026-11-18T23:10:05.917Z",
+  "page": "www.mako.co.il/mako-vod-keshet/eretz_nehederet-s24/VOD-d18317e9cef21a1026.",
+  "requests": 4,
+  "media": [
+   "deret24_05_111126_VOD_njh154_,550,850,1400,2200,.mp4.csmil/master.m3u8",
+   "5a138b58f2e4a472fe66005847c0f2dcda7af30dfbac8589e57aa2/index_1400.m3u8",
+   "96918_1794736495-6d88289a-a0b3-4906-9964-71902f3569ad-mp4-1080p-25.mp4"
+  ],
+  "ms": 27481
+ },
+ {
+  "at": "2026-11-18T23:10:12.838Z",
+  "page": "www.c14.co.il/live",
+  "requests": 165,
+  "media": [
+   "tps://n-121-13.il.cdn-redge.media/livedash/oil/ch14/live/ch14/dai.livx",
+   "//dynamic.dxmcdn.com/407cae3c-6057-4b3c-a6e5-d07582244bb0vacf4high.mp4",
+   "//dynamic.dxmcdn.com/c30b657f-6860-4135-8dd9-131228628807DsQUchigh.mp4",
+   "tps://n-121-13.il.cdn-redge.media/livedash/oil/ch14/live/ch14/dai.livx",
+   "tps://n-121-13.il.cdn-redge.media/livedash/oil/ch14/live/ch14/dai.livx",
+   "tps://n-121-13.il.cdn-redge.media/livedash/oil/ch14/live/ch14/dai.livx"
+  ],
+  "ms": 177200
+ },
+ {
+  "at": "2026-11-18T23:10:31.704Z",
+  "page": "www.google.com/goto",
+  "requests": 0,
+  "media": [],
+  "ms": 18169
+ },
+ {
+  "at": "2026-11-18T23:10:32.353Z",
+  "page": "www.google.com/goto",
+  "requests": 4,
+  "media": [
+   "deret24_04_041126_VOD_xif321_,550,850,1400,2200,.mp4.csmil/master.m3u8",
+   "8b7f2619c07582996b20ed2a82d6cbeaf6e42111198eed377ef7f8/index_1400.m3u8",
+   "96918_1794736495-6d88289a-a0b3-4906-9964-71902f3569ad-mp4-1080p-25.mp4"
+  ],
+  "ms": 26167
+ },
+ {
+  "at": "2026-11-18T23:11:05.696Z",
+  "page": "www.dailymotion.com/playlist/xaydb4",
+  "requests": 0,
+  "media": [],
+  "ms": 15929
+ },
+ {
+  "at": "2026-11-18T23:11:34.563Z",
+  "page": "www.c14.co.il/radio",
+  "requests": 0,
+  "media": [],
+  "ms": 19101
+ },
+ {
+  "at": "2026-11-18T23:11:38.962Z",
+  "page": "tv.c14.co.il/live,14251/ch14,935227/2026-10-04/hptrywtym-bhg-ynwn-mgl,18",
+  "requests": 0,
+  "media": [],
+  "ms": 15527
+ },
+ {
+  "at": "2026-11-18T23:11:59.930Z",
+  "page": "www.google.com/goto",
+  "requests": 0,
+  "media": [],
+  "ms": 15982
+ },
+ {
+  "at": "2026-11-18T23:12:20.312Z",
+  "page": "www.google.com/goto",
+  "requests": 0,
+  "media": [],
+  "ms": 15798
+ }
+]
+webEvents [
+ {
+  "at": "2026-11-18T23:08:21.818Z",
+  "where": "www.kan.org.il/live/",
+  "title": "הטלוויזיה של כאן בשידור חי לצפייה ישירה - כאן 11 :Live כאן",
+  "ok": false,
+  "engine": "all",
+  "message": "ERROR: ffmpeg exited with code -11 | browser found 3 media"
+ },
+ {
+  "at": "2026-11-18T23:08:57.517Z",
+  "where": "www.kan.org.il/content/kan-news/politic/live-1101367/liveid-1101368/",
+  "title": "שידור ישיר | כאן 11",
+  "ok": false,
+  "engine": "all",
+  "message": "ERROR: ffmpeg exited with code -11 | browser found 3 media"
+ },
+ {
+  "at": "2026-11-18T23:10:36.141Z",
+  "where": "www.kan.org.il/content/kan-news/defense/live-1113526/liveid-1113527/",
+  "title": "שידור ישיר | כאן 11",
+  "ok": false,
+  "engine": "all",
+  "message": "ERROR: ffmpeg exited with code -11 | browser found 4 media"
+ }
+]
+exit=0
