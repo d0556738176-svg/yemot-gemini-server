@@ -17,6 +17,8 @@
 //    walking-line distance, with their street address when the map has it.
 // Everything external is injected (fetchImpl), so this file tests offline.
 
+import { existsSync, readFileSync } from 'node:fs';
+
 const UA = 'yemot-ai-phone/1.0 (owner phone line; contact via github d0556738176-svg)';
 // 19.11 from the server: overpass-api.de "at capacity" (502), kumi answers GET
 // in ~3 s but POST times out, mail.ru 504. So: GET, all at once, first wins.
@@ -97,6 +99,30 @@ export function resolveDate(text, plannerDate = '', now = new Date()) {
   return today;
 }
 
+// ---------- the local map (deploy/vps/osm-update.sh) ----------
+// Israel's places from OpenStreetMap, on this server, in ~5 km squares.
+const TILE_DIR = () => process.env.OSM_TILES || '/var/lib/yemot-data/osm/tiles';
+const tileCache = new Map();
+function localMapReady() { try { return existsSync(TILE_DIR()); } catch { return false; } }
+function tileRows(key) {
+  if (tileCache.has(key)) return tileCache.get(key);
+  let rows = [];
+  try { rows = readFileSync(TILE_DIR() + '/' + key + '.jsonl', 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
+  tileCache.set(key, rows);
+  if (tileCache.size > 400) tileCache.delete(tileCache.keys().next().value);
+  return rows;
+}
+// Every place in the box [south, north, west, east].
+function localPlaces(b) {
+  const out = [];
+  for (let la = Math.floor(b[0] * 20); la <= Math.floor(b[1] * 20); la++)
+    for (let lo = Math.floor(b[2] * 20); lo <= Math.floor(b[3] * 20); lo++)
+      for (const r of tileRows(la + '_' + lo)) if (r[0] >= b[0] && r[0] <= b[1] && r[1] >= b[2] && r[1] <= b[3]) out.push({ lat: r[0], lon: r[1], tags: { ...r[3], name: r[2] } });
+  return out;
+}
+const boxAround = (loc, km) => { const d = km / 111, e = km / (111 * Math.cos(loc.lat * Math.PI / 180)); return [loc.lat - d, loc.lat + d, loc.lon - e, loc.lon + e]; };
+export function clearTileCache() { tileCache.clear(); }
+
 // ---------- geocoding ----------
 async function getJson(url, { fetchImpl = fetch, timeoutMs = 6000, headers = {}, method = 'GET', body } = {}) {
   const r = await fetchImpl(url, { method, body, headers: { 'user-agent': UA, 'accept-language': 'he,en;q=0.7', ...headers }, signal: AbortSignal.timeout(timeoutMs) });
@@ -175,7 +201,9 @@ export async function geocode({ place = '', town = '' } = {}, { fetchImpl = fetc
       const b = townHit.bbox?.length === 4 && Math.abs(townHit.bbox[1] - townHit.bbox[0]) > 0.01 ? townHit.bbox : [townHit.lat - 0.06, townHit.lat + 0.06, townHit.lon - 0.06, townHit.lon + 0.06];
       const rx = words.map(w => w.replace(/[^֐-׿a-zA-Z0-9]/g, '')).filter(Boolean).join('|');
       const q = `[out:json][timeout:12];nwr["name"~"${rx}"](${b[0]},${b[2]},${b[1]},${b[3]});out center tags 30;`;
-      let els = await overpass(q, { fetchImpl, timeoutMs: 6000 }).catch(e => { log.warn?.('[PLACE] landmark search failed', String(e?.message || e).slice(0, 80)); return null; });
+      let els = localMapReady() ? localPlaces(b).filter(x => new RegExp(rx, 'u').test(x.tags.name || '')) : null;
+      if (els && !els.length) els = null;
+      if (els === null) els = await overpass(q, { fetchImpl, timeoutMs: 6000 }).catch(e => { log.warn?.('[PLACE] landmark search failed', String(e?.message || e).slice(0, 80)); return null; });
       if (els === null) els = await nominatimNear(plain(place), townHit, 8, { fetchImpl }).catch(() => []);
       const scored = els.map(e => ({ e, name: e.tags?.name || e.tags?.['name:he'] || '', lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon }))
         .filter(x => Number.isFinite(x.lat) && x.name)
@@ -295,34 +323,34 @@ export async function zmanimFacts({ place = '', town = '', date = '', utterance 
 // ---------- places near a point ----------
 // Hebrew kind of place -> OpenStreetMap filters.
 const KINDS = [
-  [/בית כנסת|בתי כנסת|בית הכנסת|מניין|מנין|מקום תפילה|להתפלל|שטיבל/u, 'בית כנסת', ['["amenity"="place_of_worship"]["religion"="jewish"]', '["name"~"בית כנסת|בית הכנסת|בית מדרש|בהכנ|synagogue",i]']],
-  [/מקווה|מקוה/u, 'מקווה', ['["amenity"="mikveh"]', '["name"~"מקווה|מקוה|mikve",i]']],
-  [/בית מרקחת|בתי מרקחת|פארם|תרופות/u, 'בית מרקחת', ['["amenity"="pharmacy"]']],
-  [/סופר|מכולת|מרכול|סופרמרקט|מינימרקט|קניות/u, 'סופר או מכולת', ['["shop"~"^(supermarket|convenience|grocery)$"]']],
-  [/מסעד|אוכל|פיצ|פלאפל|שווארמה|המבורגר|בית קפה|קפה/u, 'מסעדה או בית קפה', ['["amenity"~"^(restaurant|fast_food|cafe)$"]']],
-  [/כספומט|בנק/u, 'כספומט או בנק', ['["amenity"~"^(atm|bank)$"]']],
-  [/תחנת דלק|דלק|סונול|פז|דור אלון/u, 'תחנת דלק', ['["amenity"="fuel"]']],
-  [/בית חולים|מיון/u, 'בית חולים', ['["amenity"="hospital"]']],
-  [/קופת חולים|מרפאה|רופא|כללית|מכבי|מאוחדת|לאומית/u, 'מרפאה', ['["amenity"~"^(clinic|doctors)$"]']],
-  [/דואר/u, 'סניף דואר', ['["amenity"="post_office"]']],
-  [/תחנת אוטובוס|אוטובוס|תחנה/u, 'תחנת אוטובוס', ['["highway"="bus_stop"]']],
-  [/רכבת/u, 'תחנת רכבת', ['["railway"="station"]']],
-  [/חניה|חניון|חנייה/u, 'חניון', ['["amenity"="parking"]']],
-  [/שירותים|נוחיות/u, 'שירותים ציבוריים', ['["amenity"="toilets"]']],
-  [/מלון|צימר|לינה|אכסניה/u, 'מקום לינה', ['["tourism"~"^(hotel|guest_house|hostel|motel|chalet)$"]']],
-  [/גן שעשועים|מגלשות|נדנדות/u, 'גן שעשועים', ['["leisure"="playground"]']],
-  [/פארק|גינה/u, 'פארק או גינה', ['["leisure"~"^(park|garden)$"]']],
-  [/חוף/u, 'חוף רחצה', ['["natural"="beach"]']],
-  [/משטרה/u, 'תחנת משטרה', ['["amenity"="police"]']],
-  [/ספרייה|ספריה/u, 'ספרייה', ['["amenity"="library"]']],
-  [/מאפייה|מאפיה|לחם/u, 'מאפייה', ['["shop"="bakery"]']],
-  [/קניון|מרכז מסחרי/u, 'קניון', ['["shop"="mall"]']],
-  [/ישיבה|כולל|בית מדרש/u, 'ישיבה או בית מדרש', ['["name"~"ישיבה|ישיבת|כולל|בית מדרש|בית המדרש"]']],
-  [/מים|ברזיה|מי שתייה/u, 'ברזיית מים', ['["amenity"="drinking_water"]']],
-  [/טעינה|עמדת טעינה/u, 'עמדת טעינה', ['["amenity"="charging_station"]']],
-  [/מכון כושר|חדר כושר/u, 'מכון כושר', ['["leisure"="fitness_centre"]']]
+  [/בית כנסת|בתי כנסת|בית הכנסת|מניין|מנין|מקום תפילה|להתפלל|שטיבל/u, 'בית כנסת', ['["amenity"="place_of_worship"]["religion"="jewish"]', '["name"~"בית כנסת|בית הכנסת|בית מדרש|בהכנ|synagogue",i]'], (t, n) => (t.amenity === 'place_of_worship' && t.religion === 'jewish') || /בית ה?כנסת|בית ה?מדרש|synagogue/i.test(n)],
+  [/מקווה|מקוה/u, 'מקווה', ['["amenity"="mikveh"]', '["name"~"מקווה|מקוה|mikve",i]'], (t, n) => t.amenity === 'mikveh' || /מקו?וה|mikve/i.test(n)],
+  [/בית מרקחת|בתי מרקחת|פארם|תרופות/u, 'בית מרקחת', ['["amenity"="pharmacy"]'], t => t.amenity === 'pharmacy'],
+  [/סופר|מכולת|מרכול|סופרמרקט|מינימרקט|קניות/u, 'סופר או מכולת', ['["shop"~"^(supermarket|convenience|grocery)$"]'], t => /^(supermarket|convenience|grocery)$/.test(t.shop || '')],
+  [/מסעד|אוכל|פיצ|פלאפל|שווארמה|המבורגר|בית קפה|קפה/u, 'מסעדה או בית קפה', ['["amenity"~"^(restaurant|fast_food|cafe)$"]'], t => /^(restaurant|fast_food|cafe)$/.test(t.amenity || '')],
+  [/כספומט|בנק/u, 'כספומט או בנק', ['["amenity"~"^(atm|bank)$"]'], t => /^(atm|bank)$/.test(t.amenity || '')],
+  [/תחנת דלק|דלק|סונול|פז|דור אלון/u, 'תחנת דלק', ['["amenity"="fuel"]'], t => t.amenity === 'fuel'],
+  [/בית חולים|מיון/u, 'בית חולים', ['["amenity"="hospital"]'], t => t.amenity === 'hospital'],
+  [/קופת חולים|מרפאה|רופא|כללית|מכבי|מאוחדת|לאומית/u, 'מרפאה', ['["amenity"~"^(clinic|doctors)$"]'], t => /^(clinic|doctors)$/.test(t.amenity || '')],
+  [/דואר/u, 'סניף דואר', ['["amenity"="post_office"]'], t => t.amenity === 'post_office'],
+  [/תחנת אוטובוס|אוטובוס|תחנה/u, 'תחנת אוטובוס', ['["highway"="bus_stop"]'], t => t.highway === 'bus_stop'],
+  [/רכבת/u, 'תחנת רכבת', ['["railway"="station"]'], t => t.railway === 'station'],
+  [/חניה|חניון|חנייה/u, 'חניון', ['["amenity"="parking"]'], t => t.amenity === 'parking'],
+  [/שירותים|נוחיות/u, 'שירותים ציבוריים', ['["amenity"="toilets"]'], t => t.amenity === 'toilets'],
+  [/מלון|צימר|לינה|אכסניה/u, 'מקום לינה', ['["tourism"~"^(hotel|guest_house|hostel|motel|chalet)$"]'], t => /^(hotel|guest_house|hostel|motel|chalet)$/.test(t.tourism || '')],
+  [/גן שעשועים|מגלשות|נדנדות/u, 'גן שעשועים', ['["leisure"="playground"]'], t => t.leisure === 'playground'],
+  [/פארק|גינה/u, 'פארק או גינה', ['["leisure"~"^(park|garden)$"]'], t => /^(park|garden)$/.test(t.leisure || '')],
+  [/חוף/u, 'חוף רחצה', ['["natural"="beach"]'], t => t.natural === 'beach'],
+  [/משטרה/u, 'תחנת משטרה', ['["amenity"="police"]'], t => t.amenity === 'police'],
+  [/ספרייה|ספריה/u, 'ספרייה', ['["amenity"="library"]'], t => t.amenity === 'library'],
+  [/מאפייה|מאפיה|לחם/u, 'מאפייה', ['["shop"="bakery"]'], t => t.shop === 'bakery'],
+  [/קניון|מרכז מסחרי/u, 'קניון', ['["shop"="mall"]'], t => t.shop === 'mall'],
+  [/ישיבה|כולל|בית מדרש/u, 'ישיבה או בית מדרש', ['["name"~"ישיבה|ישיבת|כולל|בית מדרש|בית המדרש"]'], (t, n) => /ישיבה|ישיבת|כולל|בית ה?מדרש/.test(n)],
+  [/מים|ברזיה|מי שתייה/u, 'ברזיית מים', ['["amenity"="drinking_water"]'], t => t.amenity === 'drinking_water'],
+  [/טעינה|עמדת טעינה/u, 'עמדת טעינה', ['["amenity"="charging_station"]'], t => t.amenity === 'charging_station'],
+  [/מכון כושר|חדר כושר/u, 'מכון כושר', ['["leisure"="fitness_centre"]'], t => t.leisure === 'fitness_centre']
 ];
-export function nearbyKind(text) { for (const [rx, label, filters] of KINDS) if (rx.test(String(text || ''))) return { label, filters }; return null; }
+export function nearbyKind(text) { for (const [rx, label, filters, test] of KINDS) if (rx.test(String(text || ''))) return { label, filters, test }; return null; }
 export const NEARBY_WORDS = /(?:הכי קרוב|הקרוב ביותר|הקרובה ביותר|הכי קרובה|הקרובים|הקרובות|קרוב ל|קרובה ל|ליד ה?|בסביבת|בסביבה|באזור של|בקרבת|מסביב ל|במרחק הליכה|איפה יש|איפה נמצא|איפה נמצאת|איפה אפשר למצוא)/u;
 export function isNearbyQuestion(text) { const t = String(text || ''); return NEARBY_WORDS.test(t) && !!nearbyKind(t); }
 
@@ -349,7 +377,8 @@ export async function nearbyFacts({ kindText = '', place = '', town = '' } = {},
   let items = [];
   for (const radius of [3000, 12000]) {
     const q = '[out:json][timeout:15];(' + kind.filters.map(f => `nwr${f}(around:${radius},${loc.lat},${loc.lon});`).join('') + ');out center tags 60;';
-    let els = await overpass(q, { fetchImpl, timeoutMs: 7000 }).catch(e => { log.warn?.('[PLACE] nearby search failed', String(e?.message || e).slice(0, 80)); return null; });
+    let els = localMapReady() ? localPlaces(boxAround(loc, radius / 1000)).filter(x => kind.test(x.tags, x.tags.name || '') && km(loc, x) <= radius / 1000) : null;
+    if (els === null) els = await overpass(q, { fetchImpl, timeoutMs: 7000 }).catch(e => { log.warn?.('[PLACE] nearby search failed', String(e?.message || e).slice(0, 80)); return null; });
     if (els === null) {
       els = await nominatimNear(kind.label.split(' או ')[0], loc, radius / 1000, { fetchImpl }).catch(() => null);
       if (els === null) return { loc, kind: kind.label, mapDown: true, items: [] };

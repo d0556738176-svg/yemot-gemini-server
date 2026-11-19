@@ -472,7 +472,7 @@ export const PHONE_STYLE = [
 const STOCK_OPENING = /^(?:\s*(?:(?:אני\s+)?(?:שמחתי|שמחה|שמח)\s+(?:מאוד\s+)?(?:לשמוע|לעזור|שפנית|ששאלת|שאתה|על)[^.!?,]*[.!?,]|(?:איזו\s+|זו\s+)?שאלה\s+(?:מצוינת|טובה|מעולה|נהדרת|יפה|מעניינת)[^.!?,]*[.!?,]|בשמחה[.!?,]|בהחלט[.!?,]|כמובן[.!?,]|תודה (?:ששאלת|על השאלה)[^.!?,]*[.!?,])\s*)+/u;
 // 13.11: a small model began with its own note to itself ("בבקשה, בוצע קיצור").
 const META_OPENING = /^\s*(?:בבקשה[,.!]?\s*)?(?:בוצע קיצור|קיצרתי|הנה התשובה(?: המקוצרת)?|תשובה מקוצרת|הנה גרסה מקוצרת|הנה הניסוח)[,.:!]?\s*/u;
-export function cutStockOpening(text) { const t = String(text || '').replace(META_OPENING, ''); const cut = t.replace(STOCK_OPENING, ''); return cut.length > 20 ? cut : t; }
+export function cutStockOpening(text) { const t = String(text || '').replace(META_OPENING, '').replace(/(?:ב|מה)?מקורות ש(?:ה)?סופקו(?: לי)?/gu, 'במה שמצאתי'); const cut = t.replace(STOCK_OPENING, ''); return cut.length > 20 ? cut : t; }
 
 // Extension 1 speaks as a man and answers briefly; extension 3 as a woman, at length.
 const MALE_SELF = [['מורידה','מוריד'],['מעירה','מעיר'],['ממשיכה','ממשיך'],['משמיעה','משמיע'],['מקשיבה','מקשיב'],['מכינה','מכין'],['יכולה','יכול'],['בטוחה','בטוח'],['זוכרת','זוכר'],['ממליצה','ממליץ'],['יודעת','יודע'],['מבינה','מבין'],['מחפשת','מחפש'],['מצטערת','מצטער'],['שמחה לעזור','שמח לעזור'],['תשמיעי','תשמיע'],['יוצרת','יוצר'],['כותבת','כותב'],['תורידי','תוריד'],['תמשיכי','תמשיך'],['תקריאי','תקריא']];
@@ -825,6 +825,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
 
   if (plan.intent === 'media_status') return out({ mediaStatus: true, reply: '' });
   if (SONG_MAKE.test(utterance) && !plan.about && ['chat', 'video_find', 'video_play', 'web'].includes(plan.intent)) plan.intent = 'song_make';
+  // "Let's write a song" is writing the words together first; making it comes when he asks.
+  if (plan.intent === 'song_make' && LYRICS_ASKED.test(utterance) && !SONG_MAKE.test(utterance)) plan.intent = 'chat';
   // Owner, 19.11: a new AI song from the conversation (words, style, voice
   // talked about here): every detail is read back and he confirms by key.
   if (plan.intent === 'song_make') {
@@ -855,7 +857,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     const asked = ORD.filter(([rx]) => rx.test(utterance)).map(([, n]) => n);
     if (asked.length >= 2 && asked.some(n => n > lastVideo.options.length)) {
       const n = lastVideo.options.length;
-      return out({ ref: lastVideo, reply: 'הצעתי רק ' + (n === 2 ? 'שתי' : n) + ' אפשרויות: ' + lastVideo.options.map((v, i) => (i + 1) + ', ' + clip(cleanTitle(v.title), 60)).join('. ') + '. איזה מהן להוריד? אפשר לומר למשל את אחת ושתיים, או את כולם.' });
+      const choices = {}; lastVideo.options.forEach((v, i) => { choices[String(i + 1)] = { type: 'video', video: v }; });
+      return out({ ref: lastVideo, choices, reply: 'הצעתי רק ' + (n === 2 ? 'שתי' : n) + ' אפשרויות: ' + lastVideo.options.map((v, i) => (i + 1) + ', ' + clip(cleanTitle(v.title), 60)).join('. ') + '. איזה מהן להוריד? אפשר לומר למשל את אחת ושתיים, או את כולם.' });
     }
     if (picked.length >= 2) { const c = confirmBatch(picked); return out({ ref: lastVideo, confirm: c.confirm, reply: c.reply }); }
   }

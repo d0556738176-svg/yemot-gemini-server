@@ -121,3 +121,30 @@ test('"download all the songs" is never answered "I am not downloading anything"
   assert.notEqual(r.cancel, true);
   assert.doesNotMatch(r.reply || '', /לא מורידה כלום/);
 });
+
+test('the local map on the server answers when every public map server is busy', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(tmpdir() + '/tiles-');
+  const row = (lat, lon, name, tags) => JSON.stringify([lat, lon, name, tags]);
+  const key = (lat, lon) => Math.floor(lat * 20) + '_' + Math.floor(lon * 20);
+  const rows = new Map();
+  for (const r of [[31.6801, 34.556, 'החוף הנפרד', { natural: 'beach' }], [31.6805, 34.559, 'בית כנסת אוהל משה', { amenity: 'place_of_worship', religion: 'jewish', 'addr:street': 'הרב קוק', 'addr:housenumber': '3' }], [31.70, 34.58, 'בית מרקחת', { amenity: 'pharmacy' }]]) {
+    const k = key(r[0], r[1]); rows.set(k, [...(rows.get(k) || []), row(...r)]);
+  }
+  for (const [k, v] of rows) writeFileSync(dir + '/' + k + '.jsonl', v.join('\n'));
+  process.env.OSM_TILES = dir;
+  const { clearTileCache } = await import('../place-tools.js'); clearTileCache(); clearPlaceCache();
+  const busy = async (url) => {
+    const u = String(url);
+    if (u.includes('interpreter')) return json({ remark: 'busy' }, 502);
+    if (u.includes('/search')) { const q = new URL(u).searchParams.get('q'); return /אשקלון/.test(q) && !/נפרד/.test(q) ? json([{ lat: '31.66', lon: '34.57', name: 'אשקלון', display_name: 'אשקלון, ישראל', address: { city: 'אשקלון' }, boundingbox: ['31.60', '31.72', '34.52', '34.62'] }]) : json([]); }
+    if (u.includes('/reverse')) return json({ address: {} });
+    return json({}, 404);
+  };
+  const f = await nearbyFacts({ kindText: 'בית כנסת', place: 'החוף הנפרד', town: 'אשקלון' }, { fetchImpl: busy, log: { warn() {}, info() {} } });
+  delete process.env.OSM_TILES;
+  assert.equal(f.loc.label, 'החוף הנפרד');
+  assert.equal(f.items[0].name, 'בית כנסת אוהל משה');
+  assert.match(f.items[0].address, /הרב קוק 3/);
+});
