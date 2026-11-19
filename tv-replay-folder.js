@@ -31,6 +31,8 @@ export function hourIni(key, title, hour) {
 }
 
 const jobs = new Map();
+export const replayLog = []; // last preparations (ok / error), for the status page
+const note = x => { replayLog.unshift({ at: new Date().toISOString(), ...x }); replayLog.length = Math.min(replayLog.length, 30); };
 
 // io: { putText(what, contents), upload(file, remote), del(remote), log }
 // Returns a job { done:Promise, total, ready } shared by callers of the same hour.
@@ -51,7 +53,6 @@ export function prepareHour(ch, hour, io) {
       for (const n of entry?.files ? Object.keys(entry.files) : []) await io.del(folder + '/' + n + '.wav').catch(() => {});
       entry = { day, files: {} };
     }
-    await io.putText(folder + '/ext.ini', hourIni(ch.key, ch.title, hour));
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'tvhour-'));
     try {
       let i = 0;
@@ -75,11 +76,25 @@ export function prepareHour(ch, hour, io) {
       };
       await Promise.all([one(), one()]);
     } finally { await fs.rm(tmp, { recursive: true, force: true }).catch(() => {}); }
+    // Settings last: Yemot creates a new folder only with its first file, and
+    // refuses settings for a folder that does not exist yet (19.11).
+    const want = hourIni(ch.key, ch.title, hour);
+    const norm = t => String(t || '').replace(/\r/g, '').trim();
+    let saved = false;
+    for (let a = 1; a <= 3 && !saved; a++) {
+      try { await io.putText(folder + '/ext.ini', want); } catch (e) {
+        if (io.update) { const settings = Object.fromEntries(want.trim().split('\n').map(l => { const i = l.indexOf('='); return [l.slice(0, i), l.slice(i + 1)]; })); await io.update(folder, settings).catch(() => {}); }
+      }
+      saved = io.getText ? norm(await io.getText(folder + '/ext.ini').catch(() => '')) === norm(want) : true;
+      if (!saved) await new Promise(r => setTimeout(r, 1500 * a));
+    }
+    if (!saved) throw new Error('playback settings not saved in Yemot');
     entry.preparedAt = Date.now();
     const s2 = loadState(); s2[id] = entry; saveState(s2);
     io.log?.info?.('[TV REPLAY] hour ready in Yemot', { key: ch.key, hour, files: files.length });
+    note({ key: ch.key, hour, ok: true, files: files.length });
     return folder.replace(/^ivr2:/, '');
-  })().catch(e => { job.error = String(e?.message || e).slice(0, 160); throw e; })
+  })().catch(e => { job.error = String(e?.message || e).slice(0, 160); note({ key: ch.key, hour, ok: false, error: job.error, ready: job.ready, total: job.total }); throw e; })
     .finally(() => setTimeout(() => jobs.delete(id), 5000));
   jobs.set(id, job);
   return job;
