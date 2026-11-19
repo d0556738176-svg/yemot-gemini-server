@@ -33,7 +33,8 @@ async function probe(fileOrUrl) {
       video: v ? { codec: v.codec_name, width: v.width, height: v.height } : null,
       picture: (j.streams || []).some(s => s.disposition?.attached_pic === 1),
       subtitles: (j.streams || []).filter(s => s.codec_type === 'subtitle').map(s => s.tags?.language || s.codec_name),
-      tags: Object.keys(j.format?.tags || {}).length,
+      tags: Object.fromEntries(Object.entries(j.format?.tags || {}).map(([k, v]) => [k, String(v).replace(/\s+/g, ' ').slice(0, 140)])),
+      pictureSize: (() => { const pic = (j.streams || []).find(s => s.disposition?.attached_pic === 1); return pic ? pic.width + 'x' + pic.height + ' ' + pic.codec_name : null; })(),
     };
   } catch { return { error: r.err.replace(/token=[^&\s]+/g, 'token=[x]').slice(-160) }; }
 }
