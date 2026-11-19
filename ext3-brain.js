@@ -465,8 +465,15 @@ export function ownerChannel(videos, subject) {
   const list = [...by.values()].map(c => ({ ...c, fit: fit(c) })).sort((a, b) => (b.fit - a.fit) || (b.count - a.count) || (a.first - b.first));
   const best = list[0];
   if (!best) return null;
-  if (best.fit >= 0.5 || (best.count >= 4 && best.first <= 2)) return best;
+  if (best.fit >= 0.5 || (best.count >= 4 && best.first <= 2)) return { ...best, words };
   return null;
+}
+// A channel of many speakers (קול הלשון, a broadcaster): only the uploads whose
+// title carries the name he said.
+export function byName(videos, words) {
+  if (!words?.length) return videos;
+  const norm = t => String(t || '').toLowerCase().replace(/[^\u0590-\u05FFa-z0-9 ]/g, ' ');
+  return videos.filter(v => words.every(w => norm(v.title + ' ' + v.description).includes(w.toLowerCase())));
 }
 export async function channelUploads(channelId, { count = 6, timeoutMs = 15000, env, fetchImpl, proxy, execImpl = null } = {}) {
   if (!/^UC[\w-]{20,}$/.test(String(channelId || ''))) return [];
@@ -478,7 +485,7 @@ export async function channelUploads(channelId, { count = 6, timeoutMs = 15000, 
   const flat = new Map([...vids, ...live].map(e => [String(e.id), e]));
   let videos = [];
   try {
-    const d = await youtubeGet('videos', { part: 'snippet,contentDetails,statistics', id: ids.slice(0, 20).join(',') }, { env, fetchImpl, proxy });
+    const d = await youtubeGet('videos', { part: 'snippet,contentDetails,statistics', id: ids.slice(0, 50).join(',') }, { env, fetchImpl, proxy });
     videos = (d.items || []).map(v => ({ videoId: v.id, title: decode(v.snippet?.title), channelTitle: decode(v.snippet?.channelTitle), channelId, description: cleanDescription(decode(v.snippet?.description)).slice(0, 600), publishedAt: v.snippet?.publishedAt || null, language: v.snippet?.defaultAudioLanguage || '', durationSec: parseIsoDuration(v.contentDetails?.duration), viewCount: Number(v.statistics?.viewCount) || 0, ageRestricted: v.contentDetails?.contentRating?.ytRating === 'ytAgeRestricted', live: v.snippet?.liveBroadcastContent && v.snippet.liveBroadcastContent !== 'none' }));
   } catch {
     // No quota: the uploads pages' own order (newest first), dates from yt-dlp for the first ones.
@@ -1044,7 +1051,15 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     if (found.length && plan.order === 'date') {
       const ch = ownerChannel(found, own || queries[0]);
       if (ch) {
-        const ups = await within(20000, (deps.channelUploads || channelUploads)(ch.id, { count: 6, env: deps.env, fetchImpl: deps.fetchImpl, proxy: deps.youtubeProxy })).catch(() => []);
+        const shared = ch.fit < 0.5;
+        let ups = await within(20000, (deps.channelUploads || channelUploads)(ch.id, { count: shared ? 40 : 6, env: deps.env, fetchImpl: deps.fetchImpl, proxy: deps.youtubeProxy })).catch(() => []);
+        if (shared) {
+          // Many speakers on one channel: his uploads there, and the newest of
+          // the search results with his name, together, newest first.
+          const mine = byName(ups, ch.words);
+          const fromSearch = byName(found, ch.words).filter(v => v.publishedAt && !mine.some(m => m.videoId === v.videoId));
+          ups = [...mine, ...fromSearch].sort((a, b) => Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0));
+        }
         const fitting = ups.filter(v => !seenIds.includes(v.videoId) && (!plan.minMinutes || v.durationSec >= plan.minMinutes * 45) && (!plan.maxMinutes || v.durationSec <= plan.maxMinutes * 75));
         log.info?.('[EXT3_BRAIN] latest from the channel itself', { channel: ch.title, fit: ch.fit, uploads: ups.length });
         if (fitting.length) { found = fitting; channelLatest = ch; }
@@ -1186,16 +1201,31 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
 
   if (plan.intent === 'nearby') {
     const kindText = plan.kind || utterance;
-    const [facts, web] = await Promise.all([
+    let [facts, web] = await Promise.all([
       within(Number(deps.placeBudgetMs || 19000), (deps.nearbyFacts || realNearby)({ kindText: kindText + ' ' + utterance, place: plan.place, town: plan.town, openNow: OPEN_NOW.test(utterance + ' ' + plan.standalone) }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() })).catch(e => { log.warn?.('[PLACE] nearby failed', String(e?.message || e).slice(0, 100)); return null; }),
       deps.webSearch ? deps.webSearch(plan.search || plan.standalone || utterance, { timeoutMs: 4500 }).catch(() => []) : Promise.resolve([])
     ]);
+    // "Open now" and the map has no hours for them: their hours from the web,
+    // and the pharmacies on duty tonight (Owner, 19.11).
+    const openAsk = OPEN_NOW.test(utterance + ' ' + plan.standalone);
+    if (openAsk && facts?.items?.length && !facts.items.some(x => x.open && x.open.state !== 'unknown') && deps.webSearch) {
+      const town = facts.loc?.town || plan.town || '';
+      const qs = [...new Set([facts.items[0].name ? facts.items[0].name + ' ' + (facts.items[0].address || town) + ' שעות פתיחה' : '', /מרקחת|פארם/u.test(facts.kind) ? 'בית מרקחת תורן ' + town + ' הלילה' : facts.kind + ' פתוח עכשיו ' + town].filter(Boolean))];
+      const more = (await Promise.all(qs.map(q => deps.webSearch(q, { timeoutMs: 4000 }).catch(() => [])))).flat();
+      const seenU = new Set((web || []).map(r => r.url));
+      for (const r of more) if (r?.url && !seenU.has(r.url)) { seenU.add(r.url); (web || (web = [])).push(r); }
+      if (deps.readPages && more.length) {
+        const pages = await Promise.race([deps.readPages(more.slice(0, 2).map(r => r.url), { timeoutMs: 3500 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 3800).unref?.())]);
+        for (const pg of pages || []) { const hit = (web || []).find(r => r.url === pg.url); if (hit && pg.content) hit.snippet = clip(pg.content, 900); }
+      }
+      log.info?.('[PLACE] open-now hours looked up on the web', { queries: qs.length, results: more.length });
+    }
     if (facts?.unknownPlace && !(web || []).length) return out({ reply: 'לא מצאתי במפה את המקום ' + facts.unknownPlace + '. אפשר לומר לי שם של רחוב או של מקום מוכר לידו, ובאיזו עיר, ואחפש שוב?' });
     if (facts?.items?.length || (web || []).length) {
       log.info?.('[PLACE] nearby', { kind: facts?.kind, place: facts?.loc?.label, town: facts?.loc?.town, found: facts?.items?.length || 0, web: (web || []).length, approx: !!facts?.loc?.approx });
-      const webText = (web || []).slice(0, 5).map((r, i) => 'תוצאת חיפוש ' + (i + 1) + ': ' + clip(r.title, 110) + ' (' + hostOf(r.url).slice(0, 40) + ')\n' + clip(r.snippet, 300)).join('\n');
+      const webText = (web || []).slice(0, 7).map((r, i) => 'תוצאת חיפוש ' + (i + 1) + ': ' + clip(r.title, 110) + ' (' + hostOf(r.url).slice(0, 40) + ')\n' + clip(r.snippet, 300)).join('\n');
       const reply = await ask('המתקשר שואל איפה יש ' + (facts?.kind || 'מקום') + ' קרוב למקום מסוים. ' +
-        (facts?.items?.length ? 'לפניך רשימה מהמפה, ממוינת מהקרוב לרחוק, עם המרחק בקו אווירי והכתובת. התחילי בתשובה ישירה: הקרוב ביותר, שמו בדיוק כפי שהוא כתוב ברשימה, כמה רחוק ובאיזה רחוב. אחר כך עוד אחד או שניים קרובים. אל תתארי מסלול הליכה או פניות, ואל תשני שמות. כשכתוב ליד מקום אם הוא פתוח או סגור עכשיו, אמרי את זה כפי שכתוב; כשהוא שאל מה פתוח עכשיו, פתחי במקום הפתוח הקרוב ביותר, ועל מקום שאין לו שעות במפה אמרי שכדאי להתקשר לוודא. אם במפה אין לו שם, אמרי שזה ' + facts.kind + ' שמופיע במפה בלי שם, עם הכתובת. ' : 'במפה לא נמצאו תוצאות, ענה רק לפי תוצאות החיפוש. ') +
+        (facts?.items?.length ? 'לפניך רשימה מהמפה, ממוינת מהקרוב לרחוק, עם המרחק בקו אווירי והכתובת. התחילי בתשובה ישירה: הקרוב ביותר, שמו בדיוק כפי שהוא כתוב ברשימה, כמה רחוק ובאיזה רחוב. אחר כך עוד אחד או שניים קרובים. אל תתארי מסלול הליכה או פניות, ואל תשני שמות. כשכתוב ליד מקום אם הוא פתוח או סגור עכשיו, אמרי את זה כפי שכתוב; כשהוא שאל מה פתוח עכשיו, פתחי במקום הפתוח הקרוב ביותר. כשבמפה אין שעות, חפשי בתוצאות החיפוש את שעות הפתיחה של אותו מקום או רשימת בתי מרקחת תורנים בעיר, וחשבי לפי השעה עכשיו אם פתוח; אם גם שם אין, אמרי בכנות שאין לך שעות מאומתות והציעי להתקשר, עם הטלפון אם מופיע. אם במפה אין לו שם, אמרי שזה ' + facts.kind + ' שמופיע במפה בלי שם, עם הכתובת. ' : 'במפה לא נמצאו תוצאות, ענה רק לפי תוצאות החיפוש. ') +
         'תוצאות החיפוש באינטרנט עוזרות רק כשהן מדברות בבירור על אותו מקום ממש (למשל בית כנסת שנמצא בתוך החוף או צמוד אליו); אל תמציאי מרחקים, כתובות או שמות שלא מופיעים. אם הוא שאל על מקום בעיר מסוימת, אל תציעי מקומות בעיר אחרת. בלי זמני תפילה אם אינם כתובים; אפשר להציע לברר במקום.',
         [facts?.text || '', webText ? 'חיפוש באינטרנט:\n' + webText : ''].filter(Boolean).join('\n\n'), { maxTokens: 900, budgetMs: 11000, ctx: smallContext })
         .catch(() => facts?.items?.length ? nearbyReply(facts) : '');

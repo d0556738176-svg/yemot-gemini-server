@@ -6228,7 +6228,7 @@ app.get('/live-probe',rateLimit(4,60*1000,'live-probe'),async (req,res)=>{
     t('travel',async()=>{ const f=await T.travelFacts({ from:{ place:'רמה א', town:'בית שמש' }, to:{ place:'התחנה המרכזית', town:'ירושלים' } },{ log:quiet }); return { text:String(f.text||f.unknown||'').slice(0,1500), busTrips:f.bus?.trips?.length||0, busError:f.bus?.error||'', car:!!f.car?.best }; }),
     t('pharmacyOpenNow',async()=>{ const f=await P.nearbyFacts({ kindText:'בית מרקחת פתוח עכשיו', place:'רמה א', town:'בית שמש' },{ log:quiet }); return { text:String(f?.text||'').slice(0,1200) }; }),
     t('ramiLevy',async()=>{ const f=await P.businessHours({ name:'רמי לוי', place:'קניון השדרה', town:'בית שמש' },{ log:quiet }); return { text:String(f?.text||'').slice(0,800), found:f?.items?.length||0 }; }),
-    t('latestLesson',async()=>{ const found=await B.ytdlpSearch(['גואל אלקריף'],{ count:15 }); const ch=B.ownerChannel(found,'גואל אלקריף'); const ups=ch?await B.channelUploads(ch.id,{ count:4 }):[]; return { channel:ch?.title||'', latest:ups.slice(0,3).map(v=>({ title:v.title, date:String(v.publishedAt||'').slice(0,10), min:Math.round(v.durationSec/60) })) }; })
+    t('latestLesson',async()=>{ const found=await B.ytdlpSearch(['גואל אלקריף'],{ count:15 }); const ch=B.ownerChannel(found,'גואל אלקריף'); let ups=ch?await B.channelUploads(ch.id,{ count:ch.fit<0.5?40:4 }):[]; if(ch&&ch.fit<0.5) ups=B.byName(ups,ch.words); return { channel:ch?.title||'', shared:!!ch&&ch.fit<0.5, latest:ups.slice(0,3).map(v=>({ title:v.title, date:String(v.publishedAt||'').slice(0,10), min:Math.round(v.durationSec/60) })) }; })
   ]));
   liveProbe={ at:Date.now(), out };
   res.set('cache-control','no-store').json(out);

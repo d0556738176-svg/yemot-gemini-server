@@ -209,7 +209,17 @@ export async function geocode({ place = '', town = '' } = {}, { fetchImpl = fetc
     townHit = t.find(r => sameTown(r.name, town) || sameTown(r.town, town)) || t[0] || null;
     if (!townHit) townHit = (await openMeteoGeo(town, { fetchImpl }).catch(() => []))[0] || null;
   }
-  if (place && townHit && !sameTown(place, town)) {
+  // A neighbourhood by its full name on the local map ("רמת בית שמש א'").
+  if (alias && townHit && localMapReady()) {
+    const want = plain(place);
+    const b = [townHit.lat - 0.08, townHit.lat + 0.08, townHit.lon - 0.08, townHit.lon + 0.08];
+    const LETTER = { 'א': 'אלף', 'ב': 'בית', 'ג': 'גימל', 'ד': 'דלת' };
+    const names = new Set([want, want.replace(/ ([אבגד])$/u, (m, l) => ' ' + LETTER[l])]);
+    const hits = localPlaces(b).filter(x => names.has(plain(x.tags.name || '')));
+    const pick = hits.find(x => x.tags.place) || hits[0];
+    if (pick) return { lat: pick.lat, lon: pick.lon, label: place, town, approx: false };
+  }
+  if (place && townHit && (alias || !sameTown(place, town))) {
     const words = plain(place).split(' ').filter(w => w.length >= 2 && !GENERIC.has(w)).map(w => w.replace(/^ה(?=\S{2})/u, ''));
     if (words.length) {
       const b = townHit.bbox?.length === 4 && Math.abs(townHit.bbox[1] - townHit.bbox[0]) > 0.01 ? townHit.bbox : [townHit.lat - 0.06, townHit.lat + 0.06, townHit.lon - 0.06, townHit.lon + 0.06];
