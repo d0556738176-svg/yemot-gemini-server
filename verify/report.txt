@@ -1,0 +1,473 @@
+version 489d60d6eec3
+main has the search backups
+
+===== Website key 1 (audio)
+[1s] << read=t-לחיפוש ביוטיוב בדיבור הקש 1 לחיפוש בהקלדה במקשי הטלפון הקש 2 להיסטוריית החיפושים הקש 4 לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3 לשידורים החיים של ערוצי הטלוויזיה והרדיו הקש 8 לחזרה לתפריט הראשי הקש כוכבית=m1,no,1,1,5,No,no,no,,1.2.3.4.5.6.8.*,,Ok,None,
+[2s] << read=t-חיפוש בכל האתרים באינטרנט הקלד מה לחפש, בעברית במקשי הטלפון, והקש סולמית אחרי כל אות=wt2,no,,1,60,HebrewKeyboard,no,no,,,,Ok,None,
+[2s] << read=t-מחפש עכשיו בכל האתרים באינטרנט את שיעור קצר הרב זמיר כהן הידברות כל קישור נפתח ונבדק אם אפשר להוריד ממנו, וזה יכול לקחת עד דקה וחצי לחזרה לתפריט הקש כוכבית=w3,no,1,1,2,No,no,no,,,,Ok,None,
+[5s] << read=t-מחפש באתרים, נא להמתין=w4,no,1,1,6,No,no,no,,,,Ok,None,
+[95s] << read=t-נמצאו 7 תוצאות 1, הרב זמיר כהן נבואות העבר והעתיד הידברות (1), מאתר הידברות, אורך שעה ו 9 דקות 2, הרב זמיר כהן בשיעורו השבועי: עשה טוב תהיה טוב הידברות (1), מאתר הידברות, אורך 50 דקות 3, הרב זמיר כהן מקרה או השגחה פרטית? הידברות (1), מאתר הידברות, אורך 4 דקות 4, הרב זמיר כהן: המקרא שיעור נ הידברות (1), מאתר הידברות 5, הרב זמיר כהן הסוד הידברות, מאתר הידברות, אורך 6 שניות 6, Introduction, מאתר ncw online teachable, אורך דקה 7, Rabbi Zamir Cohen Which sin should you be especially careful to avoid?, מאתר יוטיוב לבחירה הקש את מספר התוצאה וסולמית לחיפוש חדש הקש 0 0 וסולמית לתפריט הראשי הקש כ
+   PICK {"n":"3","t":"הרב זמיר כהן מקרה או השגחה פרטית? הידברות (1)","s":240}
+[96s] << read=t-בחרת את הרב זמיר כהן מקרה או השגחה פרטית? הידברות (1), מאתר הידברות, אורך 4 דקות להשמעה ולשמירה בתיקיית אודיו הקש 1 להורדת הסרטון לתיקיית וידאו הקש 2 לחזרה לתוצאות הקש 3 לתפריט הראשי הקש כוכבית=w36,no,1,1,15,No,no,no,,,,Ok,None,
+[111s] << read=t-מוריד מהאתר הורדו 16 אחוז מהקובץ נא להמתין=val_6,no,1,1,8,No,no,no,,,,Ok,None,
+[125s] << read=t-מוריד מהאתר הורדו 39 אחוז מהקובץ נא להמתין=val_11,no,1,1,8,No,no,no,,,,Ok,None,
+[138s] << read=t-מוריד מהאתר הורדו 62 אחוז מהקובץ נא להמתין=val_16,no,1,1,8,No,no,no,,,,Ok,None,
+[152s] << read=t-מוריד מהאתר הורדו 84 אחוז מהקובץ נא להמתין=val_21,no,1,1,8,No,no,no,,,,Ok,None,
+[165s] << read=t-הורדת קובץ השמע הושלמה במאה אחוז כעת מכוונן את העוצמה והבהירות להשמעה נעימה בטלפון נא להמתין=val_26,no,1,1,8,No,no,no,,,,Ok,None,
+[171s] << id_list_message=t-משמיע עכשיו את הרב זמיר כהן מקרה או השגחה פרטית? הידברות (1).f-/2/youtubeaudio/776252424f31576b744956/הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1&
+   RESULT {"played":true,"id":"wbRBO1WktIV","text":"id_list_message=t-משמיע עכשיו את הרב זמיר כהן מקרה או השגחה פרטית? הידברות (1).f-/2/youtubeaudio/776252424f31576b744956/הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1&"}
+
+===== Website key 2 (video)
+[172s] << read=t-לחיפוש ביוטיוב בדיבור הקש 1 לחיפוש בהקלדה במקשי הטלפון הקש 2 להיסטוריית החיפושים הקש 4 לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3 לשידורים החיים של ערוצי הטלוויזיה והרדיו הקש 8 לחזרה לתפריט הראשי הקש כוכבית=m1,no,1,1,5,No,no,no,,1.2.3.4.5.6.8.*,,Ok,None,
+[172s] << read=t-חיפוש בכל האתרים באינטרנט הקלד מה לחפש, בעברית במקשי הטלפון, והקש סולמית אחרי כל אות=wt2,no,,1,60,HebrewKeyboard,no,no,,,,Ok,None,
+[172s] << read=t-מחפש עכשיו בכל האתרים באינטרנט את כתבה קצרה כאן חדשות כל קישור נפתח ונבדק אם אפשר להוריד ממנו, וזה יכול לקחת עד דקה וחצי לחזרה לתפריט הקש כוכבית=w3,no,1,1,2,No,no,no,,,,Ok,None,
+[175s] << read=t-מחפש באתרים, נא להמתין=w4,no,1,1,6,No,no,no,,,,Ok,None,
+[178s] << read=t-מחפש באתרים, נא להמתין=w5,no,1,1,6,No,no,no,,,,Ok,None,
+[263s] << read=t-נמצאו 2 תוצאות 1, Ejiro Evero on growing potential of Panthers defense, מאתר panthers, אורך 8 דקות 2, New Video Appalachian Bear Rescue, מאתר יוטיוב לבחירה הקש את מספר התוצאה וסולמית לחיפוש חדש הקש 0 0 וסולמית לתפריט הראשי הקש כוכבית=w34,no,2,1,10,No,no,no,,,,Ok,None,
+   PICK {"n":"1","t":"Ejiro Evero on growing potential of Panthers defen","s":480}
+[263s] << read=t-בחרת את Ejiro Evero on growing potential of Panthers defense, מאתר panthers, אורך 8 דקות להשמעה ולשמירה בתיקיית אודיו הקש 1 להורדת הסרטון לתיקיית וידאו הקש 2 לחזרה לתוצאות הקש 3 לתפריט הראשי הקש כוכבית=w35,no,1,1,15,No,no,no,,,,Ok,None,
+[264s] << read=t-להוספת כתובית בעברית לסרטון הקש 1 בלי כתובית הקש 2=w36,no,1,1,15,No,no,no,,,,Ok,None,
+[264s] << read=t-הורדת הסרטון התחילה הוא יישמר בתיקיית וידאו עם התמונה והפרטים שלו, ומאותה הורדה יוכן גם השמע אין צורך להמתין על הקו לבחירה הקש את מספר התוצאה וסולמית לחיפוש חדש הקש 0 0 וסולמית לתפריט הראשי הקש כוכבית=w37,no,2,1,10,No,no,no,,,,Ok,None,
+   RESULT {"started":true,"text":"read=t-הורדת הסרטון התחילה הוא יישמר בתיקיית וידאו עם התמונה והפרטים שלו, ומאותה הורדה יוכן גם השמע אין צורך להמתין על הקו לבחירה הקש את מספר התוצאה וסולמית לחיפוש חדש הקש 0 0 וסולמית לתפריט הראשי הקש"}
+recent jobs {"audio":[{"id":"T-kozagoRfY","status":"ready","mode":null},{"id":"wbRBO1WktIV","status":"ready","mode":null}],"video":[{"id":"-YMDen4GSVI","status":"ready","mode":null},{"id":"wZ0gm82P2oD","status":"running","mode":null}]}
+search engines {"searches":[{"at":"2026-11-19T16:00:37.896Z","items":20,"engines":{"videos":false,"web":false,"tavily":false,"backups":{"langsearch":true,"jina":false,"firecrawl":true}}},{"at":"2026-11-19T16:03:28.960Z","items":26,"engines":{"videos":false,"web":false,"tavily":false,"backups":{"langsearch":true,"jina":false,"firecrawl":true}}}]}
+
+waiting 5 minutes for the background copies (extension 7, אודיו, וידאו)...
+
+#### YouTube audio: no id
+
+#### Website audio wbRBO1WktIV
+{
+ "id": "wbRBO1WktIV",
+ "at": "2026-11-19T16:09:56.053Z",
+ "phone": {
+  "files": 1,
+  "paths": [
+   {
+    "path": "/2/youtubeaudio/776252424f31576b744956/הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1.wav",
+    "exists": true,
+    "size": 3651322
+   }
+  ],
+  "probe": {
+   "container": "wav",
+   "durationSec": 228,
+   "bitRate": 128002,
+   "audio": {
+    "codec": "pcm_s16le",
+    "sampleRate": 8000,
+    "channels": 1,
+    "bits": 16
+   },
+   "video": null,
+   "picture": false,
+   "subtitles": [],
+   "tags": 1
+  },
+  "peakDb": -2.1,
+  "meanDb": -16
+ },
+ "ext7": {
+  "file": "135",
+  "title": "הרב זמיר כהן - מקרה או השגחה פרטית? - הידברות (1)",
+  "exists": true,
+  "size": 3651322,
+  "newest": true
+ },
+ "audioCopy": [
+  {
+   "path": "/אודיו/הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1__HaRav_Zamir_Cohen_Mikreh_O_Hashgacha_Pratit_Hidabrut_1.flac",
+   "exists": true,
+   "size": 16011496,
+   "probe": {
+    "container": "flac",
+    "durationSec": 228,
+    "bitRate": 561307,
+    "audio": {
+     "codec": "flac",
+     "sampleRate": 48000,
+     "channels": 2,
+     "bits": 16
+    },
+    "video": null,
+    "picture": true,
+    "subtitles": [],
+    "tags": 11
+   }
+  }
+ ],
+ "audioCopyNames": [
+  "הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1__HaRav_Zamir_Cohen_Mikreh_O_Hashgacha_Pratit_Hidabrut_1"
+ ],
+ "video": null
+}
+
+#### Video wZ0gm82P2oD wZ0gm82P2oD
+{
+ "id": "wZ0gm82P2oD",
+ "at": "2026-11-19T16:09:58.642Z",
+ "phone": {
+  "files": 0,
+  "paths": []
+ },
+ "ext7": null,
+ "audioCopy": [],
+ "audioCopyNames": [],
+ "video": null
+}
+
+something not finished yet; waiting 4 more minutes
+
+#### YouTube audio: no id
+
+#### Website audio wbRBO1WktIV
+{
+ "id": "wbRBO1WktIV",
+ "at": "2026-11-19T16:13:59.784Z",
+ "phone": {
+  "files": 1,
+  "paths": [
+   {
+    "path": "/2/youtubeaudio/776252424f31576b744956/הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1.wav",
+    "exists": true,
+    "size": 3651322
+   }
+  ],
+  "probe": {
+   "container": "wav",
+   "durationSec": 228,
+   "bitRate": 128002,
+   "audio": {
+    "codec": "pcm_s16le",
+    "sampleRate": 8000,
+    "channels": 1,
+    "bits": 16
+   },
+   "video": null,
+   "picture": false,
+   "subtitles": [],
+   "tags": 1
+  },
+  "peakDb": -2.1,
+  "meanDb": -16
+ },
+ "ext7": {
+  "file": "135",
+  "title": "הרב זמיר כהן - מקרה או השגחה פרטית? - הידברות (1)",
+  "exists": true,
+  "size": 3651322,
+  "newest": false
+ },
+ "audioCopy": [
+  {
+   "path": "/אודיו/הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1__HaRav_Zamir_Cohen_Mikreh_O_Hashgacha_Pratit_Hidabrut_1.flac",
+   "exists": true,
+   "size": 16011496,
+   "probe": {
+    "container": "flac",
+    "durationSec": 228,
+    "bitRate": 561307,
+    "audio": {
+     "codec": "flac",
+     "sampleRate": 48000,
+     "channels": 2,
+     "bits": 16
+    },
+    "video": null,
+    "picture": true,
+    "subtitles": [],
+    "tags": 11
+   }
+  }
+ ],
+ "audioCopyNames": [
+  "הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1__HaRav_Zamir_Cohen_Mikreh_O_Hashgacha_Pratit_Hidabrut_1"
+ ],
+ "video": null
+}
+
+#### Video wZ0gm82P2oD wZ0gm82P2oD
+{
+ "id": "wZ0gm82P2oD",
+ "at": "2026-11-19T16:14:02.376Z",
+ "phone": {
+  "files": 1,
+  "paths": [
+   {
+    "path": "/2/youtubeaudio/775a30676d383250326f44/Ejiro_Evero_on_growing_potential_of_Panthers_defense.wav",
+    "exists": true,
+    "size": 8051644
+   }
+  ],
+  "probe": {
+   "container": "wav",
+   "durationSec": 503,
+   "bitRate": 128001,
+   "audio": {
+    "codec": "pcm_s16le",
+    "sampleRate": 8000,
+    "channels": 1,
+    "bits": 16
+   },
+   "video": null,
+   "picture": false,
+   "subtitles": [],
+   "tags": 1
+  },
+  "peakDb": -3.1,
+  "meanDb": -21
+ },
+ "ext7": {
+  "file": "136",
+  "title": "Ejiro Evero on growing potential of Panthers defense",
+  "exists": true,
+  "size": 8051644,
+  "newest": true
+ },
+ "audioCopy": [
+  {
+   "path": "/אודיו/א_ז_ירו_אוורו_על_הפוטנציאל_המתפתח_של_הגנת_הפנתרים__Ezhiro_Avero_Al_Hapotentsial_Hametpate_ach_Shel_Haganat_Hapantrir.flac",
+   "exists": true,
+   "size": 21295874,
+   "probe": {
+    "container": "flac",
+    "durationSec": 503,
+    "bitRate": 338551,
+    "audio": {
+     "codec": "flac",
+     "sampleRate": 44100,
+     "channels": 2,
+     "bits": 16
+    },
+    "video": null,
+    "picture": true,
+    "subtitles": [],
+    "tags": 11
+   }
+  }
+ ],
+ "audioCopyNames": [
+  "א_ז_ירו_אוורו_על_הפוטנציאל_המתפתח_של_הגנת_הפנתרים__Ezhiro_Avero_Al_Hapotentsial_Hametpate_ach_Shel_Haganat_Hapantrir"
+ ],
+ "video": null
+}
+
+something not finished yet; waiting 4 more minutes
+
+#### YouTube audio: no id
+
+#### Website audio wbRBO1WktIV
+{
+ "id": "wbRBO1WktIV",
+ "at": "2026-11-19T16:18:05.611Z",
+ "phone": {
+  "files": 1,
+  "paths": [
+   {
+    "path": "/2/youtubeaudio/776252424f31576b744956/הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1.wav",
+    "exists": true,
+    "size": 3651322
+   }
+  ],
+  "probe": {
+   "container": "wav",
+   "durationSec": 228,
+   "bitRate": 128002,
+   "audio": {
+    "codec": "pcm_s16le",
+    "sampleRate": 8000,
+    "channels": 1,
+    "bits": 16
+   },
+   "video": null,
+   "picture": false,
+   "subtitles": [],
+   "tags": 1
+  },
+  "peakDb": -2.1,
+  "meanDb": -16
+ },
+ "ext7": {
+  "file": "135",
+  "title": "הרב זמיר כהן - מקרה או השגחה פרטית? - הידברות (1)",
+  "exists": true,
+  "size": 3651322,
+  "newest": false
+ },
+ "audioCopy": [
+  {
+   "path": "/אודיו/הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1__HaRav_Zamir_Cohen_Mikreh_O_Hashgacha_Pratit_Hidabrut_1.flac",
+   "exists": true,
+   "size": 16011496,
+   "probe": {
+    "container": "flac",
+    "durationSec": 228,
+    "bitRate": 561307,
+    "audio": {
+     "codec": "flac",
+     "sampleRate": 48000,
+     "channels": 2,
+     "bits": 16
+    },
+    "video": null,
+    "picture": true,
+    "subtitles": [],
+    "tags": 11
+   }
+  }
+ ],
+ "audioCopyNames": [
+  "הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1__HaRav_Zamir_Cohen_Mikreh_O_Hashgacha_Pratit_Hidabrut_1"
+ ],
+ "video": null
+}
+
+#### Video wZ0gm82P2oD wZ0gm82P2oD
+{
+ "id": "wZ0gm82P2oD",
+ "at": "2026-11-19T16:18:07.682Z",
+ "phone": {
+  "files": 1,
+  "paths": [
+   {
+    "path": "/2/youtubeaudio/775a30676d383250326f44/Ejiro_Evero_on_growing_potential_of_Panthers_defense.wav",
+    "exists": true,
+    "size": 8051644
+   }
+  ],
+  "probe": {
+   "container": "wav",
+   "durationSec": 503,
+   "bitRate": 128001,
+   "audio": {
+    "codec": "pcm_s16le",
+    "sampleRate": 8000,
+    "channels": 1,
+    "bits": 16
+   },
+   "video": null,
+   "picture": false,
+   "subtitles": [],
+   "tags": 1
+  },
+  "peakDb": -3.1,
+  "meanDb": -21
+ },
+ "ext7": {
+  "file": "136",
+  "title": "Ejiro Evero on growing potential of Panthers defense",
+  "exists": true,
+  "size": 8051644,
+  "newest": true
+ },
+ "audioCopy": [
+  {
+   "path": "/אודיו/א_ז_ירו_אוורו_על_הפוטנציאל_המתפתח_של_הגנת_הפנתרים__Ezhiro_Avero_Al_Hapotentsial_Hametpate_ach_Shel_Haganat_Hapantrir.flac",
+   "exists": true,
+   "size": 21295874,
+   "probe": {
+    "container": "flac",
+    "durationSec": 503,
+    "bitRate": 338551,
+    "audio": {
+     "codec": "flac",
+     "sampleRate": 44100,
+     "channels": 2,
+     "bits": 16
+    },
+    "video": null,
+    "picture": true,
+    "subtitles": [],
+    "tags": 11
+   }
+  }
+ ],
+ "audioCopyNames": [
+  "א_ז_ירו_אוורו_על_הפוטנציאל_המתפתח_של_הגנת_הפנתרים__Ezhiro_Avero_Al_Hapotentsial_Hametpate_ach_Shel_Haganat_Hapantrir"
+ ],
+ "video": {
+  "state": "done",
+  "quality": "1080p",
+  "subtitles": "not_requested",
+  "files": [
+   {
+    "path": "/וידאו/א_ז_ירו_אוורו_על_הפוטנציאל_המתפתח_של_הגנת_הפנתרים_חלק_1__Ezhiro_Avero_Al_Hapotentsial_Hametpate_ach_Shel_Haganat_Hapantrir_Chelek_1.mp4",
+    "exists": true,
+    "size": 46084689,
+    "probe": {
+     "container": "mov,mp4,m4a,3gp,3g2,mj2",
+     "durationSec": 45,
+     "bitRate": 8184337,
+     "audio": {
+      "codec": "aac",
+      "sampleRate": 44100,
+      "channels": 2,
+      "bits": null
+     },
+     "video": {
+      "codec": "h264",
+      "width": 1920,
+      "height": 1080
+     },
+     "picture": true,
+     "subtitles": [],
+     "tags": 13
+    }
+   },
+   {
+    "path": "/וידאו/א_ז_ירו_אוורו_על_הפוטנציאל_המתפתח_של_הגנת_הפנתרים_חלק_2__Ezhiro_Avero_Al_Hapotentsial_Hametpate_ach_Shel_Haganat_Hapantrir_Chelek_2.mp4",
+    "exists": true,
+    "size": 45135052,
+    "probe": {
+     "container": "mov,mp4,m4a,3gp,3g2,mj2",
+     "durationSec": 45,
+     "bitRate": 8015866,
+     "audio": {
+      "codec": "aac",
+      "sampleRate": 44100,
+      "channels": 2,
+      "bits": null
+     },
+     "video": {
+      "codec": "h264",
+      "width": 1920,
+      "height": 1080
+     },
+     "picture": true,
+     "subtitles": [],
+     "tags": 13
+    }
+   },
+   {
+    "path": "/וידאו/א_ז_ירו_אוורו_על_הפוטנציאל_המתפתח_של_הגנת_הפנתרים_חלק_3__Ezhiro_Avero_Al_Hapotentsial_Hametpate_ach_Shel_Haganat_Hapantrir_Chelek_3.mp4",
+    "exists": true,
+    "size": 45220021,
+    "probe": {
+     "container": "mov,mp4,m4a,3gp,3g2,mj2",
+     "durationSec": 45,
+     "bitRate": 8030956,
+     "audio": {
+      "codec": "aac",
+      "sampleRate": 44100,
+      "channels": 2,
+      "bits": null
+     },
+     "video": {
+      "codec": "h264",
+      "width": 1920,
+      "height": 1080
+     },
+     "picture": true,
+     "subtitles": [],
+     "tags": 13
+    }
+   },
+   {
+    "path": "/וידאו/א_ז_ירו_אוורו_על_הפוטנציאל_המתפתח_של_הגנת_הפנתרים_חלק_4__Ezhiro_Avero_Al_Hapotentsial_Hametpate_ach_Shel_Haganat_Hapantrir_Chelek_4.mp4",
+    "exists": true,
+    "size": 48287782,
+    "probe": {
+     "container": "mov,mp4,m4a,3gp,3g2,mj2",
+     "durationSec": 45,
+  
+exit=0
