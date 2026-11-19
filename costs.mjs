@@ -45,6 +45,41 @@ for (const [k, v] of Object.entries(s.body || {})) if (!hide.test(k)) log('  ' +
 log('\n== 6. Song engine (extension 4): last results in the log');
 try { const { execSync } = await import('node:child_process'); log(execSync("journalctl -u yemot-main --since '-3 days' -q -o cat --no-pager | grep -E 'SONG.*(SONG_READY|SONG_FAILED|PROVIDER_HEALTH|MUSIC_PROVIDER_FAILED|delivered)' | tail -8", { encoding: 'utf8' })); } catch {}
 
+log('\n== 7. Live server state (read-only)');
+try {
+  const { execSync } = await import('node:child_process');
+  const sh = c => { try { return execSync(c, { encoding: 'utf8', timeout: 20000 }).trim(); } catch (e) { return 'ERR ' + String(e.message).slice(0, 100); } };
+  log('  main running: ' + sh('cat /opt/yemot/.running-main') + ' | main HEAD ' + sh('git -C /opt/yemot/main rev-parse --short HEAD'));
+  log('  ext2 HEAD: ' + sh('git -C /opt/yemot/ext2 log --oneline -1') );
+  log('  ext2 has yt-dlp fallback: ' + sh('grep -c ytdlpSearchVideos /opt/yemot/ext2/youtube-ivr.js'));
+  log('  ext2 process started: ' + sh('systemctl show yemot-ext2 -p ActiveEnterTimestamp --value') + ' | last ext2 commit time: ' + sh('git -C /opt/yemot/ext2 log -1 --format=%ci'));
+  log('  services: ' + sh("for s in yemot-main yemot-ext2 caddy; do printf '%s=%s ' $s $(systemctl is-active $s); done"));
+  log('  timers: ' + sh("systemctl list-timers --all --no-legend | grep -oE 'yemot[a-z0-9-]*\\.timer' | sort -u | tr '\\n' ' '"));
+  log('  netplan files: ' + sh('ls /etc/netplan/') + ' | sha ' + sh('sha256sum /etc/netplan/*.yaml | cut -c1-12'));
+  log('  netplan has new IP: ' + sh('grep -c 176.97.205.41 /etc/netplan/50-cloud-init.yaml') + ' old IP: ' + sh('grep -c 88.214.55.82 /etc/netplan/50-cloud-init.yaml'));
+  log('  cloud-init network disabled file: ' + sh('ls /etc/cloud/cloud.cfg.d/ | grep -i network'));
+  log('  addresses on server: ' + sh("ip -4 -o addr show scope global | awk '{print $4}' | tr '\\n' ' '"));
+  log('  PUBLIC_BASE_URL main: ' + (main.PUBLIC_BASE_URL || '-') + ' | ext2: ' + (ext2.PUBLIC_BASE_URL || '-'));
+  log('  caddy hosts: ' + sh("grep -oE '[a-z0-9.-]+sslip\\.io' /etc/caddy/Caddyfile | sort -u | tr '\\n' ' '"));
+  for (const ext of ['1', '2', '3', '4', '7']) {
+    const r = await j('https://www.call2all.co.il/ym/api/GetTextFile?token=' + encodeURIComponent(tok) + '&what=' + encodeURIComponent('ivr2:/' + ext + '/ext.ini'));
+    const c = String(r.body?.contents || '');
+    const hosts = [...new Set((c.match(/https?:\/\/[a-z0-9.-]+/gi) || []).map(h => h.replace(/^https?:\/\//, '')))];
+    log('  Yemot ext ' + ext + ': ' + (c.match(/^type=.*/m)?.[0] || '?') + ' -> ' + (hosts.join(', ') || 'no link'));
+  }
+  for (const h of ['main.176-97-205-41.sslip.io', 'ext2.176-97-205-41.sslip.io', 'main.88-214-55-82.sslip.io']) { const r = await j('https://' + h + '/'); log('  https ' + h + ' -> ' + r.status); }
+  const { searchYouTubeVideos } = await import('/opt/yemot/ext2/youtube-ivr.js').catch(e => ({ e }));
+  const t0 = Date.now();
+  if (searchYouTubeVideos) {
+    const { ytdlpSearchVideos } = await import('/opt/yemot/ext2/youtube-ivr.js');
+    const r = ytdlpSearchVideos ? await ytdlpSearchVideos('שירי שבת', { count: 5 }).catch(e => ({ err: e.message })) : { err: 'no export' };
+    log('  ext2 yt-dlp search test: ' + (r.err || ((r.items || r).length + ' results, first: ' + String((r.items || r)[0]?.snippet?.title || (r.items || r)[0]?.title || '').slice(0, 60))) + ' in ' + (Date.now() - t0) + 'ms');
+  }
+  const { ytdlpSearch } = await import('/opt/yemot/main/ext3-brain.js');
+  const t1 = Date.now(); const m = await ytdlpSearch(['שירי שבת'], { count: 5 }).catch(e => ({ err: e.message }));
+  log('  main yt-dlp search test: ' + (m.err || (m.length + ' results, first: ' + String(m[0]?.title || '').slice(0, 60))) + ' in ' + (Date.now() - t1) + 'ms');
+} catch (e) { log('  state check failed: ' + e.message); }
+
 mkdirSync('/var/lib/yemot-report', { recursive: true, mode: 0o700 });
 const name = randomBytes(12).toString('hex');
 writeFileSync('/var/lib/yemot-report/' + name + '.txt', out.join('\n'), { mode: 0o600 });
