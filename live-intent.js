@@ -51,3 +51,20 @@ export function liveIntent(text) {
   if (name.replace(/\s/g, '').length < 2) return { tv: { menu: true } };
   return { webQuery: name + ' שידור חי' };
 }
+
+// A live broadcast by name, straight from YouTube's "live now" results
+// (the server's yt-dlp, free): { url, title, channel } or null.
+export async function findYoutubeLive(name, { timeoutMs = 14000, execImpl = null } = {}) {
+  const q = String(name || '').replace(/\s*שידור חי\s*/gu, ' ').trim();
+  if (q.length < 2) return null;
+  const run = execImpl || (async args => { const { execFile } = await import('node:child_process'); return new Promise(res => execFile(process.env.YTDLP_BIN || '/usr/local/bin/yt-dlp', args, { timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024 }, (e, out) => res(String(out || '')))); });
+  const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q + ' שידור חי') + '&sp=EgJAAQ%253D%253D';
+  let entries = [];
+  try { entries = JSON.parse(await run(['--flat-playlist', '-J', '--no-warnings', '--ignore-errors', '--playlist-end', '12', url])).entries || []; } catch { return null; }
+  const words = q.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+  const ok = entries.filter(e => /^[A-Za-z0-9_-]{11}$/.test(String(e?.id || '')) && (e.live_status === 'is_live' || e.live_status == null) && Number(e.age_limit || 0) < 18);
+  const fit = e => { const t = (String(e.title || '') + ' ' + String(e.channel || e.uploader || '')).toLowerCase(); return words.filter(w => t.includes(w)).length; };
+  const best = ok.map((e, i) => ({ e, s: fit(e) * 10 - i })).sort((a, b) => b.s - a.s)[0];
+  if (!best || fit(best.e) === 0) return null;
+  return { url: 'https://www.youtube.com/watch?v=' + best.e.id, title: String(best.e.title || q).slice(0, 120), channel: String(best.e.channel || best.e.uploader || '') };
+}

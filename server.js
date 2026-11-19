@@ -5184,12 +5184,19 @@ async function callHandler(call) {
         // Owner, 19.11: a live broadcast (a TV/radio channel, "what's live",
         // a live page or a live broadcast by name) plays in extension 2's live
         // player, the same relay as its channels.
-        const liveQ=fixed||ext3Done?null:(await import('./live-intent.js')).liveIntent(userTranscript);
+        const LI=await import('./live-intent.js');
+        const liveQ=fixed||ext3Done?null:LI.liveIntent(userTranscript);
+        // A live broadcast by name: YouTube's "live now" first, straight to it.
+        if(liveQ?.webQuery) {
+          const yt=await LI.findYoutubeLive(liveQ.webQuery).catch(()=>null);
+          console.info('[LIVE_HANDOFF] youtube live by name',{callId:activeKey,query:liveQ.webQuery.slice(0,80),found:!!yt});
+          if(yt) { liveQ.tv={url:yt.url,title:yt.title}; delete liveQ.webQuery; }
+        }
         const webQ=fixed||liveQ?.tv?null:(liveQ?.webQuery||(await import('./web-media-intent.js')).webSearchIntent(userTranscript));
         if(ext3Done) {}
         else if(liveQ?.tv) {
           turnContext.ext3Handoff={tv:liveQ.tv,title:liveQ.tv.title||'שידור חי',mode:'live'};
-          replyText=liveQ.tv.key?'מעביר אותך לשידור החי של '+liveQ.tv.title+'. השידור מגיע באיחור של כחצי דקה. לחזרה לתפריט הקש כוכבית.':liveQ.tv.url?'מעביר אותך לשידור החי באתר שביקשת. אם יש שם שידור פתוח, תשמע אותו בעוד רגע.':'מעביר אותך לשידורים החיים של ערוצי הטלוויזיה והרדיו. שם תבחר ערוץ בהקשה.';
+          replyText=liveQ.tv.key?'מעביר אותך לשידור החי של '+liveQ.tv.title+'. השידור מגיע באיחור של כחצי דקה. לחזרה לתפריט הקש כוכבית.':liveQ.tv.url?(/youtube\.com/.test(liveQ.tv.url)?'מצאתי ביוטיוב שידור חי: '+sanitizeForYemot(liveQ.tv.title)+'. מעביר אותך אליו, ההשמעה תתחיל בעוד כדקה. לחזרה הקש כוכבית.':'מעביר אותך לשידור החי באתר שביקשת. אם יש שם שידור פתוח, תשמע אותו בעוד רגע.'):'מעביר אותך לשידורים החיים של ערוצי הטלוויזיה והרדיו. שם תבחר ערוץ בהקשה.';
           console.info('[LIVE_HANDOFF] live broadcast requested',{callId:activeKey,key:liveQ.tv.key||null,menu:!!liveQ.tv.menu,site:liveQ.tv.url?String(liveQ.tv.url).slice(8,60):null});
           ext3Done=true;
         }
@@ -6238,6 +6245,7 @@ app.get('/live-probe',rateLimit(4,60*1000,'live-probe'),async (req,res)=>{
     t('travel',async()=>{ const f=await T.travelFacts({ from:{ place:'רמה א', town:'בית שמש' }, to:{ place:'התחנה המרכזית', town:'ירושלים' } },{ log:quiet }); return { text:String(f.text||f.unknown||'').slice(0,1500), busTrips:f.bus?.trips?.length||0, busError:f.bus?.error||'', car:!!f.car?.best, to:f.to?{ label:f.to.label, lat:f.to.lat, lon:f.to.lon }:null, fromStops:(f.bus?.fromStops||[]).slice(0,4).map(x=>x.name+' '+Math.round(x.km*1000)+'m'), toStops:(f.bus?.toStops||[]).slice(0,4).map(x=>x.name+' '+Math.round(x.km*1000)+'m'), busDebug:f.bus?.debug||null }; }),
     t('pharmacyOpenNow',async()=>{ const f=await P.nearbyFacts({ kindText:'בית מרקחת פתוח עכשיו', place:'רמה א', town:'בית שמש' },{ log:quiet }); return { text:String(f?.text||'').slice(0,1200) }; }),
     t('ramiLevy',async()=>{ const f=await P.businessHours({ name:'רמי לוי', place:'קניון השדרה', town:'בית שמש' },{ log:quiet }); return { text:String(f?.text||'').slice(0,800), found:f?.items?.length||0 }; }),
+    t('youtubeLive',async()=>{ const L=await import('./live-intent.js'); const y=await L.findYoutubeLive('הכותל המערבי'); const c=await L.findYoutubeLive('ערוץ 14'); return { kotel:y, ch14:c }; }),
     t('latestLesson',async()=>{ const found=await B.ytdlpSearch(['גואל אלקריף'],{ count:15 }); const ch=B.ownerChannel(found,'גואל אלקריף'); let ups=ch?await B.channelUploads(ch.id,{ count:ch.fit<0.5?40:4 }):[]; if(ch&&ch.fit<0.5) ups=B.byName(ups,ch.words); return { channel:ch?.title||'', shared:!!ch&&ch.fit<0.5, latest:ups.slice(0,3).map(v=>({ title:v.title, date:String(v.publishedAt||'').slice(0,10), min:Math.round(v.durationSec/60) })) }; })
   ]));
   liveProbe={ at:Date.now(), out };

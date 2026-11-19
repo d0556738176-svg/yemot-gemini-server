@@ -25,3 +25,10 @@ test('not a live request: news about a channel, a question about the system, a v
   assert.equal(liveIntent('אתה יכול להשמיע שידור חי?'), null);
   assert.equal(liveIntent('מה השיעור האחרון של גואל אלקריף'), null);
 });
+test('a live broadcast by name is found among YouTube "live now" results', async () => {
+  const { findYoutubeLive } = await import('../live-intent.js');
+  const execImpl = async args => { assert.match(args[args.length - 1], /sp=EgJAAQ/); return JSON.stringify({ entries: [{ id: 'a'.repeat(11), title: 'מוזיקה ברקע', channel: 'x' }, { id: 'b'.repeat(11), title: 'הכותל המערבי בשידור חי', channel: 'The Western Wall', live_status: 'is_live' }] }); };
+  const r = await findYoutubeLive('הכותל המערבי שידור חי', { execImpl });
+  assert.equal(r.url, 'https://www.youtube.com/watch?v=' + 'b'.repeat(11));
+  assert.equal(await findYoutubeLive('משהו אחר לגמרי', { execImpl }), null);
+});
