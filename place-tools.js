@@ -172,13 +172,13 @@ async function nominatimNear(words, loc, radiusKm, { fetchImpl }) {
   u.searchParams.set('limit', '15'); u.searchParams.set('bounded', '1'); u.searchParams.set('countrycodes', 'il');
   u.searchParams.set('viewbox', [loc.lon - d, loc.lat + d, loc.lon + d, loc.lat - d].join(','));
   const j = await getJson(u, { fetchImpl, timeoutMs: 7000 });
-  return (Array.isArray(j) ? j : []).map(x => ({ lat: Number(x.lat), lon: Number(x.lon), tags: { name: x.name || '', 'addr:street': x.address?.road || '', 'addr:housenumber': x.address?.house_number || '', 'addr:city': townOf(x.address) } }));
+  return (Array.isArray(j) ? j : []).map(x => ({ lat: Number(x.lat), lon: Number(x.lon), tags: { ...((x.category || x.class) ? { [x.category || x.class]: x.type || '' } : {}), name: x.name || '', 'addr:street': x.address?.road || '', 'addr:housenumber': x.address?.house_number || '', 'addr:city': townOf(x.address) } }));
 }
 const GENERIC = new Set(['חוף', 'החוף', 'רחוב', 'שכונת', 'שכונה', 'אזור', 'ליד', 'של', 'את', 'בית', 'מרכז', 'כיכר', 'גן', 'פארק', 'הים', 'ים']);
 // The place he named, on the map: { lat, lon, label, approx }.
 // town: the town he said (results elsewhere are rejected).
 export async function geocode({ place = '', town = '' } = {}, { fetchImpl = fetch, log = console } = {}) {
-  const strip = s => String(s || '').replace(/^(?:ב|ל)?(?:ה)?(?:מושב|קיבוץ|יישוב|ישוב|עיר|העיר|שכונת|ליד|באזור)\s+/u, '').trim();
+  const strip = s => String(s || '').replace(/^(?:ב|ל)?(?:ה)?(?:מושב|משוב|קיבוץ|יישוב|ישוב|עיר|העיר|שכונת|ליד|באזור)\s+/u, '').trim();
   place = strip(place); town = strip(town);
   if (place && town && sameTown(place, town)) place = '';
   if (!place && !town) return null;
@@ -380,7 +380,7 @@ export async function nearbyFacts({ kindText = '', place = '', town = '' } = {},
     let els = localMapReady() ? localPlaces(boxAround(loc, radius / 1000)).filter(x => kind.test(x.tags, x.tags.name || '') && km(loc, x) <= radius / 1000) : null;
     if (els === null) els = await overpass(q, { fetchImpl, timeoutMs: 7000 }).catch(e => { log.warn?.('[PLACE] nearby search failed', String(e?.message || e).slice(0, 80)); return null; });
     if (els === null) {
-      els = await nominatimNear(kind.label.split(' או ')[0], loc, radius / 1000, { fetchImpl }).catch(() => null);
+      els = await nominatimNear(kind.label.split(' או ')[0], loc, radius / 1000, { fetchImpl }).then(r => r.filter(x => kind.test(x.tags, x.tags.name || ''))).catch(() => null);
       if (els === null) return { loc, kind: kind.label, mapDown: true, items: [] };
       log.info?.('[PLACE] nearby from the map search by name', { found: els.length });
     }

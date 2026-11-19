@@ -55,7 +55,8 @@ function clip(text, n) {
  * full first; older ones shrink, then drop.
  */
 export function buildContext({ summary = '', prior = [], current = [], maxChars = 5200 } = {}) {
-  const cur = (current || []).slice(-8).map(t => ({ user: t.user, assistant: t.assistant ?? t.gemini, ref: t.ref }));
+  const all = (current || []).map(t => ({ user: t.user, assistant: t.assistant ?? t.gemini, ref: t.ref }));
+  const cur = all.slice(-8);
   const old = (prior || []).slice(-10).map(t => ({ user: t.user, assistant: t.assistant ?? t.gemini, ref: t.ref, time: t.time }));
   const render = (turns, uMax, aMax, label) => turns.map(t =>
     label + 'מתקשר: ' + clip(t.user, uMax) + '\nתשובה: ' + clip(t.assistant, aMax) + (refLine(t.ref) ? '\n' + refLine(t.ref) : '')).join('\n');
@@ -66,7 +67,11 @@ export function buildContext({ summary = '', prior = [], current = [], maxChars 
     let text = '';
     for (;;) {
       const curPart = render(curTurns, cu, ca, '');
-      text = head + (oldPart ? 'מתוך שיחות קודמות:\n' + oldPart + '\n\n' : '') + (curPart ? 'השיחה הנוכחית:\n' + curPart : 'השיחה הנוכחית רק התחילה.');
+      // 19.11: "what did I ask at the start?" after 8 turns: the earlier
+      // questions of this call stay, in order, in one line.
+      const earlier = all.slice(0, all.length - curTurns.length).map(t => clip(t.user, 90)).filter(Boolean);
+      const earlyPart = earlier.length ? 'מוקדם יותר בשיחה הנוכחית שאל, לפי הסדר: ' + earlier.map((q, i) => (i + 1) + '. ' + q).join(' ') + '\n' : '';
+      text = head + (oldPart ? 'מתוך שיחות קודמות:\n' + oldPart + '\n\n' : '') + (curPart ? 'השיחה הנוכחית:\n' + earlyPart + curPart : 'השיחה הנוכחית רק התחילה.');
       if (text.length <= maxChars || curTurns.length <= 2) break;
       curTurns = curTurns.slice(1);
     }
@@ -1060,7 +1065,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       log.info?.('[PLACE] nearby', { kind: facts?.kind, place: facts?.loc?.label, town: facts?.loc?.town, found: facts?.items?.length || 0, web: (web || []).length, approx: !!facts?.loc?.approx });
       const webText = (web || []).slice(0, 5).map((r, i) => 'תוצאת חיפוש ' + (i + 1) + ': ' + clip(r.title, 110) + ' (' + hostOf(r.url).slice(0, 40) + ')\n' + clip(r.snippet, 300)).join('\n');
       const reply = await ask('המתקשר שואל איפה יש ' + (facts?.kind || 'מקום') + ' קרוב למקום מסוים. ' +
-        (facts?.items?.length ? 'לפניך רשימה מהמפה, ממוינת מהקרוב לרחוק, עם המרחק בקו אווירי והכתובת. התחילי בתשובה ישירה: הקרוב ביותר, שמו, כמה רחוק ובאיזה רחוב, ואיך להגיע אליו בכמה מילים אם הכתובת מאפשרת. אחר כך עוד אחד או שניים קרובים. אם במפה אין לו שם, אמרי שזה ' + facts.kind + ' שמופיע במפה בלי שם, עם הכתובת. ' : 'במפה לא נמצאו תוצאות, ענה רק לפי תוצאות החיפוש. ') +
+        (facts?.items?.length ? 'לפניך רשימה מהמפה, ממוינת מהקרוב לרחוק, עם המרחק בקו אווירי והכתובת. התחילי בתשובה ישירה: הקרוב ביותר, שמו בדיוק כפי שהוא כתוב ברשימה, כמה רחוק ובאיזה רחוב. אחר כך עוד אחד או שניים קרובים. אל תתארי מסלול הליכה או פניות, ואל תשני שמות. אם במפה אין לו שם, אמרי שזה ' + facts.kind + ' שמופיע במפה בלי שם, עם הכתובת. ' : 'במפה לא נמצאו תוצאות, ענה רק לפי תוצאות החיפוש. ') +
         'תוצאות החיפוש באינטרנט עוזרות רק כשהן מדברות בבירור על אותו מקום ממש (למשל בית כנסת שנמצא בתוך החוף או צמוד אליו); אל תמציאי מרחקים, כתובות או שמות שלא מופיעים. אם הוא שאל על מקום בעיר מסוימת, אל תציעי מקומות בעיר אחרת. בלי זמני תפילה אם אינם כתובים; אפשר להציע לברר במקום.',
         [facts?.text || '', webText ? 'חיפוש באינטרנט:\n' + webText : ''].filter(Boolean).join('\n\n'), { maxTokens: 900, budgetMs: 11000, ctx: smallContext })
         .catch(() => facts?.items?.length ? nearbyReply(facts) : '');
