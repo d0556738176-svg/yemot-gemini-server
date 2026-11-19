@@ -157,7 +157,16 @@ export async function makeReplayPiece(bin, file, offsetSec, seconds, out) {
 }
 export async function masterSpeech(input, out) {
   const { preparePhoneAudio } = await import('./youtube-phone-audio.js');
-  return preparePhoneAudio(input, out, { kind: 'lesson', sampleRate: 16000 });
+  // preparePhoneAudio keeps its working files next to its output under fixed
+  // names, so every piece is mastered in a folder of its own: pieces made at
+  // the same time must never delete each other's working files (19.11).
+  const work = await fs.mkdtemp(path.join(path.dirname(out), 'm-'));
+  try {
+    const tmpOut = path.join(work, 'out.wav');
+    const r = await preparePhoneAudio(input, tmpOut, { kind: 'lesson', sampleRate: 16000 });
+    await fs.rename(tmpOut, out);
+    return r;
+  } finally { await fs.rm(work, { recursive: true, force: true }).catch(() => {}); }
 }
 
 // Quality facts of a WAV piece: format from its header, levels from ffmpeg.
