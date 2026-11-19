@@ -62,3 +62,11 @@ test('"can you make songs?" is a question, not a song order', async () => {
   const r = await ext3Turn({ utterance: 'האם את יכולה ליצור שירים?', now: 'x' }, { llm, log: quiet });
   assert.equal(r.intent, 'chat'); assert.equal(r.confirm, undefined);
 });
+
+import { findVideos } from '../ext3-brain.js';
+test('YouTube quota used up: the search goes on through the server (yt-dlp), free and unlimited', async () => {
+  const refused = async () => ({ ok: false, status: 403, json: async () => ({ error: { message: 'quotaExceeded' } }) });
+  const searchImpl = async qs => [{ videoId: 'kR4bH5teaDI', title: 'מחרוזת שירים - ישי ריבו', channelTitle: 'ר. פ.', description: '', publishedAt: '2024-08-11T00:00:00Z', language: '', durationSec: 1622, viewCount: 1000000, ageRestricted: false, live: false }];
+  const v = await findVideos(['ישי ריבו'], { env: { YOUTUBE_API_KEY: 'k' }, fetchImpl: refused, searchImpl });
+  assert.equal(v[0]?.videoId, 'kR4bH5teaDI');
+});

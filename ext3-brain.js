@@ -304,6 +304,29 @@ async function youtubeGetOwn(path, params, { env = process.env, fetchImpl = fetc
   throw last || Object.assign(new Error('YouTube unavailable'), { status: 503 });
 }
 
+// YouTube search with the server's own yt-dlp (no key, no daily quota).
+export async function ytdlpSearch(queries, { count = 15, order = 'relevance', timeoutMs = 15000 } = {}) {
+  const { execFile } = await import('node:child_process');
+  const bin = process.env.YTDLP_BIN || '/usr/local/bin/yt-dlp';
+  const one = q => new Promise(resolve => {
+    execFile(bin, ['--flat-playlist', '-J', '--no-warnings', '--ignore-errors', (order === 'date' ? 'ytsearchdate' : 'ytsearch') + count + ':' + q], { timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024 }, (err, stdout) => {
+      try { resolve(JSON.parse(stdout).entries || []); } catch { resolve([]); }
+    });
+  });
+  const lists = await Promise.all([...new Set(queries)].slice(0, 3).map(one));
+  const out = [], seen = new Set();
+  for (const list of lists) for (const e of list) {
+    const id = String(e?.id || '');
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    const ud = String(e.upload_date || '');
+    out.push({ videoId: id, title: String(e.title || ''), channelTitle: String(e.channel || e.uploader || ''), description: cleanDescription(String(e.description || '')).slice(0, 600),
+      publishedAt: /^\d{8}$/.test(ud) ? ud.slice(0, 4) + '-' + ud.slice(4, 6) + '-' + ud.slice(6, 8) + 'T00:00:00Z' : (e.timestamp ? new Date(e.timestamp * 1000).toISOString() : null),
+      language: '', durationSec: Number(e.duration) || 0, viewCount: Number(e.view_count) || 0, ageRestricted: Number(e.age_limit) >= 18, live: e.live_status === 'is_live' || e.is_live === true });
+  }
+  return out;
+}
+
 const decode = s => String(s || '').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
 /** Real search + real details (length, views, date). Never invents anything. */
@@ -339,40 +362,52 @@ export function cleanTitle(t) {
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ')
     .replace(/[|,.:;!?#*_"~]+/g, ' ').replace(/\s+-\s+/g, ' - ').replace(/\s+/g, ' ').replace(/^[\s-]+|[\s-]+$/g, '').trim();
 }
-export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, recentDays = 0, order = 'relevance', exclude = [], env, fetchImpl, proxy, regionCode = 'IL' } = {}) {
+export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, recentDays = 0, order = 'relevance', exclude = [], env, fetchImpl, proxy, regionCode = 'IL', searchImpl = null } = {}) {
   const qs = [...new Set((queries || []).map(q => String(q || '').trim()).filter(q => q.length >= 2).map(q => /[֐-׿]/.test(q) ? ytSubject(q) : q))].slice(0, 3);
   const duration = minMinutes >= 20 ? 'long' : (maxMinutes && maxMinutes <= 4) ? 'short' : (minMinutes >= 4 && (!maxMinutes || maxMinutes <= 20)) ? 'medium' : 'any';
   // "Newest": a relevance search and a date search together, then the newest
   // of the ones that are really about it (a date-only search brings noise).
   const plan = order === 'date' ? [...qs.map(q => [q, 'relevance']), [qs[0], 'date']] : qs.map(q => [q, order === 'views' ? 'viewCount' : 'relevance']);
-  const lists = await Promise.allSettled(plan.map(([q, ord]) => youtubeGet('search', {
-    part: 'snippet', q, type: 'video', maxResults: order === 'date' ? 25 : 15, safeSearch: 'strict', regionCode, relevanceLanguage: /[a-z]/i.test(q) && !/[֐-׿]/.test(q) ? 'en' : 'he', videoDuration: duration,
-    order: ord,
-    ...(recentDays ? { publishedAfter: new Date(Date.now() - recentDays * 86400000).toISOString().replace(/\.\d+Z$/, 'Z') } : {})
-  }, { env, fetchImpl, proxy })));
-  const seen = new Set((exclude || []).map(String)), ids = [];
-  for (const l of lists) for (const it of (l.status === 'fulfilled' ? l.value.items || [] : [])) {
-    const id = it?.id?.videoId;
-    if (id && !seen.has(id)) { seen.add(id); ids.push(id); }
+  const seen = new Set((exclude || []).map(String));
+  let ids = [], videos = [];
+  try {
+    const lists = await Promise.allSettled(plan.map(([q, ord]) => youtubeGet('search', {
+      part: 'snippet', q, type: 'video', maxResults: order === 'date' ? 25 : 15, safeSearch: 'strict', regionCode, relevanceLanguage: /[a-z]/i.test(q) && !/[֐-׿]/.test(q) ? 'en' : 'he', videoDuration: duration,
+      order: ord,
+      ...(recentDays ? { publishedAfter: new Date(Date.now() - recentDays * 86400000).toISOString().replace(/\.\d+Z$/, 'Z') } : {})
+    }, { env, fetchImpl, proxy })));
+    for (const l of lists) for (const it of (l.status === 'fulfilled' ? l.value.items || [] : [])) {
+      const id = it?.id?.videoId;
+      if (id && !seen.has(id)) { seen.add(id); ids.push(id); }
+    }
+    if (!ids.length) {
+      const failed = lists.find(l => l.status === 'rejected');
+      if (failed) throw failed.reason;
+      return [];
+    }
+    const details = await youtubeGet('videos', { part: 'snippet,contentDetails,statistics', id: ids.slice(0, 45).join(',') }, { env, fetchImpl, proxy });
+    videos = (details.items || []).map(v => ({
+      videoId: v.id,
+      title: decode(v.snippet?.title),
+      channelTitle: decode(v.snippet?.channelTitle),
+      description: cleanDescription(decode(v.snippet?.description)).slice(0, 600),
+      publishedAt: v.snippet?.publishedAt || null,
+      language: v.snippet?.defaultAudioLanguage || v.snippet?.defaultLanguage || '',
+      durationSec: parseIsoDuration(v.contentDetails?.duration),
+      viewCount: Number(v.statistics?.viewCount) || 0,
+      ageRestricted: v.contentDetails?.contentRating?.ytRating === 'ytAgeRestricted',
+      live: v.snippet?.liveBroadcastContent && v.snippet.liveBroadcastContent !== 'none'
+    })).filter(v => v.videoId && v.durationSec > 0 && !v.live && isSafeVideo(v));
+  } catch (apiError) {
+    // Owner, 19.11: free with no limit. Google's daily YouTube quota (10,000
+    // units, ~100 per search) runs out; then the server's own yt-dlp searches
+    // YouTube directly, with no key and no quota.
+    const found = await (searchImpl || ytdlpSearch)(plan.map(([q]) => q), { count: order === 'date' ? 25 : 15, order }).catch(() => null);
+    if (!found?.length) throw apiError;
+    for (const v of found) if (!seen.has(v.videoId)) { seen.add(v.videoId); ids.push(v.videoId); videos.push(v); }
+    videos = videos.filter(v => v.durationSec > 0 && !v.live && isSafeVideo(v));
+    if (recentDays) videos = videos.filter(v => !v.publishedAt || Date.now() - Date.parse(v.publishedAt) <= recentDays * 86400000);
   }
-  if (!ids.length) {
-    const failed = lists.find(l => l.status === 'rejected');
-    if (failed) throw failed.reason;
-    return [];
-  }
-  const details = await youtubeGet('videos', { part: 'snippet,contentDetails,statistics', id: ids.slice(0, 45).join(',') }, { env, fetchImpl, proxy });
-  let videos = (details.items || []).map(v => ({
-    videoId: v.id,
-    title: decode(v.snippet?.title),
-    channelTitle: decode(v.snippet?.channelTitle),
-    description: cleanDescription(decode(v.snippet?.description)).slice(0, 600),
-    publishedAt: v.snippet?.publishedAt || null,
-    language: v.snippet?.defaultAudioLanguage || v.snippet?.defaultLanguage || '',
-    durationSec: parseIsoDuration(v.contentDetails?.duration),
-    viewCount: Number(v.statistics?.viewCount) || 0,
-    ageRestricted: v.contentDetails?.contentRating?.ytRating === 'ytAgeRestricted',
-    live: v.snippet?.liveBroadcastContent && v.snippet.liveBroadcastContent !== 'none'
-  })).filter(v => v.videoId && v.durationSec > 0 && !v.live && isSafeVideo(v));
   const rank = new Map(ids.map((id, i) => [id, i]));
   if (minMinutes) videos = videos.filter(v => v.durationSec >= minMinutes * 60 * 0.75);
   if (maxMinutes) videos = videos.filter(v => v.durationSec <= maxMinutes * 60 * 1.25);
