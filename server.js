@@ -4507,6 +4507,19 @@ async function ext3Library() {
     const r=await fetch('https://www.call2all.co.il/ym/api/DownloadFile?'+new URLSearchParams({token,path:'ivr2:/2/youtubeaudio/ext7_index.json'}),{signal:AbortSignal.timeout(6000)});
     const j=JSON.parse(await r.text());
     const items=Object.entries(j?.items||{}).filter(([id,e])=>e?.file&&!/-he$/.test(id)).map(([videoId,e])=>({videoId,title:String(e.title||''),path:'/7/'+e.file,at:e.at||''}));
+    // Owner, 19.11: every audio file in extension 7, whichever extension made
+    // it (extension 4's songs, older downloads), can be played by name too.
+    try {
+      const d=await (await fetch('https://www.call2all.co.il/ym/api/GetIVR2Dir?'+new URLSearchParams({token,path:'ivr2:/7'}),{signal:AbortSignal.timeout(6000)})).json();
+      const known=new Set(items.map(x=>x.path));
+      for(const f of [...(d?.files||[])]) {
+        const name=String(f?.name||f?.fileName||'');
+        if(!/\.(?:wav|mp3|ogg|m4a)$/i.test(name)||known.has('/7/'+name)) continue;
+        const title=name.replace(/\.[^.]+$/,'').replace(/[_]+/g,' ').trim();
+        if(!/[\u0590-\u05FFa-zA-Z]{2}/.test(title)) continue;
+        items.push({videoId:'file:'+name,title,path:'/7/'+name,at:String(f?.mtime||f?.date||'')});
+      }
+    } catch {}
     ext3LibCache={at:Date.now(),items};
     console.info('[EXT3_LIBRARY] songs already downloaded',{count:items.length});
     return items;
@@ -4771,6 +4784,23 @@ function ext3KeyChoice(text, choices) {
   return d&&choices&&choices[d]?d:'';
 }
 
+// Several downloads at once (owner, 19.11), each exactly like a single one;
+// a song already saved is not downloaded again.
+async function ext3StartBatch(items, mode, media, subs) {
+  const lib=await ext3Library().catch(()=>[]);
+  const started=[], saved=[], waiting=[];
+  for(const v of items) {
+    if(mode!=='video'&&lib.some(x=>x.videoId===v.videoId)) { saved.push(v.title); continue; }
+    const m=await ext3StartOrPlay({...v,mode,...(typeof subs==='boolean'?{subtitles:subs}:{})},media).catch(()=>null);
+    if(m?.handoff||!m) continue;
+    (/מעירה אותו|במנוחה/.test(m.reply)?waiting:started).push(v.title);
+  }
+  const t=x=>cleanTitle(x);
+  return [started.length?'התחלתי להוריד '+(mode==='video'?'כווידאו, ומאותה הורדה גם קובץ שמע לטלפון, ':'כקובצי שמע ')+started.length+' קבצים: '+started.map(t).join(', ')+'.':'',
+    waiting.length?'שירות ההורדות מתעורר, ומיד יתחילו גם: '+waiting.map(t).join(', ')+'.':'',
+    saved.length?'כבר שמורים אצלך, בלי הורדה נוספת: '+saved.map(t).join(', ')+'.':'',
+    'כל הקבצים נשמרים בשלוחה 7. בינתיים אפשר להמשיך לדבר, ואודיע לך על כל קובץ שמוכן.'].filter(Boolean).join(' ');
+}
 async function ext3StartOrPlay(h, media) {
   let job=media.get(h.videoId);
   const askedBefore=!!job&&!job.cancelled;
@@ -5125,6 +5155,7 @@ async function callHandler(call) {
           const subs=ext3SubsChoice(userTranscript), c=pendingSubs; pendingSubs=null;
           console.info('[EXT3_MEDIA] video subtitles choice',{callId:activeKey,videoId:c.videoId,subtitles:subs});
           if(call.selfTest) { replyText='בחרת וידאו '+(subs?'עם':'בלי')+' כתובית עבור '+c.title+'.'; call.selfTest.lastSubs=subs; }
+          else if(c.batch) replyText=(subs?'עם כתובית בעברית. ':'בלי כתובית. ')+await ext3StartBatch(c.batch,'video',callMedia,subs);
           else {
             const m=await ext3StartOrPlay({...c,mode:'video',subtitles:subs},callMedia);
             replyText=m.handoff?'שירות ההורדות לא מוגדר כרגע. אפשר להוריד את '+c.title+' בשלוחה 2.':(subs?'עם כתובית בעברית מוטבעת בתוך הסרטון. ':'בלי כתובית. ')+m.reply;
@@ -5172,6 +5203,7 @@ async function callHandler(call) {
           const choice=ext3ConfirmChoice(userTranscript), c=pendingConfirm; pendingConfirm=null; pendingChoices=null;
           console.info('[EXT3_MEDIA] confirmation',{callId:activeKey,videoId:c.videoId,choice});
           if(choice==='cancel') replyText='ביטלתי, ולא הורדתי כלום. על מה תרצה שנמשיך לדבר?';
+          else if(choice==='video'&&c.batch) { pendingSubs=c; replyText='להוסיף לכל הסרטונים כתובית בעברית, מוטבעת בתוך הסרטון? עם כתובית הקש 1, בלי כתובית הקש 2.'; }
           // Owner, 13.11: video (2) also offers Hebrew subtitles, as in extension 2.
           else if(choice==='video') {
             pendingSubs=c;
@@ -5181,6 +5213,7 @@ async function callHandler(call) {
             if(call.selfTest) call.selfTest.lastSubsAsk=c.videoId;
           }
           else if(call.selfTest) replyText='בחרת קובץ שמע עבור '+c.title+'.';
+          else if(c.batch) replyText=await ext3StartBatch(c.batch,'audio',callMedia);
           else { const m=await ext3StartOrPlay({...c,mode:choice},callMedia); replyText=m.handoff?'שירות ההורדות לא מוגדר כרגע. אפשר להוריד את '+c.title+' בשלוחה 2.':m.reply; if(m.play) pendingPlay=m.play; }
           turnContext.ext3Ref={type:'video',videoId:c.videoId,title:c.title,channelTitle:c.channelTitle,durationSec:c.durationSec};
           if(call.selfTest) call.selfTest.lastConfirmChoice=choice;

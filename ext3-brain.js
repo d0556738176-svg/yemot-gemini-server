@@ -399,6 +399,27 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, rece
 }
 
 /** The full title first, then 1 audio / 2 video / 3 cancel; nothing is downloaded before a choice. */
+// "את כולם", "את שלושתם", "את 1 ו-3", "את השני והרביעי": which of the offered videos.
+const ORD = [[/(?:^|\s|ו|-)(?:1|אחת|אחד|הראשון|הראשונה|ראשון)(?=$|[\s,.!?ו])/u, 1], [/(?:^|\s|ו|-)(?:2|שתיים|שתים|שניים|השני|השנייה|שני)(?=$|[\s,.!?ו])/u, 2], [/(?:^|\s|ו|-)(?:3|שלוש|שלושה|השלישי|השלישית|שלישי)(?=$|[\s,.!?ו])/u, 3], [/(?:^|\s|ו|-)(?:4|ארבע|ארבעה|הרביעי|הרביעית|רביעי)(?=$|[\s,.!?ו])/u, 4], [/(?:^|\s|ו|-)(?:5|חמש|חמישה|החמישי|החמישית|חמישי)(?=$|[\s,.!?ו])/u, 5], [/(?:^|\s|ו|-)(?:6|שש|שישה|השישי|השישית|שישי)(?=$|[\s,.!?ו])/u, 6]];
+export function pickMany(text, options = []) {
+  const t = String(text || '');
+  const opts = (options || []).filter(v => v?.videoId);
+  if (!opts.length) return [];
+  if (/(?:את כולם|את כל ה?(?:שלושה|שלושת|סרטונים|שירים|אלה|האלה)|כולם|שלושתם|שניהם|את שתיהם|את כל מה שמצאת|הכל)(?=$|[\s,.!?])/u.test(t)) {
+    const n = /שניהם|שתיהם/u.test(t) ? 2 : /שלושתם|שלושת/u.test(t) ? 3 : opts.length;
+    return opts.slice(0, Math.min(n, 6));
+  }
+  const nums = ORD.filter(([rx]) => rx.test(t)).map(([, n]) => n).filter(n => n <= opts.length);
+  return nums.length >= 2 ? nums.map(n => opts[n - 1]) : [];
+}
+export function confirmBatch(videos) {
+  const list = videos.slice(0, 6);
+  return {
+    confirm: { batch: list.map(v => ({ videoId: v.videoId, title: v.title, channelTitle: v.channelTitle, durationSec: v.durationSec, language: v.language || '' })), title: list.length + ' קבצים', videoId: list[0].videoId, mode: 'audio' },
+    reply: 'לפני שאני מורידה, רק לוודא שאלה הקבצים הנכונים, ' + list.length + ' יחד: ' + list.map((v, i) => (i + 1) + ', ' + clip(cleanTitle(v.title), 70) + (v.durationSec ? ', ' + spokenDuration(v.durationSec) : '')).join('. ') + '. ' +
+      'להורדת כולם כקובצי שמע הקש 1, כווידאו עם אפשרות לכתובית הקש 2, לביטול הקש 3.'
+  };
+}
 export function confirmFor(v, mode = 'audio') {
   return {
     confirm: { videoId: v.videoId, title: v.title, channelTitle: v.channelTitle, durationSec: v.durationSec, language: v.language || '', mode },
@@ -785,12 +806,14 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
 
   if (plan.intent === 'media_status') return out({ mediaStatus: true, reply: '' });
   // "Download them all": one at a time, and he picks which one first.
-  if (['video_play', 'cancel'].includes(plan.intent) && /(?:את כל|את כולם|הכל|כל השירים|כל הסרטונים|כולם)(?=$|[\s,.!?])/u.test(utterance) && PLAY_WORD.test(utterance)) {
-    const opts = (lastVideo?.options || []).slice(0, 3);
-    const choices = {}; opts.forEach((v, i) => { choices[String(i + 1)] = { type: 'video', video: v }; });
-    return out({ ...(opts.length ? { choices } : {}), reply: 'אני מורידה שיר או סרטון אחד בכל פעם, כדי שתשמע בדיוק מה יורד ותאשר. ' +
-      (opts.length ? 'נתחיל באחד מהם: ' + opts.map((v, i) => 'ל' + clip(cleanTitle(v.title), 55) + ' הקש ' + (i + 1)).join(', ') + '. אחרי שהוא יורד, נעבור לבא בתור.' : 'אמור לי את שם השיר הראשון שתרצה, ואחריו נמשיך לבא.') });
+  // Owner, 19.11: several of the videos just offered, together, after one
+  // confirmation that names every one of them.
+  if (['video_play', 'cancel', 'chat'].includes(plan.intent) && PLAY_WORD.test(utterance) && (lastVideo?.options || []).length) {
+    const picked = pickMany(utterance, lastVideo.options);
+    if (picked.length >= 2) { const c = confirmBatch(picked); return out({ ref: lastVideo, confirm: c.confirm, reply: c.reply }); }
   }
+  if (['video_play', 'cancel'].includes(plan.intent) && /(?:את כל|את כולם|הכל|כל השירים|כל הסרטונים|כולם)(?=$|[\s,.!?])/u.test(utterance) && PLAY_WORD.test(utterance))
+    return out({ reply: 'כדי להוריד כמה יחד, קודם אמצא אותם: אמור לי מה לחפש, למשל שירים של זמר מסוים, ואחרי שתשמע את הרשימה תגיד תוריד את כולם, או את אחת ושלוש.' });
   if (plan.intent === 'cancel') return out({ cancel: true, reply: '' });
 
   if (plan.intent === 'library') {
@@ -902,7 +925,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     const choices = {};
     if (others.length) {
       [v, ...others].forEach((x, i) => { choices[String(i + 1)] = { type: 'video', video: videoRef(x) }; });
-      reply = reply.replace(/[.\s]*$/, '. ') + 'ואם תרצה לבחור במקשים: ' + [v, ...others].map((x, i) => 'ל' + clip(cleanTitle(x.title), 55) + ' הקש ' + (i + 1)).join(', ') + '.';
+      reply = reply.replace(/[.\s]*$/, '. ') + 'ואם תרצה לבחור במקשים: ' + [v, ...others].map((x, i) => 'ל' + clip(cleanTitle(x.title), 55) + ' הקש ' + (i + 1)).join(', ') + '.'
+      if (others.length) reply += ' אפשר גם להוריד כמה יחד: אמור תוריד את כולם, או למשל את אחת ושלוש.';
     }
     return out({ ref: { ...videoRef(v), ...(others.length ? { options: [v, ...others].map(videoRef) } : {}) }, reply, ...(others.length ? { choices } : {}) });
   }
