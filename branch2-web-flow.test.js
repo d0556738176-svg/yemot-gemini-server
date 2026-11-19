@@ -24,7 +24,7 @@ test('a registered web item gives its link, facts and metadata', async () => {
   assert.equal(f.title, 'שיר'); assert.equal(f.durationSeconds, 200); assert.equal(f.publishedAt, '2025-01-02T00:00:00Z');
   const m = downloadMetadata(id, f);
   assert.equal(m.website, 'https://soundcloud.com/a/b');
-  assert.equal(m.publisher, 'soundcloud.com');
+  assert.equal(m.publisher, 'סאונדקלאוד');
   assert.equal(webFacts(null), null);
 });
 

@@ -208,7 +208,9 @@ export function downloadMetadata(videoId, facts = {}, fallbackTitle = null) {
     title: credits.title || facts.title || fallbackTitle || videoId,
     artist: credits.artist || facts.channel, album_artist: facts.channel, album: facts.channel,
     composer: credits.composer || null, lyricist: credits.lyricist || null, arranger: credits.arranger || null,
-    date: date || null,
+    // 19.11: the day in the plain form every player reads ("2011-10-04");
+    // the exact hour stays in the comment ("פורסם ... בשעה ...").
+    date: date ? date.slice(0, 10) : null,
     year: Number.isFinite(t) ? String(new Date(t).getUTCFullYear()) : null,
     genre: GENRES[Number(facts.categoryId)] || null,
     comment: [credits.title && facts.title && credits.title !== facts.title ? facts.title : '', published, url].filter(Boolean).join(' | '), description: desc || null, synopsis: desc || null,
@@ -243,7 +245,14 @@ export async function makeDownloadCopy(source, out, { format = 'm4a', jpeg, meta
   const pic = [];
   if (jpeg) { await fs.writeFile(jpg, jpeg); input.push('-i', jpg); pic.push('-map', '1:v:0', '-disposition:v:0', 'attached_pic'); }
   const tags = ['-map_metadata', '-1'];
-  for (const [k, v] of Object.entries(metadata)) tags.push('-metadata', k + '=' + String(v));
+  // FLAC keeps one comment field: the description went over the comment
+  // (publish time and the link were lost, 19.11), so both go in one.
+  let meta = metadata;
+  if (format === 'flac' && metadata.description) {
+    const { description, ...rest } = metadata;
+    meta = { ...rest, comment: [metadata.comment, description].filter(Boolean).join('\n\n') };
+  }
+  for (const [k, v] of Object.entries(meta)) tags.push('-metadata', k + '=' + String(v));
   try {
     if (format === 'flac') {
       // Lossless copy of the best stream: decoded once, kept bit-exact from

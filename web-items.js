@@ -6,6 +6,7 @@
 // Kept in Yemot's storage too, so a download resumed after a restart still
 // knows its link.
 import { createHash } from 'node:crypto';
+import { siteName } from './branch2-web-flow.js';
 
 const PATH = 'ivr2:/2/youtubeaudio/web_items.json';
 const items = new Map();
@@ -61,9 +62,10 @@ export function webFacts(w) {
   const publishedAt = /^\d{8}$/.test(d) ? d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8) + 'T00:00:00Z' : null;
   return {
     durationSeconds: Number(w.durationSec) || null, publishedAt, viewCount: Number.isFinite(w.views) ? w.views : null,
-    title: w.title || null, channel: w.uploader || w.site || null, description: w.description || null,
+    // The site by its own name ("הידברות", not "hidabroot.org"), 19.11.
+    title: w.title || null, channel: w.uploader || (w.site ? siteName(w.site) : null), description: w.description || null,
     tags: Array.isArray(w.tags) ? w.tags : null, categoryId: null, audioLanguage: null, hasCaptions: false,
-    regionAllowed: null, regionBlocked: null, webUrl: w.page || w.url, site: w.site || null,
+    regionAllowed: null, regionBlocked: null, webUrl: w.page || w.url, site: w.site ? siteName(w.site) : null,
   };
 }
 export const _test = { items, load: () => { loaded = null; return load(); } };

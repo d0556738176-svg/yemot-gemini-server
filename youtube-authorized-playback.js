@@ -761,6 +761,13 @@ async function saveDownloadCopyInner(id,source,title,temp,policy,durationSec=nul
   // download found them (owner, 15.11: full details in every file).
   const lyrics=await fs.readFile(source+'.lyrics.txt','utf8').catch(()=>'');
   if(lyrics.trim()&&!metadata.lyrics)metadata.lyrics=lyrics.trim(); // the uploader's own words first
+  // 19.11: no words from the uploader or the captions: the song's own audio
+  // transcribed (marked as automatic), so the file still carries its words.
+  if(!metadata.lyrics&&String(process.env.BRANCH2_LYRICS_TRANSCRIBE||'on').toLowerCase()!=='off'){
+    try{ const { transcribedLyrics } = await import('./lyrics-transcribe.js');
+      const w=await transcribedLyrics(source,{durationSec:Number(durationSec)||Number(facts?.durationSeconds)||null,ffmpegPath});
+      if(w)metadata.lyrics=w; }catch(e){ console.warn('[DOWNLOADS] song words not transcribed',{videoId:id,message:String(e?.message||e).slice(0,120)}); }
+  }
   // A dubbed version (" - דיבוב לעברית") keeps all details, named apart.
   if(titleSuffix)metadata.title=String(metadata.title||title||id)+titleSuffix;
   const cap=await uploadCapBytes();
@@ -978,7 +985,10 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     await audioCache.save(id,paths);
     // Extension 7 (newest songs first): copy the complete song there in the
     // background, AFTER it is ready here, so playback is never delayed.
-    if(single&&String(process.env.BRANCH2_EXT7||'on').toLowerCase()!=='off'){
+    // 19.11: also when the phone copy had to go up in pieces (a big file):
+    // extension 7 gets the same complete song as ONE file (a big upload is
+    // sent in parts and joined by Yemot); before, big files never reached 7.
+    if(String(process.env.BRANCH2_EXT7||'on').toLowerCase()!=='off'){
       ext7Job=publishToExt7(id,phone,sourceTitle,{readJson:readCacheJson,writeJson:writeCacheJson,
         upload:(file,remote)=>uploadToYemot(file,remote,undefined,{convertAudio:mastered.sampleRate>8000||!(covered&&!cover.convert)}),log:console})
         .catch(e=>console.warn('[EXT7] song not added',{videoId:id,message:String(e?.message||e).slice(0,200)}));

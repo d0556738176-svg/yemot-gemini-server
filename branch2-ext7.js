@@ -103,8 +103,8 @@ export function publishToExt7(videoId, localWav, title, io) {
 // the order it was saved, so the newest still gets the highest number.
 // io: listSongDirs() -> [dirName], readJson(path), downloadTo(remote, localFile),
 //     joinWavs([local...], outFile), upload(local, remote), tempDir(), log
-export async function backfillExt7(io) {
-  const MARK = 'ivr2:/2/youtubeaudio/ext7_backfill_v1.json';
+export async function backfillExt7(io, { mark = 'ivr2:/2/youtubeaudio/ext7_backfill_v1.json', sinceMs = 0 } = {}) {
+  const MARK = mark;
   if (await io.readJson(MARK).catch(() => null)) return { skipped: true };
   const songs = [];
   const dirs = await io.listSongDirs();
@@ -115,7 +115,9 @@ export async function backfillExt7(io) {
     if (!/^[0-9a-f]{22}$/.test(dir)) continue; // hex of an 11-char video id
     const manifest = await io.readJson('ivr2:/2/youtubeaudio/' + dir + '/complete.json').catch(() => null);
     if (manifest?.complete !== true || !Array.isArray(manifest.playbackPaths) || !manifest.playbackPaths.length) continue;
-    songs.push({ videoId: manifest.videoId, paths: manifest.playbackPaths, at: Date.parse(manifest.createdAt) || 0 });
+    const at = Date.parse(manifest.createdAt) || 0;
+    if (sinceMs && at < sinceMs) continue;
+    songs.push({ videoId: manifest.videoId, paths: manifest.playbackPaths, at });
   }
   songs.sort((a, b) => a.at - b.at);
   const added = [];

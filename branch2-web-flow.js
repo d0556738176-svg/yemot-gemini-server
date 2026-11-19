@@ -7,6 +7,7 @@ const SITES = {
   'instagram.com': 'אינסטגרם', 'youtube.com': 'יוטיוב', 'youtu.be': 'יוטיוב', 'music.youtube.com': 'יוטיוב מיוזיק',
   'kol-halashon.com': 'קול הלשון', 'kolhalashon.com': 'קול הלשון', 'meirtv.com': 'מאיר', 'meirtv.co.il': 'מאיר',
   'torahanytime.com': 'תורה אניטיים', 'jewishmusic.fm': 'ג\'ואיש מיוזיק', 'kikar.co.il': 'כיכר השבת', 'bhol.co.il': 'בחדרי חרדים',
+  'mako.co.il': 'מאקו', '13tv.co.il': 'רשת 13', 'c14.co.il': 'ערוץ 14', 'ynet.co.il': 'ynet', 'walla.co.il': 'וואלה', 'i24news.tv': 'i24NEWS',
   'jdn.co.il': 'ג\'י די אן', 'behadrey.co.il': 'בחדרי חרדים', 'tiktok.com': 'טיקטוק', 'twitter.com': 'טוויטר', 'x.com': 'אקס',
 };
 

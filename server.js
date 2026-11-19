@@ -5854,7 +5854,7 @@ app.listen(port,async()=>{
     const fsp=await import('node:fs/promises');const os=await import('node:os');const pathm=await import('node:path');
     const {Readable}=await import('node:stream');const {pipeline}=await import('node:stream/promises');const {createWriteStream}=await import('node:fs');
     const api=(name,params)=>{const u=new URL(p.YEMOT_API_BASE+'/'+name);u.searchParams.set('token',p.yemotApiKey());for(const [k,v] of Object.entries(params))u.searchParams.set(k,v);return u;};
-    await ext7.backfillExt7({
+    const ext7io={
       log:console,
       readJson:p.readCacheJson, writeJson:p.writeCacheJson,
       upload:(file,remote)=>p.uploadToYemot(file,remote),
@@ -5878,7 +5878,11 @@ app.listen(port,async()=>{
       },
       tempDir:()=>fsp.mkdtemp(pathm.join(os.tmpdir(),'ext7-')),
       removeDir:dir=>fsp.rm(dir,{recursive:true,force:true}).catch(()=>{})
-    });
+    };
+    await ext7.backfillExt7(ext7io);
+    // 19.11: big songs saved in pieces before the fix never reached 7: the
+    // songs of the last 3 days that are missing there are added once.
+    await ext7.backfillExt7(ext7io,{mark:'ivr2:/2/youtubeaudio/ext7_backfill_v2.json',sinceMs:Date.now()-3*86400000});
   })().catch(e=>console.warn('[EXT7] backfill failed',{message:String(e?.message||e).slice(0,200)}));
   // One-time read of a finished johnvc run log (GET only) to learn its real
   // progress output.
