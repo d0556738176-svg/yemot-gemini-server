@@ -46,13 +46,14 @@ const report = async id => fetch(BASE + '/branch2-saved?id=' + id, { signal: Abo
 const runs = [];
 const SC = (process.env.Q || 'a1,w1,v1,w2').split(',');
 for (let i = 0; i < 60; i++) { const st = await fetch('https://main.176-97-205-41.sslip.io/web-search-status').then(r => r.json()).catch(() => null); if (st) { console.log('main has the search backups'); break; } await sleep(20000); }
-const a1 = !SC.includes('a1') ? null : await call('YouTube key 1 (audio)', { mode: '2', query: 'שיר ילדים קצר', key: '1', minSec: 60, maxSec: 420 }); runs.push(['YouTube audio', a1?.id]);
-const w1 = !SC.includes('w1') ? null : await call('Website key 1 (audio)', { mode: '6', query: 'שיעור קצר הרב זמיר כהן הידברות', key: '1', minSec: 120, maxSec: 900 }); runs.push(['Website audio', w1?.id]);
+const a1 = !SC.includes('a1') ? null : await call('YouTube key 1 (audio), long', { mode: '2', query: 'שיעור תורה הרב יגאל כהן', key: '1', minSec: 1200, maxSec: 3000 }); runs.push(['YouTube audio', a1?.id]);
+const w1 = !SC.includes('w1') ? null : await call('Website key 1 (audio), long', { mode: '6', query: 'שיעור הרב זמיר כהן הידברות', key: '1', minSec: 1200, maxSec: 3600 }); runs.push(['Website audio', w1?.id]);
+const w1b = !SC.includes('w1') ? null : await call('Website key 1 again (should play at once)', { mode: '6', query: 'שיעור הרב זמיר כהן הידברות', key: '1', minSec: 1200, maxSec: 3600 });
 const r0 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
 const v1 = !SC.includes('v1') ? null : await call('YouTube key 2 (video)', { mode: '2', query: 'סרטון קצר על הכותל', key: '2', minSec: 60, maxSec: 360 });
 const w2 = !SC.includes('w2') ? null : await call('Website key 2 (video)', { mode: '6', query: 'כתבה קצרה כאן חדשות', key: '2', minSec: 60, maxSec: 600 });
 const r1 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
-console.log('recent jobs', JSON.stringify(r1));
+console.log('recent jobs', JSON.stringify(r1, null, 1));
 console.log('search engines', JSON.stringify(await fetch('https://main.176-97-205-41.sslip.io/web-search-status').then(r => r.json()).catch(e => String(e))));
 const before = new Set((r0.video || []).map(x => x.id));
 for (const j of (r1.video || []).filter(x => !before.has(x.id))) runs.push(['Video ' + j.id, j.id]);
