@@ -1,0 +1,112 @@
+
+#### T-kozagoRfY
+{
+ "path": "/אודיו/עכביש_קטן_שיר_ילדים_שירי_ערוץ_בייבי__Akavish_Katan_Shir_Yeladim_Shiri_Arutz_Baby.flac",
+ "size": 4015776,
+ "picture": true,
+ "pictureSize": "640x360 mjpeg",
+ "audio": {
+  "codec": "flac",
+  "sampleRate": 48000,
+  "channels": 2,
+  "bits": 16
+ },
+ "tags": {
+  "title": "עכביש קטן - שיר ילדים - שירי ערוץ בייבי",
+  "artist": "ערוץ בייבי",
+  "album_artist": "ערוץ בייבי",
+  "album": "ערוץ בייבי",
+  "date": "2011-10-04T10:45:40Z",
+  "year": "2011",
+  "genre": "Entertainment",
+  "comment": "פורסם ביוטיוב ב 4.10.2011 בשעה 12:45 (שעון ישראל) שירי ערוץ בייבי האהובים, שירי ילדים ותינוקות. על הקיר טיפס לו עכביש קטן טיפטיפות הגשם גירש",
+  "synopsis": "פורסם ביוטיוב ב 4.10.2011 בשעה 12:45 (שעון ישראל) שירי ערוץ בייבי האהובים, שירי ילדים ותינוקות. על הקיר טיפס לו עכביש קטן טיפטיפות הגשם גירש",
+  "keywords": "'עכביש, קטן', 'שירי, ילדים', 'ערוץ, בייבי', תיק תק, תיקתק, שירי נועה, שירים לנועה, שירים לנועה 1+2+3",
+  "copyright": "© ערוץ בייבי",
+  "publisher": "YouTube",
+  "website": "https://www.youtube.com/watch?v=T-kozagoRfY",
+  "encoded_by": "Yemot branch 2",
+  "encoder": "Lavf61.1.100"
+ }
+}
+
+#### wbRBO1WktIV
+{
+ "path": "/אודיו/הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1__HaRav_Zamir_Cohen_Mikreh_O_Hashgacha_Pratit_Hidabrut_1.flac",
+ "size": 16011496,
+ "picture": true,
+ "pictureSize": "730x410 mjpeg",
+ "audio": {
+  "codec": "flac",
+  "sampleRate": 48000,
+  "channels": 2,
+  "bits": 16
+ },
+ "tags": {
+  "title": "הרב זמיר כהן - מקרה או השגחה פרטית? - הידברות (1)",
+  "artist": "hidabroot.org",
+  "album_artist": "hidabroot.org",
+  "album": "hidabroot.org",
+  "comment": "מהי אמונה, ואיך היא באה לידי ביטוי במצבים שונים בחיים? הרב זמיר כהן במסר מחזק במיוחד",
+  "synopsis": "מהי אמונה, ואיך היא באה לידי ביטוי במצבים שונים בחיים? הרב זמיר כהן במסר מחזק במיוחד",
+  "copyright": "© hidabroot.org",
+  "publisher": "hidabroot.org",
+  "website": "https://www.hidabroot.org/video/226036",
+  "encoded_by": "Yemot branch 2",
+  "encoder": "Lavf61.1.100"
+ }
+}
+
+#### -YMDen4GSVI
+{
+ "path": "/אודיו/מיוחד_מי_עומד_מאחורי_המאבק_של_נשות_הכותל_וכיצד_הוא_קשור_למחאה_נגד_הממש__Meyuchad_Mi_Omed_Meachorei_Hama_avak_Shel_Nashot_HaKotel_Ve_ketsad_Hu.flac",
+ "size": 14028779,
+ "picture": true,
+ "pictureSize": "1280x720 mjpeg",
+ "audio": {
+  "codec": "flac",
+  "sampleRate": 44100,
+  "channels": 2,
+  "bits": 16
+ },
+ "tags": {
+  "title": "מיוחד: מי עומד מאחורי המאבק של נשות הכותל? וכיצד הוא קשור למחאה נגד הממשלה? | החדשות",
+  "artist": "C14",
+  "album_artist": "C14",
+  "album": "C14",
+  "date": "2026-02-17T18:44:22Z",
+  "year": "2026",
+  "genre": "News & Politics",
+  "comment": "פורסם ביוטיוב ב 17.2.2026 בשעה 20:44 (שעון ישראל) מיוחד: מי עומד מאחורי המאבק של נשות הכותל? וכיצד הוא קשור למחאה נגד הממשלה? | החדשות C14 |",
+  "synopsis": "פורסם ביוטיוב ב 17.2.2026 בשעה 20:44 (שעון ישראל) מיוחד: מי עומד מאחורי המאבק של נשות הכותל? וכיצד הוא קשור למחאה נגד הממשלה? | החדשות C14 |",
+  "keywords": "ערוץ 14, עכשיו 14, יעקב ברדוגו, ינון מגל, הפטריוטים, חדשות, ארץ ישראל, Israel, אראל סגל, ערוץ 20, ליטל שמש, שי גולדן, חדשות 14, סטורי לילה, ",
+  "copyright": "© C14",
+  "publisher": "YouTube",
+  "website": "https://www.youtube.com/watch?v=-YMDen4GSVI",
+  "encoded_by": "Yemot branch 2",
+  "encoder": "Lavf61.1.100"
+ }
+}
+VIDEO {
+ "path": "/וידאו/מיוחד_מי_עומד_מאחורי_המאבק_של_נשות_הכותל_וכיצד_הוא_קשור_למחאה_נגד_הממש__Meyuchad_Mi_Omed_Meachorei_Hama_avak_Shel_Nashot_Hakotel_Ve_ketsad_Hu.mp4",
+ "picture": true,
+ "pictureSize": "1280x720 mjpeg",
+ "tags": {
+  "major_brand": "isom",
+  "minor_version": "512",
+  "compatible_brands": "isomiso2avc1mp41",
+  "title": "מיוחד: מי עומד מאחורי המאבק של נשות הכותל? וכיצד הוא קשור למחאה נגד הממשלה? | החדשות",
+  "artist": "C14",
+  "album_artist": "C14",
+  "album": "C14",
+  "date": "2026-02-17T18:44:22Z",
+  "encoder": "Lavf61.1.100",
+  "comment": "פורסם ביוטיוב ב 17.2.2026 בשעה 20:44 (שעון ישראל) | https://www.youtube.com/watch?v=-YMDen4GSVI",
+  "genre": "News & Politics",
+  "copyright": "© C14",
+  "description": "פורסם ביוטיוב ב 17.2.2026 בשעה 20:44 (שעון ישראל) מיוחד: מי עומד מאחורי המאבק של נשות הכותל? וכיצד הוא קשור למחאה נגד הממשלה? | החדשות C14 |",
+  "synopsis": "פורסם ביוטיוב ב 17.2.2026 בשעה 20:44 (שעון ישראל) מיוחד: מי עומד מאחורי המאבק של נשות הכותל? וכיצד הוא קשור למחאה נגד הממשלה? | החדשות C14 |",
+  "keywords": "ערוץ 14, עכשיו 14, יעקב ברדוגו, ינון מגל, הפטריוטים, חדשות, ארץ ישראל, Israel, אראל סגל, ערוץ 20, ליטל שמש, שי גולדן, חדשות 14, סטורי לילה, "
+ }
+}
+exit=0
