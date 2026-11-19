@@ -73,10 +73,17 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
     if (!prev || r.stop_sequence > prev.stop_sequence) board.set(r.gtfs_ride_id, r); // the stop nearest the destination on the same ride
   }
   if (!board.size) return { trips: [], fromStops, toStops, debug: { leaving: leaving.length, rides: 0, arriving: 0 } };
-  // Everything arriving near the destination in the window, matched to the
-  // rides above here (the API's ride filter returned nothing live, 19.11).
-  const t2 = new Date(now.getTime() + (windowMin + 150) * 60000).toISOString();
-  const arriving = (await rideStops({ gtfs_stop_ids: toStops.map(s => s.id).join(','), arrival_time_from: t0, arrival_time_to: t2, limit: 5000 }, { fetchImpl })).filter(r => board.has(r.gtfs_ride_id));
+  // Each of those rides' own stops (the ride filter works alone; with a stop
+  // list too it returned nothing, 19.11), kept where they pass near the
+  // destination: by the stop's own position, so no stop is missed.
+  const t2 = new Date(now.getTime() + (windowMin + 240) * 60000).toISOString();
+  const ids = [...board.keys()].slice(0, 80);
+  const chunks = []; for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
+  const lists = await Promise.all(chunks.map(c => rideStops({ gtfs_ride_ids: c.join(','), arrival_time_from: t0, arrival_time_to: t2, limit: 3000 }, { fetchImpl }).catch(() => [])));
+  const nearTo = r => Number.isFinite(r.gtfs_stop__lat) ? distanceKm(to, { lat: r.gtfs_stop__lat, lon: r.gtfs_stop__lon }) : (toStops.find(s => s.id === r.gtfs_stop_id)?.km ?? 99);
+  let arriving = lists.flat().filter(r => board.has(r.gtfs_ride_id)).map(r => ({ ...r, _km: nearTo(r) }));
+  const close = arriving.filter(r => r._km <= 0.6);
+  arriving = close.length ? close : arriving.filter(r => r._km <= 1.0);
   const fromKm = new Map(fromStops.map(s => [s.id, s.km])), toKm = new Map(toStops.map(s => [s.id, s.km]));
   const trips = [];
   for (const a of arriving) {
@@ -85,7 +92,7 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
     trips.push({
       line: String(b.gtfs_route__route_short_name || ''), agency: b.gtfs_route__agency_name || '', routeName: String(b.gtfs_route__route_long_name || '').replace(/-\d+$/, ''),
       board: b.gtfs_stop__name, boardWalkKm: fromKm.get(b.gtfs_stop_id) ?? null, leaves: israelHHMM(b.departure_time || b.arrival_time), leavesAt: Date.parse(b.departure_time || b.arrival_time),
-      alight: a.gtfs_stop__name, alightWalkKm: toKm.get(a.gtfs_stop_id) ?? null, arrives: israelHHMM(a.arrival_time), arrivesAt: Date.parse(a.arrival_time),
+      alight: a.gtfs_stop__name, alightWalkKm: a._km ?? toKm.get(a.gtfs_stop_id) ?? null, arrives: israelHHMM(a.arrival_time), arrivesAt: Date.parse(a.arrival_time),
       rail: String(b.gtfs_route__route_type) === '2'
     });
   }

@@ -83,14 +83,14 @@ function stride(url) {
   const u = new URL(String(url));
   if (u.pathname === '/gtfs_stops/list') return json(stops.filter(s => s.city === u.searchParams.get('city')));
   if (u.pathname === '/gtfs_ride_stops/list') {
-    const ids = u.searchParams.get('gtfs_stop_ids').split(',').map(Number);
+    const ids = u.searchParams.get('gtfs_stop_ids')?.split(',').map(Number);
     const all = [
       ride(100, 1, 'נחל דולב/נחל הקישון', 3, '2026-11-19T18:40:00Z'), ride(100, 3, 'התחנה המרכזית ירושלים', 30, '2026-11-19T19:25:00Z'),
       ride(200, 1, 'נחל דולב/נחל הקישון', 5, '2026-11-19T18:50:00Z', '23', 'אחר'), ride(200, 2, 'מרכז העיר', 9, '2026-11-19T19:00:00Z', '23', 'אחר'),
       ride(300, 3, 'התחנה המרכזית ירושלים', 2, '2026-11-19T18:45:00Z', '418'), ride(300, 1, 'נחל דולב/נחל הקישון', 20, '2026-11-19T19:30:00Z', '418')
     ];
     const rides = u.searchParams.get('gtfs_ride_ids')?.split(',').map(Number);
-    return json(all.filter(r => ids.includes(r.gtfs_stop_id) && (!rides || rides.includes(r.gtfs_ride_id))));
+    return json(all.filter(r => (!ids || ids.includes(r.gtfs_stop_id)) && (!rides || rides.includes(r.gtfs_ride_id))));
   }
   return json([], 404);
 }
