@@ -8,7 +8,7 @@ const t00 = Date.now(), T = () => '[' + Math.round((Date.now() - t00) / 1000) + 
 const dur = s => { if (!s) return 1e9; let t = 0; const h = s.match(/(\d+)? ?(שעה|שעתיים|שעות)/); if (h) t += h[2] === 'שעה' ? 3600 : h[2] === 'שעתיים' ? 7200 : +h[1] * 3600; const m = s.match(/(\d+)? ?(דקה|דקות)/); if (m) t += m[2] === 'דקה' ? 60 : +m[1] * 60; const x = s.match(/(\d+) שניות/); if (x) t += +x[1]; return t || 1e9; };
 async function call(name, { mode, query, key, minSec = 90, maxSec = 420 }) {
   console.log('\n===== ' + name);
-  const id = 'e2e' + Date.now(); let params = {}, picked = false, keyed = false, result = null;
+  const id = 'e2e' + Date.now(); let params = {}, picked = false, keyed = false, result = null, tries = 0, yt = 0;
   for (let i = 0; i < 500; i++) {
     const u = new URL(BASE + '/yemot-youtube');
     for (const [k, v] of Object.entries({ ApiCallId: id, ApiPhone: '0500000099', ApiDID: '0772296638', ApiExtension: '2', ...params })) u.searchParams.set(k, v);
@@ -22,10 +22,12 @@ async function call(name, { mode, query, key, minSec = 90, maxSec = 420 }) {
     let v = 'None';
     if (i === 0) v = mode;
     else if (/הקלד מה לחפש/.test(s)) v = query;
+    else if (/בחרת את /.test(s) && /אורך ([^,.]+)/.test(s) && !keyed && (dur(s.match(/אורך ([^,.]+)/)[1]) > maxSec || dur(s.match(/אורך ([^,.]+)/)[1]) < minSec) && tries < 8) { tries++; v = '3'; picked = false; console.log('   too long/short; back'); }
+    else if (!picked && /לבחירה הקש את מספר התוצאה/.test(s) && !/אורך/.test(s)) { yt++; v = String(yt); picked = true; console.log('   PICK youtube #' + yt); }
     else if (!picked && /(^|=t-)(1, |נמצאו)/.test(s) && /אורך|דקות/.test(s)) {
       const items = [...s.matchAll(/(?:^|[ =-])(\d+), (.+?), (?:מאתר [^,]+, )?(?:ערוץ [^,]+, )?(?:אורך )?((?:\d+ )?(?:שעה|שעתיים|שעות|דקה|דקות)[^,.]*)/g)].map(x => ({ n: x[1], t: x[2].slice(0, 50), s: dur(x[3]) }));
       const ok = items.filter(x => x.s >= minSec && x.s <= maxSec);
-      const pick = ok[Math.floor(ok.length / 2)] || items[0];
+      const pick = ok[tries % Math.max(1, ok.length)] || items[0];
       console.log('   PICK', JSON.stringify(pick)); v = pick?.n || '1'; picked = true;
     }
     else if (!keyed && /הקש 1/.test(s) && /(להשמעה|כשמע)/.test(s) && /הקש 2/.test(s)) { v = key; keyed = true; }
@@ -42,11 +44,11 @@ async function call(name, { mode, query, key, minSec = 90, maxSec = 420 }) {
 }
 const report = async id => fetch(BASE + '/branch2-saved?id=' + id, { signal: AbortSignal.timeout(300000) }).then(r => r.json()).catch(e => ({ err: String(e) }));
 const runs = [];
-const a1 = await call('YouTube key 1 (audio)', { mode: '2', query: 'ניגון חב"ד ישן', key: '1' }); runs.push(['YouTube audio', a1?.id]);
+const a1 = await call('YouTube key 1 (audio)', { mode: '2', query: 'שיר מקהלת מלכות', key: '1', minSec: 120, maxSec: 480 }); runs.push(['YouTube audio', a1?.id]);
 const w1 = await call('Website key 1 (audio)', { mode: '6', query: 'שיעור קצר הרב זמיר כהן הידברות', key: '1', minSec: 120, maxSec: 900 }); runs.push(['Website audio', w1?.id]);
 const r0 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
-const v1 = await call('YouTube key 2 (video)', { mode: '2', query: 'סרטון קצר על הכותל', key: '2', maxSec: 300 });
-const w2 = await call('Website key 2 (video)', { mode: '6', query: 'ארץ נהדרת מאקו קטע', key: '2', minSec: 200, maxSec: 400 });
+const v1 = await call('YouTube key 2 (video)', { mode: '2', query: 'סרטון קצר על הכותל', key: '2', minSec: 60, maxSec: 360 });
+const w2 = await call('Website key 2 (video)', { mode: '6', query: 'כאן 11 כתבה קצרה', key: '2', minSec: 60, maxSec: 600 });
 const r1 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
 console.log('recent jobs', JSON.stringify(r1));
 const before = new Set((r0.video || []).map(x => x.id));
