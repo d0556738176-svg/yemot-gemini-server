@@ -26,3 +26,15 @@ test('no keys -> empty list, never throws', async () => {
   const r = await searchWebVideos('x', { env: {}, fetchImpl: async () => { throw new Error('no'); } });
   assert.deepEqual(r.items, []);
 });
+
+test('when Serper answers nothing, the backup engines find the pages (19.11)', async () => {
+  const fetchImpl = async (url) => {
+    if (/serper/.test(url)) return { ok: false, status: 400, json: async () => ({}) };
+    if (/langsearch/.test(url)) return { ok: true, json: async () => ({ code: 200, data: { webPages: { value: [{ url: 'https://www.hidabroot.org/video/1', name: 'שיעור', snippet: 'וידאו' }] } } }) };
+    if (/jina/.test(url)) return { ok: true, json: async () => ({ data: [{ url: 'https://kan.org.il/ep/2', title: 'פרק', description: '' }] }) };
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  const r = await searchWebVideos('שיעור', { env: { SERPER_API_KEY: 'k', LANGSEARCH_API_KEY: 'l', JINA_API_KEY: 'j' }, fetchImpl });
+  assert.deepEqual(r.items.map(x => x.url).sort(), ['https://kan.org.il/ep/2', 'https://www.hidabroot.org/video/1']);
+  assert.equal(r.engines.backups.langsearch, true);
+});

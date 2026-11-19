@@ -6279,6 +6279,12 @@ app.post('/internal/web-hints', rateLimit(60, 60 * 1000, 'web-hints'), async (re
 
 // Whole-web video search for extension 2 (keys 5/6) and extensions 1/3
 // (owner, 18.11). Same shared secret as the web hints.
+// Which search engines answered the last whole-web searches (no queries,
+// no keys): read-only, for checking from outside (19.11).
+app.get('/web-search-status', rateLimit(30, 60 * 1000, 'web-search-status'), async (req,res)=>{
+  const { searchStatus } = await import('./web-video-search.js');
+  res.json({ searches: searchStatus.slice(-20) });
+});
 app.post('/internal/web-videos', rateLimit(60, 60 * 1000, 'web-videos'), async (req,res)=>{
   const secret=String(process.env.WEB_HINTS_SECRET||'').trim(), got=String(req.get('x-web-hints-secret')||'');
   const { timingSafeEqual } = await import('node:crypto');

@@ -28,17 +28,70 @@ async function serper(path, body, env, fetchImpl, timeoutMs) {
 }
 
 async function tavily(q, env, fetchImpl, timeoutMs) {
-  const key = String(env.TAVILY_API_KEY || env.TAVILY_BACKUP_API_KEY || '').trim();
+  // Both keys, in turn: a used-up or refused key goes to the next (19.11).
+  const keys = [env.TAVILY_API_KEY, env.TAVILY_BACKUP_API_KEY].map(k => String(k || '').trim()).filter(Boolean);
+  for (const key of keys) {
+    try {
+      const r = await fetchImpl('https://api.tavily.com/search', {
+        method: 'POST', signal: AbortSignal.timeout(timeoutMs),
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
+        body: JSON.stringify({ api_key: key, query: q, max_results: 10, search_depth: 'advanced' })
+      });
+      if (r.ok) { const j = await r.json(); if (j?.results?.length) return j; continue; }
+    } catch { /* next key */ }
+  }
+  return null;
+}
+
+// Backup engines (19.11): used only when Serper answered nothing (its free
+// credits can run out), so their own free quotas are kept for that case.
+// Each returns [{ url, title, snippet }] or null.
+async function langsearch(q, env, fetchImpl, timeoutMs) {
+  const key = String(env.LANGSEARCH_API_KEY || '').trim();
   if (!key) return null;
   try {
-    const r = await fetchImpl('https://api.tavily.com/search', {
+    const r = await fetchImpl('https://api.langsearch.com/v1/web-search', {
       method: 'POST', signal: AbortSignal.timeout(timeoutMs),
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
-      body: JSON.stringify({ api_key: key, query: q, max_results: 10, search_depth: 'advanced' })
+      body: JSON.stringify({ query: q, freshness: 'noLimit', summary: false, count: 10 })
     });
-    return r.ok ? await r.json() : null;
+    if (!r.ok) return null;
+    const j = await r.json();
+    const v = j?.data?.webPages?.value || j?.webPages?.value || [];
+    return v.map(x => ({ url: x.url, title: x.name, snippet: x.snippet })).filter(x => x.url);
   } catch { return null; }
 }
+async function jina(q, env, fetchImpl, timeoutMs) {
+  const key = String(env.JINA_API_KEY || '').trim();
+  if (!key) return null;
+  try {
+    const r = await fetchImpl('https://s.jina.ai/?q=' + encodeURIComponent(q), {
+      signal: AbortSignal.timeout(Math.max(timeoutMs, 15000)),
+      headers: { authorization: 'Bearer ' + key, accept: 'application/json', 'x-respond-with': 'no-content' }
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j?.data || []).map(x => ({ url: x.url, title: x.title, snippet: x.description || x.content })).filter(x => x.url);
+  } catch { return null; }
+}
+async function firecrawl(q, env, fetchImpl, timeoutMs) {
+  const key = String(env.FIRECRAWL_API_KEY || '').trim();
+  if (!key) return null;
+  try {
+    const r = await fetchImpl('https://api.firecrawl.dev/v1/search', {
+      method: 'POST', signal: AbortSignal.timeout(Math.max(timeoutMs, 15000)),
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
+      body: JSON.stringify({ query: q, limit: 10 })
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const d = Array.isArray(j?.data) ? j.data : (j?.data?.web || []);
+    return d.map(x => ({ url: x.url, title: x.title, snippet: x.description })).filter(x => x.url);
+  } catch { return null; }
+}
+
+// What answered the last searches (booleans only), for /web-search-status.
+export const searchStatus = [];
 
 export async function searchWebVideos(query, { env = process.env, fetchImpl = fetch, timeoutMs = 9000, max = 30 } = {}) {
   const q = String(query || '').replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -75,8 +128,21 @@ export async function searchWebVideos(query, { env = process.env, fetchImpl = fe
   for (const x of vidsEn?.videos || []) add(x, 'video-en', 2);
   for (const r of [web, webVideo, webLesson, webDownload, webRecording]) for (const x of r?.organic || []) add(x, 'web', MEDIA_HINT.test(x.link + ' ' + x.title) ? 2 : 1);
   for (const x of tv?.results || []) add(x, 'tavily', MEDIA_HINT.test(x.url + ' ' + x.title) ? 2 : 1);
+  // Serper gave nothing (credits used up or down): the backup engines.
+  let backups = null;
+  if (!(vids?.videos?.length || web?.organic?.length)) {
+    const [ls, ls2, jn, fc] = await Promise.all([
+      langsearch(q, env, fetchImpl, timeoutMs), langsearch(q + ' וידאו', env, fetchImpl, timeoutMs),
+      jina(q, env, fetchImpl, timeoutMs), firecrawl(q, env, fetchImpl, timeoutMs),
+    ]);
+    backups = { langsearch: !!(ls?.length || ls2?.length), jina: !!jn?.length, firecrawl: !!fc?.length };
+    for (const x of [...(ls || []), ...(ls2 || []), ...(jn || []), ...(fc || [])]) add(x, 'backup', MEDIA_HINT.test(x.url + ' ' + x.title) ? 2 : 1);
+  }
   // Video results first, then pages that look like they hold media; the
   // original order of each engine is kept within the same weight.
   const items = out.map((x, i) => ({ ...x, i })).sort((a, b) => b.weight - a.weight || a.i - b.i).slice(0, max).map(({ i, weight, ...x }) => x);
-  return { items, engines: { videos: !!vids, web: !!web, tavily: !!tv } };
+  const engines = { videos: !!vids?.videos?.length, web: !!web?.organic?.length, tavily: !!tv?.results?.length, ...(backups ? { backups } : {}) };
+  searchStatus.push({ at: new Date().toISOString(), items: items.length, engines });
+  if (searchStatus.length > 30) searchStatus.shift();
+  return { items, engines };
 }
