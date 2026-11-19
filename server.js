@@ -4458,6 +4458,166 @@ async function youtubeCallHandler(call) {
     }
   }
 
+  // Extension 5 (owner, 19.11): each live channel in its own extension, and
+  // replays by hour in 5/9. Yemot tells which part with api_add_0=tv=<part>.
+  async function ext5Call(part) {
+    const TV=await import('./branch2-tv.js');
+    const tap=async(text,opts={})=>String(await call.read([{type:'text',data:sanitizeForYemot(text)}],'tap',
+      {max_digits:1,min_digits:1,sec_wait:7,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'t5'+(++tapNo),timeout:10*60*1000,...opts})||'None').trim();
+    const list=TV.TV_CHANNELS.map(c=>'ל'+c.title+' הקישו '+c.key).join(', ');
+    if(part==='menu') {
+      for(let i=0;i<3;i++) {
+        const k=await tap('שידורים חיים. '+list+'. לשידורים חוזרים לפי שעה הקישו 9. לתפריט הראשי הקישו כוכבית.',{digits_allowed:[...TV.TV_CHANNELS.map(c=>c.key),'9','*']});
+        branch2KeyLog('tv5',k,0,0);
+        if(k.includes('*')) return call.go_to_folder('/');
+        if(k==='9') return call.go_to_folder('/5/9');
+        if(TV.TV_CHANNELS.some(c=>c.key===k)) return call.go_to_folder('/5/'+k);
+      }
+      return call.go_to_folder('/');
+    }
+    if(part==='replay') {
+      for(let i=0;i<3;i++) {
+        const k=await tap('שידורים חוזרים לפי שעה. '+list+'. לחזרה הקישו כוכבית.',{digits_allowed:[...TV.TV_CHANNELS.map(c=>c.key),'*']});
+        branch2KeyLog('tv5r',k,0,0);
+        if(k.includes('*')) return call.go_to_folder('/5');
+        if(TV.TV_CHANNELS.some(c=>c.key===k)) return call.go_to_folder('/5/9/'+k);
+      }
+      return call.go_to_folder('/5');
+    }
+    let m=part.match(/^live([1-9])$/);
+    if(m) {
+      const ch=TV.TV_CHANNELS.find(c=>c.key===m[1]);
+      if(!ch) return call.go_to_folder('/5');
+      const { noteCall }=await import('./live-relay.js');
+      const deps=await tvDeps();
+      const src=await TV.findChannelSource(ch,deps);
+      noteCall({what:'channel chosen',ext:'5/'+ch.key,key:ch.key,title:ch.title,how:src.how||null,found:!!src.page});
+      if(!src.page) {
+        noteCall({what:'told: not available',key:ch.key});
+        await tap('השידור של '+ch.title+' אינו זמין כרגע. לחזרה לרשימת הערוצים הקישו כוכבית.',{sec_wait:3,digits_allowed:['*']});
+        return call.go_to_folder('/5');
+      }
+      const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,referer:src.referer||null,af:TV.TV_AUDIO_FILTER,
+        refresh:async()=>{ TV.forget(ch.key); const f=await TV.findChannelSource(ch,await tvDeps(),{fresh:true}); return f.page?{url:f.page,referer:f.referer||null}:null; }});
+      noteCall({what:'listening ended',key:ch.key,exit:!!r.exit,told:r.say||null});
+      if(r.exit) return call.go_to_folder('/');
+      if(r.say&&/לא הצלחתי|לא מגיע|נקטע|הסתיים/.test(r.say)) TV.forget(ch.key);
+      return call.go_to_folder('/5');
+    }
+    m=part.match(/^replay([1-9])$/);
+    if(m) {
+      const ch=TV.TV_CHANNELS.find(c=>c.key===m[1]);
+      if(!ch) return call.go_to_folder('/5/9');
+      const REC=await import('./tv-recorder.js');
+      let note='';
+      for(let round=0;round<8;round++) {
+        const have=await REC.hoursAvailable(ch.key);
+        if(!have.length) {
+          await tap('עדיין אין הקלטות של '+ch.title+'. ההקלטה פועלת כל הזמן, ושעה שהוקלטה תהיה זמינה כאן. לחזרה הקישו כוכבית.',{sec_wait:3,digits_allowed:['*']});
+          return call.go_to_folder('/5/9');
+        }
+        const k=String(await call.read([{type:'text',data:sanitizeForYemot(note+'שידורים חוזרים של '+ch.title+'. הקישו את השעה בשתי ספרות, למשל אפס שמונה לשמונה בבוקר, או שתיים אפס לשמונה בערב. לחזרה הקישו כוכבית.')}],'tap',
+          {max_digits:2,min_digits:1,sec_wait:7,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'h5'+(++tapNo),timeout:10*60*1000})||'None').trim();
+        branch2KeyLog('tv5h',k,0,0);
+        if(k.includes('*')) return call.go_to_folder('/5/9');
+        if(k==='None') { if(round>=1) return call.go_to_folder('/5/9'); continue; }
+        const hour=Number(k);
+        if(!/^\d{1,2}$/.test(k)||hour>23) { note='השעה '+k+' אינה בין אפס לעשרים ושלוש. '; continue; }
+        if(!have.includes(hour)) { note='אין הקלטה של '+ch.title+' בשעה '+hour+'. '; continue; }
+        const r=await replayHours(ch,hour,REC);
+        if(r.exit) return call.go_to_folder('/');
+        if(r.back) return call.go_to_folder('/5/9');
+        note=r.say||'';
+      }
+      return call.go_to_folder('/5/9');
+    }
+    return call.go_to_folder('/');
+  }
+
+  // Plays a recorded hour (and the next ones, while recorded) in 2-minute
+  // pieces: 6 = 2 minutes on, 4 = 2 minutes back, 3 = 10 minutes on,
+  // # = choose another hour, * = back to the channels.
+  async function replayHours(ch,firstHour,REC) {
+    const TV=await import('./branch2-tv.js');
+    const p=(await import('./youtube-authorized-playback.js'))._pipeline;
+    const { SYSTEM_FFMPEG }=await import('./live-relay.js');
+    const { existsSync }=await import('node:fs');
+    const fsp=(await import('node:fs')).promises;
+    const os=(await import('node:os')).default;
+    const pathm=(await import('node:path')).default;
+    const bin=[...SYSTEM_FFMPEG.filter(b=>existsSync(b)),(await import('ffmpeg-static')).default].filter(Boolean)[0];
+    const { spawn }=await import('node:child_process');
+    const PIECE=120;
+    const callTag=Math.random().toString(36).slice(2,8);
+    const tmp=await fsp.mkdtemp(pathm.join(os.tmpdir(),'replay-'));
+    const uploaded=[];
+    const del=async remote=>{ const x=new URL(p.YEMOT_API_BASE+'/FileAction'); x.searchParams.set('token',p.yemotApiKey()); x.searchParams.set('action','delete'); x.searchParams.set('what',remote); await fetch(x,{signal:AbortSignal.timeout(8000)}).catch(()=>{}); };
+    // One piece: file index + offset -> phone WAV in Yemot, or null at the end of the file.
+    const made=new Map();
+    const makePiece=(files,fi,off)=>{
+      const id=fi+':'+off;
+      if(made.has(id)) return made.get(id);
+      const job=(async()=>{
+        const out=pathm.join(tmp,fi+'_'+off+'.wav');
+        await new Promise(res=>{ const pr=spawn(bin,['-hide_banner','-loglevel','error','-y','-ss',String(off),'-i',files[fi],'-t',String(PIECE),'-vn','-ac','1','-ar','16000','-af',TV.TV_AUDIO_FILTER,'-c:a','pcm_s16le',out],{stdio:['ignore','ignore','ignore']}); pr.on('close',res); pr.on('error',res); });
+        const st=await fsp.stat(out).catch(()=>null);
+        if(!st||st.size<32000*2) return null; // under ~2 seconds: this file is over
+        const remote='ivr2:/2/replay/'+callTag+'/'+String(made.size).padStart(3,'0')+'.wav';
+        await p.uploadToYemot(out,remote,undefined,{convertAudio:true,single:true});
+        await fsp.unlink(out).catch(()=>{});
+        uploaded.push(remote);
+        return { remote, play:remote.replace(/^ivr2:/,'').replace(/\.wav$/,'') };
+      })().catch(e=>{ console.warn('[TV REPLAY] piece failed',{key:ch.key,message:String(e?.message||e).slice(0,160)}); return null; });
+      made.set(id,job);
+      return job;
+    };
+    try {
+      let hour=firstHour, files=await REC.filesForHour(ch.key,hour), fi=0, off=0, first=true;
+      console.info('[TV REPLAY] start',{key:ch.key,hour,files:files.length});
+      while(true) {
+        if(fi>=files.length) {
+          // Next hour, when it was recorded too.
+          const next=(hour+1)%24;
+          const nf=await REC.filesForHour(ch.key,next);
+          const cur=REC.israelParts().hour;
+          if(!nf.length||next===(cur+1)%24) return {say:'סוף ההקלטות של '+ch.title+'. '};
+          hour=next; files=nf; fi=0; off=0; made.clear();
+          continue;
+        }
+        const piece=await makePiece(files,fi,off);
+        if(!piece) { fi++; off=0; continue; }
+        // The next piece is prepared while this one plays.
+        makePiece(files,fi,off+PIECE);
+        const intro=first?[{type:'text',data:sanitizeForYemot('משמיע את '+ch.title+' משעה '+hour+'. לדילוג קדימה שתי דקות הקישו 6, עשר דקות 3, אחורה 4. לשעה אחרת סולמית, ולחזרה כוכבית.')}]:[];
+        first=false;
+        const k=String(await call.read([...intro,{type:'file',data:piece.play}],'tap',
+          {max_digits:1,min_digits:1,sec_wait:1,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'rp'+(++tapNo),timeout:10*60*1000})||'None').trim();
+        if(k.includes('*')) return {back:true};
+        if(k==='#') return {say:''};
+        if(k==='4') {
+          if(off>=PIECE) off-=PIECE;
+          else if(fi>0) { fi--; off=5*PIECE; } // the end of the previous 10-minute file
+          continue;
+        }
+        if(k==='3') { off+=5*PIECE; continue; }
+        off+=PIECE; // played to the end, or 6
+      }
+    } finally {
+      for(const r of uploaded) del(r);
+      fsp.rm(tmp,{recursive:true,force:true}).catch(()=>{});
+    }
+  }
+
+  const tvPart=String(call?.values?.tv ?? call?.req?.query?.tv ?? '').trim();
+  if(tvPart) {
+    try { return await ext5Call(tvPart); }
+    catch(e) {
+      if(e instanceof ExitError) throw e;
+      console.warn('[EXT5 TV] call failed',{part:tvPart,message:String(e?.message||e).slice(0,200)});
+      return call.go_to_folder('/');
+    }
+  }
+
   async function playSelected(call, video, playOpts={}) {
     console.info('[YouTube IVR] direct playback requested', { videoId: video.videoId, consent: !!playOpts.consentToFallback });
     // Preparation runs in the background (download -> convert -> upload). We keep
@@ -4651,18 +4811,15 @@ async function youtubeCallHandler(call) {
         }
         if(!searchMode) {
           const choice=String(await call.read(
-            [{type:'text',data:sanitizeForYemot((said?said+' ':'')+'לחיפוש ביוטיוב בדיבור הקש 1. לחיפוש בהקלדה במקשי הטלפון הקש 2. להיסטוריית החיפושים הקש 4. לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3. לשידורים החיים של ערוצי הטלוויזיה והרדיו הקש 8. לחזרה לתפריט הראשי הקש כוכבית.')}],
+            [{type:'text',data:sanitizeForYemot((said?said+' ':'')+'לחיפוש ביוטיוב בדיבור הקש 1. לחיפוש בהקלדה במקשי הטלפון הקש 2. להיסטוריית החיפושים הקש 4. לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3. לחזרה לתפריט הראשי הקש כוכבית.')}],
             'tap',
             {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',val_name:'m'+(++tapNo),timeout:10*60*1000,
              digits_allowed:['1','2','3','4','5','6','8','*']}
           )||'None').trim();
           console.info('[YouTube IVR] search mode',{choice}); branch2KeyLog('mode',choice,0,0);
           if(choice.includes('*')) return call.go_to_folder('/');
-          if(choice==='8') {
-            const t=await tvMenu();
-            if(t.exit) return call.go_to_folder('/');
-            continue;
-          }
+          // The live channels moved to main-menu extension 5 (owner, 19.11).
+          if(choice==='8') return call.go_to_folder('/5');
           if(choice==='5'||choice==='6'||choice==='3') {
             const w=await webFlow(choice==='5'?'voice':choice==='6'?'type':'history');
             if(w.exit) return call.go_to_folder('/');
@@ -5459,10 +5616,18 @@ if (process.env.BRANCH2_TV_WARM !== 'off') {
   setTimeout(warm,90*1000).unref?.();
   setInterval(warm,15*60*1000).unref?.();
 }
+// Replays (5/9): every channel is recorded around the clock (owner, 19.11).
+setTimeout(async()=>{ try {
+  const TV=await import('./branch2-tv.js'); const { startRecorders }=await import('./tv-recorder.js');
+  startRecorders({ channels: TV.TV_CHANNELS, ffmpegPath: (await import('ffmpeg-static')).default, log: console,
+    findSource: async (ch,{fresh}={}) => TV.findChannelSource(ch, await tvDeps(), { fresh }) });
+} catch(e) { console.warn('[TV REC] not started',{message:String(e?.message||e).slice(0,200)}); } }, 5000).unref?.();
 app.get('/tv-status', rateLimit(30, 60 * 1000, 'tv-status'), async (req,res)=>{
   const TV=await import('./branch2-tv.js'); const { _relays, relayHistory }=await import('./live-relay.js');
   const host=u=>{ try { return new URL(u).host; } catch { return null; } };
-  res.json({ channels: TV.tvStatus(_relays),
+  const { recStatus, hoursAvailable }=await import('./tv-recorder.js'); const { ext5Status }=await import('./tv-ext5.js');
+  const recordings={}; for(const ch of TV.TV_CHANNELS) recordings[ch.key]={ ...(recStatus[ch.key]||{}), hours: await hoursAvailable(ch.key) };
+  res.json({ ext5: ext5Status, recordings, channels: TV.tvStatus(_relays),
     live: [..._relays.values()].filter(r=>!r.stopped).map(r=>({ title:r.title, site:host(r.url), pieces:r.next, inYemot:r.pieces.length, error:r.error, events:r.events.slice(-12) })),
     stopped: relayHistory().map(r=>({ ...r, url:undefined, site:host(r.url) })) });
 });
@@ -5714,6 +5879,15 @@ async function configureYemotStructure() {
           } catch (e) { console.warn('[Yemot automatic setup] key cleanup skipped', { path: extPath, message: String(e?.message || e).slice(0, 120) }); }
         }
       } catch (e) { console.warn('[Yemot automatic setup] extension 7 not configured', { message: String(e?.message || e).slice(0, 200) }); }
+    }
+    // Extension 5: the live TV channels and their replays (owner, 19.11).
+    if (String(process.env.BRANCH2_EXT5_TV || 'on').toLowerCase() !== 'off') {
+      try {
+        const { setupExt5 } = await import('./tv-ext5.js');
+        const getText = async what => { const j = await (await fetch(base + '/GetTextFile?' + new URLSearchParams({ token, what }))).json().catch(() => null); return j?.responseStatus === 'OK' ? String(j.contents ?? '') : null; };
+        const putText = async (what, contents) => { const j = await (await fetch(base + '/UploadTextFile', { method: 'POST', body: new URLSearchParams({ token, what, contents }) })).json().catch(() => null); if (j?.responseStatus !== 'OK') throw new Error('UploadTextFile ' + what + ': ' + (j?.message || 'failed')); };
+        await setupExt5(publicUrl, { getText, putText, update: (path, settings) => updateExtension(path, settings) }, console);
+      } catch (e) { console.warn('[EXT5 TV] not configured', { message: String(e?.message || e).slice(0, 200) }); }
     }
     // Playback extensions: * = Yemot star menu, 0 = main menu (owner, 12.11).
     try { await (await import('./branch2-star-keys.js')).applyMainMenuKey({ base, token }); }
