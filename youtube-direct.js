@@ -125,6 +125,9 @@ function fileSeconds(file) {
 export async function directDownload(videoId, output, opts = {}) {
   const log = opts.log || console;
   const web = await webItem(videoId).catch(() => null);
+  // 19.11: a website file is named after the title the site shows (search
+  // result), not the downloader's guess ("2289_ab2dbe52695dfda").
+  const fix = r => (web?.title && r ? { ...r, title: web.title } : r);
   let first = null, firstErr = null, firstSec = null;
   try { first = await directDownloadPlain(videoId, output, opts); }
   catch (e) {
@@ -137,13 +140,13 @@ export async function directDownload(videoId, output, opts = {}) {
     // shorter than the site's own length is replaced by what the page's
     // player really plays (browser engine), when that is longer.
     const want = Number(web?.durationSec) || 0;
-    if (!web || web.live || want < 60) { if (web) webEvent(web, true, first.client || 'yt-dlp'); return first; }
+    if (!web || web.live || want < 60) { if (web) webEvent(web, true, first.client || 'yt-dlp'); return fix(first); }
     firstSec = await fileSeconds(output);
-    if (!firstSec || firstSec >= want * 0.6) { webEvent(web, true, first.client || 'yt-dlp'); return first; }
+    if (!firstSec || firstSec >= want * 0.6) { webEvent(web, true, first.client || 'yt-dlp'); return fix(first); }
     log.warn?.('[DIRECT] the site gave a much shorter file than the recording; trying the page player', { videoId, gotSec: Math.round(firstSec), wantSec: want });
   }
   if (!(browserAvailable() || streamlinkPath())) {
-    if (first) { webEvent(web, true, (first.client || 'yt-dlp') + ' (short)', 'only ' + Math.round(firstSec) + 's of ' + web.durationSec + 's'); return first; }
+    if (first) { webEvent(web, true, (first.client || 'yt-dlp') + ' (short)', 'only ' + Math.round(firstSec) + 's of ' + web.durationSec + 's'); return fix(first); }
     webEvent(web, false, 'plain', firstErr?.message || firstErr); throw firstErr;
   }
   // Owner, 18.11: every site we can. The page is opened again in the
@@ -165,13 +168,13 @@ export async function directDownload(videoId, output, opts = {}) {
       }
       log.info?.('[DIRECT] downloaded through the browser engine', { videoId, bytes: r.bytes });
       webEvent(web, true, 'browser/streamlink');
-      return r;
+      return fix(r);
     } catch (e2) {
       if (e2?.name === 'AbortError' || e2?.code === 'too_large') throw e2;
       log.warn?.('[DIRECT] browser engine address failed', { videoId, message: String(e2?.message || e2).slice(0, 160) });
     }
   }
-  if (first) { webEvent(web, true, (first.client || 'yt-dlp') + ' (short)', 'only ' + Math.round(firstSec) + 's of ' + web.durationSec + 's; the page player gave nothing longer'); return first; }
+  if (first) { webEvent(web, true, (first.client || 'yt-dlp') + ' (short)', 'only ' + Math.round(firstSec) + 's of ' + web.durationSec + 's; the page player gave nothing longer'); return fix(first); }
   webEvent(web, false, 'all', (firstErr?.message || firstErr) + (s ? ' | browser found ' + (s.media?.length || 0) + ' media' : ' | browser not run'));
   throw firstErr;
 }

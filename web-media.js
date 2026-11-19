@@ -173,15 +173,23 @@ export async function hlsIsLive(url, { headers = {}, cookie = null, fetchImpl = 
 export async function followGoogleRedirect(url, { fetchImpl = fetch } = {}) {
   try {
     if (!/(^|\.)google(?:apis)?\.com$/i.test(new URL(url).hostname)) return url;
-    const r = await fetchImpl(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(6000) });
-    const loc = r.headers.get('location');
-    return loc && /^https?:\/\//i.test(loc) ? loc : url;
+    const r = await fetchImpl(url, { method: 'GET', redirect: 'follow', signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+    try { await r.body?.cancel(); } catch {}
+    let end = r.url && /^https?:\/\//i.test(r.url) ? r.url : url;
+    // A page that forwards by itself in its HTML (no 302).
+    if (/(^|\.)google(?:apis)?\.com$/i.test(new URL(end).hostname)) {
+      const r2 = await fetchImpl(end, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Mozilla/5.0' } }).catch(() => null);
+      const html = r2 ? (await r2.text().catch(() => '')).slice(0, 20000) : '';
+      const m = html.match(/(?:http-equiv=["']?refresh["']?[^>]*url=|window\.location(?:\.href)?\s*=\s*["']|<a [^>]*href=["'])(https?:\/\/[^"'<> ]+)/i);
+      if (m && !/google\./i.test(new URL(m[1].replace(/&amp;/g, '&')).hostname)) end = m[1].replace(/&amp;/g, '&');
+    }
+    return end;
   } catch { return url; }
 }
 
 export async function inspectLink(c0, opts = {}) {
   const c = { ...c0, url: await (opts.followRedirect || followGoogleRedirect)(unwrapRedirect(c0.url)) };
-  if (c.url !== c0.url && !c0.site) c.site = hostOf(c.url);
+  if (c.url !== c0.url) { c.site = hostOf(c.url); c.source = c.source && /google/i.test(c.source) ? null : c.source; }
   let failure = null;
   const r = await inspectLinkPlain(c, { ...opts, onFailure: f => { failure = f; } });
   if (r) return r;
