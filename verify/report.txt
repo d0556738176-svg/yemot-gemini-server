@@ -1,0 +1,280 @@
+version 30ea7e79cab9
+version 30ea7e79cab9
+version 30ea7e79cab9
+version 30ea7e79cab9
+version 30ea7e79cab9
+version 7d39b13a8f79
+main has the search backups
+
+===== Website key 1 (audio)
+[1s] << read=t-לחיפוש ביוטיוב בדיבור הקש 1 לחיפוש בהקלדה במקשי הטלפון הקש 2 להיסטוריית החיפושים הקש 4 לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3 לחזרה לתפריט הראשי הקש כוכבית=m1,no,1,1,5,No,no,no,,1.2.3.4.5.6.8.*,,Ok,None,
+[2s] << read=t-חיפוש בכל האתרים באינטרנט הקלד מה לחפש, בעברית במקשי הטלפון, והקש סולמית אחרי כל אות=wt2,no,,1,60,HebrewKeyboard,no,no,,,,Ok,None,
+[2s] << read=t-מחפש עכשיו בכל האתרים באינטרנט את שיעור קצר הרב אמנון יצחק כל קישור נפתח ונבדק אם אפשר להוריד ממנו, וזה יכול לקחת עד דקה וחצי לחזרה לתפריט הקש כוכבית=w3,no,1,1,2,No,no,no,,,,Ok,None,
+[5s] << read=t-מחפש באתרים, נא להמתין=w4,no,1,1,6,No,no,no,,,,Ok,None,
+[83s] << read=t-לחיפוש ביוטיוב בדיבור הקש 1 לחיפוש בהקלדה במקשי הטלפון הקש 2 להיסטוריית החיפושים הקש 4 לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3 לחזרה לתפריט הראשי הקש כוכבית=m1,no,1,1,5,No,no,no,,1.2.3.4.5.6.8.*,,Ok,None,
+[86s] << read=t-אמור מה תרצה לחפש ביוטיוב אפשר לומר נושא, אדם, ערוץ או שם סרטון ולסיום ההקלטה הקש סולמית לחזרה לתפריט הראשי הקש כוכבית=val_1,no,record,,,no,,,1,60
+[89s] << id_list_message=t-אירעה תקלה זמנית בחיפוש ביוטיוב נא לנסות שוב&
+   RESULT {"played":false,"id":null,"text":"id_list_message=t-אירעה תקלה זמנית בחיפוש ביוטיוב נא לנסות שוב&"}
+
+===== Website key 2 (video)
+[90s] << read=t-לחיפוש ביוטיוב בדיבור הקש 1 לחיפוש בהקלדה במקשי הטלפון הקש 2 להיסטוריית החיפושים הקש 4 לחיפוש עמוק בכל האתרים באינטרנט: בדיבור הקש 5, בהקלדה הקש 6, ולחיפושים האחרונים באינטרנט הקש 3 לחזרה לתפריט הראשי הקש כוכבית=m1,no,1,1,5,No,no,no,,1.2.3.4.5.6.8.*,,Ok,None,
+[90s] << read=t-חיפוש בכל האתרים באינטרנט הקלד מה לחפש, בעברית במקשי הטלפון, והקש סולמית אחרי כל אות=wt2,no,,1,60,HebrewKeyboard,no,no,,,,Ok,None,
+[90s] << read=t-מחפש עכשיו בכל האתרים באינטרנט את סרטון הידברות קצר כל קישור נפתח ונבדק אם אפשר להוריד ממנו, וזה יכול לקחת עד דקה וחצי לחזרה לתפריט הקש כוכבית=w3,no,1,1,2,No,no,no,,,,Ok,None,
+[93s] << read=t-מחפש באתרים, נא להמתין=w4,no,1,1,6,No,no,no,,,,Ok,None,
+[96s] << read=t-מחפש באתרים, נא להמתין=w5,no,1,1,6,No,no,no,,,,Ok,None,
+[187s] << read=t-נמצאו 5 תוצאות 1, מעשה קטן של אדם גדול הידברות (1), מאתר הידברות, אורך 4 דקות 2, בעקבות הפרשה פרשת שלח לך סיפור פרשת השבוע בהמחשת AI מיוחדת, מאתר יוטיוב 3, בעקבות הפרשה פרשת עקב סיפור פרשת השבוע בהמחשת AI מיוחדת, מאתר יוטיוב 4, בעקבות הפרשה פרשת דברים סיפור פרשת השבוע בהמחשת AI מיוחדת, מאתר יוטיוב 5, בעקבות הפרשה פרשת בהעלותך סיפור פרשת השבוע בהמחשת AI מיוחדת, מאתר יוטיוב לבחירה הקש את מספר התוצאה וסולמית לחיפוש חדש הקש 0 0 וסולמית לתפריט הראשי הקש כוכבית=w36,no,2,1,10,No,no,no,,,,Ok,None,
+   PICK {"n":"1","t":"מעשה קטן של אדם גדול הידברות (1)","s":240}
+[188s] << read=t-בחרת את מעשה קטן של אדם גדול הידברות (1), מאתר הידברות, אורך 4 דקות להשמעה ולשמירה בתיקיית אודיו הקש 1 להורדת הסרטון לתיקיית וידאו הקש 2 לחזרה לתוצאות הקש 3 לתפריט הראשי הקש כוכבית=w37,no,1,1,15,No,no,no,,,,Ok,None,
+[188s] << read=t-להוספת כתובית בעברית לסרטון הקש 1 בלי כתובית הקש 2=w38,no,1,1,15,No,no,no,,,,Ok,None,
+[188s] << read=t-הורדת הסרטון התחילה הוא יישמר בתיקיית וידאו עם התמונה והפרטים שלו, ומאותה הורדה יוכן גם השמע אין צורך להמתין על הקו לבחירה הקש את מספר התוצאה וסולמית לחיפוש חדש הקש 0 0 וסולמית לתפריט הראשי הקש כוכבית=w39,no,2,1,10,No,no,no,,,,Ok,None,
+   RESULT {"started":true,"text":"read=t-הורדת הסרטון התחילה הוא יישמר בתיקיית וידאו עם התמונה והפרטים שלו, ומאותה הורדה יוכן גם השמע אין צורך להמתין על הקו לבחירה הקש את מספר התוצאה וסולמית לחיפוש חדש הקש 0 0 וסולמית לתפריט הראשי הקש"}
+recent jobs {
+ "audio": [],
+ "video": [
+  {
+   "id": "wmnAMMFGQ6Z",
+   "status": "running",
+   "mode": null
+  }
+ ],
+ "timings": [],
+ "ext7Newest": [
+  {
+   "id": "sodGf5pzMR4",
+   "file": "148",
+   "title": "מה מראים לנו בחלום ולמה ❓ שיעור נדיר על חלומות 🎯🎯🎯",
+   "at": "2026-11-19T18:52:11.082Z"
+  },
+  {
+   "id": "8EjHeZRAHHQ",
+   "file": "144",
+   "title": "הרב יגאל כהן | הסוד המפתיע לקבלת התורה (שכולנו צריכים לשמוע) ❤️",
+   "at": "2026-11-19T17:02:35.719Z"
+  },
+  {
+   "id": "wmpd0ft8Rgq",
+   "file": "143",
+   "title": "",
+   "at": "2026-11-19T16:48:51.922Z"
+  },
+  {
+   "id": "wXeW8eUPPhs",
+   "file": "142",
+   "title": "",
+   "at": "2026-11-19T16:48:38.133Z"
+  },
+  {
+   "id": "RcQ_jVAm_m8",
+   "file": "141",
+   "title": "",
+   "at": "2026-11-19T16:48:15.536Z"
+  },
+  {
+   "id": "w2r1bkj92zJ",
+   "file": "140",
+   "title": "",
+   "at": "2026-11-19T16:47:57.469Z"
+  },
+  {
+   "id": "wyi1uQgbgdd",
+   "file": "139",
+   "title": "",
+   "at": "2026-11-19T16:47:44.714Z"
+  },
+  {
+   "id": "wLsNksfW3M7",
+   "file": "138",
+   "title": "",
+   "at": "2026-11-19T16:47:31.675Z"
+  }
+ ],
+ "ext7CatchUp": {
+  "at": "2026-11-19T16:49:02.380Z",
+  "count": 48
+ }
+}
+search engines {"searches":[{"at":"2026-11-19T21:25:53.596Z","items":23,"engines":{"videos":false,"web":false,"tavily":false,"backups":{"langsearch":true,"jina":false,"firecrawl":true}}},{"at":"2026-11-19T21:27:22.641Z","items":27,"engines":{"videos":false,"web":false,"tavily":false,"backups":{"langsearch":true,"jina":false,"firecrawl":true}}}]}
+
+waiting 5 minutes for the background copies (extension 7, אודיו, וידאו)...
+
+#### YouTube audio: no id
+
+#### Website audio: no id
+
+#### Video wmnAMMFGQ6Z wmnAMMFGQ6Z
+{
+ "id": "wmnAMMFGQ6Z",
+ "at": "2026-11-19T21:33:56.891Z",
+ "phone": {
+  "files": 1,
+  "paths": [
+   {
+    "path": "/2/youtubeaudio/776d6e414d4d464751365a/מעשה_קטן_של_אדם_גדול_הידברות_1.wav",
+    "exists": true,
+    "size": 3600462
+   }
+  ],
+  "probe": {
+   "container": "wav",
+   "durationSec": 225,
+   "bitRate": 128002,
+   "audio": {
+    "codec": "pcm_s16le",
+    "sampleRate": 8000,
+    "channels": 1,
+    "bits": 16
+   },
+   "video": null,
+   "picture": false,
+   "subtitles": [],
+   "tags": {
+    "encoder": "Lavf60.16.100"
+   },
+   "pictureSize": null
+  },
+  "peakDb": -3.1,
+  "meanDb": -19.3
+ },
+ "ext7": {
+  "file": "149",
+  "title": "מעשה קטן של אדם גדול - הידברות (1)",
+  "exists": true,
+  "size": 3600462,
+  "newest": true
+ },
+ "audioCopy": [
+  {
+   "path": "/אודיו/מעשה_קטן_של_אדם_גדול_הידברות_1__Ma_ase_Katan_Shel_Adam_Gadol_Hidabrut_1.flac",
+   "exists": true,
+   "size": 12016436,
+   "probe": {
+    "container": "flac",
+    "durationSec": 225,
+    "bitRate": 427205,
+    "audio": {
+     "codec": "flac",
+     "sampleRate": 48000,
+     "channels": 2,
+     "bits": 16
+    },
+    "video": null,
+    "picture": true,
+    "subtitles": [],
+    "tags": {
+     "title": "מעשה קטן של אדם גדול - הידברות (1)",
+     "artist": "הידברות",
+     "album_artist": "הידברות",
+     "album": "הידברות",
+     "comment": "https://www.hidabroot.org/video/82228 עד כמה נלך רחוק בשמירת המצוות? סיפור מצמרר על אחד מגדולי הדור שהעדיף להתבזות ולא לעבור על לאו אחד בתור",
+     "synopsis": "עד כמה נלך רחוק בשמירת המצוות? סיפור מצמרר על אחד מגדולי הדור שהעדיף להתבזות ולא לעבור על לאו אחד בתורה!",
+     "copyright": "© הידברות",
+     "publisher": "הידברות",
+     "website": "https://www.hidabroot.org/video/82228",
+     "encoded_by": "Yemot branch 2",
+     "lyrics": "קטן קטן אבל גדול גדול ביקשו לדבר את אחד מהזקנים שבדור אדם שמוגדר כגאון גדול ראש ישיבה חשוב והוא קם לדבר, אדם בזקנותו בקושי קעם, קשה לו והוא ",
+     "encoder": "Lavf61.1.100"
+    },
+    "pictureSize": "730x410 mjpeg"
+   }
+  }
+ ],
+ "audioCopyNames": [
+  "מעשה_קטן_של_אדם_גדול_הידברות_1__Ma_ase_Katan_Shel_Adam_Gadol_Hidabrut_1"
+ ],
+ "video": {
+  "state": "done",
+  "quality": "1080p",
+  "subtitles": "not_requested",
+  "files": [
+   {
+    "path": "/וידאו/מעשה_קטן_של_אדם_גדול_הידברות_1__Ma_ase_Katan_Shel_Adam_Gadol_Hidabrut_1.mp4",
+    "exists": true,
+    "size": 28435554,
+    "probe": {
+     "container": "mov,mp4,m4a,3gp,3g2,mj2",
+     "durationSec": 225,
+     "bitRate": 1010934,
+     "audio": {
+      "codec": "mp3",
+      "sampleRate": 48000,
+      "channels": 2,
+      "bits": null
+     },
+     "video": {
+      "codec": "h264",
+      "width": 768,
+      "height": 576
+     },
+     "picture": true,
+     "subtitles": [],
+     "tags": {
+      "major_brand": "isom",
+      "minor_version": "512",
+      "compatible_brands": "isomiso2avc1mp41",
+      "title": "מעשה קטן של אדם גדול - הידברות (1)",
+      "artist": "הידברות",
+      "album_artist": "הידברות",
+      "album": "הידברות",
+      "encoder": "Lavf61.1.100",
+      "comment": "https://www.hidabroot.org/video/82228",
+      "copyright": "© הידברות",
+      "description": "עד כמה נלך רחוק בשמירת המצוות? סיפור מצמרר על אחד מגדולי הדור שהעדיף להתבזות ולא לעבור על לאו אחד בתורה!",
+      "synopsis": "עד כמה נלך רחוק בשמירת המצוות? סיפור מצמרר על אחד מגדולי הדור שהעדיף להתבזות ולא לעבור על לאו אחד בתורה!"
+     },
+     "pictureSize": "730x410 mjpeg"
+    }
+   }
+  ]
+ }
+}
+
+DOWNLOAD EVENTS [
+ {
+  "at": "2026-11-19T21:28:54.799Z",
+  "kind": "video-start",
+  "id": "wmnAMMFGQ6Z",
+  "title": "מעשה קטן של אדם גדול - הידברות (1)",
+  "subtitles": false
+ },
+ {
+  "at": "2026-11-19T21:30:07.241Z",
+  "kind": "audio",
+  "id": "wmnAMMFGQ6Z",
+  "ok": true,
+  "pieces": 1,
+  "single": true,
+  "durationSec": 225,
+  "readySec": 6
+ },
+ {
+  "at": "2026-11-19T21:30:08.007Z",
+  "kind": "video",
+  "id": "wmnAMMFGQ6Z",
+  "ok": true,
+  "remote": "ivr2:/וידאו/מעשה_קטן_של_אדם_גדול_הידברות_1__Ma_ase_Katan_Shel_Adam_Gadol_Hidabrut_1.mp4"
+ },
+ {
+  "at": "2026-11-19T21:30:09.487Z",
+  "kind": "ext7",
+  "id": "wmnAMMFGQ6Z",
+  "ok": true,
+  "file": "149"
+ },
+ {
+  "at": "2026-11-19T21:30:43.231Z",
+  "kind": "audio-copy",
+  "id": "wmnAMMFGQ6Z",
+  "ok": true,
+  "saved": "ivr2:/אודיו/מעשה_קטן_של_אדם_גדול_הידברות_1__Ma_ase_Katan_Shel_Adam_Gadol_Hidabrut_1.flac"
+ }
+]
+webEvents [
+ {
+  "at": "2026-11-19T21:29:57.631Z",
+  "where": "www.hidabroot.org/video/82228",
+  "title": "מעשה קטן של אדם גדול - הידברות (1)",
+  "ok": true,
+  "engine": "yt-dlp"
+ }
+]
+exit=0
