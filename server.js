@@ -5181,8 +5181,18 @@ async function callHandler(call) {
         // Owner, 18.11: "search the whole web for a recording/video of ..." =
         // extension 2's deep web search, with the results read there and a
         // key press before any download.
-        const webQ=fixed?null:(await import('./web-media-intent.js')).webSearchIntent(userTranscript);
+        // Owner, 19.11: a live broadcast (a TV/radio channel, "what's live",
+        // a live page or a live broadcast by name) plays in extension 2's live
+        // player, the same relay as its channels.
+        const liveQ=fixed||ext3Done?null:(await import('./live-intent.js')).liveIntent(userTranscript);
+        const webQ=fixed||liveQ?.tv?null:(liveQ?.webQuery||(await import('./web-media-intent.js')).webSearchIntent(userTranscript));
         if(ext3Done) {}
+        else if(liveQ?.tv) {
+          turnContext.ext3Handoff={tv:liveQ.tv,title:liveQ.tv.title||'שידור חי',mode:'live'};
+          replyText=liveQ.tv.key?'מעביר אותך לשידור החי של '+liveQ.tv.title+'. השידור מגיע באיחור של כחצי דקה. לחזרה לתפריט הקש כוכבית.':liveQ.tv.url?'מעביר אותך לשידור החי באתר שביקשת. אם יש שם שידור פתוח, תשמע אותו בעוד רגע.':'מעביר אותך לשידורים החיים של ערוצי הטלוויזיה והרדיו. שם תבחר ערוץ בהקשה.';
+          console.info('[LIVE_HANDOFF] live broadcast requested',{callId:activeKey,key:liveQ.tv.key||null,menu:!!liveQ.tv.menu,site:liveQ.tv.url?String(liveQ.tv.url).slice(8,60):null});
+          ext3Done=true;
+        }
         else if(webQ) {
           turnContext.ext3Handoff={webQuery:webQ,title:webQ,mode:'web'};
           replyText=/שידור|לייב/.test(webQ)?'מעביר אותך לחיפוש השידור החי, בשלוחת ההורדות. שם תשמע את השידורים שנמצאו, ותבחר בהקשה.':'מעביר אותך לחיפוש עמוק בכל האתרים באינטרנט, בשלוחת ההורדות. שם תשמע את התוצאות, ותאשר בהקשה לפני כל הורדה.';
