@@ -74,7 +74,46 @@ const exhaustedYouTubeKeys = new Map();
  * is tried, so search keeps working when one key's quota runs out.
  */
 export async function searchYouTubeVideos(query, options = {}) {
-  return withYouTubeKey(apiKey => searchYouTubeVideosWithKey(query, { ...options, apiKey }), options);
+  try {
+    return await withYouTubeKey(apiKey => searchYouTubeVideosWithKey(query, { ...options, apiKey }), options);
+  } catch (error) {
+    // Owner, 19.11: search must stay free with no daily limit. When every
+    // Google key is out of its daily quota (403/429) or none is set, the
+    // server's own yt-dlp searches YouTube directly (no key, no quota).
+    const quota = [403, 429].includes(error?.httpStatus) || error?.status === 503;
+    if (!quota || options.pageToken || process.env.YTDLP_SEARCH === 'off') throw error;
+    const found = await ytdlpSearchVideos(query, options).catch(() => []);
+    if (!found.length) throw error;
+    console.warn('[YouTube IVR] Google quota used up; searched with the server\'s yt-dlp', { results: found.length });
+    return found;
+  }
+}
+
+// YouTube search through the server's yt-dlp: same shape as the API results.
+export async function ytdlpSearchVideos(query, { newest = null, count = 40, timeoutMs = 20000, execImpl = null } = {}) {
+  const original = String(query || '').trim();
+  const q = cleanedSearchText(original);
+  if (!q) return [];
+  const wantsNewest = newest == null ? wantsNewestQuery(original) : !!newest;
+  const args = ['--flat-playlist', '-J', '--no-warnings', '--ignore-errors', (wantsNewest ? 'ytsearchdate' : 'ytsearch') + count + ':' + q];
+  const bin = process.env.YTDLP_BIN || '/usr/local/bin/yt-dlp';
+  const stdout = await (execImpl ? execImpl(bin, args) : new Promise(async (resolve, reject) => {
+    const { execFile } = await import('node:child_process');
+    execFile(bin, args, { timeout: timeoutMs, maxBuffer: 30 * 1024 * 1024 }, (err, out) => (out ? resolve(out) : reject(err || new Error('no output'))));
+  }));
+  const entries = JSON.parse(stdout).entries || [];
+  const results = entries.filter(e => /^[A-Za-z0-9_-]{11}$/.test(String(e?.id || '')) && e.live_status !== 'is_live').map(e => {
+    const ud = String(e.upload_date || '');
+    return {
+      videoId: String(e.id),
+      title: String(e.title || 'ללא כותרת'),
+      channelTitle: String(e.channel || e.uploader || 'ערוץ לא ידוע'),
+      publishedAt: /^\d{8}$/.test(ud) ? ud.slice(0, 4) + '-' + ud.slice(4, 6) + '-' + ud.slice(6, 8) + 'T00:00:00Z' : (e.timestamp ? new Date(e.timestamp * 1000).toISOString() : null),
+      description: String(e.description || '')
+    };
+  });
+  Object.defineProperty(results, 'nextPageToken', { value: null, enumerable: false });
+  return results;
 }
 
 // The next page of a channel's uploads (newest first), with the same key rotation.
