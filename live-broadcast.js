@@ -210,6 +210,7 @@ export const liveEnabled = () => /^(true|1|yes|on)$/i.test(String(process.env.BR
 export async function disableLiveExtension() {
   if (!token()) return;
   const before = await getText(FOLDER + '/ext.ini');
+  if (/^ext5_tv=yes\s*$/m.test(String(before || ''))) return; // the TV channels (19.11) stay
   if (!/go_to_folder=\/\s*$/m.test(String(before || '')) || /type=api/.test(String(before || ''))) {
     await putText(FOLDER + '/ext.ini', 'type=go_to_folder\ngo_to_folder=/\n');
     log('extension 5 cancelled: pressing 5 returns to the main menu');
@@ -221,6 +222,8 @@ export async function configureLiveExtension(publicUrl) {
   // Extension 5 is now also an owner-managed website audio library.
   const existing = token() ? await getText(FOLDER + '/ext.ini') : '';
   if (/^ext5_web_audio_library=yes\s*$/m.test(String(existing || ''))) return;
+  // Owner, 19.11: extension 5 is the live TV channels, set by the extension-2 app.
+  if (/^ext5_tv=yes\s*$/m.test(String(existing || ''))) return;
   if (!liveEnabled()) return disableLiveExtension();
   if (process.env.BRANCH5_LIVE_AUTO_CONFIGURE === 'false' || /staging|test/i.test(process.env.RENDER_SERVICE_NAME || '')) return;
   if (!token() || !publicUrl) return;
