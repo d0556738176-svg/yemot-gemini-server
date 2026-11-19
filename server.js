@@ -4095,7 +4095,10 @@ async function readExt3Handoff(phone) {
   const remote='ivr2:/2/youtubejobs/handoff/'+digits+'.json';
   const data=await Promise.race([_pipeline.readCacheJson(remote).catch(()=>null),new Promise(r=>setTimeout(()=>r(null),3000))]);
   // A whole-web search sent from extension 1 or 3 (owner, 18.11) carries words, not a video.
-  if(!data||!(/^[A-Za-z0-9_-]{11}$/.test(String(data.videoId||''))||String(data.webQuery||'').trim())) return null;
+  // Owner, 19.11: a live broadcast asked for in the AI extensions: a TV/radio
+  // channel of key 8 (tv.key), the channel menu (tv.menu) or a live page (tv.url).
+  const tvOk=data?.tv&&(/^[1-8]$/.test(String(data.tv.key||''))||data.tv.menu===true||/^https?:\/\//.test(String(data.tv.url||'')));
+  if(!data||!(/^[A-Za-z0-9_-]{11}$/.test(String(data.videoId||''))||String(data.webQuery||'').trim()||tvOk)) return null;
   // Used once: deleted now, whether fresh or stale.
   try { const x=new URL(_pipeline.YEMOT_API_BASE+'/FileAction'); x.searchParams.set('token',_pipeline.yemotApiKey()); x.searchParams.set('action','delete'); x.searchParams.set('what',remote); void fetch(x,{signal:AbortSignal.timeout(8000)}).catch(()=>{}); } catch {}
   if(Date.now()-Date.parse(data.at||0)>30*60*1000) return null;
@@ -4125,13 +4128,18 @@ async function youtubeCallHandler(call) {
   const PAGE=Math.max(5,Math.min(30,Number(process.env.BRANCH2_PAGE_SIZE||20)));
   const callerPhone=getCallerNumber(call);
   let handedWebQuery=null; // words sent from extension 1/3 for the whole-web search
+  let handedTv=null; // a live channel / live page sent from extension 1/3 (19.11)
 
   // Owner, 10.11: extension 3 recommended a video and the caller asked to
   // hear or download it; it waits here, already selected, for the usual
   // confirmation (1 = play, 2 = video). Read once, then deleted.
   try {
     const handed=await readExt3Handoff(getCallerNumber(call));
-    if(handed&&String(handed.webQuery||'').trim()&&!handed.videoId) {
+    if(handed?.tv&&!handed.videoId) {
+      handedTv={key:/^[1-8]$/.test(String(handed.tv.key||''))?String(handed.tv.key):null,url:/^https?:\/\//.test(String(handed.tv.url||''))?String(handed.tv.url).slice(0,500):null,title:String(handed.tv.title||'').slice(0,120)};
+      console.info('[EXT3_HANDOFF] live broadcast received',{key:handedTv.key,site:handedTv.url?(()=>{try{return new URL(handedTv.url).host;}catch{return null;}})():null});
+    }
+    else if(handed&&String(handed.webQuery||'').trim()&&!handed.videoId) {
       handedWebQuery=String(handed.webQuery).trim().slice(0,200);
       console.info('[EXT3_HANDOFF] whole-web search received',{query:handedWebQuery.slice(0,120)});
     }
@@ -4319,11 +4327,12 @@ async function youtubeCallHandler(call) {
 
   // Owner, 18.11: key 8 at the start = six live TV channels (audio only),
   // streamed from our own server through the live relay. * = back.
-  async function tvMenu() {
+  async function tvMenu(preKey=null) {
     const TV=await import('./branch2-tv.js');
     let note='';
     for(let round=0;round<6;round++) {
-      const k=String(await call.read([{type:'text',data:sanitizeForYemot(TV.menuText(note))}],'tap',
+      const pk=preKey; preKey=null;
+      const k=pk||String(await call.read([{type:'text',data:sanitizeForYemot(TV.menuText(note))}],'tap',
         {max_digits:1,min_digits:1,sec_wait:8,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'tv'+(++tapNo),timeout:10*60*1000,
          digits_allowed:['1','2','3','4','5','6','7','8','*']})||'None').trim();
       branch2KeyLog('tv',k,0,0);
@@ -4801,6 +4810,18 @@ async function youtubeCallHandler(call) {
       // No key = speech. The choice holds until a new search (7).
       if(!keyState&&!keyTranscript) {
         const said=prompt===basePrompt?'':String(prompt).split(/(?<=[.?!])\s+/).filter(x=>!/אמור|אמרו|הקש סולמית/.test(x)).join(' ');
+        if(!searchMode&&handedTv) {
+          const h=handedTv; handedTv=null;
+          if(h.url) {
+            const r=await liveListenItem({url:h.url,title:h.title||'השידור החי'});
+            if(r.exit) return call.go_to_folder('/');
+            nextPrompt=r.say?r.say+' ':null;
+            continue;
+          }
+          const t=await tvMenu(h.key);
+          if(t.exit) return call.go_to_folder('/');
+          continue;
+        }
         if(!searchMode&&handedWebQuery) {
           const hq=handedWebQuery; handedWebQuery=null;
           const w=await webFlow({q:hq});
