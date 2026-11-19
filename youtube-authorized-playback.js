@@ -17,6 +17,7 @@ import { pickApifyActor } from './youtube-engine-select.js';
 import { directDownload, directEnabled } from './youtube-direct.js';
 import { preparePhoneAudio, PHONE_AUDIO_VERSION } from './youtube-phone-audio.js';
 import { publishToExt7 } from './branch2-ext7.js';
+import { publishToExt5 } from './branch2-ext5.js';
 
 import { createAudioCache, audioCachePaths, verifiedAudioFile, titleFileName } from './youtube-audio-cache.js';
 
@@ -886,7 +887,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
   const source=path.join(temp,id+'.source');
   const chunksDir=path.join(temp,'chunks');
   const paths=[];
-  let ext7Job=null, mp3Job=null;
+  let ext7Job=null, ext5Job=null, mp3Job=null;
   try {
     // Primary: Apify (downloads the full audio on their infra, bypassing the
     // datacenter block). Falls through to the older paths only if it fails.
@@ -1008,6 +1009,21 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
         upload:(file,remote)=>uploadToYemot(file,remote,undefined,{convertAudio:mastered.sampleRate>8000||!(covered&&!cover.convert)}),log:console})
         .catch(e=>console.warn('[EXT7] song not added',{videoId:id,message:String(e?.message||e).slice(0,200)}));
     }
+    // Reuse the prepared phone file for the additional website-audio library.
+    if (await webItem(id)) {
+      ext5Job=publishToExt5(id,phone,sourceTitle,{
+        readJson:readCacheJson,writeJson:writeCacheJson,
+        list:async()=>{
+          const u=new URL(YEMOT_API_BASE+'/GetIVR2Dir');
+          u.searchParams.set('token',yemotApiKey());u.searchParams.set('path','ivr2:/5');
+          const response=await fetch(u,{signal:AbortSignal.timeout(20000)});
+          if(!response.ok) throw new Error('Extension 5 listing HTTP '+response.status);
+          return response.json();
+        },
+        upload:(file,remote)=>uploadToYemot(file,remote,undefined,{convertAudio:mastered.sampleRate>8000||!(covered&&!cover.convert)}),
+        log:console
+      }).catch(e=>console.warn('[EXT5] audio not added',{videoId:id,message:String(e?.message||e).slice(0,160)}));
+    }
     // Downloadable copy with the video's picture, in the background.
     if(mp3Policy)mp3Job=saveDownloadCopy(id,source,sourceTitle,temp,mp3Policy,mastered.durationSec)
       .catch(e=>console.warn('[DOWNLOADS] song not saved for downloading',{videoId:id,message:String(e?.message||e).slice(0,200)}));
@@ -1015,7 +1031,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
   } finally {
     // The temporary copy is removed only after the background copies finish.
     const cleanup=()=>fs.rm(temp,{recursive:true,force:true}).catch(()=>{});
-    const pending=[ext7Job,mp3Job].filter(Boolean);
+    const pending=[ext7Job,ext5Job,mp3Job].filter(Boolean);
     if(pending.length) void Promise.allSettled(pending).finally(cleanup); else await cleanup();
   }
 }
