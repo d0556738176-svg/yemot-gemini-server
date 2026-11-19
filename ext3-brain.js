@@ -25,7 +25,8 @@
 // Everything external is injected (deps), so this file is testable offline.
 
 import { isCapabilityQuestion, SYSTEM_FACTS } from './caller-intent.js';
-import { isZmanimQuestion, isNearbyQuestion, nearbyKind, spokenTime, sameTown, zmanimFacts as realZmanim, nearbyFacts as realNearby, spokenDistance } from './place-tools.js';
+import { travelFacts as realTravel } from './travel-tools.js';
+import { isZmanimQuestion, isNearbyQuestion, nearbyKind, spokenTime, sameTown, zmanimFacts as realZmanim, nearbyFacts as realNearby, spokenDistance, businessHours as realBusinessHours, OPEN_NOW } from './place-tools.js';
 
 const HE_NUMBER_WORDS = { 'אחת': 1, 'אחד': 1, 'שתיים': 2, 'שניים': 2, 'שלוש': 3, 'שלושה': 3 };
 
@@ -97,7 +98,7 @@ export function activeLesson(current = []) {
 
 // ---------- planner ----------
 
-export const INTENTS = ['library', 'chat', 'web', 'zmanim', 'nearby', 'song_make', 'video_find', 'video_about', 'video_play', 'media_status', 'cancel', 'read_page', 'recall'];
+export const INTENTS = ['library', 'chat', 'web', 'zmanim', 'nearby', 'route', 'song_make', 'video_find', 'video_about', 'video_play', 'media_status', 'cancel', 'read_page', 'recall'];
 
 export function plannerPrompt({ context, utterance, now, video, older = null, media = '', prefs = [] }) {
   return [
@@ -109,6 +110,7 @@ export function plannerPrompt({ context, utterance, now, video, older = null, me
     'zmanim = שאלה על זמן הלכתי של היום במקום מסוים (סוף זמן קריאת שמע או תפילה לפי הגר"א או המגן אברהם, הנץ, שקיעה, עלות השחר, חצות, מנחה, פלג המנחה, צאת הכוכבים, כניסת שבת והדלקת נרות, צאת שבת). אלה זמנים שמחשבים לפי מיקום ותאריך, לא מחפשים באינטרנט.',
     'song_make = המתקשר מבקש עכשיו ליצור, להלחין ולהקליט שיר חדש בבינה מלאכותית (לא למצוא שיר קיים, ולא רק לכתוב מילים בשיחה). שיחה על מילים, סגנון או קול לשיר בלי בקשה ליצור אותו עכשיו היא chat.',
     'nearby = המתקשר שואל איפה יש מקום מסוג מסוים (בית כנסת, מקווה, בית מרקחת, סופר, מסעדה, כספומט, תחנת דלק, מרפאה, חניון וכו\') הכי קרוב או ליד מקום מסוים (רחוב, שכונה, חוף, מקום מוכר, יישוב).',
+    'route = המתקשר שואל איך להגיע ממקום למקום: באיזה אוטובוס או רכבת, באיזה כבישים לנסוע ברכב, כמה זמן נסיעה, מה הדרך הכי מהירה עכשיו. מלאי from_place/from_town (מאיפה יוצא; אם אמר "אני נמצא ב..." או אמר קודם בשיחה איפה הוא) ו-to_place/to_town (לאן), ו-mode: bus כשביקש תחבורה ציבורית, car כשביקש ברכב, any כששאל באופן כללי או על שניהם.',
     'video_find = המתקשר רוצה שתמליצי או תמצאי לו סרטון, הרצאה, סיפור או סרט ביוטיוב.',
     'video_about = שאלה על סרטון שכבר הוזכר בשיחה (מה השם, תרגום השם, אורך, ערוץ, על מה הוא, האם הוא בעברית).',
     'video_play = המתקשר מבקש עכשיו לשמוע, להשמיע, להפעיל או להוריד סרטון או שיר מסוים (הסרטון שהוזכר, או שיר/סרטון שהוא מתאר בשמו). שאלה על מצב הורדה אינה video_play.',
@@ -119,7 +121,7 @@ export function plannerPrompt({ context, utterance, now, video, older = null, me
     'recall = שאלה על שיחות קודמות או על פרטים שהמתקשר סיפר על עצמו.',
     'בנוסף: כשהמתקשר נותן הוראה קבועה לגבי איך לדבר איתו או על מה לא לדבר (למשל "אל תדברי איתי על חדשות", "תמיד תעני קצר", "תקראי לי בשם דוד"), כתבי אותה בשדה instruction כמשפט ברור, אחרת השאירי ריק.',
     'החזר JSON בלבד, בלי טקסט נוסף, בצורה:',
-    '{"intent":"...","standalone":"השאלה כמשפט עצמאי וברור בעברית עם כל הפרטים מההקשר","search":"שאילתת חיפוש קצרה לאינטרנט אם intent=web או read_page","searches":["כששאל כמה דברים שונים שצריך לחפש (למשל מזג אוויר וגם שער הדולר): שאילתה קצרה נפרדת לכל אחד, עד 3; אחרת רשימה ריקה"],"yt_he":"שאילתת חיפוש ביוטיוב בעברית: לסרטון/שיר שהמתקשר מתכוון אליו לפי ההקשר (למשל שם הזמר והשיר שדובר עליהם), לא המשפט שאמר","yt_en":"אותה שאילתה באנגלית אם מתאים","min_minutes":0,"max_minutes":0,"recent_days":0,"order":"relevance או date או views","play":"audio או video","continue_offer":false,"instruction":"","place":"ל-zmanim/nearby: המקום עצמו (רחוב, שכונה, חוף, מקום מוכר או יישוב) בלי מילות יחס, ואם לא נאמר עכשיו - המקום שדובר עליו קודם בשיחה, אחרת ריק","town":"ל-zmanim/nearby: העיר או היישוב שבו המקום נמצא, ריק אם לא ידוע","date":"ל-zmanim: התאריך שעליו שאל בפורמט YYYY-MM-DD לפי הזמן עכשיו, ריק = היום","kind":"ל-nearby: סוג המקום שהוא מחפש, למשל בית כנסת"}',
+    '{"intent":"...","standalone":"השאלה כמשפט עצמאי וברור בעברית עם כל הפרטים מההקשר","search":"שאילתת חיפוש קצרה לאינטרנט אם intent=web או read_page","searches":["כששאל כמה דברים שונים שצריך לחפש (למשל מזג אוויר וגם שער הדולר): שאילתה קצרה נפרדת לכל אחד, עד 3; אחרת רשימה ריקה"],"yt_he":"שאילתת חיפוש ביוטיוב בעברית: לסרטון/שיר שהמתקשר מתכוון אליו לפי ההקשר (למשל שם הזמר והשיר שדובר עליהם), לא המשפט שאמר","yt_en":"אותה שאילתה באנגלית אם מתאים","min_minutes":0,"max_minutes":0,"recent_days":0,"order":"relevance או date או views","play":"audio או video","continue_offer":false,"instruction":"","place":"ל-zmanim/nearby: המקום עצמו (רחוב, שכונה, חוף, מקום מוכר או יישוב) בלי מילות יחס, ואם לא נאמר עכשיו - המקום שדובר עליו קודם בשיחה, אחרת ריק","town":"ל-zmanim/nearby: העיר או היישוב שבו המקום נמצא, ריק אם לא ידוע","date":"ל-zmanim: התאריך שעליו שאל בפורמט YYYY-MM-DD לפי הזמן עכשיו, ריק = היום","kind":"ל-nearby: סוג המקום שהוא מחפש, למשל בית כנסת","from_place":"ל-route: המקום שממנו יוצא (רחוב, שכונה, מקום מוכר), בלי מילות יחס","from_town":"ל-route: העיר או היישוב של נקודת המוצא","to_place":"ל-route: המקום שאליו רוצה להגיע","to_town":"ל-route: העיר או היישוב של היעד","mode":"ל-route: bus או car או any","business":"כששואל על עסק או מקום מסוים בשמו (שעות פתיחה, טלפון, כתובת): שם העסק בלבד, למשל רמי לוי; אחרת ריק"}',
     'שימי לב לשיבושי תמלול בשמות מקומות: "משוב" הוא כמעט תמיד "מושב", "קיבוצ" = "קיבוץ", "קביעת גאט" = "קריית גת". כשהמילה נשמעת כמו שם של יישוב בישראל, כתבי את שם היישוב הנכון כפי שהוא מוכר. כשהמתקשר אומר עכשיו מקום חדש, הוא מחליף את המקום שדובר עליו קודם.',
     'recent_days: כשביקש משהו חדש (השבוע=7, לאחרונה/חדש=30, היום=2). order: date כשביקש "הכי חדש", views כשביקש "הכי הרבה צפיות". שיר בודד = max_minutes 8, ואם אמר שאינו רוצה סט/רשימה/מיקס אל תחפשי סט.',
     'play = "video" רק כשהמתקשר ביקש במפורש להוריד את הווידאו/הסרטון עצמו. continue_offer = true כשהמתקשר רק מסכים להמשיך את מה שהוצע לו בתשובה הקודמת.',
@@ -165,7 +167,11 @@ export function parsePlan(text) {
     place: str(j.place).slice(0, 80),
     town: str(j.town).slice(0, 60),
     date: /^\d{4}-\d{2}-\d{2}$/.test(String(j.date || '').trim()) ? String(j.date).trim() : '',
-    kind: str(j.kind).slice(0, 40)
+    kind: str(j.kind).slice(0, 40),
+    business: str(j.business).slice(0, 60),
+    fromPlace: str(j.from_place).slice(0, 80), fromTown: str(j.from_town).slice(0, 60),
+    toPlace: str(j.to_place).slice(0, 80), toTown: str(j.to_town).slice(0, 60),
+    mode: ['bus', 'car'].includes(j.mode) ? j.mode : 'any'
   };
 }
 
@@ -238,8 +244,8 @@ export function heuristicPlan(utterance, { video = null } = {}) {
   // The video named in the request, not the whole sentence, is what gets searched.
   if (PLAY_WORD.test(u) && !/^(?:לא|אל)(?=$|[\s,.!?])/u.test(u)) return { ...base, intent: 'video_play', ytHe: video && POINT_WORD.test(u) ? '' : u.replace(PLAY_WORD_G, ' ').replace(/(?:הלו|נו|כן|בבקשה|אני רוצה|ש?תשמיעי|לי|את|השיר|הסרטון|הפרק|ה?ו?וידי?או|קובץ שמע|ביוטיוב|יוטיוב)/gu, ' ').replace(/\s+/g, ' ').trim() };
   if (video && /(?:השם|איך קוראים|איך נקרא|כמה זמן|אורך|ארוך|הערוץ|באנגלית|בעברית|תתרגם|תתרגמי|על מה הוא|מה יש ב)/u.test(u) && (VIDEO_WORD.test(u) || /(?:אותו|שלו|זה)/u.test(u))) return { ...base, intent: 'video_about' };
-  if ((YT_WORD.test(u) || VIDEO_WORD.test(u) || SONG_WORD.test(u)) && /(?:תמליצ|ממליצ|מומלץ|תמצא|תמצאי|תחפש|תחפשי|אני מחפש|יש סרטון|איזה סרטון|איזה שיר|מה השיר|תביא|תביאי|הכי חדש|חדש של|שיצא|שיצאו)/u.test(u)) return { ...base, intent: 'video_find' };
-  if (/(?:תחפש|תחפשי|חפש|חפשי|באינטרנט|ברשת|בגוגל|עדכני|היום|עכשיו|חדשות|מחיר|כמה עולה|שער|מזג האוויר|מי ראש|מי שר|מי נשיא|מתי פתוח|שעות פתיחה|טלפון של)/u.test(u)) return { ...base, intent: 'web' };
+  if ((YT_WORD.test(u) || VIDEO_WORD.test(u) || SONG_WORD.test(u) || (NEWEST.test(u) && /(?:שיעור|הרצאה|קליפ|פרק)/u.test(u))) && (NEWEST.test(u) || /(?:תמליצ|ממליצ|מומלץ|תמצא|תמצאי|תחפש|תחפשי|אני מחפש|יש סרטון|איזה סרטון|איזה שיר|מה השיר|תביא|תביאי|הכי חדש|חדש של|שיצא|שיצאו|יצא|יצאו|העלה|העלו|לאחרונה)/u.test(u))) return { ...base, intent: 'video_find', ...(NEWEST.test(u) || /לאחרונה/u.test(u) ? { order: 'date' } : {}) };
+  if (/(?:תחפש|תחפשי|חפש|חפשי|באינטרנט|ברשת|בגוגל|עדכני|היום|עכשיו|חדשות|מחיר|כמה עולה|שער|מזג האוויר|מי ראש|מי שר|מי נשיא|מתי פתוח|שעות פתיחה|טלפון של|המספר של|מספר של|איפה מוכרים|איפה קונים|איפה אפשר לקנות|איפה משיגים|פתוח|פתוחה)/u.test(u)) return { ...base, intent: 'web' };
   return { ...base, intent: 'chat' };
 }
 
@@ -320,7 +326,7 @@ export async function ytdlpSearch(queries, { count = 15, order = 'relevance', ti
     if (!/^[A-Za-z0-9_-]{11}$/.test(id) || seen.has(id)) continue;
     seen.add(id);
     const ud = String(e.upload_date || '');
-    out.push({ videoId: id, title: String(e.title || ''), channelTitle: String(e.channel || e.uploader || ''), description: cleanDescription(String(e.description || '')).slice(0, 600),
+    out.push({ videoId: id, title: String(e.title || ''), channelTitle: String(e.channel || e.uploader || ''), channelId: String(e.channel_id || ''), description: cleanDescription(String(e.description || '')).slice(0, 600),
       publishedAt: /^\d{8}$/.test(ud) ? ud.slice(0, 4) + '-' + ud.slice(4, 6) + '-' + ud.slice(6, 8) + 'T00:00:00Z' : (e.timestamp ? new Date(e.timestamp * 1000).toISOString() : null),
       language: '', durationSec: Number(e.duration) || 0, viewCount: Number(e.view_count) || 0, ageRestricted: Number(e.age_limit) >= 18, live: e.live_status === 'is_live' || e.is_live === true });
   }
@@ -352,7 +358,7 @@ export function ytSubject(q) {
   out = out.replace(/\s+/g, ' ').trim();
   return out.length >= 2 ? out : String(q || '').trim();
 }
-export const NEWEST = /(?:הכי חדש|הכי חדשה|האחרון|האחרונה|החדש ביותר|החדשה ביותר|הכי עדכני|שיצא עכשיו|שיצא השבוע|שיצא לאחרונה|newest|latest)/iu;
+export const NEWEST = /(?:הכי חדש|הכי חדשה|האחרון|האחרונה|האחרונים|האחרונות|לאחרונה|החדש ביותר|החדשה ביותר|הכי עדכני|שיצא עכשיו|שיצא השבוע|שיצא לאחרונה|newest|latest)/iu;
 /** A title fit to read aloud and to put before a key: no "(Prod. by ...)", pipes or commas. */
 export function cleanTitle(t) {
   return String(t || '')
@@ -390,6 +396,7 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, rece
       videoId: v.id,
       title: decode(v.snippet?.title),
       channelTitle: decode(v.snippet?.channelTitle),
+      channelId: v.snippet?.channelId || '',
       description: cleanDescription(decode(v.snippet?.description)).slice(0, 600),
       publishedAt: v.snippet?.publishedAt || null,
       language: v.snippet?.defaultAudioLanguage || v.snippet?.defaultLanguage || '',
@@ -439,6 +446,54 @@ export async function findVideos(queries, { minMinutes = 0, maxMinutes = 0, rece
     videos.sort((a, b) => (rank.get(a.videoId) + alt(a) - rank.get(b.videoId) - alt(b)) - 4 * (Math.log10(b.viewCount + 10) - Math.log10(a.viewCount + 10)));
   }
   return videos.slice(0, 10);
+}
+
+// Owner, 19.11: "what is X's latest lesson on YouTube", "what came out lately
+// on channel 14". A search sorted by date is not the channel's own latest
+// upload; the channel is found among the search results, and its own
+// uploads page (newest first) is read with the server's yt-dlp.
+const NAME_STOP = new Set(['של', 'הרב', 'רב', 'ערוץ', 'בערוץ', 'שיעור', 'השיעור', 'שיעורים', 'הרצאה', 'סרטון', 'סרטונים', 'הסרטון', 'חדש', 'החדש', 'האחרון', 'האחרונה', 'האחרונים', 'ביוטיוב', 'יוטיוב', 'קליפ', 'שיר', 'מה', 'לאחרונה', 'יצא', 'יצאו', 'הכי']);
+export function ownerChannel(videos, subject) {
+  const words = String(subject || '').replace(/[^\u0590-\u05FFa-zA-Z0-9 ]/g, ' ').split(/\s+/).map(w => w.replace(/^(?:ה|ב|ו)(?=[\u0590-\u05FF]{3})/u, '')).filter(w => w.length > 1 && !NAME_STOP.has(w));
+  const by = new Map();
+  videos.slice(0, 15).forEach((v, i) => {
+    if (!v.channelId) return;
+    const c = by.get(v.channelId) || { id: v.channelId, title: v.channelTitle, count: 0, first: i };
+    c.count++; by.set(v.channelId, c);
+  });
+  const fit = c => { const t = String(c.title || '').toLowerCase(); return words.length ? words.filter(w => t.includes(w.toLowerCase())).length / words.length : 0; };
+  const list = [...by.values()].map(c => ({ ...c, fit: fit(c) })).sort((a, b) => (b.fit - a.fit) || (b.count - a.count) || (a.first - b.first));
+  const best = list[0];
+  if (!best) return null;
+  if (best.fit >= 0.5 || (best.count >= 4 && best.first <= 2)) return best;
+  return null;
+}
+export async function channelUploads(channelId, { count = 6, timeoutMs = 15000, env, fetchImpl, proxy, execImpl = null } = {}) {
+  if (!/^UC[\w-]{20,}$/.test(String(channelId || ''))) return [];
+  const run = execImpl || (async args => { const { execFile } = await import('node:child_process'); return new Promise(res => execFile(process.env.YTDLP_BIN || '/usr/local/bin/yt-dlp', args, { timeout: timeoutMs, maxBuffer: 20 * 1024 * 1024 }, (err, out) => res(String(out || '')))); });
+  const tab = async t => { try { return (JSON.parse(await run(['--flat-playlist', '-J', '--no-warnings', '--ignore-errors', '--playlist-end', String(count), 'https://www.youtube.com/channel/' + channelId + '/' + t])).entries || []); } catch { return []; } };
+  const [vids, live] = await Promise.all([tab('videos'), tab('streams')]);
+  const ids = [...new Set([...vids, ...live].map(e => String(e?.id || '')).filter(id => /^[A-Za-z0-9_-]{11}$/.test(id)))];
+  if (!ids.length) return [];
+  const flat = new Map([...vids, ...live].map(e => [String(e.id), e]));
+  let videos = [];
+  try {
+    const d = await youtubeGet('videos', { part: 'snippet,contentDetails,statistics', id: ids.slice(0, 20).join(',') }, { env, fetchImpl, proxy });
+    videos = (d.items || []).map(v => ({ videoId: v.id, title: decode(v.snippet?.title), channelTitle: decode(v.snippet?.channelTitle), channelId, description: cleanDescription(decode(v.snippet?.description)).slice(0, 600), publishedAt: v.snippet?.publishedAt || null, language: v.snippet?.defaultAudioLanguage || '', durationSec: parseIsoDuration(v.contentDetails?.duration), viewCount: Number(v.statistics?.viewCount) || 0, ageRestricted: v.contentDetails?.contentRating?.ytRating === 'ytAgeRestricted', live: v.snippet?.liveBroadcastContent && v.snippet.liveBroadcastContent !== 'none' }));
+  } catch {
+    // No quota: the uploads pages' own order (newest first), dates from yt-dlp for the first ones.
+    videos = await Promise.all(ids.slice(0, 8).map(async (id, i) => {
+      const e = flat.get(id) || {};
+      let full = null;
+      if (i < 3) { try { full = JSON.parse(await run(['-J', '--no-warnings', '--skip-download', 'https://www.youtube.com/watch?v=' + id])); } catch {} }
+      const ud = String(full?.upload_date || e.upload_date || '');
+      return { videoId: id, title: String(full?.title || e.title || ''), channelTitle: String(full?.channel || e.channel || ''), channelId, description: cleanDescription(String(full?.description || '')).slice(0, 600), publishedAt: /^\d{8}$/.test(ud) ? ud.slice(0, 4) + '-' + ud.slice(4, 6) + '-' + ud.slice(6, 8) + 'T00:00:00Z' : (full?.timestamp ? new Date(full.timestamp * 1000).toISOString() : null), language: '', durationSec: Number(full?.duration || e.duration) || 0, viewCount: Number(full?.view_count || e.view_count) || 0, ageRestricted: Number(full?.age_limit) >= 18, live: (full?.live_status || e.live_status) === 'is_live' };
+    }));
+  }
+  videos = videos.filter(v => v.videoId && !v.live && isSafeVideo(v));
+  // Newest first by date where known; the page order otherwise.
+  const order = new Map(ids.map((id, i) => [id, i]));
+  return videos.sort((a, b) => (a.publishedAt && b.publishedAt ? Date.parse(b.publishedAt) - Date.parse(a.publishedAt) : order.get(a.videoId) - order.get(b.videoId)));
 }
 
 /** The full title first, then 1 audio / 2 video / 3 cancel; nothing is downloaded before a choice. */
@@ -985,12 +1040,23 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     }
     // "סט" means a long mix, not a 1-minute short.
     if (found.length && /(?:^|\s)(?:סט|מחרוזת|מיקס|ברצף|רצף)(?=$|\s)/u.test(utterance) && !plan.maxMinutes) { const long = found.filter(v => v.durationSec >= 15 * 60); if (long.length) found = long; }
+    let channelLatest = null;
+    if (found.length && plan.order === 'date') {
+      const ch = ownerChannel(found, own || queries[0]);
+      if (ch) {
+        const ups = await within(20000, (deps.channelUploads || channelUploads)(ch.id, { count: 6, env: deps.env, fetchImpl: deps.fetchImpl, proxy: deps.youtubeProxy })).catch(() => []);
+        const fitting = ups.filter(v => !seenIds.includes(v.videoId) && (!plan.minMinutes || v.durationSec >= plan.minMinutes * 45) && (!plan.maxMinutes || v.durationSec <= plan.maxMinutes * 75));
+        log.info?.('[EXT3_BRAIN] latest from the channel itself', { channel: ch.title, fit: ch.fit, uploads: ups.length });
+        if (fitting.length) { found = fitting; channelLatest = ch; }
+      }
+    }
     if (!found.length) return out({ reply: 'חיפשתי ביוטיוב את ' + (own || queries[0]) + ' בכמה דרכים, ולא מצאתי סרטון שמתאים למה שביקשת. ייתכן שזה פשוט לא עלה ליוטיוב. אפשר לומר לי את השם בצורה אחרת, למשל שם הערוץ או שם הפרק, ואחפש שוב.' });
     const instruction = 'המתקשר ביקש המלצה על סרטון. לפניך רשימת סרטונים אמיתיים שנמצאו עכשיו ביוטיוב, עם הכותרת המדויקת, הערוץ, האורך בדקות, מספר הצפיות, תאריך הפרסום והתיאור. ' +
       'בחרי את הסרטון המתאים ביותר לבקשה: קודם שיתאים בדיוק לנושא, לסוג (שיר בודד, סט, הרצאה), לשפה, לאורך ולמידת החדשות שביקש, ובין המתאימים עדיף סרטון איכותי ופופולרי. אסור להמליץ על סרטון שאינו ברשימה, ואסור לשנות את הכותרת, הערוץ, האורך או התאריך. ' +
       'דברי במשפטים טבעיים וזורמים, כמו שמספרים לחבר ("מצאתי לך את..., זה מהערוץ של..., אורכו..."), ולא כטופס עם מילים כמו "כותרת:" או "ערוץ:". בתשובה אמרי את הכותרת המדויקת כפי שהיא (ואם היא בשפה זרה גם תרגום לעברית), את שם הערוץ, את האורך, מתי פורסם ואת מספר הצפיות, ותארי בעברית במילים שלך על מה הסרטון רק לפי התיאור שלו, בלי להמציא. ' +
       (relaxed === 'length' ? 'חשוב: לא נמצא ביוטיוב סרטון באורך מלא כפי שביקש. אמרי לו זאת בכנות במשפט אחד (ייתכן שהפרקים המלאים לא עולים ליוטיוב), והציעי את הקרוב ביותר מהרשימה. ' : '') +
       'אם הסרטונים שנמצאו אינם התוכנית או השיר עצמו אלא פודקאסט, ראיון, כתבה או קטע על הנושא, אמרי זאת בכנות במשפט אחד ("פרק מלא של התוכנית עצמה לא מצאתי ביוטיוב, אבל יש..."). ' +
+      (channelLatest ? 'זו רשימת ההעלאות האחרונות של הערוץ ' + channelLatest.title + ' עצמו, מהחדש לישן. אם שאל על הסרטון או השיעור האחרון, בחרי את הראשון (pick 0) ואמרי מתי פורסם; אם שאל מה יצא לאחרונה, ספרי בקצרה על שלושת האחרונים. ' : '') +
       (plan.order === 'date' ? 'הוא ביקש את החדש ביותר: הרשימה ממוינת מהחדש לישן, אז עדיף את הראשון שמתאים לנושא, ואמרי מתי פורסם. ' : '') +
       'סיימי בכך שאפשר לומר "תשמיעי לי אותו" כדי לשמוע או להוריד אותו. ' +
       'החזר JSON בלבד בצורה {"pick":מספר i של הסרטון הנבחר,"answer":"התשובה למתקשר"}.';
@@ -1074,6 +1140,35 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     });
   }
 
+  // A route asked as a web question, with both ends known: the real timetable and map.
+  if (plan.intent === 'web' && ROUTE.test(utterance + ' ' + plan.standalone) && (plan.toPlace || plan.toTown) && (plan.fromPlace || plan.fromTown)) plan.intent = 'route';
+  if (plan.intent === 'route') {
+    if (!(plan.toPlace || plan.toTown)) return out({ reply: 'לאן אתה רוצה להגיע? אמור לי את המקום ואת העיר, ואבדוק לך אוטובוסים ודרך ברכב.' });
+    if (!(plan.fromPlace || plan.fromTown)) return out({ reply: 'מאיפה אתה יוצא? אמור לי את המקום שבו אתה נמצא ואת העיר, ואבדוק לך איך להגיע ל' + (plan.toPlace || plan.toTown) + '.' });
+    const wantsTraffic = /(?:פקק|פקקים|עומס|עומסים|תנועה|הכי מהר|הכי מהיר|מהירה|כרגע|עכשיו)/u.test(utterance + ' ' + plan.standalone);
+    const facts = await within(Number(deps.travelBudgetMs || 22000), (deps.travelFacts || realTravel)({ from: { place: plan.fromPlace, town: plan.fromTown }, to: { place: plan.toPlace, town: plan.toTown }, mode: plan.mode }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() }))
+      .catch(e => { log.warn?.('[TRAVEL] failed', String(e?.message || e).slice(0, 100)); return null; });
+    if (facts?.unknown) return out({ reply: 'לא מצאתי במפה את ' + facts.unknown + '. אפשר לומר לי שם של רחוב או מקום מוכר לידו, ובאיזו עיר?' });
+    if (facts?.text) {
+      const busOk = facts.bus?.trips?.length, carOk = !!facts.car?.best;
+      log.info?.('[TRAVEL] route', { mode: plan.mode, bus: facts.bus?.trips?.length || 0, busError: facts.bus?.error || '', car: carOk, roads: facts.roads });
+      let traffic = '';
+      if (carOk && wantsTraffic && deps.newsSearch && facts.roads.length) {
+        const items = await deps.newsSearch('עומסי תנועה ' + facts.roads.slice(0, 3).map(r => 'כביש ' + r).join(' '), { timeoutMs: 3500 }).catch(() => []);
+        traffic = (items || []).slice(0, 5).map(x => '- ' + clip(x.title, 140) + (x.source ? ' (' + x.source + (x.date ? ', ' + x.date : '') + ')' : '')).join('\n');
+      }
+      const reply = await ask('המתקשר שואל איך להגיע ממקום למקום. לפניך נתונים אמיתיים שנבדקו עכשיו: נסיעות אוטובוס ישירות מלוח הזמנים הרשמי (עם שעות יציאה והגעה, תחנת עלייה וירידה), ומסלול ברכב לפי המפה. ' +
+        'עני רק לפיהם, בלי להוסיף קו, תחנה, כביש או זמן שלא כתובים. ' + (busOk ? 'באוטובוס: פתחי באפשרות שמגיעה הכי מוקדם, אמרי את מספר הקו, איפה עולים ומתי יוצא, איפה יורדים ומתי מגיע, ואחר כך עוד אפשרות או שתיים. ' : 'אם אין קו ישיר, אמרי זאת בכנות במשפט אחד, והציעי לבדוק החלפות באפליקציית מוביט או במוקד התחבורה הציבורית בכוכבית 8787. ') +
+        (carOk ? 'ברכב: אמרי את הכבישים לפי הסדר, המרחק והזמן הרגיל. אין לך נתוני פקקים חיים: אם שאל על פקקים, אמרי זאת בכנות במשפט אחד, ' + (traffic ? 'ספרי רק על דיווח מהחדשות שלמטה שמדבר בבירור על הכבישים האלה ומהיום, ' : '') + 'והציעי לבדוק לפני היציאה בווייז או בגוגל מפות. ' : '') +
+        (plan.mode === 'bus' ? 'הוא שאל על תחבורה ציבורית: את הרכב אל תפרטי. ' : plan.mode === 'car' ? 'הוא שאל על נסיעה ברכב: אל תפרטי אוטובוסים. ' : ''),
+        facts.text + (traffic ? '\n\nדיווחי תנועה מהחדשות:\n' + traffic : ''), { maxTokens: 1200, budgetMs: 12000, ctx: smallContext })
+        .catch(() => 'הנה מה שבדקתי. ' + facts.text.split('\n').slice(1).join(' '));
+      return out({ reply });
+    }
+    log.warn?.('[TRAVEL] no route data; falling back to the web');
+    plan.intent = 'web'; plan.search = plan.search || plan.standalone || utterance;
+  }
+
   if (plan.intent === 'zmanim') {
     const facts = await within(Number(deps.placeBudgetMs || 11000), (deps.zmanimFacts || realZmanim)({ place: plan.place, town: plan.town, date: plan.date, utterance: utterance + ' ' + plan.standalone }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() })).catch(e => { log.warn?.('[ZMANIM] failed', String(e?.message || e).slice(0, 100)); return null; });
     if (facts?.unknownPlace) return out({ reply: 'לא מצאתי במפה את המקום ' + facts.unknownPlace + '. ' + 'תוכל' + ' לומר לי את שם היישוב או העיר הקרובה, ואחשב לך את הזמנים בדיוק לפיה?' });
@@ -1092,7 +1187,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   if (plan.intent === 'nearby') {
     const kindText = plan.kind || utterance;
     const [facts, web] = await Promise.all([
-      within(Number(deps.placeBudgetMs || 19000), (deps.nearbyFacts || realNearby)({ kindText: kindText + ' ' + utterance, place: plan.place, town: plan.town }, { fetchImpl: deps.fetchImpl || fetch, log })).catch(e => { log.warn?.('[PLACE] nearby failed', String(e?.message || e).slice(0, 100)); return null; }),
+      within(Number(deps.placeBudgetMs || 19000), (deps.nearbyFacts || realNearby)({ kindText: kindText + ' ' + utterance, place: plan.place, town: plan.town, openNow: OPEN_NOW.test(utterance + ' ' + plan.standalone) }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() })).catch(e => { log.warn?.('[PLACE] nearby failed', String(e?.message || e).slice(0, 100)); return null; }),
       deps.webSearch ? deps.webSearch(plan.search || plan.standalone || utterance, { timeoutMs: 4500 }).catch(() => []) : Promise.resolve([])
     ]);
     if (facts?.unknownPlace && !(web || []).length) return out({ reply: 'לא מצאתי במפה את המקום ' + facts.unknownPlace + '. אפשר לומר לי שם של רחוב או של מקום מוכר לידו, ובאיזו עיר, ואחפש שוב?' });
@@ -1100,7 +1195,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       log.info?.('[PLACE] nearby', { kind: facts?.kind, place: facts?.loc?.label, town: facts?.loc?.town, found: facts?.items?.length || 0, web: (web || []).length, approx: !!facts?.loc?.approx });
       const webText = (web || []).slice(0, 5).map((r, i) => 'תוצאת חיפוש ' + (i + 1) + ': ' + clip(r.title, 110) + ' (' + hostOf(r.url).slice(0, 40) + ')\n' + clip(r.snippet, 300)).join('\n');
       const reply = await ask('המתקשר שואל איפה יש ' + (facts?.kind || 'מקום') + ' קרוב למקום מסוים. ' +
-        (facts?.items?.length ? 'לפניך רשימה מהמפה, ממוינת מהקרוב לרחוק, עם המרחק בקו אווירי והכתובת. התחילי בתשובה ישירה: הקרוב ביותר, שמו בדיוק כפי שהוא כתוב ברשימה, כמה רחוק ובאיזה רחוב. אחר כך עוד אחד או שניים קרובים. אל תתארי מסלול הליכה או פניות, ואל תשני שמות. אם במפה אין לו שם, אמרי שזה ' + facts.kind + ' שמופיע במפה בלי שם, עם הכתובת. ' : 'במפה לא נמצאו תוצאות, ענה רק לפי תוצאות החיפוש. ') +
+        (facts?.items?.length ? 'לפניך רשימה מהמפה, ממוינת מהקרוב לרחוק, עם המרחק בקו אווירי והכתובת. התחילי בתשובה ישירה: הקרוב ביותר, שמו בדיוק כפי שהוא כתוב ברשימה, כמה רחוק ובאיזה רחוב. אחר כך עוד אחד או שניים קרובים. אל תתארי מסלול הליכה או פניות, ואל תשני שמות. כשכתוב ליד מקום אם הוא פתוח או סגור עכשיו, אמרי את זה כפי שכתוב; כשהוא שאל מה פתוח עכשיו, פתחי במקום הפתוח הקרוב ביותר, ועל מקום שאין לו שעות במפה אמרי שכדאי להתקשר לוודא. אם במפה אין לו שם, אמרי שזה ' + facts.kind + ' שמופיע במפה בלי שם, עם הכתובת. ' : 'במפה לא נמצאו תוצאות, ענה רק לפי תוצאות החיפוש. ') +
         'תוצאות החיפוש באינטרנט עוזרות רק כשהן מדברות בבירור על אותו מקום ממש (למשל בית כנסת שנמצא בתוך החוף או צמוד אליו); אל תמציאי מרחקים, כתובות או שמות שלא מופיעים. אם הוא שאל על מקום בעיר מסוימת, אל תציעי מקומות בעיר אחרת. בלי זמני תפילה אם אינם כתובים; אפשר להציע לברר במקום.',
         [facts?.text || '', webText ? 'חיפוש באינטרנט:\n' + webText : ''].filter(Boolean).join('\n\n'), { maxTokens: 900, budgetMs: 11000, ctx: smallContext })
         .catch(() => facts?.items?.length ? nearbyReply(facts) : '');
@@ -1133,7 +1228,19 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     const parts = (plan.searches || []).length >= 2 ? plan.searches : splitRequests(utterance);
     const multi = parts.length >= 2;
     const queries = multi ? parts.slice(0, 3) : [...new Set([q1, plan.standalone, hours ? q1.replace(/\s*(?:עכשיו|כרגע|היום)\s*/g, ' ') + ' שעות פתיחה' : '', route ? q1.replace(/\s*(?:עכשיו|כרגע|היום|הכי מהר|הכי מהיר|בבקשה)\s*/g, ' ') + ' קווי אוטובוס moovit' : ''].filter(Boolean))].slice(0, 3);
+    // Owner, 19.11: a named business's hours come first from the map's own
+    // entry, worked out for this minute, then from the web sources.
+    const bizName = hours ? (plan.business || '') : '';
+    const mapHoursP = bizName && (plan.town || plan.place) ? within(9000, (deps.businessHours || realBusinessHours)({ name: bizName, place: plan.place && !sameTown(plan.place, bizName) ? plan.place : '', town: plan.town }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() })).catch(() => null) : Promise.resolve(null);
     const sets = await Promise.allSettled(queries.map(q => deps.webSearch(q, { timeoutMs: 4500 })));
+    const mapHours = await mapHoursP;
+    // "Where do they sell X in <town>": the shops of that kind on the map too.
+    const BUY = /(?:איפה מוכרים|איפה קונים|איפה אפשר לקנות|איפה משיגים|איפה להשיג|איפה יש לקנות|מי מוכר)/u;
+    const shopKind = BUY.test(utterance + ' ' + plan.standalone) && (plan.town || plan.place) ? (nearbyKind(utterance + ' ' + plan.standalone + ' ' + (plan.kind || '')) || (/(?:^|\s)ה?ספר(?=\s|$)/u.test(utterance + ' ' + plan.standalone) ? nearbyKind('ספרים') : null)) : null;
+    const shops = shopKind ? await within(9000, (deps.nearbyFacts || realNearby)({ kindText: shopKind.label, place: plan.place, town: plan.town }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() })).catch(() => null) : null;
+    const mapText = [mapHours?.items?.length ? mapHours.text : '', shops?.items?.length ? shops.text : ''].filter(Boolean).join('\n\n');
+    if (shops?.items?.length) log.info?.('[EXT3_BRAIN] shops of that kind from the map', { kind: shopKind.label, found: shops.items.length });
+    if (mapHours?.items?.length) log.info?.('[EXT3_BRAIN] business hours from the map', { found: mapHours.items.length, withHours: mapHours.items.filter(x => x.hours).length });
     const seen = new Set(), results = [];
     const lists = sets.map(s => (s.status === 'fulfilled' ? s.value || [] : []).filter(r => r?.url).sort((a, b) => sourceRank(a.url) - sourceRank(b.url)));
     if (multi) {
@@ -1148,6 +1255,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       // Official sites first, then news, then the rest; social pages last.
       results.sort((a, b) => sourceRank(a.url) - sourceRank(b.url));
     }
+    if (!results.length && mapText) results.push({ url: 'https://www.openstreetmap.org/', title: 'המפה הפתוחה', snippet: mapText });
     if (!results.length) {
       log.warn?.('[EXT3_BRAIN] web search found nothing; answering from knowledge with a caveat');
       const reply = await ask('חיפשת באינטרנט ולא נמצאו מקורות. ענה מהידע הכללי שלך רק על מה שאת בטוחה בו, ואמרי בפירוש שלא הצלחת לאמת עכשיו את הפרטים העדכניים.', '', { maxTokens: 1400 });
@@ -1168,14 +1276,15 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       budget -= body.length;
       return 'מקור ' + (i + 1) + label(r.url) + ': ' + clip(r.title, 120) + ' (' + hostOf(r.url).slice(0, 50) + ')\n' + body;
     }).join('\n\n').slice(0, 6500);
+    const mapSource = mapText && !results.some(r => r.url === 'https://www.openstreetmap.org/') ? 'מקור מהמפה (שעות מחושבות לרגע זה):\n' + mapText + '\n\n' : '';
     log.info?.('[EXT3_BRAIN] web research', { queries, results: results.length, pagesRead: pages.length, official: results.filter(r => sourceRank(r.url) === 0).length, sourceChars: sourceText.length });
     const verify = 'כלל ברזל: כל עובדה בתשובה חייבת להופיע במקורות שלמטה. אל תוסיפי מהזיכרון שום פרט על אנשים: לא קשרים זוגיים, משפחה, רכילות, מחלות או פרשיות, גם אם נדמה לך שאת יודעת, אלא אם זה כתוב במפורש במקור, וגם אז רק אם זה מה ששאל. פרט שלא מופיע במקורות, השמיטי. ' + 'בדיקת אמינות לפני שאת עונה: השווי בין המקורות. כשהם סותרים, העדיפי את האתר הרשמי, אחריו את המקור העדכני ביותר, ואמרי במפורש על איזה מקור את מתבססת ("לפי האתר הרשמי של כללית"). אל תצטטי שני מקורות סותרים בלי להכריע או להסביר. ' +
       (plan.mapDown ? 'המפה לא הייתה זמינה עכשיו. אמרי רק מקומות שכתובים במפורש במקורות, עם השם והכתובת כפי שהם כתובים שם, בלי להעריך מרחקים או זמני הליכה ובלי להמציא שמות של בתי כנסת, רחובות או שכונות. אם המקורות לא מזכירים מקום מתאים ליד המקום שהוא אמר, אמרי בכנות שלא הצלחת לאמת עכשיו, והציעי לשאול שוב בעוד כמה דקות. ' : '') +
       (route ? 'זו שאלה על איך מגיעים ממקום למקום: אמרי רק קווים, חברות, תחנות וזמני נסיעה שכתובים במפורש במקורות, בדיוק כפי שהם, ובדקי שהם באמת בין שני המקומות שהוא אמר (לא עיר אחרת). אם המקורות לא נותנים מסלול ברור, אמרי בכנות שלא מצאת מסלול מאומת, תני את מה שכן ידוע בוודאות, והציעי לבדוק באפליקציית מוביט או במוקד המידע של התחבורה הציבורית בטלפון כוכבית 8787. אסור להמציא קו, החלפה, רכבת או זמן נסיעה. ' : '') +
-      (hours ? 'זו שאלה על שעות פתיחה, ולכן כאן עני ממוקד וקצר יחסית (5 עד 8 משפטים) גם אם בדרך כלל את מרחיבה: האם פתוח עכשיו ועד מתי, השעות של היום ושל מחר, הכתובת והטלפון. בלי עצות שלא נשאלו. כתבי שעות תמיד מהמוקדמת למאוחרת, למשל משמונה בבוקר עד אחת בצהריים. אם אין לך התאמה ודאית למקום שביקש, אמרי זאת בשני משפטים ושאלי באיזו עיר הוא נמצא, בלי לפרט נתונים לא ודאיים. אם הסניף שמופיע במקורות נמצא בעיר או בשכונה אחרת ממה שהמתקשר אמר, אמרי איזה סניף מצאת ושאלי אם לזה התכוון. זו שאלה על שעות פתיחה: מצאי את שעות היום הנוכחי (' + now + '), חשבי בעצמך לפי השעה עכשיו האם המקום פתוח או סגור ברגע זה ועד מתי, ואמרי את זה בתחילת התשובה בבירור. אם אין שעות מפורשות ליום הזה, אמרי שאין לך שעות מאומתות להיום והציעי להתקשר למקום, עם מספר הטלפון אם מופיע. ' : '');
+      (hours ? 'כשיש מקור מהמפה, המצב פתוח או סגור שבו כבר חושב לשעה הזאת לפי שעות המפה; אם אתר רשמי או מקור עדכני אחר נותן שעות אחרות, העדיפי אותם, חשבי לפיהם ואמרי שבמפה רשום אחרת. זו שאלה על שעות פתיחה, ולכן כאן עני ממוקד וקצר יחסית (5 עד 8 משפטים) גם אם בדרך כלל את מרחיבה: האם פתוח עכשיו ועד מתי, השעות של היום ושל מחר, הכתובת והטלפון. בלי עצות שלא נשאלו. כתבי שעות תמיד מהמוקדמת למאוחרת, למשל משמונה בבוקר עד אחת בצהריים. אם אין לך התאמה ודאית למקום שביקש, אמרי זאת בשני משפטים ושאלי באיזו עיר הוא נמצא, בלי לפרט נתונים לא ודאיים. אם הסניף שמופיע במקורות נמצא בעיר או בשכונה אחרת ממה שהמתקשר אמר, אמרי איזה סניף מצאת ושאלי אם לזה התכוון. זו שאלה על שעות פתיחה: מצאי את שעות היום הנוכחי (' + now + '), חשבי בעצמך לפי השעה עכשיו האם המקום פתוח או סגור ברגע זה ועד מתי, ואמרי את זה בתחילת התשובה בבירור. אם אין שעות מפורשות ליום הזה, אמרי שאין לך שעות מאומתות להיום והציעי להתקשר למקום, עם מספר הטלפון אם מופיע. ' : '');
     const reply = await ask('המתקשר צריך מידע עדכני ומדויק. לפניך מקורות אמיתיים מהאינטרנט שנאספו ונקראו עכשיו לשאלה הזאת בלבד. אל תערבבי בתשובה מידע מתשובות קודמות שאינו קשור לשאלה הזאת. ' + verify +
       (multi ? 'הוא שאל כמה דברים: ' + parts.join('; ') + '. עני על כל אחד מהם בנפרד ולפי הסדר, ואם לאחד מהם אין תשובה במקורות, אמרי זאת. ' : '') +
-      'כשמדובר בתחזית או בנתון יומי, השתמשי רק בנתון של היום (' + now + ') ואל תקריאי ימים שכבר עברו. ' + (hours ? 'ענה ממוקד ובבהירות, רק לפי המקורות:' : 'ענה בהרחבה ובפירוט רק לפי המקורות:') + ' עובדות, מספרים, שמות ותאריכים בדיוק כפי שכתובים בהם. כשהמקורות לא עונים על חלק מהשאלה, אמרי שלא מצאת את החלק הזה. אל תקריאי כתובות אתרים ואל תאמרי "מקור 1".', 'מקורות:\n' + sourceText, { maxTokens: hours ? 700 : 1800, budgetMs: 14000, ctx: smallContext })
+      'כשמדובר בתחזית או בנתון יומי, השתמשי רק בנתון של היום (' + now + ') ואל תקריאי ימים שכבר עברו. ' + (hours ? 'ענה ממוקד ובבהירות, רק לפי המקורות:' : 'ענה בהרחבה ובפירוט רק לפי המקורות:') + ' עובדות, מספרים, שמות ותאריכים בדיוק כפי שכתובים בהם. כשהמקורות לא עונים על חלק מהשאלה, אמרי שלא מצאת את החלק הזה. אל תקריאי כתובות אתרים ואל תאמרי "מקור 1".', 'מקורות:\n' + mapSource + sourceText, { maxTokens: hours ? 700 : 1800, budgetMs: 14000, ctx: smallContext })
       .catch(e => {
         log.warn?.('[EXT3_BRAIN] web answer not written; saying what was found', { status: e?.status || 0 });
         const seenHost = new Set();
@@ -1229,7 +1338,7 @@ const LYRICS_ASKED = /(?:נכתוב|תכתוב|תכתבי|לכתוב|תחבר|ת
 const TIPS_ASKED = /(?:טיפ|טיפים|עצה|עצות|המלצות מעשיות|תן לי רעיונות|תני לי רעיונות)/u;
 
 const GREETING = /^(?:שלום|היי|הי|הלו|אהלן|בוקר טוב|ערב טוב|לילה טוב|צהריים טובים|מה נשמע|מה שלומך|מה שלומך היום|מה קורה|מה המצב|מה העניינים|מה איתך|תודה|תודה רבה|יופי|מעולה|אחלה)(?:\s+(?:כפרה|אחי|חביבי|מותק|יקירתי|יקירי|גבר|נשמה|לך|רבה|לך רבה|בבקשה|עליך))*[\s?!.,]*$/u;
-const FACTUAL = /(?:איך נקרא|איך קוראים ל|איך הם נקראים|מי שר|מי שרה|מי שרים|מי הזמר|מי הזמרת|מי המלחין|מי כתב את השיר|צמד|להקת|אלבום|אלבומים|שירים של|שיר של|דיסקוגרפיה|איך מגיעים|איך אני מגיע|איך להגיע|באיזה קו|איזה קו|קו אוטובוס|קווי אוטובוס|תחבורה ציבורית|מסלול נסיעה|כמה זמן נסיעה|מספר הטלפון|מה הטלפון|טלפון של|כתובת של|מה הכתובת|כמה עולה|מה המחיר|מחיר של|באיזו איכות|איזה פורמט|מי המנהל|מי הבעלים|מי ראש|מי שר ה|מי נשיא|מתי נולד|מתי נפטר|בן כמה|בת כמה)/u;
+const FACTUAL = /(?:איפה מוכרים|איפה קונים|איפה אפשר לקנות|איפה משיגים|איפה להשיג|איפה יש לקנות|מי מוכר|המספר של|מספר של|מספר טלפון|הטלפון של|טלפון ל|איך מתקשרים|איך משיגים את|פתוח עכשיו|פתוחה עכשיו|עד מתי פתוח|שעות פתיחה|איך נקרא|איך קוראים ל|איך הם נקראים|מי שר|מי שרה|מי שרים|מי הזמר|מי הזמרת|מי המלחין|מי כתב את השיר|צמד|להקת|אלבום|אלבומים|שירים של|שיר של|דיסקוגרפיה|איך מגיעים|איך אני מגיע|איך להגיע|באיזה קו|איזה קו|קו אוטובוס|קווי אוטובוס|תחבורה ציבורית|מסלול נסיעה|כמה זמן נסיעה|מספר הטלפון|מה הטלפון|טלפון של|כתובת של|מה הכתובת|כמה עולה|מה המחיר|מחיר של|באיזו איכות|איזה פורמט|מי המנהל|מי הבעלים|מי ראש|מי שר ה|מי נשיא|מתי נולד|מתי נפטר|בן כמה|בת כמה)/u;
 const ROUTE = /(?:איך מגיעים|איך אני מגיע|איך להגיע|להגיע ל|באיזה קו|איזה קו|קו אוטובוס|קווי אוטובוס|תחבורה ציבורית|אוטובוס ל|רכבת ל|מסלול נסיעה|הדרך הכי מהירה|הכי מהר ל|נסיעה ל)/u;
 
 // A map or calendar service that hangs must not keep the caller waiting.

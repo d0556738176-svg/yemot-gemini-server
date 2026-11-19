@@ -17,6 +17,7 @@
 //    walking-line distance, with their street address when the map has it.
 // Everything external is injected (fetchImpl), so this file tests offline.
 
+import { openState, openLine } from './opening-hours.js';
 import { existsSync, readFileSync } from 'node:fs';
 
 const UA = 'yemot-ai-phone/1.0 (owner phone line; contact via github d0556738176-svg)';
@@ -174,13 +175,26 @@ async function nominatimNear(words, loc, radiusKm, { fetchImpl }) {
   const j = await getJson(u, { fetchImpl, timeoutMs: 7000 });
   return (Array.isArray(j) ? j : []).map(x => ({ lat: Number(x.lat), lon: Number(x.lon), tags: { ...((x.category || x.class) ? { [x.category || x.class]: x.type || '' } : {}), name: x.name || '', 'addr:street': x.address?.road || '', 'addr:housenumber': x.address?.house_number || '', 'addr:city': townOf(x.address) } }));
 }
+const NEIGHBOURHOODS = [
+  [/^(?:ב)?רמה\s*([אבגד])['׳]?$/u, 'רמת בית שמש $1', 'בית שמש'],
+  [/^(?:ב)?רמב["״']?ש\s*([אבגד])['׳]?$/u, 'רמת בית שמש $1', 'בית שמש'],
+  [/^(?:ב)?רמת בית שמש\s*([אבגד])['׳]?$/u, 'רמת בית שמש $1', 'בית שמש'],
+  [/^(?:ב)?(?:שכונת\s+)?נופי? השמש$/u, 'נופי השמש', 'בית שמש'],
+  [/^(?:ב)?(?:שכונת\s+)?רמות$/u, 'רמות', 'ירושלים']
+];
 const GENERIC = new Set(['חוף', 'החוף', 'רחוב', 'שכונת', 'שכונה', 'אזור', 'ליד', 'של', 'את', 'בית', 'מרכז', 'כיכר', 'גן', 'פארק', 'הים', 'ים']);
 // The place he named, on the map: { lat, lon, label, approx }.
 // town: the town he said (results elsewhere are rejected).
 export async function geocode({ place = '', town = '' } = {}, { fetchImpl = fetch, log = console } = {}) {
   const strip = s => String(s || '').replace(/^(?:ב|ל)?(?:ה)?(?:מושב|משוב|קיבוץ|יישוב|ישוב|עיר|העיר|שכונת|ליד|באזור)\s+/u, '').trim();
   place = strip(place); town = strip(town);
-  if (place && town && sameTown(place, town)) place = '';
+  let alias = false;
+  // Neighbourhoods said the way people say them ("רמה א" = רמת בית שמש א').
+  for (const [rx, to, city] of NEIGHBOURHOODS) {
+    const m = place.match(rx);
+    if (m && (!town || sameTown(town, city))) { place = to.replace('$1', m[1] || ''); town = city; alias = true; break; }
+  }
+  if (place && town && !alias && sameTown(place, town)) place = '';
   if (!place && !town) return null;
   const inTown = r => !town || sameTown(r.town, town) || sameTown(r.display.split(',')[1] || '', town) || r.display.split(',').some(p => sameTown(p, town) && !/נפת|מחוז|מועצה/u.test(p));
   const full = [place, town].filter(Boolean).join(' ');
@@ -348,6 +362,12 @@ const KINDS = [
   [/ישיבה|כולל|בית מדרש/u, 'ישיבה או בית מדרש', ['["name"~"ישיבה|ישיבת|כולל|בית מדרש|בית המדרש"]'], (t, n) => /ישיבה|ישיבת|כולל|בית ה?מדרש/.test(n)],
   [/מים|ברזיה|מי שתייה/u, 'ברזיית מים', ['["amenity"="drinking_water"]'], t => t.amenity === 'drinking_water'],
   [/טעינה|עמדת טעינה/u, 'עמדת טעינה', ['["amenity"="charging_station"]'], t => t.amenity === 'charging_station'],
+  [/חנות ספרים|חנויות ספרים|ספרי קודש|ספרים|סטימצקי|צומת ספרים/u, 'חנות ספרים', ['["shop"="books"]', '["name"~"ספרים|ספרי|סטימצקי|צומת ספרים"]'], (t, n) => t.shop === 'books' || /ספרים|ספרי קודש|סטימצקי|צומת ספרים/.test(n)],
+  [/מספרה|תספורת|ספר שיער|ספרית/u, 'מספרה', ['["shop"="hairdresser"]'], t => t.shop === 'hairdresser'],
+  [/חשמל|מוצרי חשמל|מכונות/u, 'חנות מוצרי חשמל', ['["shop"~"^(electronics|appliance|hardware)$"]'], t => /^(electronics|appliance|hardware)$/.test(t.shop || '')],
+  [/בגדים|ביגוד|נעליים/u, 'חנות בגדים או נעליים', ['["shop"~"^(clothes|shoes)$"]'], t => /^(clothes|shoes)$/.test(t.shop || '')],
+  [/ירקות|פירות|ירקן/u, 'ירקן', ['["shop"="greengrocer"]'], t => t.shop === 'greengrocer'],
+  [/אטליז|קצב/u, 'אטליז', ['["shop"="butcher"]'], t => t.shop === 'butcher'],
   [/מכון כושר|חדר כושר/u, 'מכון כושר', ['["leisure"="fitness_centre"]'], t => t.leisure === 'fitness_centre']
 ];
 export function nearbyKind(text) { for (const [rx, label, filters, test] of KINDS) if (rx.test(String(text || ''))) return { label, filters, test }; return null; }
@@ -369,7 +389,9 @@ async function reverseAddress(lat, lon, { fetchImpl }) {
   return [street && a.house_number ? street + ' ' + a.house_number : street, townOf(a)].filter(Boolean).join(', ');
 }
 // The nearest places of a kind to the point he named, nearest first.
-export async function nearbyFacts({ kindText = '', place = '', town = '' } = {}, { fetchImpl = fetch, log = console } = {}) {
+export const OPEN_NOW = /(?:פתוח|פתוחה|פתוחים|פתוחות|תורנ|עובד עכשיו|עובדת עכשיו)/u;
+export async function nearbyFacts({ kindText = '', place = '', town = '', openNow = false } = {}, { fetchImpl = fetch, log = console, now = new Date() } = {}) {
+  openNow = openNow || OPEN_NOW.test(kindText);
   const kind = nearbyKind(kindText);
   if (!kind) return null;
   const loc = await geocode({ place, town }, { fetchImpl, log }).catch(() => null);
@@ -389,13 +411,47 @@ export async function nearbyFacts({ kindText = '', place = '', town = '' } = {},
       .filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon))
       .map(x => ({ name: x.tags['name:he'] || x.tags.name || '', address: addressOf(x.tags), km: km(loc, x), lat: x.lat, lon: x.lon, phone: x.tags.phone || x.tags['contact:phone'] || '', hours: x.tags.opening_hours || '', denomination: x.tags.denomination || '' }))
       .filter(x => { const k = (x.name || '') + '|' + Math.round(x.lat * 2000) + '|' + Math.round(x.lon * 2000); if (seen.has(k)) return false; seen.add(k); return true; })
-      .sort((a, b) => a.km - b.km).slice(0, 5);
-    if (items.length) break;
+      .sort((a, b) => a.km - b.km)
+      .map(x => ({ ...x, open: x.hours ? openState(x.hours, now) : { state: 'unknown' } }));
+    // "Open now": the open ones first (by distance), the ones known to be
+    // closed are left out when there are open ones, unknown hours stay last.
+    if (openNow) {
+      const rank = x => x.open.state === 'open' ? 0 : x.open.state === 'unknown' ? 1 : 2;
+      const anyOpen = items.some(x => x.open.state === 'open');
+      items = items.filter(x => !anyOpen || x.open.state !== 'closed').sort((a, b) => rank(a) - rank(b) || a.km - b.km);
+    }
+    items = items.slice(0, 5);
+    if (items.length && (!openNow || items.some(x => x.open.state === 'open') || radius === 12000)) break;
   }
   // Street address for the nearest ones the map lists without one.
   for (const x of items.slice(0, 2)) if (!x.address) x.address = await reverseAddress(x.lat, x.lon, { fetchImpl }).catch(() => '');
   const where = loc.label + (loc.town && !sameTown(loc.label, loc.town) ? ' ב' + loc.town : '');
   const text = 'מהמפה הפתוחה (OpenStreetMap), ' + kind.label + ' הקרובים ביותר ל' + where + (loc.approx ? ' (את המקום המדויק לא מצאתי במפה, המרחקים ממרכז ' + loc.town + ')' : '') + ', מהקרוב לרחוק, מרחק בקו אווירי:\n' +
-    (items.length ? items.map((x, i) => (i + 1) + '. ' + (x.name || kind.label + ' בלי שם במפה') + (x.denomination ? ' (' + x.denomination + ')' : '') + ' - ' + spokenDistance(x.km) + (x.address ? ', כתובת: ' + x.address : '') + (x.phone ? ', טלפון: ' + x.phone : '') + (x.hours ? ', שעות: ' + x.hours : '')).join('\n') : 'לא נמצא אף ' + kind.label + ' במפה בטווח של 12 קילומטר.');
-  return { loc, kind: kind.label, items, text };
+    (items.length ? items.map((x, i) => (i + 1) + '. ' + (x.name || kind.label + ' בלי שם במפה') + (x.denomination ? ' (' + x.denomination + ')' : '') + ' - ' + spokenDistance(x.km) + (x.address ? ', כתובת: ' + x.address : '') + (x.phone ? ', טלפון: ' + x.phone : '') + (x.open.state !== 'unknown' ? ', ' + openLine(x.hours, now, spokenTime) + (x.open.today ? ' (' + x.open.today + ')' : '') : x.hours ? ', שעות לפי המפה: ' + x.hours : ', שעות הפתיחה לא מופיעות במפה')).join('\n') : 'לא נמצא אף ' + kind.label + ' במפה בטווח של 12 קילומטר.');
+  const openNote = openNow ? '\nהוא שאל מה פתוח עכשיו. השעה עכשיו בישראל: ' + spokenTime(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now)) + '. ' + (items.some(x => x.open.state === 'open') ? 'הפתוחים עכשיו לפי שעות המפה מופיעים ראשונים.' : 'במפה לא מצאתי מקום שמסומן כפתוח עכשיו; למקומות בלי שעות במפה צריך לברר בטלפון.') : '';
+  return { loc, kind: kind.label, items, text: text + openNote, openNow };
+}
+
+// ---------- a named business: its hours on the map (owner, 19.11) ----------
+// "Is Rami Levy in the Hasdera mall in Beit Shemesh open now?": the map's own
+// entry for that business in that town, nearest to the place he said, with
+// its hours worked out for this minute. Nothing found = nothing said.
+export async function businessHours({ name = '', place = '', town = '' } = {}, { fetchImpl = fetch, log = console, now = new Date() } = {}) {
+  const words = plain(name).split(' ').filter(w => w.length >= 2 && !GENERIC.has(w) && !/^(?:סניף|חנות|הסניף|החנות|פתוח|פתוחה|עכשיו)$/u.test(w));
+  if (!words.length || !localMapReady()) return null;
+  const loc = await geocode({ place, town }, { fetchImpl, log }).catch(() => null)
+    || (town ? await geocode({ town }, { fetchImpl, log }).catch(() => null) : null);
+  if (!loc) return null;
+  const rows = localPlaces(boxAround(loc, place ? 4 : 8));
+  const hits = rows.map(x => ({ x, n: plain(x.tags.name || '') }))
+    .filter(({ n }) => n && words.every(w => n.includes(w) || n.includes(w.replace(/^ה/u, ''))))
+    .map(({ x }) => ({ name: x.tags.name, address: addressOf(x.tags), phone: x.tags.phone || x.tags['contact:phone'] || '', hours: x.tags.opening_hours || '', km: km(loc, x) }))
+    .sort((a, b) => a.km - b.km).slice(0, 3);
+  if (!hits.length) return { loc, items: [], text: '' };
+  const text = 'מהמפה הפתוחה (OpenStreetMap), ' + name + ' ליד ' + loc.label + (loc.town && !sameTown(loc.label, loc.town) ? ' ב' + loc.town : '') + ':\n' + hits.map((h, i) => {
+    const s = h.hours ? openState(h.hours, now) : { state: 'unknown' };
+    return (i + 1) + '. ' + h.name + ' - ' + spokenDistance(h.km) + ' מהמקום' + (h.address ? ', כתובת: ' + h.address : '') + (h.phone ? ', טלפון: ' + h.phone : '') +
+      (s.state !== 'unknown' ? ', לפי שעות המפה: ' + openLine(h.hours, now, spokenTime) + (s.today ? ' (' + s.today + ')' : '') : h.hours ? ', שעות במפה: ' + h.hours : ', שעות הפתיחה לא מופיעות במפה');
+  }).join('\n');
+  return { loc, items: hits, text };
 }

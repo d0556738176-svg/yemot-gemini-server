@@ -6215,6 +6215,24 @@ app.get('/version',rateLimit(30,60*1000,'version'),async (req,res)=>{
   const map=JSON.parse(await readFile('/var/lib/yemot-data/osm/built.json','utf8').catch(()=>'null'));
   res.set('cache-control','no-store').json({running,startedAt:new Date(Date.now()-process.uptime()*1000).toISOString(),localMap:map?{builtAt:map.at,places:map.places,tiles:map.tiles}:null});
 });
+// Owner, 19.11: a read-only live check of the free information tools (map
+// hours, buses, roads, a channel's latest upload) on the running server.
+// No model, no keys, no caller data; public facts only, kept 5 minutes.
+let liveProbe = null;
+app.get('/live-probe',rateLimit(4,60*1000,'live-probe'),async (req,res)=>{
+  if (liveProbe && Date.now()-liveProbe.at<5*60*1000) return res.set('cache-control','no-store').json(liveProbe.out);
+  const t=async (name,fn)=>{ const t0=Date.now(); try { return [name,{ ok:true, ms:Date.now()-t0, ...(await fn()), ms:Date.now()-t0 }]; } catch(e){ return [name,{ ok:false, ms:Date.now()-t0, error:String(e?.message||e).slice(0,120) }]; } };
+  const P=await import('./place-tools.js'), T=await import('./travel-tools.js'), B=await import('./ext3-brain.js');
+  const quiet={ info(){}, warn(){} };
+  const out=Object.fromEntries(await Promise.all([
+    t('travel',async()=>{ const f=await T.travelFacts({ from:{ place:'רמה א', town:'בית שמש' }, to:{ place:'התחנה המרכזית', town:'ירושלים' } },{ log:quiet }); return { text:String(f.text||f.unknown||'').slice(0,1500), busTrips:f.bus?.trips?.length||0, busError:f.bus?.error||'', car:!!f.car?.best }; }),
+    t('pharmacyOpenNow',async()=>{ const f=await P.nearbyFacts({ kindText:'בית מרקחת פתוח עכשיו', place:'רמה א', town:'בית שמש' },{ log:quiet }); return { text:String(f?.text||'').slice(0,1200) }; }),
+    t('ramiLevy',async()=>{ const f=await P.businessHours({ name:'רמי לוי', place:'קניון השדרה', town:'בית שמש' },{ log:quiet }); return { text:String(f?.text||'').slice(0,800), found:f?.items?.length||0 }; }),
+    t('latestLesson',async()=>{ const found=await B.ytdlpSearch(['גואל אלקריף'],{ count:15 }); const ch=B.ownerChannel(found,'גואל אלקריף'); const ups=ch?await B.channelUploads(ch.id,{ count:4 }):[]; return { channel:ch?.title||'', latest:ups.slice(0,3).map(v=>({ title:v.title, date:String(v.publishedAt||'').slice(0,10), min:Math.round(v.durationSec/60) })) }; })
+  ]));
+  liveProbe={ at:Date.now(), out };
+  res.set('cache-control','no-store').json(out);
+});
 // Owner's live check (19.11): deploy/vps/ask.mjs (run by the owner on the
 // server) writes questions under a long random name; opening this address
 // runs them as one simulated text call in extension 1 or 3 of the RUNNING
