@@ -73,12 +73,10 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
     if (!prev || r.stop_sequence > prev.stop_sequence) board.set(r.gtfs_ride_id, r); // the stop nearest the destination on the same ride
   }
   if (!board.size) return { trips: [], fromStops, toStops, debug: { leaving: leaving.length, rides: 0, arriving: 0 } };
-  const ids = [...board.keys()];
-  const t2 = new Date(now.getTime() + (windowMin + 240) * 60000).toISOString();
-  const arriving = [];
-  for (let i = 0; i < ids.length && i < 600; i += 120) {
-    arriving.push(...await rideStops({ gtfs_stop_ids: toStops.map(s => s.id).join(','), gtfs_ride_ids: ids.slice(i, i + 120).join(','), arrival_time_from: t0, arrival_time_to: t2, limit: 1500 }, { fetchImpl }));
-  }
+  // Everything arriving near the destination in the window, matched to the
+  // rides above here (the API's ride filter returned nothing live, 19.11).
+  const t2 = new Date(now.getTime() + (windowMin + 150) * 60000).toISOString();
+  const arriving = (await rideStops({ gtfs_stop_ids: toStops.map(s => s.id).join(','), arrival_time_from: t0, arrival_time_to: t2, limit: 5000 }, { fetchImpl })).filter(r => board.has(r.gtfs_ride_id));
   const fromKm = new Map(fromStops.map(s => [s.id, s.km])), toKm = new Map(toStops.map(s => [s.id, s.km]));
   const trips = [];
   for (const a of arriving) {
