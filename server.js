@@ -4542,40 +4542,27 @@ async function youtubeCallHandler(call) {
     if(m) {
       const ch=TV.TV_CHANNELS.find(c=>c.key===m[1]);
       if(!ch) return call.go_to_folder('/5/9');
-      const REC=await import('./tv-recorder.js');
       const RF=await import('./tv-replay-folder.js');
-      const p=(await import('./youtube-authorized-playback.js'))._pipeline;
       let note='';
       for(let round=0;round<8;round++) {
-        const have=await REC.hoursAvailable(ch.key);
+        // The hours already in Yemot (kept for good), not the local recordings.
+        const have=RF.publishedHours(ch.key);
         if(!have.length) {
-          await tap('עדיין אין הקלטות של '+ch.title+'. ההקלטה פועלת כל הזמן, ושעה שהוקלטה תהיה זמינה כאן.',{sec_wait:2,digits_allowed:['0']});
+          await tap('עדיין לא עלו שידורים חוזרים של '+ch.title+'. כל שעה עולה אוטומטית כמה דקות אחרי שהיא מסתיימת.',{sec_wait:2,digits_allowed:['0']});
           return call.go_to_folder('/5/9');
         }
-        const k=String(await call.read([{type:'text',data:sanitizeForYemot(note+'שידורים חוזרים של '+ch.title+'. הקישו את השעה בשתי ספרות, למשל אפס שמונה לשמונה בבוקר, או שתיים אפס לשמונה בערב. השעות שהוקלטו: '+have.join(', ')+'. לחזרה לתפריט הקודם הקישו אפס וסולמית, ולתפריט הראשי סולמית.')}],'tap',
+        const k=String(await call.read([{type:'text',data:sanitizeForYemot(note+'שידורים חוזרים של '+ch.title+'. הקישו את השעה בשתי ספרות, למשל אפס שמונה לשמונה בבוקר, או שתיים אפס לשמונה בערב. השעות שיש: '+have.join(', ')+'. בכל שעה מושמע קודם השידור החדש ביותר, ובמקש 4 הימים הקודמים. לחזרה לתפריט הקודם הקישו אפס וסולמית, ולתפריט הראשי סולמית.')}],'tap',
           {max_digits:2,min_digits:1,sec_wait:7,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'h5'+(++tapNo),timeout:10*60*1000})||'None').trim();
         branch2KeyLog('tv5h',k,0,0);
         if(k==='None') return call.go_to_folder('/');
         if(k==='0') return call.go_to_folder('/5/9');
         const hour=Number(k);
         if(!/^\d{1,2}$/.test(k)||hour>23) { note='השעה '+k+' אינה בין אפס לעשרים ושלוש. '; continue; }
-        if(!have.includes(hour)) { note='אין הקלטה של '+ch.title+' בשעה '+hour+'. '; continue; }
-        const io=await replayIo();
-        const job=RF.prepareHour(ch,hour,io);
-        let folder=null, failed=null, first=true;
-        job.done.then(f=>{ folder=f; },e=>{ failed=String(e?.message||e); });
-        const t0=Date.now();
-        while(!folder&&!failed&&Date.now()-t0<6*60*1000) {
-          const msg=first?'מכין את '+ch.title+' משעה '+hour+'. ':'מכין, נא להמתין. ';
-          const progress=job.total?'מוכנים '+job.ready+' מתוך '+job.total+' חלקים. ':'';
-          first=false;
-          const w=String(await call.read([{type:'text',data:sanitizeForYemot(msg+progress)}],'tap',
-            {max_digits:1,min_digits:1,sec_wait:4,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'hw'+(++tapNo),timeout:10*60*1000,digits_allowed:['0']})||'None').trim();
-          if(w==='0') { note=''; break; }
+        if(have.includes(hour)) {
+          console.info('[TV REPLAY] caller sent to the hour',{key:ch.key,hour});
+          return call.go_to_folder('/5/9/'+ch.key+'/'+String(hour).padStart(2,'0'));
         }
-        if(folder) { console.info('[TV REPLAY] caller sent to the hour',{key:ch.key,hour,folder}); return call.go_to_folder(folder); }
-        note=failed?'יש תקלה זמנית בהכנת ההקלטה. ':'';
-        if(failed) console.warn('[TV REPLAY] hour not prepared',{key:ch.key,hour,message:failed.slice(0,160)});
+        note='שעה '+hour+' של '+ch.title+' עדיין לא עלתה. כל שעה עולה אוטומטית כמה דקות אחרי שהיא מסתיימת. ';
       }
       return call.go_to_folder('/5/9');
     }
@@ -5635,11 +5622,6 @@ app.get('/tv-replay-probe', rateLimit(6, 60 * 1000, 'tv-replay-probe'), async (r
   }
   res.json({ at:new Date().toISOString(), disk: REC.diskInfo(), filter: TV.TV_AUDIO_FILTER, channels: out });
 });
-// Replay hours copied to Yemot are emptied 3 hours after their last use.
-setInterval(async()=>{ try {
-  const p=(await import('./youtube-authorized-playback.js'))._pipeline; const RF=await import('./tv-replay-folder.js');
-  await RF.cleanupHours({ del: async remote=>{ const x=new URL(p.YEMOT_API_BASE+'/FileAction'); x.searchParams.set('token',p.yemotApiKey()); x.searchParams.set('action','delete'); x.searchParams.set('what',remote); await fetch(x,{signal:AbortSignal.timeout(8000)}).catch(()=>{}); }, log: console });
-} catch(e) { console.warn('[TV REPLAY] cleanup skipped',{message:String(e?.message||e).slice(0,120)}); } }, 30*60*1000).unref?.();
 // Yemot access for the replay hours (extension 5/9), shared by calls and the check.
 async function replayIo() {
   const p=(await import('./youtube-authorized-playback.js'))._pipeline;
@@ -5649,43 +5631,24 @@ async function replayIo() {
     getText:async what=>{ const j=await (await fetch(api('GetTextFile',{what}),{signal:AbortSignal.timeout(20000)})).json().catch(()=>null); return j?.responseStatus==='OK'?String(j.contents??''):null; },
     update:async(path,settings)=>{ const j=await (await fetch(api('UpdateExtension',{path,...settings}),{signal:AbortSignal.timeout(20000)})).json().catch(()=>null); if(j?.responseStatus!=='OK') throw new Error('UpdateExtension: '+String(j?.message||'failed').slice(0,80)); },
     list:async path=>{ const j=await (await fetch(api('GetIVR2Dir',{path}),{signal:AbortSignal.timeout(20000)})).json().catch(()=>null); return j; },
-    upload:(f,r)=>p.uploadToYemot(f,r,undefined,{convertAudio:true,single:true}),
+    // A whole hour is bigger than one upload: Yemot gets it in parts and joins it.
+    upload:(f,r)=>p.uploadToYemot(f,r,undefined,{convertAudio:true}),
     del:async remote=>{ await fetch(api('FileAction',{action:'delete',what:remote}),{signal:AbortSignal.timeout(8000)}).catch(()=>{}); },
     log:console,
   };
 }
-// Full check of the replays (owner, 19.11): for every channel, the hour is
-// prepared in Yemot exactly as for a caller, then its folder is read back
-// (settings and files). Runs in the background; open again for the results.
-let replayCheck={status:'idle'};
-app.get('/tv-replay-check', rateLimit(10, 60 * 1000, 'tv-replay-check'), async (req,res)=>{
-  if(replayCheck.status!=='running'&&req.query.start) {
-    replayCheck={status:'running',at:new Date().toISOString(),channels:[]};
-    (async()=>{ try {
-      const TV=await import('./branch2-tv.js'); const REC=await import('./tv-recorder.js'); const RF=await import('./tv-replay-folder.js');
-      const io=await replayIo();
-      for(const ch of TV.TV_CHANNELS) {
-        const hours=await REC.hoursAvailable(ch.key);
-        const hour=req.query.hour!==undefined?Number(req.query.hour):hours[0];
-        const row={key:ch.key,title:ch.title,hour,hours};
-        if(hour===undefined||!hours.includes(hour)) { row.ok=false; row.why='no recording'; replayCheck.channels.push(row); continue; }
-        const t0=Date.now();
-        try {
-          const folder=await RF.prepareHour(ch,hour,io).done;
-          row.folder=folder; row.sec=Math.round((Date.now()-t0)/1000);
-          const ini=await io.getText('ivr2:'+folder+'/ext.ini');
-          const dir=await io.list('ivr2:'+folder);
-          const wavs=(dir?.files||[]).map(f=>String(f.name||'')).filter(n=>/^\d{3}\.wav$/i.test(n));
-          row.files=wavs.length; row.expected=(await REC.filesForHour(ch.key,hour)).length;
-          row.iniOk=!!ini&&/^type=playfile$/m.test(ini)&&/^start=min$/m.test(ini)&&/^control_play0=go_to_folder$/m.test(ini);
-          row.durations=(dir?.files||[]).filter(f=>/^\d{3}\.wav$/i.test(String(f.name||''))).map(f=>f.duration??f.durationStr??null);
-          row.ok=row.iniOk&&row.files===row.expected;
-        } catch(e) { row.ok=false; row.error=String(e?.message||e).slice(0,200); row.sec=Math.round((Date.now()-t0)/1000); }
-        replayCheck.channels.push(row);
-      }
-    } finally { replayCheck.status='done'; replayCheck.finishedAt=new Date().toISOString(); } })();
-  }
-  res.json(replayCheck);
+// Replays (owner, 19.11): every finished hour of every channel is uploaded to
+// Yemot by itself and kept for good; checked every 5 minutes.
+setTimeout(()=>{ const run=async()=>{ try {
+  const TV=await import('./branch2-tv.js'); const RF=await import('./tv-replay-folder.js');
+  await RF.publishPending(TV.TV_CHANNELS, await replayIo());
+} catch(e) { console.warn('[TV REPLAY] publishing round skipped',{message:String(e?.message||e).slice(0,160)}); } };
+  run(); setInterval(run, 5*60*1000).unref?.(); }, 3*60*1000).unref?.();
+app.get('/tv-replay-check', rateLimit(20, 60 * 1000, 'tv-replay-check'), async (req,res)=>{
+  const TV=await import('./branch2-tv.js'); const RF=await import('./tv-replay-folder.js');
+  const pending=(await RF.hoursToPublish(TV.TV_CHANNELS)).map(x=>x.ch.key+'/'+x.id);
+  const published={}; for(const ch of TV.TV_CHANNELS) published[ch.key]=RF.publishedHours(ch.key);
+  res.json({ log: RF.replayLog, published, pending });
 });
 app.get('/tv-status', rateLimit(30, 60 * 1000, 'tv-status'), async (req,res)=>{
   const TV=await import('./branch2-tv.js'); const { _relays, relayHistory }=await import('./live-relay.js');
