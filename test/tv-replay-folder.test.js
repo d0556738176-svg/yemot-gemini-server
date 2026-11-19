@@ -7,32 +7,34 @@ import path from 'node:path';
 
 const dir = mkdtempSync(path.join(os.tmpdir(), 'rec-'));
 process.env.TV_REC_DIR = dir;
+const mp3 = (key, name) => { mkdirSync(path.join(dir, key), { recursive: true }); execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=f=300:d=4', '-ac', '1', '-ar', '16000', '-c:a', 'libmp3lame', path.join(dir, key, name)]); };
 
-test('replay hour: files first, then the settings (Yemot refuses settings for an empty folder)', async () => {
-  const { prepareHour, replayLog } = await import('../tv-replay-folder.js');
-  const { israelParts } = await import('../tv-recorder.js');
-  const now = israelParts();
-  mkdirSync(path.join(dir, '1'), { recursive: true });
-  const hh = String(now.hour).padStart(2, '0');
-  for (const m of ['00', '10']) execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=f=300:d=5', '-ac', '1', '-ar', '16000', '-c:a', 'libmp3lame', path.join(dir, '1', now.ymd + '-' + hh + m + '00.mp3')]);
-  const yemot = {}; const order = [];
+test('every finished hour goes to Yemot as one file, a new number each day, kept for good', async () => {
+  const RF = await import('../tv-replay-folder.js');
+  // Two days of 21:00 (finished), and the current hour (still recording: not published).
+  mp3('1', '20261118-210000.mp3'); mp3('1', '20261118-211000.mp3');
+  mp3('1', '20261119-210000.mp3');
+  const now = new Date('2026-11-19T20:30:00Z'); // 22:30 in Israel
+  mp3('1', '20261119-220000.mp3');
+  const ch = { key: '1', title: 'כאן 11' };
+  const todo = await RF.hoursToPublish([ch], now);
+  assert.deepEqual(todo.map(x => x.id), ['20261118-21', '20261119-21']);
+  assert.equal(todo[0].files.length, 2);
+
+  const yemot = { 'ivr2:/5/9/1/21/000.wav': 'left from the old layout' }; const order = []; const deleted = [];
   const io = {
-    upload: async (f, r) => { order.push('upload ' + path.basename(r)); yemot[r] = 'audio'; },
+    list: async f => ({ files: Object.keys(yemot).filter(k => k.startsWith(f + '/') && k.endsWith('.wav')).map(k => ({ name: k.split('/').pop() })) }),
+    del: async r => { deleted.push(r); delete yemot[r]; },
+    upload: async (f, r) => { order.push('upload ' + r.split('/').slice(-1)[0]); yemot[r] = 'audio'; },
     putText: async (w, c) => { if (!Object.keys(yemot).some(k => k.startsWith(w.replace('/ext.ini', '/')))) throw new Error('folder missing'); order.push('settings'); yemot[w] = c; },
     getText: async w => yemot[w] ?? null,
-    del: async () => {}, log: { info() {} },
+    log: { info() {}, warn() {} },
   };
-  const folder = await prepareHour({ key: '1', title: 'כאן 11' }, now.hour, io).done;
-  assert.equal(folder, '/5/9/1/' + hh);
-  // The two parts upload side by side (either may finish first); the settings come last.
-  assert.deepEqual(order.slice(0, 2).sort(), ['upload 000.wav', 'upload 001.wav']);
-  assert.equal(order[2], 'settings');
-  assert.match(yemot['ivr2:/5/9/1/' + hh + '/ext.ini'], /^type=playfile\n.*\nstart=min\n/);
-  assert.equal(replayLog[0].ok, true);
-  // Second time: nothing uploaded again.
-  order.length = 0;
-  await prepareHour({ key: '1', title: 'כאן 11' }, now.hour, io).done.catch(() => {});
-  await new Promise(r => setTimeout(r, 5200)); // the job of the first call is released after 5 s
-  await prepareHour({ key: '1', title: 'כאן 11' }, now.hour, io).done;
-  assert.ok(!order.some(x => x.startsWith('upload')), 'unchanged files are not uploaded again: ' + order.join(','));
+  for (const item of todo) await RF.publishHour(item, io);
+  assert.deepEqual(deleted, ['ivr2:/5/9/1/21/000.wav'], 'old layout cleared once');
+  assert.deepEqual(order, ['upload 000.wav', 'settings', 'upload 001.wav'], 'day 1 = 000, day 2 = 001 (newest first with start=max)');
+  assert.match(yemot['ivr2:/5/9/1/21/ext.ini'], /\nstart=max\n/);
+  assert.deepEqual(RF.publishedHours('1'), [21]);
+  assert.deepEqual((await RF.hoursToPublish([ch], now)).map(x => x.id), [], 'nothing published twice');
+  assert.equal(RF.replayLog[0].ok, true);
 });

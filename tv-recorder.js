@@ -13,7 +13,7 @@ import path from 'node:path';
 import { resolveStreamInfo, ffmpegHeaderArgs, SYSTEM_FFMPEG } from './live-relay.js';
 
 export const REC_DIR = process.env.TV_REC_DIR || path.join(os.homedir(), 'yemot-tv-rec');
-const KEEP_MS = 26 * 3600 * 1000;
+const KEEP_MS = 48 * 3600 * 1000; // a safety margin: every hour is in Yemot (for good) minutes after it ends
 const MIN_FREE = 2 * 1024 ** 3, WANT_FREE = 3 * 1024 ** 3;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
 

@@ -48,9 +48,9 @@ test('replay hour folder: extension 7 keys, 0 = back to the hours, # = main menu
   const { hourIni, hourFolder } = await import('../tv-replay-folder.js');
   const ini = hourIni('2', 'ערוץ 12', 22);
   assert.equal(hourFolder('2', 8), 'ivr2:/5/9/2/08');
-  for (const line of ['type=playfile', 'start=min', 'control_play1=seconds_plus', 'control_play3=seconds_minus', 'control_play4=minus', 'control_play5=wait',
+  for (const line of ['type=playfile', 'start=max', 'control_play1=seconds_plus', 'control_play3=seconds_minus', 'control_play4=minus', 'control_play5=wait',
     'control_play6=plus', 'control_play7=minut_plus_amount1', 'minut_plus_amount1=180000', 'control_play0=go_to_folder',
     'playfile_control_play_0_goto=/5/9/2', 'control_play#=go_to_folder', 'playfile_control_play_#_goto=/'])
     assert.ok(ini.split('\n').includes(line), line);
-  assert.ok(!/control_play8|control_play9|start=max/.test(ini), 'no file details, dubbing or newest-first order');
+  assert.ok(!/control_play8|control_play9|start=min/.test(ini), 'no file details or dubbing; newest day first');
 });
