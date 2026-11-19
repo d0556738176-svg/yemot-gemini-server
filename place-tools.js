@@ -425,13 +425,17 @@ export async function nearbyFacts({ kindText = '', place = '', town = '', openNo
       .map(x => ({ ...x, open: x.hours ? openState(x.hours, now) : { state: 'unknown' } }));
     // "Open now": the open ones first (by distance), the ones known to be
     // closed are left out when there are open ones, unknown hours stay last.
-    if (openNow) {
+    if (openNow && items.length) {
+      // Open ones first, but only among the places really near him (an open
+      // one 10 km away, in another town, is not "the nearest open pharmacy").
+      const reach = Math.max(3, items[0].km * 3);
+      const near = items.filter(x => x.km <= reach);
       const rank = x => x.open.state === 'open' ? 0 : x.open.state === 'unknown' ? 1 : 2;
-      const anyOpen = items.some(x => x.open.state === 'open');
-      items = items.filter(x => !anyOpen || x.open.state !== 'closed').sort((a, b) => rank(a) - rank(b) || a.km - b.km);
+      const anyOpen = near.some(x => x.open.state === 'open');
+      items = near.filter(x => !anyOpen || x.open.state !== 'closed').sort((a, b) => rank(a) - rank(b) || a.km - b.km);
     }
     items = items.slice(0, 5);
-    if (items.length && (!openNow || items.some(x => x.open.state === 'open') || radius === 12000)) break;
+    if (items.length) break;
   }
   // Street address for the nearest ones the map lists without one.
   for (const x of items.slice(0, 2)) if (!x.address) x.address = await reverseAddress(x.lat, x.lon, { fetchImpl }).catch(() => '');

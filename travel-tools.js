@@ -72,7 +72,7 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
     const prev = board.get(r.gtfs_ride_id);
     if (!prev || r.stop_sequence > prev.stop_sequence) board.set(r.gtfs_ride_id, r); // the stop nearest the destination on the same ride
   }
-  if (!board.size) return { trips: [], fromStops, toStops };
+  if (!board.size) return { trips: [], fromStops, toStops, debug: { leaving: leaving.length, rides: 0, arriving: 0 } };
   const ids = [...board.keys()];
   const t2 = new Date(now.getTime() + (windowMin + 240) * 60000).toISOString();
   const arriving = [];
@@ -100,7 +100,7 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
     if (n >= 2) continue;
     perLine.set(t.line, n + 1); out.push(t);
   }
-  return { trips: out.slice(0, 5), fromStops, toStops };
+  return { trips: out.slice(0, 5), fromStops, toStops, debug: { leaving: leaving.length, rides: board.size, arriving: arriving.length, matched: trips.length } };
 }
 function sameCity(a, b) { return plainCity(a.town) && plainCity(a.town) === plainCity(b.town); }
 
