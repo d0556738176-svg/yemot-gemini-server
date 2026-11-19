@@ -12,7 +12,8 @@ async function call(name, { mode, query, key, minSec = 90, maxSec = 420 }) {
   for (let i = 0; i < 500; i++) {
     const u = new URL(BASE + '/yemot-youtube');
     for (const [k, v] of Object.entries({ ApiCallId: id, ApiPhone: '0500000099', ApiDID: '0772296638', ApiExtension: '2', ...params })) u.searchParams.set(k, v);
-    const text = await fetch(u, { signal: AbortSignal.timeout(120000) }).then(r => r.text()).catch(e => 'ERR ' + e);
+    let text = '';
+    for (let k = 0; k < 4 && !text.trim(); k++) { if (k) await sleep(15000); text = await fetch(u, { signal: AbortSignal.timeout(120000) }).then(r => r.text()).catch(e => ''); }
     let s = text; try { s = decodeURIComponent(text.replace(/\+/g, ' ')); } catch {} s = s.replace(/\s+/g, ' ');
     const m = text.match(/read=.*?=([A-Za-z0-9_]+),/); const name = m?.[1];
     const show = !/נבדקו|ההורדה נמשכת|הכנת הסרטון נמשכת|ממתין/.test(s) || i < 3;
@@ -45,7 +46,7 @@ const a1 = await call('YouTube key 1 (audio)', { mode: '2', query: 'ניגון �
 const w1 = await call('Website key 1 (audio)', { mode: '6', query: 'שיעור קצר הרב זמיר כהן הידברות', key: '1', minSec: 120, maxSec: 900 }); runs.push(['Website audio', w1?.id]);
 const r0 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
 const v1 = await call('YouTube key 2 (video)', { mode: '2', query: 'סרטון קצר על הכותל', key: '2', maxSec: 300 });
-const w2 = await call('Website key 2 (video)', { mode: '6', query: 'ארץ נהדרת מאקו קטע', key: '2', minSec: 60, maxSec: 400 });
+const w2 = await call('Website key 2 (video)', { mode: '6', query: 'ארץ נהדרת מאקו קטע', key: '2', minSec: 200, maxSec: 400 });
 const r1 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
 console.log('recent jobs', JSON.stringify(r1));
 const before = new Set((r0.video || []).map(x => x.id));
