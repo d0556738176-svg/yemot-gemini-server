@@ -1020,7 +1020,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
           if(!response.ok) throw new Error('Extension 5 listing HTTP '+response.status);
           return response.json();
         },
-        upload:(file,remote)=>uploadToYemot(file,remote,undefined,{convertAudio:mastered.sampleRate>8000||!(covered&&!cover.convert)}),
+        upload:(file,remote)=>ensureUploadedAndVerified(file,remote,{expectedDurationSec:mastered.durationSec,replace:true}),
         log:console
       }).catch(e=>console.warn('[EXT5] audio not added',{videoId:id,message:String(e?.message||e).slice(0,160)}));
     }
