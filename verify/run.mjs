@@ -6,7 +6,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 for (let i = 0; i < 90; i++) {
   const d0 = await fetch(BASE + '/branch2-diag').then(r => r.json()).catch(e => ({ err: String(e) }));
   console.log('running version:', d0.commit, d0.startedAt, d0.err || '');
-  if (String(d0.commit || '').startsWith('bff5eef')) break;
+  if (String(d0.commit || '').startsWith('6ce7c56')) break;
   if (i === 89) process.exit(1);
   await sleep(20000);
 }
