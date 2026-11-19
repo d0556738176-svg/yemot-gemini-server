@@ -5498,7 +5498,11 @@ app.get('/branch2-saved',rateLimit(20,60*1000,'saved-check'),async (req,res)=>{
   try{
     if(req.query.recent){
       const pick=m=>[...m.entries()].slice(-10).map(([id,j])=>({id,status:j?.status||j?.state||null,mode:j?.mode||null}));
-      return res.json({audio:pick(youtubePlaybackJobs),video:pick(youtubeVideoJobs)});
+      const { _pipeline: p } = await import('./youtube-authorized-playback.js');
+      const idx=await p.readCacheJson('ivr2:/2/youtubeaudio/ext7_index.json').catch(()=>null);
+      const ext7Newest=Object.entries(idx?.items||{}).sort((a,b)=>Number(b[1].file)-Number(a[1].file)).slice(0,8).map(([id,e])=>({id,file:e.file,title:e.title,at:e.at}));
+      const v2=await p.readCacheJson('ivr2:/2/youtubeaudio/ext7_backfill_v2.json').catch(()=>null);
+      return res.json({audio:pick(youtubePlaybackJobs),video:pick(youtubeVideoJobs),ext7Newest,ext7CatchUp:v2});
     }
     const id=String(req.query.id||'');
     if(!/^[A-Za-z0-9_-]{11}$/.test(id))return res.status(400).json({ok:false});
