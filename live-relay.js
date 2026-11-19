@@ -6,7 +6,7 @@
 // One relay per broadcast, shared by every caller on it; it stops by itself a
 // few minutes after the last caller leaves, and after a hard limit.
 import { spawn } from 'node:child_process';
-import { promises as fs, existsSync } from 'node:fs';
+import { promises as fs, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -16,8 +16,14 @@ export const SEG_SEC = 20;
 const IDLE_MS = 3 * 60 * 1000, MAX_MS = 4 * 3600 * 1000, KEEP = 12;
 const relays = new Map();
 export const SYSTEM_FFMPEG = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
-const history = []; // the last relays that stopped, for the status page
+// The last relays that stopped, for the status page. Kept in a file too, so
+// an app restart (an update) does not wipe what happened in the last calls.
+const HISTORY_FILE = path.join(os.tmpdir(), 'yemot-live-history.json');
+const history = (() => { try { const j = JSON.parse(readFileSync(HISTORY_FILE, 'utf8')); return Array.isArray(j) ? j.slice(0, 20) : []; } catch { return []; } })();
+function saveHistory() { try { writeFileSync(HISTORY_FILE, JSON.stringify(history.slice(0, 20))); } catch {} }
 export const relayHistory = () => history;
+// Call-side events of the TV menu (channel chosen, what the caller was told).
+export function noteCall(event) { history.unshift({ at: new Date().toISOString(), call: true, ...event }); history.length = Math.min(history.length, 20); saveHistory(); }
 export const liveIdFor = url => 'l' + createHash('sha1').update(String(url)).digest('hex').slice(0, 10);
 
 // The stream address the page plays (YouTube live, HLS, Icecast...).
@@ -74,7 +80,8 @@ export function startRelay(item, deps) {
     log.info?.('[LIVE] relay stopped', { id, why, pieces: r.next });
     r.note('stopped', { why });
     history.unshift({ id, title: r.title, url: r.url, startedAt: new Date(r.startedAt).toISOString(), pieces: r.next, why, events: r.events.slice(-12) });
-    history.length = Math.min(history.length, 10);
+    history.length = Math.min(history.length, 20);
+    saveHistory();
     setTimeout(async () => {
       for (const p of r.pieces) await deps.del?.(p.remote).catch?.(() => {});
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
