@@ -66,6 +66,10 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now yemot-osm.timer
 [ -f /var/lib/yemot-data/osm/built.json ] || systemctl start --no-block yemot-osm.service || true
+# The browser console cannot send Ctrl+C (Ctrl and Shift are dropped), so a
+# log reader left following on the console (journalctl -f) would block it for
+# good: any journalctl on the console is stopped at each update (19.11).
+pkill -t tty1 -x journalctl 2>/dev/null || true
 # Security updates install automatically (Ubuntu default); make sure it is on.
 systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
 # Setting names typed through the console may have - instead of _ (no Shift).
