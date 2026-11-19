@@ -5790,7 +5790,10 @@ app.listen(port,async()=>{
     if(!streamDownloaderPath()) await new Promise(r=>{ const p=spawn('bash',[new URL('./install-stream-downloader.sh',import.meta.url).pathname],{stdio:'ignore'}); p.on('close',c=>{console.info('[ENGINES] N_m3u8DL-RE install',{ok:c===0}); r();}); p.on('error',()=>r()); });
     await (await import('./streamlink-media.js')).ensureStreamlink().catch(()=>false);
     await (await import('./browser-media.js')).ensureBrowserInstalled().catch(()=>false);
-    if(String(process.env.ENGINE_SELFTEST||'on')!=='off') {
+    // 19.11: no longer automatic on every start: each run used ~100 search
+    // credits and the restarts of one day used the free search quota up.
+    // It runs on demand (/branch2-engine-test) or with ENGINE_SELFTEST=on.
+    if(String(process.env.ENGINE_SELFTEST||'off')==='on') {
       await new Promise(r=>setTimeout(r,60000));
       const t=await import('./web-engine-selftest.js');
       await t.runEngineSelfTest({ffmpegPath:(await import('ffmpeg-static')).default}).catch(e=>console.warn('[ENGINE_TEST] failed',{message:String(e?.message||e).slice(0,120)}));
