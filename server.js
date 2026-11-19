@@ -4542,14 +4542,27 @@ function conversationCommand(text) {
   const t=String(text||'').replace(/[.,!?״"]/g,' ').replace(/\s+/g,' ').trim();
   if(t.split(' ').length>9) return '';
   if(/(?:שיחה חדשה|נושא חדש מההתחלה|נתחיל מההתחלה|תתחיל מההתחלה|תתחילי מההתחלה|דף חלק|לפתוח שיחה חדשה|תפתח שיחה חדשה|תפתחי שיחה חדשה|נפתח שיחה חדשה)/u.test(t)) return 'new';
-  if(/(?:היסטוריה|היסטוריית|השיחות הקודמות|השיחות הישנות|רשימת השיחות|שיחות קודמות|לשיחה קודמת|לשיחה הקודמת|תחזיר אותי לשיחה|תחזרי לשיחה|לחזור לשיחה)/u.test(t)) return 'history';
+  // "History of Jerusalem" is a question, not the conversations list.
+  if(/(?:היסטוריית ה?שיחות|היסטוריה של ה?שיחות|השיחות הקודמות|השיחות הישנות|רשימת ה?שיחות|שיחות קודמות|לשיחה (?:ה)?קודמת|תחזיר אותי לשיחה|תחזירי אותי לשיחה|תחזרי לשיחה|לחזור לשיחה)/u.test(t)
+    || /^(?:(?:תפתח|תפתחי|לפתוח|תקריא|תקריאי)\s+(?:את\s+)?)?ה?היסטוריה$/u.test(t)) return 'history';
   return '';
 }
 // The conversations of this extension, 8 per page, newest first:
 // 1-8 = go back to that one, 9 = a new conversation, 0 = more, * = back.
-async function ext3HistoryMenu(call, branch, phone) {
+async function ext3HistoryMenu(call, branch, phone, {about=''}={}) {
   const all=await listThreads(branch,phone).catch(()=>[]);
   const male=branch==='1';
+  // "Back to the conversation about physics": straight to it when one matches.
+  const words=String(about).replace(/[.,!?]/g,' ').split(/\s+/).filter(w=>w.length>=3);
+  if(words.length) {
+    const score=t=>words.filter(w=>String(t.title).includes(w)).length;
+    const best=all.filter(t=>score(t)>0).sort((a,b)=>score(b)-score(a))[0];
+    if(best) {
+      const th=await selectThread(branch,phone,best.id);
+      const last=th?.turns?.at(-1);
+      return {changed:!best.current,prompt:'חזרנו לשיחה על '+sanitizeForYemot(best.title).slice(0,90)+'. '+(last?'בפעם האחרונה שאלת: '+sanitizeForYemot(titleOf(last.user))+'.':'')+' אפשר להמשיך מכאן.'};
+    }
+  }
   if(!all.length) return {prompt:'עוד אין שיחות קודמות בשלוחה הזאת. אפשר להתחיל לדבר, '+(male?'אני מקשיב.':'אני מקשיבה.')};
   for(let page=0;;page++) {
     const items=all.slice(page*8,page*8+8);
@@ -5156,7 +5169,8 @@ async function callHandler(call) {
           console.info('[THREADS] new conversation',{callId:activeKey});
           ext3Done=true;
         } else if(convCmd==='history') {
-          const h=await ext3HistoryMenu(call,brainBranch(),normalizePhone(callerPhone));
+          const about=(String(userTranscript).match(/(?:לשיחה|שיחה)\s+(?:ה?קודמת\s+)?(?:על|בנושא|של)\s+(.{2,60})$/u)||[])[1]||'';
+          const h=await ext3HistoryMenu(call,brainBranch(),normalizePhone(callerPhone),{about});
           if(h?.hangup) { activeCalls.delete(activeKey); return; }
           if(h?.changed) turnHistory.length=0;
           turnContext.noThreadSave=true;
