@@ -15,6 +15,7 @@ import { getSongProviderHealth } from './song-generator.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
 import { keySlots, keysFor, withKeys, keyReport, isDeadKey, markDeadKey } from './key-slots.js';
+import { currentThread, appendTurn, newThread, selectThread, listThreads, threadContext, spokenWhen, titleOf } from './conversation-threads.js';
 import { ext3Turn, parseKeyOptions, spokenDuration, toMaleSelf, confirmFor, cleanTitle } from './ext3-brain.js';
 import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
@@ -4480,12 +4481,16 @@ async function directReadPage(url,timeoutMs=6000) {
 }
 async function ext3ReadPages(urls,opts={}) {
   const timeoutMs=Math.min(opts?.timeoutMs||4500,6000);
-  const got=await readPages(urls,{timeoutMs:Math.min(timeoutMs,4500),hedgeMs:1200}).catch(()=>[]);
-  const have=new Set(got.map(p=>String(p.url||'').replace(/[#?].*$/,'')));
-  const missing=(urls||[]).filter(u=>!have.has(String(u).replace(/[#?].*$/,'')));
-  if(!missing.length) return got;
-  const direct=await Promise.allSettled(missing.map(u=>directReadPage(u,timeoutMs)));
-  const extra=direct.filter(x=>x.status==='fulfilled'&&x.value.content.length>300).map(x=>x.value);
+  // 19.11: the server reads every page itself AT THE SAME TIME as the reader
+  // services (several of them run out of quota), so a dead service never adds
+  // its whole wait before the real reading starts.
+  const [got,direct]=await Promise.all([
+    readPages(urls,{timeoutMs:Math.min(timeoutMs,4500),hedgeMs:1200}).catch(()=>[]),
+    Promise.allSettled((urls||[]).map(u=>directReadPage(u,timeoutMs)))
+  ]);
+  const have=new Set(got.filter(p=>String(p.content||'').length>300).map(p=>String(p.url||'').replace(/[#?].*$/,'')));
+  const extra=direct.filter(x=>x.status==='fulfilled'&&x.value.content.length>300&&!have.has(String(x.value.url).replace(/[#?].*$/,''))).map(x=>x.value);
+  if(!extra.length) return got;
   if(extra.length) console.info('[EXT3_BRAIN] pages read directly',{count:extra.length});
   return [...got,...extra];
 }
@@ -4519,10 +4524,52 @@ async function ext3NewsSearch(q,{timeoutMs=4000}={}) {
   },{label:'Serper news'});
   return (j?.news||[]).map(x=>({title:String(x.title||''),snippet:String(x.snippet||''),source:String(x.source||''),date:String(x.date||''),url:String(x.link||'')})).filter(x=>x.title);
 }
+// "שיחה חדשה" / "היסטוריה" said in extensions 1 and 3.
+function conversationCommand(text) {
+  const t=String(text||'').replace(/[.,!?״"]/g,' ').replace(/\s+/g,' ').trim();
+  if(t.split(' ').length>9) return '';
+  if(/(?:שיחה חדשה|נושא חדש מההתחלה|נתחיל מההתחלה|תתחיל מההתחלה|תתחילי מההתחלה|דף חלק|לפתוח שיחה חדשה|תפתח שיחה חדשה|תפתחי שיחה חדשה|נפתח שיחה חדשה)/u.test(t)) return 'new';
+  if(/(?:היסטוריה|היסטוריית|השיחות הקודמות|השיחות הישנות|רשימת השיחות|שיחות קודמות|לשיחה קודמת|לשיחה הקודמת|תחזיר אותי לשיחה|תחזרי לשיחה|לחזור לשיחה)/u.test(t)) return 'history';
+  return '';
+}
+// The conversations of this extension, 8 per page, newest first:
+// 1-8 = go back to that one, 9 = a new conversation, 0 = more, * = back.
+async function ext3HistoryMenu(call, branch, phone) {
+  const all=await listThreads(branch,phone).catch(()=>[]);
+  const male=branch==='1';
+  if(!all.length) return {prompt:'עוד אין שיחות קודמות בשלוחה הזאת. אפשר להתחיל לדבר, '+(male?'אני מקשיב.':'אני מקשיבה.')};
+  for(let page=0;;page++) {
+    const items=all.slice(page*8,page*8+8);
+    if(!items.length) page=0;
+    const list=(items.length?items:all.slice(0,8));
+    const head=page===0?'יש לך '+all.length+' שיחות בשלוחה הזאת. ':'';
+    const text=head+list.map((t,i)=>'לשיחה '+spokenWhen(t.updated)+' על '+sanitizeForYemot(t.title).slice(0,90)+(t.current?', השיחה הנוכחית,':'')+' הקש '+(i+1)).join('. ')+
+      '. לשיחה חדשה הקש 9.'+(all.length>(page+1)*8?' לשיחות נוספות הקש 0.':'')+' לחזרה הקש כוכבית.';
+    let d='';
+    try {
+      d=String(await call.read(branch1SpeechItems(text),'tap',{max_digits:1,min_digits:1,sec_wait:8,typing_playback_mode:'No',allow_empty:true,empty_val:'None',
+        digits_allowed:['1','2','3','4','5','6','7','8','9','0','*'].slice(0,list.length).concat(['9','0','*']),timeout:10*60*1000})||'').trim();
+    } catch(e) { if(isCallerHangupError(e)) return {hangup:true}; throw e; }
+    console.info('[THREADS] history menu',{branch,page,pressed:d,threads:all.length});
+    if(d==='0') continue;
+    if(d==='9') { await newThread(branch,phone); return {changed:true,prompt:male?'פתחתי שיחה חדשה. על מה נדבר?':'פתחתי שיחה חדשה. על מה תרצה שנדבר?'}; }
+    const pick=list[Number(d)-1];
+    if(!pick) return {prompt:male?'בסדר, ממשיכים. אני מקשיב.':'בסדר, ממשיכים. אני מקשיבה.'};
+    const th=await selectThread(branch,phone,pick.id);
+    const last=th?.turns?.at(-1);
+    const lastAnswer=sanitizeForYemot(String(last?.gemini||'').replace(/\s+/g,' ')).slice(0,220).replace(/\s+\S*$/,'');
+    return {changed:!pick.current,prompt:'חזרנו לשיחה על '+sanitizeForYemot(pick.title).slice(0,90)+'. '+(last?'בפעם האחרונה שאלת: '+sanitizeForYemot(titleOf(last.user))+(lastAnswer?', ועניתי: '+lastAnswer+'.':'.'):'')+' אפשר להמשיך מכאן.'};
+  }
+}
 async function runExt3Brain(utterance, phone, callId, turnHistory, now, media='') {
   const key=normalizePhone(phone);
-  const prior=key!=='לא מזוהה'?conversationLog.filter(x=>normalizePhone(x.phone)===key&&x.user&&String(x.callId||'')!==String(callId||'')).slice(-12):[];
-  const summary=key!=='לא מזוהה'?String(callerSummaries.get(key)||''):'';
+  // Owner, 19.11: the conversation in progress of THIS extension, across calls,
+  // until he asks for a new one; older topics of it in one line.
+  const branch=typeof brainBranch==='function'?brainBranch():'';
+  const thread=key!=='לא מזוהה'&&branch?await currentThread(branch,key,{legacy:conversationLog.filter(x=>normalizePhone(x.phone)===key&&x.user)}).catch(()=>null):null;
+  const tc=thread?threadContext(thread,callId):null;
+  const prior=tc?tc.prior:key!=='לא מזוהה'?conversationLog.filter(x=>normalizePhone(x.phone)===key&&x.user&&String(x.callId||'')!==String(callId||'')).slice(-12):[];
+  const summary=[thread&&thread.title!=='השיחות הקודמות'?'':key!=='לא מזוהה'?String(callerSummaries.get(key)||''):'',tc?.topics||''].filter(Boolean).join('\n');
   const prefs=key!=='לא מזוהה'?(callerPrefs.get(key)||[]):[];
   const ext1=typeof brainBranch==='function'&&brainBranch()==='1';
   return ext3Turn({utterance,summary,prior,current:turnHistory,now,prefs,media,voice:ext1?'male':'female',brief:ext1},{
@@ -4807,6 +4854,14 @@ async function callHandler(call) {
   // minutes), so a download asked for mid-call starts at once.
   if(typeof brainBranch==='function'&&brainBranch()) { wakeSearxng(); if(process.env.EXT3_MEDIA_SECRET&&!call.selfTest) void ext2Wake('call start'); }
   if(typeof loadCallerMemory==='function') await loadCallerMemory(callerPhone);
+  const openThread=typeof brainBranch==='function'&&brainBranch()&&callerPhone!=='לא מזוהה'
+    ? await currentThread(brainBranch(),normalizePhone(callerPhone),{legacy:conversationLog.filter(x=>normalizePhone(x.phone)===normalizePhone(callerPhone)&&x.user)}).catch(()=>null) : null;
+  if (openThread) {
+    // Owner, 19.11: this extension's own conversation goes on from where it stopped.
+    const last=openThread.turns.filter(t=>t.user&&!/^בחרתי באפשרות/u.test(t.user)).at(-1);
+    openingPrompt=last?'שלום, טוב לשמוע אותך. בפעם האחרונה דיברנו על '+sanitizeForYemot(titleOf(last.user)).replace(/[.!?]+$/u,'')+'. אפשר להמשיך משם, או לומר שיחה חדשה.':'';
+    console.info('[CALL_FLOW] conversation thread',{callId:activeKey,turns:openThread.turns.length});
+  } else
   if (process.env.ENABLE_AI_OPENING !== 'false' && callerPhone !== 'לא מזוהה' && conversationLog.some(x=>x.phone===callerPhone)) {
     openingPrompt=await buildOpeningForCaller(callerPhone,explicitSearchOnly);
     console.info('[CALL_FLOW] returning_caller_memory_found', { callId: activeKey, hasMemory: !!openingPrompt });
@@ -4839,12 +4894,19 @@ async function callHandler(call) {
   }
   if(!call.selfTest && !resumed) {
     try {
-      const choice=String(await call.read([{type:'text',data:'לשיחה בדיבור הקש 1. להקלדה במקשי הטלפון הקש 2.'}],'tap',
+      const withHistory=typeof brainBranch==='function'&&!!brainBranch()&&callerPhone!=='לא מזוהה';
+      const choice=String(await call.read([{type:'text',data:'לשיחה בדיבור הקש 1. להקלדה במקשי הטלפון הקש 2.'+(withHistory?' להיסטוריית השיחות הקש 3.':'')}],'tap',
         {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',
-         digits_allowed:['1','2','*'],timeout:10*60*1000})||'').trim();
+         digits_allowed:withHistory?['1','2','3','*']:['1','2','*'],timeout:10*60*1000})||'').trim();
       console.info('[CALL_FLOW] input mode chosen',{callId:activeKey,choice});
       if(choice.includes('*')) { activeCalls.delete(activeKey); return call.go_to_folder('/'); }
       typingMode=choice==='2';
+      // Owner, 19.11: 3 = the conversations of this extension, newest first.
+      if(choice==='3'&&withHistory) {
+        const h=await ext3HistoryMenu(call,brainBranch(),normalizePhone(callerPhone));
+        if(h?.hangup) { activeCalls.delete(activeKey); return; }
+        if(h?.prompt) { openingPrompt=h.prompt; turnHistory.length=0; }
+      }
     } catch(modeError) {
       if(isCallerHangupError(modeError)) { activeCalls.delete(activeKey); return; }
       if(modeError instanceof ExitError) throw modeError;
@@ -4992,7 +5054,7 @@ async function callHandler(call) {
     let originalSpokenTranscript='';
     let relevantHistoryText='';
     let allowExternalLookup=!explicitSearchOnly;
-    turnContext.ext3Ref=null; turnContext.ext3Handoff=null;
+    turnContext.ext3Ref=null; turnContext.ext3Handoff=null; turnContext.noThreadSave=false;
     try {
       if(active) active.status='מתמלל את ההקלטה ומעבד את השאלה';
       const israelNow=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',dateStyle:'full',timeStyle:'short',hourCycle:'h23'}).format(new Date());
@@ -5015,12 +5077,30 @@ async function callHandler(call) {
             console.info('[EXT3_KEYS] not the saved song; searching YouTube',{callId:activeKey,query:q});
             userTranscript='תמצאי לי ביוטיוב את השיר '+q;
           } }
-        const fixed=answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
+        // Owner, 19.11: "שיחה חדשה" starts over; "היסטוריה" goes back to an
+        // earlier conversation of this extension.
+        const convCmd=callerPhone!=='לא מזוהה'?conversationCommand(userTranscript):'';
+        if(convCmd==='new') {
+          await newThread(brainBranch(),normalizePhone(callerPhone)).catch(()=>null);
+          turnHistory.length=0; turnContext.noThreadSave=true;
+          replyText=brainBranch()==='1'?'פתחתי שיחה חדשה, מההתחלה. על מה נדבר?':'פתחתי שיחה חדשה, דף חלק. על מה תרצה שנדבר?';
+          console.info('[THREADS] new conversation',{callId:activeKey});
+          ext3Done=true;
+        } else if(convCmd==='history') {
+          const h=await ext3HistoryMenu(call,brainBranch(),normalizePhone(callerPhone));
+          if(h?.hangup) { activeCalls.delete(activeKey); return; }
+          if(h?.changed) turnHistory.length=0;
+          turnContext.noThreadSave=true;
+          replyText=h?.prompt||'חזרנו לשיחה. אפשר להמשיך.';
+          ext3Done=true;
+        }
+        const fixed=ext3Done?null:answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
         // Owner, 18.11: "search the whole web for a recording/video of ..." =
         // extension 2's deep web search, with the results read there and a
         // key press before any download.
         const webQ=fixed?null:(await import('./web-media-intent.js')).webSearchIntent(userTranscript);
-        if(webQ) {
+        if(ext3Done) {}
+        else if(webQ) {
           turnContext.ext3Handoff={webQuery:webQ,title:webQ,mode:'web'};
           replyText=/שידור|לייב/.test(webQ)?'מעביר אותך לחיפוש השידור החי, בשלוחת ההורדות. שם תשמע את השידורים שנמצאו, ותבחר בהקשה.':'מעביר אותך לחיפוש עמוק בכל האתרים באינטרנט, בשלוחת ההורדות. שם תשמע את התוצאות, ותאשר בהקשה לפני כל הורדה.';
           console.info('[WEB_HANDOFF] whole-web search requested',{callId:activeKey,query:webQ.slice(0,120)});
@@ -5468,6 +5548,8 @@ async function callHandler(call) {
       phone:normalizePhone(callerPhone),callId:String(callId||''),user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript) || 'לא ניתן היה לתמלל את ההקלטה',gemini:replyText,
       ...(turnContext.ext3Ref?{ref:turnContext.ext3Ref}:{})};
     if(!call.selfTest) conversationLog.push(entry);
+    if(!call.selfTest&&typeof brainBranch==='function'&&brainBranch()&&!turnContext.noThreadSave)
+      void appendTurn(brainBranch(),normalizePhone(callerPhone),entry).catch(e=>console.warn('[THREADS] turn not saved',{message:String(e?.message||e).slice(0,120)}));
     if(conversationLog.length>MAX_CONVERSATION_LOG)
       conversationLog.splice(0,conversationLog.length-MAX_CONVERSATION_LOG);
     // The spoken answer is already ready. Do not make the caller wait for

@@ -318,7 +318,7 @@ test('extension 1: man\'s voice and short answers', async () => {
   const { deps, prompts } = baseDeps(['{"intent":"chat"}', '{"answer":"אני ממליצה לך לנוח"}']);
   const r = await ext3Turn({ utterance: 'מה כדאי לעשות כשעייפים', now, voice: 'male', brief: true }, deps);
   assert.equal(r.reply, 'אני ממליץ לך לנוח');
-  assert.match(prompts.at(-1).p, /ענה בקצרה, 2 עד 4 משפטים/);
+  assert.match(prompts.at(-1).p, /ענה תשובה רגילה ולא ארוכה, 3 עד 6 משפטים/);
   assert.match(prompts.at(-1).p, /בלשון זכר/);
   const current = [{ user: 'x', assistant: 'y', ref: clown }];
   const b = baseDeps([]); const c = await ext3Turn({ utterance: 'תשמיעי לי אותו', current, now, voice: 'male', brief: true }, b.deps);

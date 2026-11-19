@@ -246,7 +246,9 @@ export function localZmanim(lat, lon, date) {
 }
 // Words that mean he is asking for a halachic time of day.
 export const ZMANIM_WORDS = /(?:קריאת שמע|ק״ש|קש של|זמן ק\s*ש|סוף זמן|זמן תפילה|סוף זמן תפילה|הנץ|נץ החמה|זריחה|שקיעה|עלות השחר|עלות|צאת הכוכבים|צאת השבת|יציאת השבת|כניסת השבת|הדלקת נרות|זמן הדלקה|הבדלה|מוצאי שבת|חצות|מנחה גדולה|מנחה קטנה|פלג המנחה|זמני היום|זמני תפילה|זמן ציצית|משיכיר|בין השמשות|רבנו תם|רבינו תם|תחילת הצום|סוף הצום|צאת הצום|זמנים הלכתיים|זמני הלכה|לפי הגרא|לפי הגר״א|מגן אברהם|המג״א)/u;
-export function isZmanimQuestion(text) { return ZMANIM_WORDS.test(String(text || '')); }
+// "What is alot hashachar?" asks for an explanation, not for today's time.
+const EXPLAIN = /(?:מה זה|מה פירוש|מה הפירוש|מה המשמעות|למה|מדוע|מה ההבדל|תסביר|תסבירי|הסבר|מה המקור|מאיפה|מי קבע|איך מחשבים|איך יודעים)/u;
+export function isZmanimQuestion(text) { const t = String(text || ''); return ZMANIM_WORDS.test(t) && !(EXPLAIN.test(t) && !/(?:מתי|באיזו שעה|באיזה שעה|עד מתי|היום|מחר)/u.test(t)); }
 
 // All the day's times for a place, as text for the answer model and the
 // spoken times ready for the phone. Returns null when the place is unknown.

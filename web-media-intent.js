@@ -2,6 +2,8 @@
 // video of ..." sends the caller to extension 2's deep web search (keys 5/6/3
 // there), where he hears the results and confirms with a key before anything
 // is downloaded. Returns the search words, or null.
+import { isCapabilityQuestion } from './caller-intent.js';
+
 const WEB = /(?:מהאינטרנט|מהרשת|בכל\s+(?:ה)?אתרים|בכל\s+(?:ה)?אינטרנט|באינטרנט|ברשת|באתרים|מכל\s+(?:ה)?אתרים|בכל\s+הרשת)/u;
 const MEDIA = /(?:סרטון|סרטונים|הקלטה|הקלטות|שיעור|שיעורים|הרצאה|הרצאות|וידאו|וידיאו|קליפ|שיר|שירים|ניגון|דרשה|שיחה מוקלטת|קובץ שמע|אודיו)/u;
 const LIVE = /(?:ה?שידור ה?חי|ה?שידורים ה?חיים|בלייב|לייב)/u;
@@ -11,6 +13,8 @@ const LEAD = /^(?:(?:אני\s+)?רוצה\s+(?:ש)?|בבקשה\s+|תוכל\s+|ת�
 export function webSearchIntent(text) {
   const t = String(text || '').normalize('NFKC').replace(/[.,!?״"]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t || !ASK.test(t)) return null;
+  // 19.11: "can you download from other sites?" is a question, not a search.
+  if (isCapabilityQuestion(t)) return null;
   // A live broadcast (owner, 18.11) needs no "on the internet": the words
   // "שידור חי" stay in the search, so extension 2 looks for live ones.
   const live = LIVE.test(t);

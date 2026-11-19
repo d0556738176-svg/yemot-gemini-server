@@ -24,6 +24,7 @@
 //
 // Everything external is injected (deps), so this file is testable offline.
 
+import { isCapabilityQuestion, SYSTEM_FACTS } from './caller-intent.js';
 import { isZmanimQuestion, isNearbyQuestion, nearbyKind, spokenTime, sameTown, zmanimFacts as realZmanim, nearbyFacts as realNearby, spokenDistance } from './place-tools.js';
 
 const HE_NUMBER_WORDS = { 'אחת': 1, 'אחד': 1, 'שתיים': 2, 'שניים': 2, 'שלוש': 3, 'שלושה': 3 };
@@ -210,6 +211,8 @@ export function heuristicPlan(utterance, { video = null } = {}) {
   const u = String(utterance || '').trim();
   const base = { standalone: u, search: u, ytHe: u.replace(YT_WORD, ' ').replace(/\s+/g, ' ').trim(), ytEn: '', minMinutes: 0, maxMinutes: 0, recentDays: /(?:השבוע|לאחרונה|חדש|חדשים|הכי טרי)/u.test(u) ? 30 : 0, order: 'relevance', instruction: '', place: '', town: '', date: '', kind: '', play: /(?:להוריד|תוריד|הורד).{0,20}(?:וידאו|וידיאו|סרטון עצמו)|כן לוידאו/u.test(u) ? 'video' : 'audio', continueOffer: false };
   // A key choice that names something to hear ("לשמיעת השיר X") is a play request.
+  // "Do you download only from YouTube?" is a question about the system.
+  if (isCapabilityQuestion(u)) return { ...base, intent: 'chat', about: true };
   const chosen = u.match(/^בחרתי באפשרות\s*\d+\s*:?\s*(.*)$/u);
   if (chosen && /(?:לשמיעת|להשמעת|לשמוע|להשמיע|לנגן|השיר|שיר|הסרטון|סרטון|הפרק|פרק)/u.test(chosen[1]) && !/(?:ביטול|המשך השיחה|לחיפוש|להמשך|שיחה על)/u.test(chosen[1]))
     return { ...base, intent: 'video_play', ytHe: chosen[1].replace(/(?:לשמיעת|להשמעת|לשמוע את|לשמוע|להשמיע את|להשמיע|לנגן את|לנגן|השיר|שיר|הסרטון|סרטון|הפרק|של\s+$)/gu, ' ').replace(/\s+/g, ' ').trim() };
@@ -447,7 +450,7 @@ export function lengthRule(brief = false, utterance = '') {
   if (!brief) return '';
   return /(?:בהרחבה|בפירוט|תפרט|תפרטי|תרחיב|תרחיבי|לעומק|באריכות|תסביר לי הכל|הכל על)/u.test(utterance)
     ? 'כלל אורך שגובר על כל הוראה אחרת: המתקשר ביקש פירוט, אז ענה מפורט אבל ממוקד, עד 12 משפטים.'
-    : 'כלל אורך שגובר על כל הוראה אחרת למעלה: ענה בקצרה, 2 עד 4 משפטים ברורים וישר לעניין, עם הפרט החשוב ביותר (מספר, שעה, שם) בהתחלה. אל תרחיב אלא אם המתקשר מבקש "בהרחבה" או "תפרט". כשאתה מציע אפשרויות במקשים, אמור אותן במלואן גם בתשובה קצרה.';
+    : 'כלל אורך שגובר על כל הוראה אחרת למעלה: ענה תשובה רגילה ולא ארוכה, 3 עד 6 משפטים ברורים, ישר לעניין, עם הפרט החשוב ביותר (מספר, שעה, שם) בהתחלה ועם ההסבר החיוני בלבד. אל תרחיב אלא אם המתקשר מבקש "בהרחבה" או "תפרט". כשאתה מציע אפשרויות במקשים, אמור אותן במלואן גם בתשובה קצרה.';
 }
 
 export function teachingRule(lesson) {
@@ -488,7 +491,7 @@ export function prefsBlock(prefs = []) {
     style ? 'המתקשר ביקש שתדברי איתו מעכשיו בסגנון הזה, וזה גובר על הוראות הטון למעלה (אבל לא על הדיוק ועל הכבוד): ' + style.slice(STYLE_PREFIX.length) + '. המשיכי בסגנון הזה בכל תשובה עד שיבקש לחזור לרגיל.' : ''].filter(Boolean).join('\n');
 }
 
-export function answerPrompt({ context, utterance, plan, now, instruction, extra = '', lesson = null, prefs = [], media = '', stuck = false, voice = 'female', brief = false, compliment = false }) {
+export function answerPrompt({ context, utterance, plan, now, instruction, extra = '', lesson = null, prefs = [], media = '', stuck = false, voice = 'female', brief = false, compliment = false, tip = false }) {
   return [
     instruction,
     PHONE_STYLE,
@@ -510,6 +513,8 @@ export function answerPrompt({ context, utterance, plan, now, instruction, extra
     voiceRule(voice),
     // Owner, 12.11 (extension 3): now and then a real compliment, never flattery.
     compliment ? 'בתשובה הזאת מותר לך, רק אם יש לזה סיבה אמיתית בשיחה, לשלב מחמאה קצרה וכנה אחת על משהו ספציפי שהמתקשר אמר או עשה (שאלה חכמה שחשב עליה, רעיון יפה, סקרנות, הומור, התמדה בלימוד), במשפט אחד טבעי באמצע או בסוף התשובה, ולא בפתיחה. בלי הגזמה, בלי מילים כמו "מדהים" או "גאון", ובלי לחזור על מחמאה שכבר נאמרה. אם אין סיבה אמיתית, אל תחמיאי בכלל.' : '',
+    // Owner, 19.11: a useful tip now and then, and whenever he asks for tips.
+    TIPS_ASKED.test(utterance) ? 'המתקשר ביקש טיפים או עצות: תני כמה טיפים מעשיים, ברורים ומועילים באמת, כל אחד במשפט או שניים.' : tip ? 'אם יש טיפ מעשי אחד שבאמת יעזור לו בנושא הזה, הוסיפי אותו בסוף התשובה במשפט אחד שמתחיל ב"טיפ קטן:". אם אין טיפ אמיתי ומועיל, אל תוסיפי.' : '',
     lengthRule(brief, utterance),
     'החזר אובייקט JSON תקין בלבד עם שדה "answer".'
   ].filter(x => x !== '').join('\n');
@@ -708,12 +713,15 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // A halachic time or "the nearest X" is computed from the map even when the
   // planner called it a web question; his own place words fill what it left out.
   if (['zmanim', 'nearby'].includes(rules.intent) && ['web', 'chat', 'recall'].includes(plan.intent)) plan = { ...plan, intent: rules.intent };
+  // 19.11 (owner): a question about what the system can do is answered from
+  // the system's real facts; no search, no download, whatever words it holds.
+  if (isCapabilityQuestion(utterance)) { plan = { ...plan, intent: 'chat', about: true }; log.info?.('[EXT3_BRAIN] question about the system'); }
   // 18.11 "מה נשמע כפרה" was searched on the web and explained like a dictionary.
   if (GREETING.test(utterance.trim()) && ['web', 'read_page', 'recall'].includes(plan.intent)) plan = { ...plan, intent: 'chat' };
   // Facts about real people, songs and routes come from the web, never from a
   // small model's memory (17.11: an invented duo "אישואשה", invented albums,
   // invented bus lines through Ramat Gan).
-  if (plan.intent === 'chat' && !plan.continueOffer && !lessonRef && FACTUAL.test(utterance + ' ' + plan.standalone)) { plan = { ...plan, intent: 'web', search: plan.search || plan.standalone || utterance }; log.info?.('[EXT3_BRAIN] factual question sent to the web'); }
+  if (plan.intent === 'chat' && !plan.about && !plan.continueOffer && !lessonRef && FACTUAL.test(utterance + ' ' + plan.standalone)) { plan = { ...plan, intent: 'web', search: plan.search || plan.standalone || utterance }; log.info?.('[EXT3_BRAIN] factual question sent to the web'); }
   // "Cancel" only means stopping a download that exists (17.11: "תפסיקי למצוא
   // סרטונים באנגלית" and "תורידי לי את כל השירים" were both answered
   // "בסדר, אני לא מורידה כלום").
@@ -761,7 +769,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // small enough for the free fast models (they refuse big ones with 413).
   const ask = async (instruction, extra = '', { maxTokens = 1800, budgetMs = 13000, lesson = lessonRef, ctx = context } = {}) => {
     let raw;
-    const common = { utterance, plan, now, instruction, lesson, prefs, media, stuck, voice, brief, compliment: voice !== 'male' && !brief && !stuck && (current || []).length % 4 === 2 };
+    const common = { utterance, plan, now, instruction, lesson, prefs, media, stuck, voice, brief, compliment: voice !== 'male' && !brief && !stuck && (current || []).length % 4 === 2, tip: !stuck && !plan.about && (current || []).length % 3 === 1 };
     if (brief && !/(?:בהרחבה|בפירוט|תפרט|תרחיב|לעומק|באריכות)/u.test(utterance)) maxTokens = Math.min(maxTokens, 700);
     try { raw = await deps.llm(answerPrompt({ ...common, context: ctx, extra }), { budgetMs, maxTokens }); }
     catch (e) {
@@ -1082,7 +1090,9 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // chat (talk, explanation, teaching, continuing an offer, a new standing instruction)
   const lessonWanted = looksLikeLessonRequest(utterance) || (plan.continueOffer && lessonRef);
   let reply = await ask('את עוזרת חכמה ונבונה בטלפון, עם ידע רחב בכל תחום. עני על מה שהמתקשר אמר עכשיו, בהמשך טבעי לשיחה.' +
-    (plan.instruction ? ' המתקשר נתן עכשיו הוראה קבועה: "' + plan.instruction + '". אשרי בקצרה ובחום שתזכרי ותקיימי אותה מעכשיו, והמשיכי בהתאם.' : ''), '', { maxTokens: 2000, budgetMs: 13000 });
+    (plan.instruction ? ' המתקשר נתן עכשיו הוראה קבועה: "' + plan.instruction + '". אשרי בקצרה ובחום שתזכרי ותקיימי אותה מעכשיו, והמשיכי בהתאם.' : '') +
+    (plan.about ? ' הוא שואל על המערכת עצמה ועל מה שהיא יודעת לעשות. עני בדיוק על מה ששאל, בכנות, רק מתוך העובדות על המערכת שלמטה, בלי לבצע שום פעולה ובלי להבטיח מה שלא כתוב שם. אם שאל "רק מ..." או "מאיזה אתרים", אמרי במפורש את התשובה. בסוף הציעי בקצרה איך לבקש את זה.' : ''),
+    plan.about ? SYSTEM_FACTS : '', { maxTokens: 2000, budgetMs: 13000 });
   if (stuck) {
     // Keys must be clear: one short line and the options, nothing garbled around them.
     const keys = parseKeyOptions(reply) || parseKeyOptions(numberedToKeys(reply));
@@ -1097,6 +1107,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
 }
 
 export { HE_NUMBER_WORDS };
+
+const TIPS_ASKED = /(?:טיפ|טיפים|עצה|עצות|המלצות מעשיות|תן לי רעיונות|תני לי רעיונות)/u;
 
 const GREETING = /^(?:שלום|היי|הי|הלו|אהלן|בוקר טוב|ערב טוב|לילה טוב|צהריים טובים|מה נשמע|מה שלומך|מה שלומך היום|מה קורה|מה המצב|מה העניינים|מה איתך|תודה|תודה רבה|יופי|מעולה|אחלה)(?:\s+(?:כפרה|אחי|חביבי|מותק|יקירתי|יקירי|גבר|נשמה|לך|רבה|לך רבה|בבקשה|עליך))*[\s?!.,]*$/u;
 const FACTUAL = /(?:איך נקרא|איך קוראים ל|איך הם נקראים|מי שר|מי שרה|מי שרים|מי הזמר|מי הזמרת|מי המלחין|מי כתב את השיר|צמד|להקת|אלבום|אלבומים|שירים של|שיר של|דיסקוגרפיה|איך מגיעים|איך אני מגיע|איך להגיע|באיזה קו|איזה קו|קו אוטובוס|קווי אוטובוס|תחבורה ציבורית|מסלול נסיעה|כמה זמן נסיעה|מספר הטלפון|מה הטלפון|טלפון של|כתובת של|מה הכתובת|כמה עולה|מה המחיר|מחיר של|באיזו איכות|איזה פורמט|מי המנהל|מי הבעלים|מי ראש|מי שר ה|מי נשיא|מתי נולד|מתי נפטר|בן כמה|בת כמה)/u;
