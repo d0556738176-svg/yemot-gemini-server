@@ -532,6 +532,12 @@ export function lookupCachedYouTubeAudio(videoId) {
   const job=(async()=>{
     const existing=await audioCache.lookup(id);
     if(existing) return existing;
+    // A website recording saved before its id came from the page (19.11).
+    if(/^w[A-Za-z0-9]{10}$/.test(id)){
+      const { webItem } = await import('./web-items.js');
+      const w=await webItem(id).catch(()=>null);
+      if(w?.legacyId){ const old=await audioCache.lookup(w.legacyId).catch(()=>null); if(old) return old; }
+    }
     const sizes=legacyCompleteDownloads[id];
     if(!sizes) return null;
     const paths=audioCachePaths(id,sizes.length);
@@ -868,8 +874,13 @@ async function coverPolicy(){
   if(r)coverPolicyCache=policy; // not tested yet: ask again next song
   return policy;
 }
+// 19.11 (owner: "the upload to Yemot takes long"): how long each stage of the
+// last downloads really took, for /branch2-saved?recent.
+export const buildTimings=[];
 async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=>{}, consent=false, local=null) {
   const id=String(videoId||'').trim();
+  const tm={id,startedAt:new Date().toISOString()};const t00=Date.now();
+  buildTimings.push(tm);if(buildTimings.length>30)buildTimings.shift();
   if(!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'authorized-audio-'));
   const source=path.join(temp,id+'.source');
@@ -925,7 +936,10 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     // Owner, 18.11: 16kHz/16-bit/mono WAV, peak -2dB (lessons) / -3dB (songs),
     // lessons cleaned below 100Hz. 8kHz only if Yemot proved it keeps 16kHz
     // files unconverted (it would then play them wrong), see below.
+    tm.downloadSec=Math.round((Date.now()-t00)/1000);tm.sourceMB=Number(((await fs.stat(source).catch(()=>({size:0}))).size/1048576).toFixed(1));
+    const tMaster=Date.now();
     let mastered=await preparePhoneAudio(source,phone,{signal,title:sourceTitle,sampleRate:await phoneRate(),onPercent:percent=>onProgress({stage:'converting',percent})});
+    tm.masterSec=Math.round((Date.now()-tMaster)/1000);tm.phoneMB=Number((mastered.bytes/1048576).toFixed(1));tm.rate=mastered.sampleRate;tm.durationSec=mastered.durationSec;
     // The original audio is kept only when a downloadable MP3 copy will be
     // made from it (after the song is ready); otherwise free the disk now.
     const mp3Policy=await downloadCopyPolicy();
@@ -964,7 +978,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
           mastered=await resamplePhoneTo8k(phone,mastered,signal);covered=false;
           await ensureUploadedAndVerified(phone,'ivr2:'+fullPath+'.wav',{expectedDurationSec:mastered.durationSec,signal,replace:true});
         }
-        paths.push(fullPath);single=true;
+        paths.push(fullPath);single=true;tm.uploadSec=Math.round((Date.now()-t)/1000);
         console.info('[YouTube IVR] single full file uploaded',{videoId:id,bytes:mastered.bytes,durationSec:mastered.durationSec,uploadMs:Date.now()-t});
       }catch(e){
         if(signal?.aborted)throw e;
@@ -981,6 +995,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
         onProgress({stage:info.converting?'preparing':'uploading',completed:paths.length,total:info.total});
       });
     }
+    tm.single=single;tm.readySec=Math.round((Date.now()-t00)/1000);
     onProgress({stage:'verifying',completed:paths.length,total:paths.length});
     await audioCache.save(id,paths);
     // Extension 7 (newest songs first): copy the complete song there in the

@@ -4425,7 +4425,9 @@ async function youtubeCallHandler(call) {
       }
       // Confirmation before any download (owner, 18.11), as with YouTube.
       const about='בחרת את '+it.title+', מאתר '+W.siteName(it.site)+(W.lengthText(it.durationSeconds)?', '+W.lengthText(it.durationSeconds):'')+'. ';
-      const choice=await tap(about+'להשמעה ולשמירה בתיקיית אודיו הקש 1. '+(it.hasVideo?'להורדת הסרטון לתיקיית וידאו הקש 2. ':'')+'לחזרה לתוצאות הקש 3. לתפריט הראשי הקש כוכבית.',{sec_wait:15});
+      // 19.11: a recording already saved is said so, and plays at once.
+      const saved=await Promise.race([(typeof lookupCachedYouTubeAudio==='function'?lookupCachedYouTubeAudio(it.videoId):Promise.resolve(null)).catch(()=>null),new Promise(r=>setTimeout(()=>r(null),2500))]);
+      const choice=await tap(about+(saved?.playbackPaths?.length?'הקובץ הזה כבר שמור במערכת, ויושמע מיד בלי הורדה נוספת. ':'')+'להשמעה ולשמירה בתיקיית אודיו הקש 1. '+(it.hasVideo?'להורדת הסרטון לתיקיית וידאו הקש 2. ':'')+'לחזרה לתוצאות הקש 3. לתפריט הראשי הקש כוכבית.',{sec_wait:15});
       console.info('[WEB_SEARCH] choice',{videoId:it.videoId,web:it.web,choice});
       if(choice.includes('*')) return {exit:true};
       if(choice==='1') {
@@ -5498,11 +5500,12 @@ app.get('/branch2-saved',rateLimit(20,60*1000,'saved-check'),async (req,res)=>{
   try{
     if(req.query.recent){
       const pick=m=>[...m.entries()].slice(-10).map(([id,j])=>({id,status:j?.status||j?.state||null,mode:j?.mode||null}));
+      const timings=(await import('./youtube-authorized-playback.js')).buildTimings.slice(-15);
       const { _pipeline: p } = await import('./youtube-authorized-playback.js');
       const idx=await p.readCacheJson('ivr2:/2/youtubeaudio/ext7_index.json').catch(()=>null);
       const ext7Newest=Object.entries(idx?.items||{}).sort((a,b)=>Number(b[1].file)-Number(a[1].file)).slice(0,8).map(([id,e])=>({id,file:e.file,title:e.title,at:e.at}));
       const v2=await p.readCacheJson('ivr2:/2/youtubeaudio/ext7_backfill_v2.json').catch(()=>null);
-      return res.json({audio:pick(youtubePlaybackJobs),video:pick(youtubeVideoJobs),ext7Newest,ext7CatchUp:v2});
+      return res.json({audio:pick(youtubePlaybackJobs),video:pick(youtubeVideoJobs),timings,ext7Newest,ext7CatchUp:v2?{at:v2.at,count:(v2.added||[]).length}:null});
     }
     const id=String(req.query.id||'');
     if(!/^[A-Za-z0-9_-]{11}$/.test(id))return res.status(400).json({ok:false});

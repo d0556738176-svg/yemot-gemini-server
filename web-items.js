@@ -40,8 +40,13 @@ function save() {
 export function registerWebItem(item) {
   const url = String(item?.url || '').trim();
   if (!/^https?:\/\//i.test(url)) return null;
-  const id = webIdFor(url);
-  items.set(id, { ...(items.get(id) || {}), ...item, url, id, at: new Date().toISOString() });
+  // 19.11: the id comes from the PAGE when there is one, so the same
+  // recording found again (its file address carries a fresh token each
+  // time) is the same item, and a file already saved plays at once.
+  const page = String(item?.page || '').trim();
+  const id = webIdFor(/^https?:\/\//i.test(page) ? page : url);
+  const legacyId = id !== webIdFor(url) ? webIdFor(url) : null;
+  items.set(id, { ...(items.get(id) || {}), ...item, url, id, ...(legacyId && !items.get(id)?.legacyId ? { legacyId } : {}), at: new Date().toISOString() });
   save();
   return id;
 }
