@@ -17,7 +17,7 @@ async function call(name, { mode, query, key, minSec = 90, maxSec = 420 }) {
     let s = text; try { s = decodeURIComponent(text.replace(/\+/g, ' ')); } catch {} s = s.replace(/\s+/g, ' ');
     const m = text.match(/read=.*?=([A-Za-z0-9_]+),/); const name = m?.[1];
     const show = !/נבדקו|ההורדה נמשכת|הכנת הסרטון נמשכת|ממתין/.test(s) || i < 3;
-    if (show) console.log(T(), '<<', s.slice(0, 330));
+    if (show) console.log(T(), '<<', s.slice(0, 600));
     if (/id_list_message=/.test(text) || !name) { const h = text.match(/youtubeaudio\/([0-9a-f]{22})\//); result = { played: /משמיע עכשיו/.test(s), id: h ? Buffer.from(h[1], 'hex').toString() : null, text: s.slice(0, 200) }; break; }
     let v = 'None';
     if (i === 0) v = mode;
@@ -44,13 +44,14 @@ async function call(name, { mode, query, key, minSec = 90, maxSec = 420 }) {
 }
 const report = async id => fetch(BASE + '/branch2-saved?id=' + id, { signal: AbortSignal.timeout(300000) }).then(r => r.json()).catch(e => ({ err: String(e) }));
 const runs = [];
-const a1 = await call('YouTube key 1 (audio)', { mode: '2', query: 'שיר מקהלת מלכות', key: '1', minSec: 120, maxSec: 480 }); runs.push(['YouTube audio', a1?.id]);
+const a1 = await call('YouTube key 1 (audio)', { mode: '2', query: 'שיר ילדים קצר', key: '1', minSec: 60, maxSec: 420 }); runs.push(['YouTube audio', a1?.id]);
 const w1 = await call('Website key 1 (audio)', { mode: '6', query: 'שיעור קצר הרב זמיר כהן הידברות', key: '1', minSec: 120, maxSec: 900 }); runs.push(['Website audio', w1?.id]);
 const r0 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
 const v1 = await call('YouTube key 2 (video)', { mode: '2', query: 'סרטון קצר על הכותל', key: '2', minSec: 60, maxSec: 360 });
-const w2 = await call('Website key 2 (video)', { mode: '6', query: 'כאן 11 כתבה קצרה', key: '2', minSec: 60, maxSec: 600 });
+const w2 = await call('Website key 2 (video)', { mode: '6', query: 'כתבה קצרה כאן חדשות', key: '2', minSec: 60, maxSec: 600 });
 const r1 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
 console.log('recent jobs', JSON.stringify(r1));
+console.log('search engines', JSON.stringify(await fetch('https://main.176-97-205-41.sslip.io/web-search-status').then(r => r.json()).catch(e => String(e))));
 const before = new Set((r0.video || []).map(x => x.id));
 for (const j of (r1.video || []).filter(x => !before.has(x.id))) runs.push(['Video ' + j.id, j.id]);
 console.log('\nwaiting 5 minutes for the background copies (extension 7, אודיו, וידאו)...'); await sleep(300000);
