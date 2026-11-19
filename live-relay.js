@@ -13,7 +13,9 @@ import { createHash } from 'node:crypto';
 import { ytdlpPath } from './youtube-direct.js';
 
 export const SEG_SEC = 20;
-const IDLE_MS = 3 * 60 * 1000, MAX_MS = 4 * 3600 * 1000, KEEP = 12;
+// Owner, 19.11: no time limit on a live broadcast (it still stops a few
+// minutes after the last caller leaves). LIVE_MAX_HOURS can set one again.
+const IDLE_MS = 3 * 60 * 1000, MAX_MS = (Number(process.env.LIVE_MAX_HOURS) || 0) * 3600 * 1000, KEEP = 12;
 const relays = new Map();
 export const SYSTEM_FFMPEG = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
 // The last relays that stopped, for the status page. Kept in a file too, so
@@ -145,7 +147,7 @@ export function startRelay(item, deps) {
     // restarts the app only after 90 quiet seconds, so it never cuts a listener.
     if (Date.now() - beat > 60000) { beat = Date.now(); log.info?.('[LIVE] relay on air', { id, pieces: r.next }); }
     if (Date.now() - r.lastSeen > IDLE_MS) return r.stop('no_listeners');
-    if (Date.now() - r.startedAt > MAX_MS) return r.stop('time_limit');
+    if (MAX_MS && Date.now() - r.startedAt > MAX_MS) return r.stop('time_limit');
     busy = true;
     try {
       const names = (await fs.readdir(dir).catch(() => [])).filter(n => /^\d{3}\.wav$/.test(n)).sort();
