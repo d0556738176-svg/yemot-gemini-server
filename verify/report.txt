@@ -1,0 +1,175 @@
+version 5d17b1d49f24
+version 5d17b1d49f24
+version 5d17b1d49f24
+version 5d17b1d49f24
+version 5d17b1d49f24
+version 5d17b1d49f24
+version b4e20b9346c1
+{
+ "audio": [],
+ "video": [],
+ "ext7Newest": [
+  {
+   "id": "wmpd0ft8Rgq",
+   "file": "143",
+   "title": "",
+   "at": "2026-11-19T16:48:51.922Z"
+  },
+  {
+   "id": "wXeW8eUPPhs",
+   "file": "142",
+   "title": "",
+   "at": "2026-11-19T16:48:38.133Z"
+  },
+  {
+   "id": "RcQ_jVAm_m8",
+   "file": "141",
+   "title": "",
+   "at": "2026-11-19T16:48:15.536Z"
+  },
+  {
+   "id": "w2r1bkj92zJ",
+   "file": "140",
+   "title": "",
+   "at": "2026-11-19T16:47:57.469Z"
+  },
+  {
+   "id": "wyi1uQgbgdd",
+   "file": "139",
+   "title": "",
+   "at": "2026-11-19T16:47:44.714Z"
+  },
+  {
+   "id": "wLsNksfW3M7",
+   "file": "138",
+   "title": "",
+   "at": "2026-11-19T16:47:31.675Z"
+  },
+  {
+   "id": "KrceLbAH3dI",
+   "file": "137",
+   "title": "",
+   "at": "2026-11-19T16:47:15.109Z"
+  },
+  {
+   "id": "wZ0gm82P2oD",
+   "file": "136",
+   "title": "Ejiro Evero on growing potential of Panthers defense",
+   "at": "2026-11-19T16:13:06.443Z"
+  }
+ ],
+ "ext7CatchUp": {
+  "at": "2026-11-19T16:49:02.380Z",
+  "added": [
+   "0SzJQFYbeUY",
+   "3XAQtepkWag",
+   "IyaMprXfYNU",
+   "FBVs8WWBH8Q",
+   "MUvnsSd44ZI",
+   "DWtSWvxI8S8",
+   "tlPTlRBrb74",
+   "j2iFkbQXKDY",
+   "K1nQX_hdop0",
+   "pa-xKyNBQWs",
+   "aHkXOsVFKnQ",
+   "jpwnBE_fqH8",
+   "nACtlomaMwE",
+   "H5xiCtQx8vk",
+   "7BYoky5_WKI",
+   "tFW2alq3FMU",
+   "VFH6mJHFILc",
+   "Q7ZziOXHjIE",
+   "47FdNxc9Jwg",
+   "YLoD9L1kv_Y",
+   "xgFSDxgxXCs",
+   "F2zhYgwNElQ",
+   "psJ437K50Kw",
+   "KXry5hcpezk",
+   "JxmORuQ2WNs",
+   "ILUXXlPJ64Q",
+   "rAGWuyHHec4",
+   "wIIldnbyr1f",
+   "wOcVsuzVnYL",
+   "wCUikWuOOeN",
+   "wMNZOkZSxAR",
+   "wwz0e0GGtHx",
+   "Si2tAfsDiFM",
+   "KrceLbAH3dI",
+   "wdJG10iHeAh",
+   "w8M5WuofC7y",
+   "wLsNksfW3M7",
+   "wyi1uQgbgdd",
+   "w2r1bkj92zJ",
+   "RcQ_jVAm_m8",
+   "wXeW8eUPPhs",
+   "wqaH8bmE2Oq",
+   "wpFoh5fMKVV",
+   "-YMDen4GSVI",
+   "T-kozagoRfY",
+   "wbRBO1WktIV",
+   "wZ0gm82P2oD",
+   "wmpd0ft8Rgq"
+  ]
+ }
+}
+
+#### wbRBO1WktIV {
+ "phone": {
+  "files": 1,
+  "dur": 228,
+  "peak": -2.1
+ },
+ "ext7": {
+  "file": "135",
+  "title": "הרב זמיר כהן - מקרה או השגחה פרטית? - הידברות (1)",
+  "exists": true,
+  "size": 3651322,
+  "newest": false
+ },
+ "audioCopy": [
+  {
+   "path": "/אודיו/הרב_זמיר_כהן_מקרה_או_השגחה_פרטית_הידברות_1__HaRav_Zamir_Cohen_Mikreh_O_Hashgacha_Pratit_Hidabrut_1.flac",
+   "size": 16011496,
+   "dur": 228
+  }
+ ]
+}
+
+#### wZ0gm82P2oD {
+ "phone": {
+  "files": 1,
+  "dur": 503,
+  "peak": -3.1
+ },
+ "ext7": {
+  "file": "136",
+  "title": "Ejiro Evero on growing potential of Panthers defense",
+  "exists": true,
+  "size": 8051644,
+  "newest": false
+ },
+ "audioCopy": [
+  {
+   "path": "/אודיו/א_ז_ירו_אוורו_על_הפוטנציאל_המתפתח_של_הגנת_הפנתרים__Ezhiro_Avero_Al_Hapotentsial_Hametpate_ach_Shel_Haganat_Hapantrir.flac",
+   "size": 21295874,
+   "dur": 503
+  }
+ ]
+}
+
+#### wmpd0ft8Rgq {
+ "phone": {
+  "files": 27,
+  "dur": 120,
+  "peak": -2.2
+ },
+ "ext7": {
+  "file": "143",
+  "title": "",
+  "exists": true,
+  "size": 50135460,
+  "newest": true
+ },
+ "audioCopy": []
+}
+exit=0
