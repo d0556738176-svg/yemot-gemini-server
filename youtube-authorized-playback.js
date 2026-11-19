@@ -724,7 +724,9 @@ const copyInFlight=new Set();
 async function saveDownloadCopy(id,source,title,temp,policy,durationSec=null,titleSuffix=''){
   const key=id+(titleSuffix?'-he':'');
   copyInFlight.add(key);
-  try{ return await saveDownloadCopyInner(id,source,title,temp,policy,durationSec,titleSuffix); }
+  const ev=(await import('./download-events.js')).downloadEvent;
+  try{ const r=await saveDownloadCopyInner(id,source,title,temp,policy,durationSec,titleSuffix); void ev('audio-copy',id,{ok:true,saved:(r?.saved||[]).map(x=>x.remote).join(' | ')}); return r; }
+  catch(e){ void ev('audio-copy',id,{ok:false,message:String(e?.message||e)}); throw e; }
   finally{ copyInFlight.delete(key); }
 }
 // 15.11 (owner): every song he hears from YouTube must also be in the אודיו
@@ -832,6 +834,7 @@ async function saveDownloadCopyInner(id,source,title,temp,policy,durationSec=nul
     picture:seen?.picture??!!jpeg,pictureSize:seen?.pictureSize||null,audio:seen?.audio||null,
     title:seen?.tags?.title||null,artist:seen?.tags?.artist||null,date:seen?.tags?.date||null,genre:seen?.tags?.genre||null,
     tagCount:seen?Object.keys(seen.tags).length:null,ms:Date.now()-t});
+  return {saved};
 }
 
 // 16kHz phone files (owner, 18.11). Yemot converts uploads (convertAudio=1);
@@ -997,6 +1000,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
       });
     }
     tm.single=single;tm.readySec=Math.round((Date.now()-t00)/1000);
+    void (await import('./download-events.js')).downloadEvent('audio',id,{ok:true,pieces:paths.length,single,durationSec:Math.round(mastered.durationSec||0),readySec:tm.readySec});
     onProgress({stage:'verifying',completed:paths.length,total:paths.length});
     await audioCache.save(id,paths);
     // Extension 7 (newest songs first): copy the complete song there in the
@@ -1007,7 +1011,8 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
     if(String(process.env.BRANCH2_EXT7||'on').toLowerCase()!=='off'){
       ext7Job=publishToExt7(id,phone,sourceTitle,{readJson:readCacheJson,writeJson:writeCacheJson,
         upload:(file,remote)=>uploadToYemot(file,remote,undefined,{convertAudio:mastered.sampleRate>8000||!(covered&&!cover.convert)}),log:console})
-        .catch(e=>console.warn('[EXT7] song not added',{videoId:id,message:String(e?.message||e).slice(0,200)}));
+        .then(async r=>{ (await import('./download-events.js')).downloadEvent('ext7',id,{ok:true,file:r?.file||null}); return r; })
+        .catch(async e=>{ console.warn('[EXT7] song not added',{videoId:id,message:String(e?.message||e).slice(0,200)}); (await import('./download-events.js')).downloadEvent('ext7',id,{ok:false,message:String(e?.message||e)}); });
     }
     // Reuse the prepared phone file for the additional website-audio library.
     // Owner, 19.11: extension 5 is now the live TV channels; the website-audio
@@ -1027,6 +1032,7 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
       }).catch(e=>console.warn('[EXT5] audio not added',{videoId:id,message:String(e?.message||e).slice(0,160)}));
     }
     // Downloadable copy with the video's picture, in the background.
+    if(!mp3Policy)void (await import('./download-events.js')).downloadEvent('audio-copy',id,{ok:false,message:'no copy policy (the copy self-test result is missing)'});
     if(mp3Policy)mp3Job=saveDownloadCopy(id,source,sourceTitle,temp,mp3Policy,mastered.durationSec)
       .catch(e=>console.warn('[DOWNLOADS] song not saved for downloading',{videoId:id,message:String(e?.message||e).slice(0,200)}));
     return {playbackPaths:paths,chunkCount:paths.length};

@@ -3912,6 +3912,7 @@ function startYouTubeVideoJob(video) {
   if (existing && existing.status === 'running') return existing;
   const state = { status: 'running', startedAt: Date.now(), error: null, remote: null, subtitles: video?.subtitles };
   youtubeVideoJobs.set(id, state);
+  void import('./download-events.js').then(m => m.downloadEvent('video-start', id, { title: String(video?.title || '').slice(0, 80), subtitles: !!video?.subtitles }));
   const release = playbackAwake.acquire();
   (async () => {
     await videoPendingUpdate(l => [...new Set([...l, id])]);
@@ -3962,9 +3963,10 @@ function startYouTubeVideoJob(video) {
         return downloadAuthorizedAudioToYemot(id, { localSource: file, title });
       },
     });
-  })().then(r => { state.status = 'ready'; state.remote = r.remote; return videoPendingUpdate(l => l.filter(x => x !== id)); })
+  })().then(r => { state.status = 'ready'; state.remote = r.remote; void import('./download-events.js').then(m => m.downloadEvent('video', id, { ok: true, remote: String(r?.remote || '') })); return videoPendingUpdate(l => l.filter(x => x !== id)); })
     .catch(e => {
       state.status = 'failed'; state.error = e?.code || 'video_failed';
+      void import('./download-events.js').then(m => m.downloadEvent('video', id, { ok: false, code: state.error, message: String(e?.message || e) }));
       console.warn('[VIDEO] job failed', { videoId: id, code: state.error, message: String(e?.message || e).slice(0, 200) });
       if (state.error !== 'video_pending') return videoPendingUpdate(l => l.filter(x => x !== id));
     })
@@ -4030,6 +4032,7 @@ function startYouTubePlaybackJob(video, opts = {}) {
   }).catch(error => {
     state.status = 'failed';
     state.error = error;
+    void import('./download-events.js').then(m => m.downloadEvent('audio', key, { ok: false, code: error?.code || 'unknown', message: String(error?.cause?.message || error?.message || error || '') }));
     const code = error?.code || 'unknown';
     // 'apify_pending' is not a real failure — the provider run is still working.
     // Keep it in the pending index so a restart resumes it on its own.
@@ -4474,7 +4477,7 @@ async function youtubeCallHandler(call) {
         const sub=await tap('להוספת כתובית בעברית לסרטון הקש 1. בלי כתובית הקש 2.',{sec_wait:15});
         if(sub.includes('*')) return {exit:true};
         const v={videoId:it.videoId,title:it.title,durationSeconds:it.durationSeconds,subtitles:sub==='1'};
-        if(!it.web) { const gate=await videoStartGate(v); if(gate) { note='ההורדה החינמית של הסרטון הזה מיוטיוב לא זמינה כרגע. אפשר למצוא אותו בחיפוש ביוטיוב ושם לאשר את מנוע הגיבוי. '; continue; } }
+        if(!it.web) { const gate=await videoStartGate(v); if(gate) { void import('./download-events.js').then(m=>m.downloadEvent('video-gate',it.videoId,{blocked:String(gate?.code||gate)})); note='ההורדה החינמית של הסרטון הזה מיוטיוב לא זמינה כרגע. אפשר למצוא אותו בחיפוש ביוטיוב ושם לאשר את מנוע הגיבוי. '; continue; } }
         const st=startYouTubeVideoJob(v);
         console.info('[WEB_SEARCH] video requested',{videoId:it.videoId,web:it.web,status:st.status,subtitles:v.subtitles});
         note='הורדת הסרטון התחילה'+(v.subtitles?', עם כתובית בעברית':'')+'. הוא יישמר בתיקיית וידאו עם התמונה והפרטים שלו, ומאותה הורדה יוכן גם השמע. אין צורך להמתין על הקו. ';
@@ -5677,7 +5680,8 @@ app.get('/tv-check', rateLimit(4, 60 * 1000, 'tv-check'), async (req,res)=>{
   res.json({ channels: await TV.checkAllChannels(await tvDeps()) });
 });
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
-app.get('/branch2-diag',async (req,res)=>{ let commit=''; try { commit=String(readFileSync(new URL('./.git/HEAD',import.meta.url),'utf8')).trim(); if(commit.startsWith('ref:')) commit=String(readFileSync(new URL('./.git/'+commit.slice(5).trim(),import.meta.url),'utf8')).trim(); } catch {} let engineTest=null, webEvents=[], browserEvents=[]; try { engineTest=(await import('./web-engine-selftest.js')).state; webEvents=(await import('./youtube-direct.js')).webEvents; browserEvents=(await import('./browser-media.js')).browserEvents; } catch {} res.json({commit:commit.slice(0,12), startedAt:BRANCH2_STARTED_AT, keys:branch2Keys.slice(-100), engineTest, webEvents:webEvents.slice(-40), browserEvents:browserEvents.slice(-40)}); });
+app.get('/branch2-diag',async (req,res)=>{ let commit=''; try { commit=String(readFileSync(new URL('./.git/HEAD',import.meta.url),'utf8')).trim(); if(commit.startsWith('ref:')) commit=String(readFileSync(new URL('./.git/'+commit.slice(5).trim(),import.meta.url),'utf8')).trim(); } catch {} let downloadEvents=[]; try { downloadEvents=await (await import('./download-events.js')).recentDownloadEvents(60); } catch {}
+  let engineTest=null, webEvents=[], browserEvents=[]; try { engineTest=(await import('./web-engine-selftest.js')).state; webEvents=(await import('./youtube-direct.js')).webEvents; browserEvents=(await import('./browser-media.js')).browserEvents; } catch {} res.json({commit:commit.slice(0,12), startedAt:BRANCH2_STARTED_AT, keys:branch2Keys.slice(-100), downloadEvents, engineTest, webEvents:webEvents.slice(-40), browserEvents:browserEvents.slice(-40)}); });
 // Owner, 19.11: what one download really left in Yemot (phone file quality,
 // extension 7, the אודיו copy, the וידאו file). Read-only; ?recent=1 lists
 // the latest download jobs of this server run.
@@ -5992,6 +5996,7 @@ async function runSegmentSelfTest() {
 const port=process.env.PORT||3000;
 app.listen(port,async()=>{
   console.log('server running on port '+port);
+  void import('./youtube-authorized-playback.js').then(async pb=>(await import('./download-events.js')).attachStore({read:x=>pb._pipeline.readCacheJson(x),write:(x,d)=>pb._pipeline.writeCacheJson(x,d)})).catch(()=>{});
   // Owner, 18.11: every engine for downloading from as many sites as possible
   // is installed here by itself (once; nothing waits for it), then checked
   // live on real sites (results in /branch2-diag -> engineTest).
