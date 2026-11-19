@@ -4285,6 +4285,9 @@ async function youtubeCallHandler(call) {
   }
   // The relay itself, for any live source (web search results and the TV channels of key 8).
   async function liveListenItem(item) {
+    // Owner, 19.11: every live broadcast (YouTube, any site, handed from the
+    // AI extensions) in the same phone sound as the TV channels of extension 5.
+    if(!item.af) item={...item,af:(await import('./branch2-tv.js')).TV_AUDIO_FILTER};
     const it=item;
     const { startRelay, nextPiece, followingPieces, SEG_SEC } = await import('./live-relay.js');
     const p=(await import('./youtube-authorized-playback.js'))._pipeline;
