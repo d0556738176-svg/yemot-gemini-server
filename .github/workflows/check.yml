@@ -2,13 +2,13 @@ name: ext2 web download check
 on:
   push:
     branches: [verify/ext2-web-download]
-    paths: [verify/run.mjs, verify/go.txt, verify/want.txt, verify/script.txt, verify/diag.mjs, verify/diag2.mjs, verify/kol.mjs]
+    paths: [verify/run.mjs, verify/go.txt, verify/want.txt, verify/script.txt, verify/diag.mjs, verify/diag2.mjs, verify/kol.mjs, verify/e2e.mjs]
 permissions:
   contents: write
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
