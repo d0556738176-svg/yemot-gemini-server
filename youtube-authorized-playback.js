@@ -375,7 +375,15 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,
   const mv=await fa({action:'move',what:joined,target:finalPath});
   await fa({action:'delete',what:remotePath}).catch(()=>null);
   const m=await getYemotFile(finalPath).catch(()=>null);
-  const sizeOk=Number(m?.file?.size)===total||(/\.wav$/i.test(finalPath)&&Math.abs(Number(m?.file?.size)-total)<=4096);
+  // Yemot's join always converts to its 8 kHz WAV (see above), so a 16 kHz
+  // phone WAV (owner's spec, 18.11) comes back about half its size: that is
+  // the expected result, not a broken join (19.11: an hour of TV, 16 kHz,
+  // landed whole and was reported as "not in place").
+  let srcRate=8000;
+  if(/\.wav$/i.test(filePath)){ try{ const fh=await fs.open(filePath,'r'); const hb=Buffer.alloc(44); await fh.read(hb,0,44,0); await fh.close(); if(hb.toString('ascii',0,4)==='RIFF')srcRate=hb.readUInt32LE(24)||8000; }catch{} }
+  const got=Number(m?.file?.size);
+  const converted=44+(total-44)*8000/Math.max(8000,srcRate);
+  const sizeOk=got===total||(/\.wav$/i.test(finalPath)&&(Math.abs(got-total)<=4096||(srcRate>8000&&got>=converted*0.85&&got<=converted*1.05)));
   if(m?.file?.exists!==true||!sizeOk)
     throw new Error('Yemot multi-part file not in place: '+JSON.stringify({joined,move:mv?.responseStatus||null,size:m?.file?.size??null}).slice(0,240));
   console.info('[YouTube IVR] playback step 7: Yemot UploadFile accepted (parts joined)', { remotePath: finalPath, parts, variant: doneVariant, bytes: total });

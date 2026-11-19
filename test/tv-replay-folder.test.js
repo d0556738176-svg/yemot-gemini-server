@@ -25,14 +25,15 @@ test('every finished hour goes to Yemot as one file, a new number each day, kept
   const io = {
     list: async f => ({ files: Object.keys(yemot).filter(k => k.startsWith(f + '/') && k.endsWith('.wav')).map(k => ({ name: k.split('/').pop() })) }),
     del: async r => { deleted.push(r); delete yemot[r]; },
-    upload: async (f, r) => { order.push('upload ' + r.split('/').slice(-1)[0]); yemot[r] = 'audio'; },
-    putText: async (w, c) => { if (!Object.keys(yemot).some(k => k.startsWith(w.replace('/ext.ini', '/')))) throw new Error('folder missing'); order.push('settings'); yemot[w] = c; },
+    putText: async (w, c) => { order.push('settings'); yemot[w] = c; },
+    // A big file is moved into its folder at the end: the folder must exist.
+    upload: async (f, r) => { if (!yemot[r.replace(/[^/]+$/, 'ext.ini')]) throw new Error('folder missing'); order.push('upload ' + r.split('/').slice(-1)[0]); yemot[r] = 'audio'; },
     getText: async w => yemot[w] ?? null,
     log: { info() {}, warn() {} },
   };
   for (const item of todo) await RF.publishHour(item, io);
   assert.deepEqual(deleted, ['ivr2:/5/9/1/21/000.wav'], 'old layout cleared once');
-  assert.deepEqual(order, ['upload 000.wav', 'settings', 'upload 001.wav'], 'day 1 = 000, day 2 = 001 (newest first with start=max)');
+  assert.deepEqual(order, ['settings', 'upload 000.wav', 'upload 001.wav'], 'settings create the folder; day 1 = 000, day 2 = 001 (newest first with start=max)');
   assert.match(yemot['ivr2:/5/9/1/21/ext.ini'], /\nstart=max\n/);
   assert.deepEqual(RF.publishedHours('1'), [21]);
   assert.deepEqual((await RF.hoursToPublish([ch], now)).map(x => x.id), [], 'nothing published twice');
