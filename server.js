@@ -4293,7 +4293,11 @@ async function youtubeCallHandler(call) {
       // 16 kHz pieces: Yemot plays a file above 8 kHz only when it converts it on
       // upload (as youtube-authorized-playback does for sampleRate>8000). Without
       // it the caller heard silence while the pieces were ready (19.11).
-      upload:(f,r)=>p.uploadToYemot(f,r,undefined,{convertAudio:true,single:true}),
+      upload:async(f,r)=>{
+        // TV channels (owner's spec, 18.11): every piece mastered like the downloads.
+        if(item.master) { const m=f.replace(/\.wav$/,'')+'.m.wav'; try { await (await import('./tv-recorder.js')).masterSpeech(f,m); await p.uploadToYemot(m,r,undefined,{convertAudio:true,single:true}); return; } catch(e) { console.warn('[LIVE] mastering skipped',{message:String(e?.message||e).slice(0,120)}); } finally { (await import('node:fs')).promises.unlink(m).catch(()=>{}); } }
+        return p.uploadToYemot(f,r,undefined,{convertAudio:true,single:true});
+      },
       del:async remote=>{ const x=new URL(p.YEMOT_API_BASE+'/FileAction'); x.searchParams.set('token',p.yemotApiKey()); x.searchParams.set('action','delete'); x.searchParams.set('what',remote); await fetch(x,{signal:AbortSignal.timeout(8000)}).catch(()=>{}); }});
     console.info('[LIVE] caller joined',{id:relay.id,title:String(it.title).slice(0,80)});
     let last=null, waited=0, said=false;
@@ -4346,7 +4350,7 @@ async function youtubeCallHandler(call) {
       const { noteCall }=await import('./live-relay.js');
       noteCall({what:'channel chosen',key:ch.key,title:ch.title,source:src.page?(()=>{try{return new URL(src.page).host;}catch{return null;}})():null,how:src.how||null});
       if(!src.page) { noteCall({what:'told: not available',key:ch.key}); note='השידור של '+ch.title+' אינו זמין כרגע. '; continue; }
-      const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,referer:src.referer||null,af:TV.TV_AUDIO_FILTER,
+      const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,referer:src.referer||null,af:'anull',master:true,
         refresh:async()=>{ TV.forget(ch.key); const f=await TV.findChannelSource(ch,await tvDeps(),{fresh:true}); return f.page?{url:f.page,referer:f.referer||null}:null; }});
       noteCall({what:'listening ended',key:ch.key,exit:!!r.exit,told:r.say||null});
       if(r.exit) return {exit:true};
@@ -4506,7 +4510,7 @@ async function youtubeCallHandler(call) {
         await tap('השידור של '+ch.title+' אינו זמין כרגע. לחזרה לרשימת הערוצים הקישו כוכבית.',{sec_wait:3,digits_allowed:['*']});
         return call.go_to_folder('/5');
       }
-      const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,referer:src.referer||null,af:TV.TV_AUDIO_FILTER,
+      const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,referer:src.referer||null,af:'anull',master:true,
         refresh:async()=>{ TV.forget(ch.key); const f=await TV.findChannelSource(ch,await tvDeps(),{fresh:true}); return f.page?{url:f.page,referer:f.referer||null}:null; }});
       noteCall({what:'listening ended',key:ch.key,exit:!!r.exit,told:r.say||null});
       if(r.exit) return call.go_to_folder('/');
@@ -4562,21 +4566,24 @@ async function youtubeCallHandler(call) {
     const uploaded=[];
     const del=async remote=>{ const x=new URL(p.YEMOT_API_BASE+'/FileAction'); x.searchParams.set('token',p.yemotApiKey()); x.searchParams.set('action','delete'); x.searchParams.set('what',remote); await fetch(x,{signal:AbortSignal.timeout(8000)}).catch(()=>{}); };
     // One piece: file index + offset -> phone WAV in Yemot, or null at the end of the file.
-    const made=new Map();
+    const made=new Map(); let pieceNo=0;
     const makePiece=(files,fi,off)=>{
       const id=fi+':'+off;
       if(made.has(id)) return made.get(id);
       const job=(async()=>{
         const out=pathm.join(tmp,fi+'_'+off+'.wav');
-        await new Promise(res=>{ const pr=spawn(bin,['-hide_banner','-loglevel','error','-y','-ss',String(off),'-i',files[fi],'-t',String(PIECE),'-vn','-ac','1','-ar','16000','-af',TV.TV_AUDIO_FILTER,'-c:a','pcm_s16le',out],{stdio:['ignore','ignore','ignore']}); pr.on('close',res); pr.on('error',res); });
-        const st=await fsp.stat(out).catch(()=>null);
-        if(!st||st.size<32000*2) return null; // under ~2 seconds: this file is over
-        const remote='ivr2:/2/replay/'+callTag+'/'+String(made.size).padStart(3,'0')+'.wav';
-        await p.uploadToYemot(out,remote,undefined,{convertAudio:true,single:true});
+        const secs=await REC.makeReplayPiece(bin,files[fi],off,PIECE,out);
+        if(secs<2) { await fsp.unlink(out).catch(()=>{}); return null; } // this file is over
+        const remote='ivr2:/2/replay/'+callTag+'/'+String(pieceNo++).padStart(3,'0')+'.wav';
+        // A failed upload is tried again; it never ends the hour by mistake.
+        for(let a=1;;a++) {
+          try { await p.uploadToYemot(out,remote,undefined,{convertAudio:true,single:true}); break; }
+          catch(e) { if(a>=3) throw e; await new Promise(r=>setTimeout(r,1500*a)); }
+        }
         await fsp.unlink(out).catch(()=>{});
         uploaded.push(remote);
         return { remote, play:remote.replace(/^ivr2:/,'').replace(/\.wav$/,'') };
-      })().catch(e=>{ console.warn('[TV REPLAY] piece failed',{key:ch.key,message:String(e?.message||e).slice(0,160)}); return null; });
+      })().catch(e=>{ console.warn('[TV REPLAY] piece failed',{key:ch.key,message:String(e?.message||e).slice(0,160)}); made.delete(id); return {failed:true}; });
       made.set(id,job);
       return job;
     };
@@ -4594,6 +4601,7 @@ async function youtubeCallHandler(call) {
           continue;
         }
         const piece=await makePiece(files,fi,off);
+        if(piece?.failed) return {say:'יש תקלה זמנית בהשמעת ההקלטה. אפשר לבחור שעה שוב. '};
         if(!piece) { fi++; off=0; continue; }
         // The next piece is prepared while this one plays.
         makePiece(files,fi,off+PIECE);
@@ -5643,6 +5651,33 @@ setTimeout(async()=>{ try {
   startRecorders({ channels: TV.TV_CHANNELS, ffmpegPath: (await import('ffmpeg-static')).default, log: console,
     findSource: async (ch,{fresh}={}) => TV.findChannelSource(ch, await tvDeps(), { fresh }) });
 } catch(e) { console.warn('[TV REC] not started',{message:String(e?.message||e).slice(0,200)}); } }, 5000).unref?.();
+// Replay quality check (read-only: nothing uploaded, nothing kept): makes the
+// first 2-minute phone piece of a recorded hour exactly as a call does, and
+// reports its format and levels.
+app.get('/tv-replay-probe', rateLimit(6, 60 * 1000, 'tv-replay-probe'), async (req,res)=>{
+  const REC=await import('./tv-recorder.js'); const TV=await import('./branch2-tv.js');
+  const { SYSTEM_FFMPEG }=await import('./live-relay.js'); const { existsSync, promises:fsp }=await import('node:fs');
+  const os=(await import('node:os')).default, pathm=(await import('node:path')).default;
+  const bin=[...SYSTEM_FFMPEG.filter(b=>existsSync(b)),(await import('ffmpeg-static')).default].filter(Boolean)[0];
+  const out=[]; const now=REC.israelParts();
+  for(const ch of TV.TV_CHANNELS) {
+    const hours=await REC.hoursAvailable(ch.key);
+    const hour=req.query.hour!==undefined?Number(req.query.hour):(hours.includes(now.hour)?now.hour:hours[hours.length-1]);
+    if(req.query.ch&&req.query.ch!==ch.key) continue;
+    const files=hour===undefined?[]:await REC.filesForHour(ch.key,hour);
+    if(!files.length) { out.push({key:ch.key,title:ch.title,ok:false,why:'no recording',hours}); continue; }
+    const wav=pathm.join(os.tmpdir(),'replay-probe-'+ch.key+'.wav');
+    const t0=Date.now();
+    const secs=await REC.makeReplayPiece(bin,files[0],0,120,wav);
+    const q=secs>0?await REC.pieceQuality(bin,wav).catch(()=>null):null;
+    await fsp.unlink(wav).catch(()=>{});
+    const okFmt=q&&q.channels===1&&q.sampleRate===16000&&q.bits===16;
+    const okLevel=q&&q.maxDb<=-1.5&&q.maxDb>=-2.6;
+    out.push({key:ch.key,title:ch.title,hour,files:files.length,firstFile:pathm.basename(files[0]),pieceSec:Math.round(secs),madeInSec:Math.round((Date.now()-t0)/100)/10,
+      quality:q,ok:!!(secs>=10&&okFmt&&okLevel),hours});
+  }
+  res.json({ at:new Date().toISOString(), disk: REC.diskInfo(), filter: TV.TV_AUDIO_FILTER, channels: out });
+});
 app.get('/tv-status', rateLimit(30, 60 * 1000, 'tv-status'), async (req,res)=>{
   const TV=await import('./branch2-tv.js'); const { _relays, relayHistory }=await import('./live-relay.js');
   const host=u=>{ try { return new URL(u).host; } catch { return null; } };

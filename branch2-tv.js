@@ -28,7 +28,7 @@ export const TV_CHANNELS = Object.freeze([
 
 // Speech-friendly phone sound (owner's spec for shiurim/lessons, 18.11): cut
 // the low rumble, gentle noise reduction, loudness with true peak -2 dB.
-export const TV_AUDIO_FILTER = 'highpass=f=90,afftdn=nf=-25,loudnorm=I=-16:TP=-2';
+export const TV_AUDIO_FILTER = 'highpass=f=100,afftdn=nf=-25,loudnorm=I=-16:TP=-2';
 
 export function parseOverrides(text) {
   const out = {};
