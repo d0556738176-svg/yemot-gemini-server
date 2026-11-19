@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
+import { existsSync as existsSyncFs } from 'node:fs';
 import { addCoverArt, fetchThumbnail, normalizeCover, makeDownloadCopy, downloadMetadata, inspectMedia } from './youtube-cover-art.js';
 import { downloadVisionAudio } from './vision-audio.mjs';
 import { resolveApifyAudio, isApifyConfigured, nativeLimits, NATIVE_ACTOR_ID, apifyReceiptPath } from './youtube-apify-source.js';
@@ -138,10 +139,21 @@ async function fetchAuthorizedSource(videoId, output, fallbackUrl=null, signal=u
   return total;
 }
 
-function runFfmpeg(args, signal=undefined) {
+// 18.11: a crash of the bundled ffmpeg (exit by signal) is retried once with
+// the server's own ffmpeg (as in youtube-phone-audio.js).
+const SERVER_FFMPEG = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find(p => existsSyncFs(p)) || null;
+async function runFfmpeg(args, signal=undefined) {
+  try { return await runFfmpegWith(ffmpegPath, args, signal); }
+  catch (e) {
+    if (!e?.crashed || !SERVER_FFMPEG || SERVER_FFMPEG === ffmpegPath || signal?.aborted) throw e;
+    console.warn('[YouTube IVR] bundled ffmpeg crashed; doing it with the server ffmpeg', { signal: e.crashed });
+    return runFfmpegWith(SERVER_FFMPEG, args, signal);
+  }
+}
+function runFfmpegWith(bin, args, signal=undefined) {
   return new Promise((resolve, reject) => {
-    if (!ffmpegPath) return reject(new Error('ffmpeg-static is unavailable'));
-    const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    if (!bin) return reject(new Error('ffmpeg-static is unavailable'));
+    const child = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('ffmpeg timed out')); }, FFMPEG_TIMEOUT_MS);
     // Stop the child process when the caller's budget is gone so no orphan
     // conversion keeps eating CPU on the free instance.
@@ -154,9 +166,9 @@ function runFfmpeg(args, signal=undefined) {
       if (stderr.length > 5000) stderr = stderr.slice(-5000);
     });
     child.on('error', err => { clearTimeout(timer); reject(err); });
-    child.on('close', code => { clearTimeout(timer); code === 0
+    child.on('close', (code, sig) => { clearTimeout(timer); code === 0
       ? resolve()
-      : reject(new Error('ffmpeg failed (' + code + '): ' + stderr.slice(-1800))); });
+      : reject(Object.assign(new Error('ffmpeg failed (' + code + '): ' + stderr.slice(-1800)), { crashed: code === null && sig && sig !== 'SIGKILL' ? sig : null })); });
   });
 }
 

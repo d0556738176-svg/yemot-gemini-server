@@ -22,6 +22,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
+import { existsSync } from 'node:fs';
 
 // q3: downmix-correct order and in-pass loudness measurement (q2 was the first test build).
 export const PHONE_AUDIO_VERSION = 'q3';
@@ -189,10 +190,23 @@ export function parseIntegratedLufs(stderr) {
 
 // onTime(seconds, inputDurationSeconds|null) receives ffmpeg's real position in
 // the file when "-progress pipe:2" is in args (measured, never estimated).
-export function runFfmpeg(args, { signal, timeoutMs = 10800000, collect = false, onTime } = {}) {
+// 18.11: the bundled ffmpeg crashes (killed by a signal, exit "null") on
+// some site recordings (mako). The same work is then done once more with the
+// server's own ffmpeg, so the file is still made, with the same settings.
+const SYSTEM_FFMPEG = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find(p => existsSync(p)) || null;
+export async function runFfmpeg(args, opts = {}) {
+  try { return await runFfmpegWith(ffmpegPath, args, opts); }
+  catch (e) {
+    if (!e?.crashed || !SYSTEM_FFMPEG || SYSTEM_FFMPEG === ffmpegPath || opts.signal?.aborted) throw e;
+    console.warn('[PHONE_AUDIO] bundled ffmpeg crashed; doing it with the server ffmpeg', { signal: e.crashed });
+    return runFfmpegWith(SYSTEM_FFMPEG, args, opts);
+  }
+}
+
+function runFfmpegWith(bin, args, { signal, timeoutMs = 10800000, collect = false, onTime } = {}) {
   return new Promise((resolve, reject) => {
-    if (!ffmpegPath) return reject(new Error('ffmpeg-static is unavailable'));
-    const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    if (!bin) return reject(new Error('ffmpeg-static is unavailable'));
+    const child = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '', partial = '', inputDuration = null;
     child.stderr.on('data', d => {
       partial += d;
@@ -212,10 +226,10 @@ export function runFfmpeg(args, { signal, timeoutMs = 10800000, collect = false,
     if (signal?.aborted) return onAbort();
     signal?.addEventListener('abort', onAbort, { once: true });
     child.on('error', e => { clearTimeout(timer); reject(e); });
-    child.on('close', code => {
+    child.on('close', (code, sig) => {
       clearTimeout(timer); signal?.removeEventListener('abort', onAbort);
       err += partial;
-      code === 0 ? resolve(err) : reject(Object.assign(new Error('ffmpeg failed (' + code + '): ' + err.slice(-400)), { code: 'ffmpeg_failed', stderr: err.slice(-20000) }));
+      code === 0 ? resolve(err) : reject(Object.assign(new Error('ffmpeg failed (' + code + '): ' + err.slice(-400)), { code: 'ffmpeg_failed', stderr: err.slice(-20000), crashed: code === null && sig && sig !== 'SIGKILL' ? sig : null }));
     });
   });
 }
