@@ -218,6 +218,9 @@ export async function disableLiveExtension() {
   if (state && state.on) { await saveState({ on: false, changedAt: Date.now(), reason: 'extension 5 cancelled by the owner' }).catch(() => {}); log('live channels turned off'); }
 }
 export async function configureLiveExtension(publicUrl) {
+  // Extension 5 is now also an owner-managed website audio library.
+  const existing = token() ? await getText(FOLDER + '/ext.ini') : '';
+  if (/^ext5_web_audio_library=yes\s*$/m.test(String(existing || ''))) return;
   if (!liveEnabled()) return disableLiveExtension();
   if (process.env.BRANCH5_LIVE_AUTO_CONFIGURE === 'false' || /staging|test/i.test(process.env.RENDER_SERVICE_NAME || '')) return;
   if (!token() || !publicUrl) return;
