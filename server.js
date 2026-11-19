@@ -6193,6 +6193,43 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
   serverTime:new Date().toISOString()
 }));
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
+// Owner's live check (19.11): deploy/vps/ask.mjs (run by the owner on the
+// server) writes questions under a long random name; opening this address
+// runs them as one simulated text call in extension 1 or 3 of the RUNNING
+// code (nothing saved to memory), and the answers go to the private report.
+app.get('/owner-check/:name', rateLimit(10, 60 * 1000, 'owner-check'), async (req,res)=>{
+  const name=String(req.params.name||'');
+  if(!/^[a-f0-9]{24}$/.test(name)) return res.status(404).end();
+  const { stat, readFile, writeFile, unlink } = await import('node:fs/promises');
+  const file='/var/lib/yemot-report/'+name+'.ask';
+  const st=await stat(file).catch(()=>null);
+  if(!st || Date.now()-st.mtimeMs>2*3600*1000) return res.status(404).end();
+  const ask=JSON.parse(await readFile(file,'utf8').catch(()=>'{}'));
+  await unlink(file).catch(()=>{});
+  const branch=ask.branch==='1'?'1':'3';
+  const questions=(ask.questions||[]).map(String).filter(Boolean).slice(0,20);
+  res.type('text/plain; charset=utf-8').send('started: '+questions.length+' questions in extension '+branch+'. Read /owner-report/'+name+' in a few minutes.');
+  const lines=['live check, extension '+branch+', '+new Date().toISOString()];
+  let index=0, askedAt=Date.now();
+  const id='owner-check-'+Date.now();
+  const call={
+    selfTest:{next:()=>questions[index++]||''},
+    values:{ApiPhone:'0000000009',ApiCallId:id},callId:id,
+    read:async items=>{
+      const text=(Array.isArray(items)?items:[]).map(x=>x?.type==='file'?'[file '+x.data+']':(x?.data||'')).join(' ').replace(/\s*¶\s*/g,'. ').trim();
+      if(index>0) lines.push('Q'+index+': '+questions[index-1]+'\n  ('+(Date.now()-askedAt)+'ms) '+text+(call.selfTest.lastConfirm?'\n  [confirm '+JSON.stringify(call.selfTest.lastConfirm).slice(0,300)+']':''));
+      call.selfTest.lastConfirm=null;
+      if(index>=questions.length) throw new Error('call was disconnected by the caller');
+      askedAt=Date.now();
+      return '/e2e-selftest.wav';
+    },
+    id_list_message:async()=>{},go_to_folder:async()=>{},hangup:async()=>{}
+  };
+  try { await callPersona.run({persona:branch==='1'?'male':'female',branch},()=>callHandler(call)); }
+  catch(e) { lines.push('CRASH '+String(e?.stack||e).slice(0,400)); }
+  await writeFile('/var/lib/yemot-report/'+name+'.txt',lines.join('\n'),{mode:0o600}).catch(()=>{});
+  console.info('[OWNER_CHECK] finished',{branch,questions:questions.length});
+});
 // Owner's call report (18.11): deploy/vps/report.mjs, run by the owner on the
 // server, writes it under a long random name; it is served only for 2 hours.
 app.get('/owner-report/:name', rateLimit(30, 60 * 1000, 'owner-report'), async (req,res)=>{
