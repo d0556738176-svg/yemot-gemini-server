@@ -110,39 +110,70 @@ function webEvent(web, ok, engine, message) {
   if (webEvents.length > 100) webEvents.shift();
 }
 
+// Real length of a downloaded file (ffprobe), or null.
+function fileSeconds(file) {
+  return new Promise(resolve => {
+    const bin = ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe'].find(b => existsSync(b)) || 'ffprobe';
+    const p = spawn(bin, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', file], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = ''; p.stdout.on('data', d => { out += d; });
+    const t = setTimeout(() => p.kill('SIGKILL'), 30000);
+    p.on('error', () => { clearTimeout(t); resolve(null); });
+    p.on('close', () => { clearTimeout(t); const n = Number(out.trim()); resolve(Number.isFinite(n) && n > 0 ? n : null); });
+  });
+}
+
 export async function directDownload(videoId, output, opts = {}) {
-  try {
-    const r = await directDownloadPlain(videoId, output, opts);
-    webEvent(await webItem(videoId).catch(() => null), true, r.client || 'yt-dlp');
-    return r;
-  }
+  const log = opts.log || console;
+  const web = await webItem(videoId).catch(() => null);
+  let first = null, firstErr = null, firstSec = null;
+  try { first = await directDownloadPlain(videoId, output, opts); }
   catch (e) {
-    if (e?.name === 'AbortError' || e?.code === 'too_large' || opts.signal?.aborted) throw e;
-    const web = await webItem(videoId).catch(() => null);
-    if (!web) throw e;
-    if (!(browserAvailable() || streamlinkPath())) { webEvent(web, false, 'plain', e?.message || e); throw e; }
-    // Owner, 18.11: every site we can. The page is opened again in the
-    // browser engine (fresh addresses and cookies, which expire) and what its
-    // player plays is downloaded with the same tools.
-    const log = opts.log || console;
-    const pageUrl = web.page || web.url;
-    const sl = await streamlinkResolve(pageUrl).catch(() => null);
-    const s = await sniffPage(pageUrl, { timeoutMs: 30000, log }).catch(() => null);
-    for (const m of [...(sl ? [{ url: sl.url, headers: sl.headers, cookie: null }] : []), ...(s?.media || [])]) {
-      try {
-        const fresh = { ...web, url: m.url, alternateUrls: [], referer: m.headers?.Referer || web.page || web.url, httpHeaders: mediaRequestHeaders(m.headers), cookie: m.cookie || null, impersonate: false };
-        const r = await directDownloadPlain(videoId, output, { ...opts, webOverride: fresh });
-        log.info?.('[DIRECT] downloaded through the browser engine', { videoId, bytes: r.bytes });
-        webEvent(web, true, 'browser/streamlink');
-        return r;
-      } catch (e2) {
-        if (e2?.name === 'AbortError' || e2?.code === 'too_large') throw e2;
-        log.warn?.('[DIRECT] browser engine address failed', { videoId, message: String(e2?.message || e2).slice(0, 160) });
-      }
-    }
-    webEvent(web, false, 'all', (e?.message || e) + (s ? ' | browser found ' + (s.media?.length || 0) + ' media' : ' | browser not run'));
-    throw e;
+    if (e?.name === 'AbortError' || e?.code === 'too_large' || opts.signal?.aborted || !web) throw e;
+    firstErr = e;
   }
+  if (first) {
+    // 19.11: a site page can hold an advert or a preview beside the real
+    // recording (mako: a 20-second file for a 5-minute item). A file much
+    // shorter than the site's own length is replaced by what the page's
+    // player really plays (browser engine), when that is longer.
+    const want = Number(web?.durationSec) || 0;
+    if (!web || web.live || want < 60) { if (web) webEvent(web, true, first.client || 'yt-dlp'); return first; }
+    firstSec = await fileSeconds(output);
+    if (!firstSec || firstSec >= want * 0.6) { webEvent(web, true, first.client || 'yt-dlp'); return first; }
+    log.warn?.('[DIRECT] the site gave a much shorter file than the recording; trying the page player', { videoId, gotSec: Math.round(firstSec), wantSec: want });
+  }
+  if (!(browserAvailable() || streamlinkPath())) {
+    if (first) { webEvent(web, true, (first.client || 'yt-dlp') + ' (short)', 'only ' + Math.round(firstSec) + 's of ' + web.durationSec + 's'); return first; }
+    webEvent(web, false, 'plain', firstErr?.message || firstErr); throw firstErr;
+  }
+  // Owner, 18.11: every site we can. The page is opened again in the
+  // browser engine (fresh addresses and cookies, which expire) and what its
+  // player plays is downloaded with the same tools.
+  const pageUrl = web.page || web.url;
+  const sl = await streamlinkResolve(pageUrl).catch(() => null);
+  const s = await sniffPage(pageUrl, { timeoutMs: 30000, log }).catch(() => null);
+  const target = first ? output + '.player' : output;
+  for (const m of [...(sl ? [{ url: sl.url, headers: sl.headers, cookie: null }] : []), ...(s?.media || [])]) {
+    try {
+      const fresh = { ...web, url: m.url, alternateUrls: [], referer: m.headers?.Referer || web.page || web.url, httpHeaders: mediaRequestHeaders(m.headers), cookie: m.cookie || null, impersonate: false };
+      const r = await directDownloadPlain(videoId, target, { ...opts, webOverride: fresh });
+      if (first) {
+        const sec = await fileSeconds(target);
+        if (!sec || sec <= firstSec * 1.2) { await fs.rm(target, { force: true }).catch(() => {}); continue; }
+        await fs.rename(target, output);
+        log.info?.('[DIRECT] the full recording came from the page player', { videoId, sec: Math.round(sec) });
+      }
+      log.info?.('[DIRECT] downloaded through the browser engine', { videoId, bytes: r.bytes });
+      webEvent(web, true, 'browser/streamlink');
+      return r;
+    } catch (e2) {
+      if (e2?.name === 'AbortError' || e2?.code === 'too_large') throw e2;
+      log.warn?.('[DIRECT] browser engine address failed', { videoId, message: String(e2?.message || e2).slice(0, 160) });
+    }
+  }
+  if (first) { webEvent(web, true, (first.client || 'yt-dlp') + ' (short)', 'only ' + Math.round(firstSec) + 's of ' + web.durationSec + 's; the page player gave nothing longer'); return first; }
+  webEvent(web, false, 'all', (firstErr?.message || firstErr) + (s ? ' | browser found ' + (s.media?.length || 0) + ' media' : ' | browser not run'));
+  throw firstErr;
 }
 
 async function directDownloadPlain(videoId, output, { mode = 'audio', height, ffmpegPath, signal, onProgress, log = console, maxBytes = Infinity, stallMs = 60000, clients = CLIENTS, bin = ytdlpPath(), withCaptions = true, webOverride = null } = {}) {
