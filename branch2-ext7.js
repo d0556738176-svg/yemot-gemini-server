@@ -89,7 +89,16 @@ export function publishToExt7(videoId, localWav, title, io) {
     // never two songs on one number.
     const items = { ...(index.items || {}) };
     await io.writeJson(INDEX, { version: 1, next: n + 1, items });
-    await io.upload(localWav, EXT7_PATH + '/' + file + '.wav');
+    // 19.11: numbers 145-147 were reserved but their upload failed once and
+    // the songs never reached 7. Yemot busy or the line dropped: tried again
+    // after 15 s, 45 s and 2 minutes before giving up.
+    let lastErr = null;
+    for (const w of io.retryWaits || [0, 15000, 45000, 120000]) {
+      if (w) await new Promise(r => setTimeout(r, w));
+      try { await io.upload(localWav, EXT7_PATH + '/' + file + '.wav'); lastErr = null; break; }
+      catch (e) { lastErr = e; io.log?.warn?.('[EXT7] upload did not go through; trying again', { videoId, file, message: String(e?.message || e).slice(0, 140) }); }
+    }
+    if (lastErr) throw lastErr;
     await io.writeJson(INDEX, { version: 1, next: n + 1, items: { ...items, [videoId]: entry } });
     io.log?.info?.('[EXT7] song added', { videoId, file });
     return entry;

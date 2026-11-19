@@ -26,8 +26,9 @@ test('the same video is never added twice, even when requests overlap', async ()
   assert.deepEqual(f.uploads, ['ivr2:/7/000.wav', 'ivr2:/7/001.wav']);
 });
 
-test('a failed upload leaves a gap, never two songs on one number', async () => {
+test('an upload that keeps failing leaves a gap, never two songs on one number', async () => {
   const f = fakeIo({ failUploadOnce: true });
+  f.io.retryWaits = [0]; // no second try here: the failure must leave only a gap
   await assert.rejects(publishToExt7('aaaaaaaaaaa', '/tmp/a.wav', 'A', f.io));
   await publishToExt7('bbbbbbbbbbb', '/tmp/b.wav', 'B', f.io);
   assert.deepEqual(f.uploads, ['ivr2:/7/001.wav']);
@@ -93,4 +94,13 @@ test('every playback extension: star lines out, 0 = main menu, other lines kept'
     'type=playfile\ntitle=x\ncontrol_play0=go_to_folder\nplayfile_control_play_0_goto=/\n');
   const once = withMainMenuKey('type=last_play');
   assert.equal(withMainMenuKey(once), once);
+});
+
+test('a failed upload to extension 7 is tried again before the song is given up (19.11)', async () => {
+  const { publishToExt7 } = await import('./branch2-ext7.js');
+  let store = {}, tries = 0;
+  const io = { retryWaits: [0, 1, 1], readJson: async p => store[p] || null, writeJson: async (p, d) => { store[p] = d; },
+    upload: async () => { if (++tries < 3) throw new Error('Yemot busy'); }, log: { info() {}, warn() {} } };
+  const e = await publishToExt7('abcdefghijk', '/tmp/x.wav', 'שיר', io);
+  assert.equal(tries, 3); assert.equal(e.file, '000');
 });
