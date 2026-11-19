@@ -1,0 +1,59 @@
+version 30ea7e79cab9 started 2026-11-19T20:37:28.236Z
+webEvents []
+browserEvents [
+ {
+  "at": "2026-11-19T20:55:10.391Z",
+  "page": "www.c14.co.il/radio",
+  "requests": 0,
+  "media": [],
+  "ms": 19878
+ },
+ {
+  "at": "2026-11-19T21:03:39.203Z",
+  "page": "www.c14.co.il/radio",
+  "requests": 0,
+  "media": [],
+  "ms": 21387
+ },
+ {
+  "at": "2026-11-19T21:07:44.180Z",
+  "page": "www.kan.org.il/live/",
+  "requests": 9,
+  "media": [
+   "s://kancdn.medonecdn.net/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx",
+   "zeq.tv/webcache/redge-il/livedash/oil/kancdn-live/live/kan11/live.livx"
+  ],
+  "ms": 5149
+ },
+ {
+  "at": "2026-11-19T21:09:53.887Z",
+  "page": "www.c14.co.il/radio",
+  "requests": 0,
+  "media": [],
+  "ms": 20078
+ },
+ {
+  "at": "2026-11-19T21:14:06.932Z",
+  "page": "www.c14.co.il/radio",
+  "requests": 0,
+  "media": [],
+  "ms": 19882
+ },
+ {
+  "at": "2026-11-19T21:16:00.718Z",
+  "page": "www.c14.co.il/radio",
+  "requests": 0,
+  "media": [],
+  "ms": 19762
+ }
+]
+recent {
+ "audio": [],
+ "video": [],
+ "timings": []
+}
+exit=0
