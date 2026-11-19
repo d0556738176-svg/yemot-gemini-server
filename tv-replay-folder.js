@@ -104,12 +104,14 @@ export async function publishHour(item, io) {
     const m = await masterSpeech(raw, out);
     await fs.unlink(raw).catch(() => {});
     const number = String(f0.next).padStart(3, '0');
+    // Settings first: writing them creates the folder in Yemot (measured 19.11:
+    // folders 5/1-5/9 were created that way), and a big file sent in parts is
+    // moved into its folder at the end - which fails when the folder is missing.
+    await saveSettings(folder, hourIni(ch.key, ch.title, hour), io);
     for (let a = 1; ; a++) {
       try { await io.upload(out, folder + '/' + number + '.wav'); break; }
       catch (e) { if (a >= 3) throw e; await new Promise(r => setTimeout(r, 5000 * a)); }
     }
-    // Settings after the first file: Yemot creates a folder with its first file.
-    await saveSettings(folder, hourIni(ch.key, ch.title, hour), io);
     const s2 = loadState(); s2.done ||= {}; s2.folders ||= {};
     f0.days[number] = id; f0.next++;
     s2.folders[ch.key + '/' + hour] = f0;
