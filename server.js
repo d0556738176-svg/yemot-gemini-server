@@ -6207,6 +6207,14 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
   serverTime:new Date().toISOString()
 }));
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
+// Which code is running and whether the local map is built (no secrets), so a
+// deploy can be verified from outside (19.11).
+app.get('/version',rateLimit(30,60*1000,'version'),async (req,res)=>{
+  const { readFile } = await import('node:fs/promises');
+  const running=String(await readFile('/opt/yemot/.running-main','utf8').catch(()=>'')).trim().slice(0,12);
+  const map=JSON.parse(await readFile('/var/lib/yemot-data/osm/built.json','utf8').catch(()=>'null'));
+  res.set('cache-control','no-store').json({running,startedAt:new Date(Date.now()-process.uptime()*1000).toISOString(),localMap:map?{builtAt:map.at,places:map.places,tiles:map.tiles}:null});
+});
 // Owner's live check (19.11): deploy/vps/ask.mjs (run by the owner on the
 // server) writes questions under a long random name; opening this address
 // runs them as one simulated text call in extension 1 or 3 of the RUNNING
