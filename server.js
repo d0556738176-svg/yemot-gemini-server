@@ -11,7 +11,7 @@ import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.j
 import { createSongCallHandler } from './song-ivr.js';
 import { handleWorkerCallback, isCloudWorkerConfigured } from './song-cloud.js';
 import { startLinkGuard } from './yemot-link-guard.js';
-import { getSongProviderHealth } from './song-generator.js';
+import { getSongProviderHealth, createSong, cloudJobStatus } from './song-generator.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
 import { keySlots, keysFor, withKeys, keyReport, isDeadKey, markDeadKey } from './key-slots.js';
@@ -4705,6 +4705,11 @@ async function ext3MediaNotes(media) {
     if(job.paths&&!job.readySaid) { job.readySaid=true; media.lastReady=job; notes.push('הקובץ של '+job.title+' מוכן. כשתרצה לשמוע אותו, אמור תשמיעי לי אותו.'); }
     if(job.readySaid&&(job.mode!=='video'||job.videoSaid)) job.done=true;
   }));
+  for(const job of ext3Songs(media)) {
+    if(job.said) continue;
+    if(job.paths) { job.said=true; media.lastReady={...job,durationSec:0}; notes.push(ext3SongStage(job)); }
+    else if(job.failed) { job.said=true; notes.push(ext3SongStage(job)); }
+  }
   return notes.length?'ועוד הודעה: '+notes.join(' '):'';
 }
 // The extension-2 service sleeps when idle and can take a few minutes to wake.
@@ -4735,6 +4740,10 @@ function ext3Jobs(media) { return [...media.values()].filter(j=>j&&typeof j==='o
 // Only measured facts from the download service, never an invented percentage.
 async function ext3MediaStatusReply(media) {
   const jobs=ext3Jobs(media).filter(j=>!j.cancelled);
+  const songs=ext3Songs(media);
+  for(const j of songs) if(j.paths) { j.said=true; media.lastReady={...j,durationSec:0}; }
+  const songText=songs.map(ext3SongStage).join(' ');
+  if(!jobs.length&&songText) return songText+' בינתיים אפשר להמשיך לדבר על כל דבר.';
   if(!jobs.length) return 'כרגע אני לא מורידה שום קובץ. אם תרצה, ספר לי איזה שיר או סרטון, אמצא אותו, אומר לך את שמו המלא, ותבחר אם להוריד.';
   const parts=[];
   for(const job of jobs) {
@@ -4753,7 +4762,7 @@ async function ext3MediaStatusReply(media) {
     const min=Number(st.audio?.minutes ?? st.video?.minutes);
     parts.push('ההורדה של '+job.title+(job.mode==='video'?', כווידאו וגם כקובץ שמע מאותה הורדה,':'')+' עדיין בתהליך'+(Number.isFinite(min)?(min<1?', היא התחילה לפני פחות מדקה':', כבר '+min+' דקות'):'')+'. '+(st.audio?.spoken?st.audio.spoken+' ':'')+'אודיע לך ברגע שהקובץ מוכן.');
   }
-  return parts.join(' ')+' בינתיים אפשר להמשיך לדבר על כל דבר.';
+  return (songText?songText+' ':'')+parts.join(' ')+' בינתיים אפשר להמשיך לדבר על כל דבר.';
 }
 // Only after the caller confirmed the exact title and chose 1 (audio) or 2
 // (video + phone audio from the same download). Ready -> plays now;
@@ -4782,6 +4791,35 @@ function ext3KeyChoice(text, choices) {
   if(!d) { const w={'אחת':'1','אחד':'1','שתיים':'2','שניים':'2','שלוש':'3','שלושה':'3','ארבע':'4','ארבעה':'4','חמש':'5','חמישה':'5','שש':'6','שישה':'6'};
     const m=t.match(/^(?:מספר\s*|אפשרות\s*|את\s*)?([1-9]|אחת|אחד|שתיים|שניים|שלוש|שלושה|ארבע|ארבעה|חמש|חמישה|שש|שישה)[.!?\s]*$/u); if(m) d=w[m[1]]||m[1]; }
   return d&&choices&&choices[d]?d:'';
+}
+
+// A new AI song asked for in extension 1 or 3 (owner, 19.11): made by
+// extension 4's engine in the background (it goes on after he hangs up and is
+// saved in extension 7); its stage is told when he asks, and he hears when it
+// is ready.
+function ext3StartSong(song, media, {callId, phone}) {
+  const key='song:'+Date.now();
+  const job={song:true,key,title:String(song.title||''),stage:'writing',since:Date.now()};
+  media.set(key,job);
+  createSong({prompt:song.brief,callId:'ext3-'+callId+'-'+key,userKey:phone||callId,generateText:songGenerateText,
+    onStatus:st=>{ if(st.status==='generating_music') { job.stage='music'; job.musicAt=Date.now(); job.songId=st.songId||job.songId; if(st.title) job.title=st.title; } else if(st.status==='generating_lyrics') job.stage='writing'; }})
+    .then(r=>{
+      if(r?.needsClarification) { job.failed='clarify'; job.question=String(r.clarificationQuestion||''); }
+      else if(r?.playbackPaths?.length) { job.paths=r.playbackPaths; if(r.spec?.title) job.title=r.spec.title; }
+      else job.failed='empty';
+      console.info('[EXT3_SONG] finished',{key,ok:!!job.paths,failed:job.failed||''});
+    },e=>{ job.failed=String(e?.code||'error'); console.warn('[EXT3_SONG] failed',{key,code:job.failed,message:String(e?.message||e).slice(0,160)}); });
+  return job;
+}
+function ext3Songs(media) { return [...media.values()].filter(j=>j&&j.song); }
+function ext3SongStage(job) {
+  if(job.paths) return 'השיר '+(job.title||'')+' מוכן ונשמר בשלוחה 7. כדי לשמוע אותו עכשיו אמור תשמיעי לי אותו.';
+  if(job.failed==='clarify') return 'יוצר השירים צריך עוד פרט: '+(job.question||'איזה סגנון מוזיקלי תרצה?')+' אמור לי, ואז תיצרי את השיר.';
+  if(job.failed) return 'יצירת השיר '+(job.title||'')+' לא הצליחה הפעם'+(job.failed==='QUEUE_FULL'?', כי כרגע נוצרים שירים רבים':'')+'. אפשר לבקש שוב בעוד כמה דקות.';
+  const min=Math.floor((Date.now()-(job.musicAt||job.since))/60000);
+  if(job.stage!=='music') return 'אני עדיין כותבת את המילים לשיר'+(job.title?' '+job.title:'')+', עוד רגע זה עובר להלחנה.';
+  const st=job.songId?cloudJobStatus(job.songId):{};
+  return (st?.stage==='starting'?'מכינים את האולפן לשיר ':'המנוע מלחין ושר עכשיו את השיר ')+(job.title||'')+(min>=1?', עברו '+(min===1?'דקה אחת':min+' דקות')+' מתחילת ההלחנה':', ההלחנה התחילה הרגע')+'. בדרך כלל זה לוקח עשר עד עשרים דקות.';
 }
 
 // Several downloads at once (owner, 19.11), each exactly like a single one;
@@ -4842,6 +4880,7 @@ function ext3ConfirmChoice(text) {
 // "This call's downloads" in one line, for the brain (so it never invents a status).
 function ext3MediaLine(media, pendingConfirm) {
   const bits=ext3Jobs(media).filter(j=>!j.cancelled).map(j=>j.title+' ('+(j.mode==='video'?'וידאו ושמע':'שמע')+', '+(j.paths?'מוכן':j.needsStart?'מחכה שהשירות יתעורר':'בהורדה')+')');
+  for(const j of ext3Songs(media)) bits.push('שיר חדש בבינה מלאכותית '+(j.title||'')+' ('+(j.paths?'מוכן':j.failed?'לא הצליח':j.stage==='music'?'בהלחנה':'בכתיבת מילים')+')');
   if(pendingConfirm) bits.push('מחכה לבחירה של המתקשר אם להוריד את '+pendingConfirm.title);
   return bits.join('; ');
 }
@@ -5202,7 +5241,20 @@ async function callHandler(call) {
           // the same download), 3 cancel. Nothing was downloaded before this.
           const choice=ext3ConfirmChoice(userTranscript), c=pendingConfirm; pendingConfirm=null; pendingChoices=null;
           console.info('[EXT3_MEDIA] confirmation',{callId:activeKey,videoId:c.videoId,choice});
-          if(choice==='cancel') replyText='ביטלתי, ולא הורדתי כלום. על מה תרצה שנמשיך לדבר?';
+          if(c.song) {
+            // Owner, 19.11: 1 = make the song now, 2 = change details, 3 = cancel.
+            if(choice==='cancel') replyText='בסדר, לא יצרתי את השיר. על מה נמשיך לדבר?';
+            else if(choice==='video') replyText='בשמחה. מה לשנות בשיר? אפשר לשנות את הנושא, הסגנון, הקול או המילים. כשנסיים, אמור תיצרי את השיר, ואקריא לך שוב את הפרטים לאישור.';
+            else if(call.selfTest) replyText='בחרת ליצור את השיר.';
+            else {
+              const job=ext3StartSong(c.song,callMedia,{callId,phone:normalizePhone(callerPhone)});
+              replyText='התחלתי ליצור את השיר'+(c.song.title?' '+c.song.title:'')+'. קודם נכתבות המילים, ואחר כך המנוע מלחין ושר. זה לוקח בדרך כלל עשר עד עשרים דקות, והשיר יישמר גם בשלוחה 7. בינתיים אפשר להמשיך לדבר, לשאול בכל רגע איפה זה עומד, ואודיע לך ברגע שהוא מוכן.';
+              console.info('[EXT3_SONG] started',{callId:activeKey,title:String(c.song.title||'').slice(0,60),briefChars:c.song.brief.length,key:job.key});
+            }
+            if(call.selfTest) call.selfTest.lastConfirmChoice=choice;
+            ext3Done=true;
+          }
+          else if(choice==='cancel') replyText='ביטלתי, ולא הורדתי כלום. על מה תרצה שנמשיך לדבר?';
           else if(choice==='video'&&c.batch) { pendingSubs=c; replyText='להוסיף לכל הסרטונים כתובית בעברית, מוטבעת בתוך הסרטון? עם כתובית הקש 1, בלי כתובית הקש 2.'; }
           // Owner, 13.11: video (2) also offers Hebrew subtitles, as in extension 2.
           else if(choice==='video') {
@@ -5215,7 +5267,7 @@ async function callHandler(call) {
           else if(call.selfTest) replyText='בחרת קובץ שמע עבור '+c.title+'.';
           else if(c.batch) replyText=await ext3StartBatch(c.batch,'audio',callMedia);
           else { const m=await ext3StartOrPlay({...c,mode:choice},callMedia); replyText=m.handoff?'שירות ההורדות לא מוגדר כרגע. אפשר להוריד את '+c.title+' בשלוחה 2.':m.reply; if(m.play) pendingPlay=m.play; }
-          turnContext.ext3Ref={type:'video',videoId:c.videoId,title:c.title,channelTitle:c.channelTitle,durationSec:c.durationSec};
+          if(!c.song) turnContext.ext3Ref={type:'video',videoId:c.videoId,title:c.title,channelTitle:c.channelTitle,durationSec:c.durationSec};
           if(call.selfTest) call.selfTest.lastConfirmChoice=choice;
           ext3Done=true;
         }

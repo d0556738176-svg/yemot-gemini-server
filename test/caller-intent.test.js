@@ -45,3 +45,20 @@ test('a named site is a whole-web request (the site stays in the search)', () =>
   assert.equal(webSearchIntent('תוריד לי שיעור של הרב זילברשטיין מאתר קול הלשון'), 'שיעור של הרב זילברשטיין מאתר קול הלשון');
   assert.equal(webSearchIntent('האם את יכולה להוריד מאתר קול הלשון?'), null);
 });
+
+test('a new song from the conversation: details read back, created only after the key', async () => {
+  const llm = async (p, o = {}) => {
+    if (o.planner) return JSON.stringify({ intent: 'song_make' });
+    return JSON.stringify({ title: 'שבת מלכתא', topic: 'שיר שמח לכבוד שבת', style: 'חסידי עם גיטרה', voice: 'ילד', lyrics: 'שבת באה אלינו\nהנרות דולקים', brief: 'שיר שמח לכבוד שבת, חסידי עם גיטרה, בקול ילד' });
+  };
+  const r = await ext3Turn({ utterance: 'עכשיו תיצרי את השיר', now: 'x', current: [{ user: 'בואי נכתוב שיר לשבת', assistant: 'שבת באה אלינו, הנרות דולקים' }] }, { llm, log: quiet });
+  assert.equal(r.intent, 'song_make');
+  assert.ok(r.confirm?.song?.brief.includes('מילות השיר'));
+  assert.match(r.reply, /שם השיר: שבת מלכתא.*סגנון: חסידי עם גיטרה.*קול: ילד.*שבת באה אלינו/);
+  assert.match(r.reply, /ליצירת השיר הקש 1, לשינוי פרטים הקש 2, לביטול הקש 3/);
+});
+test('"can you make songs?" is a question, not a song order', async () => {
+  const llm = async (p, o = {}) => o.planner ? JSON.stringify({ intent: 'song_make' }) : JSON.stringify({ answer: 'כן, אפשר ליצור שיר.' });
+  const r = await ext3Turn({ utterance: 'האם את יכולה ליצור שירים?', now: 'x' }, { llm, log: quiet });
+  assert.equal(r.intent, 'chat'); assert.equal(r.confirm, undefined);
+});

@@ -92,7 +92,7 @@ export function activeLesson(current = []) {
 
 // ---------- planner ----------
 
-export const INTENTS = ['library', 'chat', 'web', 'zmanim', 'nearby', 'video_find', 'video_about', 'video_play', 'media_status', 'cancel', 'read_page', 'recall'];
+export const INTENTS = ['library', 'chat', 'web', 'zmanim', 'nearby', 'song_make', 'video_find', 'video_about', 'video_play', 'media_status', 'cancel', 'read_page', 'recall'];
 
 export function plannerPrompt({ context, utterance, now, video, older = null, media = '', prefs = [] }) {
   return [
@@ -102,11 +102,12 @@ export function plannerPrompt({ context, utterance, now, video, older = null, me
     'chat = שיחה, ברכה ("מה נשמע", "מה שלומך"), הסבר, לימוד, עצה, ידע כללי שאינו תלוי בפרטים מדויקים, המשך של שיעור או של הצעה קודמת ("כן", "תמשיכי", "אחת", "בטח").',
     'web = צריך מידע עדכני או מדויק מהאינטרנט: חדשות, מחירים, מי מכהן היום, פרטי עסק, אירועים אחרונים, נתונים שמשתנים, או כשהמתקשר מבקש לחפש. גם כל שאלה על פרט ספציפי מהעולם האמיתי שאפשר לטעות בו: מי שר שיר, איך נקרא זמר או צמד, אילו שירים יש לזמר, איך מגיעים ממקום למקום ובאיזה קו אוטובוס או רכבת, פרטים טכניים של שירות או מוצר. אלה web ולא chat, כדי לא לענות מהזיכרון.',
     'zmanim = שאלה על זמן הלכתי של היום במקום מסוים (סוף זמן קריאת שמע או תפילה לפי הגר"א או המגן אברהם, הנץ, שקיעה, עלות השחר, חצות, מנחה, פלג המנחה, צאת הכוכבים, כניסת שבת והדלקת נרות, צאת שבת). אלה זמנים שמחשבים לפי מיקום ותאריך, לא מחפשים באינטרנט.',
+    'song_make = המתקשר מבקש עכשיו ליצור, להלחין ולהקליט שיר חדש בבינה מלאכותית (לא למצוא שיר קיים, ולא רק לכתוב מילים בשיחה). שיחה על מילים, סגנון או קול לשיר בלי בקשה ליצור אותו עכשיו היא chat.',
     'nearby = המתקשר שואל איפה יש מקום מסוג מסוים (בית כנסת, מקווה, בית מרקחת, סופר, מסעדה, כספומט, תחנת דלק, מרפאה, חניון וכו\') הכי קרוב או ליד מקום מסוים (רחוב, שכונה, חוף, מקום מוכר, יישוב).',
     'video_find = המתקשר רוצה שתמליצי או תמצאי לו סרטון, הרצאה, סיפור או סרט ביוטיוב.',
     'video_about = שאלה על סרטון שכבר הוזכר בשיחה (מה השם, תרגום השם, אורך, ערוץ, על מה הוא, האם הוא בעברית).',
     'video_play = המתקשר מבקש עכשיו לשמוע, להשמיע, להפעיל או להוריד סרטון או שיר מסוים (הסרטון שהוזכר, או שיר/סרטון שהוא מתאר בשמו). שאלה על מצב הורדה אינה video_play.',
-    'media_status = שאלה על הורדה או הכנה שכבר התחילה: מה המצב, כמה אחוזים, מה מורידים עכשיו, האם מוכן.',
+    'media_status = שאלה על הורדה, הכנה או יצירת שיר שכבר התחילו: מה המצב, איפה זה עומד, כמה אחוזים, מה מורידים עכשיו, האם השיר מוכן.',
     'library = בקשה לשמוע אילו שירים או קבצים כבר הורדו ושמורים במערכת.',
     'cancel = המתקשר מבקש לבטל או לעצור הורדה, או אומר שלא רצה להוריד.',
     'read_page = המתקשר מבקש שתקריאי לו כתבה, מאמר או דף מאתר מסוים (למשל "תקריאי לי כתבה מחזקת מהידברות").',
@@ -218,6 +219,7 @@ export function heuristicPlan(utterance, { video = null } = {}) {
     return { ...base, intent: 'video_play', ytHe: chosen[1].replace(/(?:לשמיעת|להשמעת|לשמוע את|לשמוע|להשמיע את|להשמיע|לנגן את|לנגן|השיר|שיר|הסרטון|סרטון|הפרק|של\s+$)/gu, ' ').replace(/\s+/g, ' ').trim() };
   if (/^בחרתי באפשרות/u.test(u)) return { ...base, intent: 'chat', continueOffer: true };
   if (/(?:אילו|איזה|מה|תגיד|תגידי|תקריא|תקריאי|רשימת|רשימה של).{0,20}(?:שירים|קבצים|סרטונים|השירים|הקבצים).{0,25}(?:הורדתי|הורדנו|ירדו|שהורדת|שמורים|יש לי|כבר הורדו|במערכת)/u.test(u)) return { ...base, intent: 'library' };
+  if (/(?:איפה זה עומד|איפה הוא עומד|איפה השיר|מה עם השיר|השיר כבר מוכן|השיר מוכן)/u.test(u)) return { ...base, intent: 'media_status' };
   if (/(?:מצב|סטטוס|כמה אחוז|אחוזים|מה את מורידה|מה מורידים|מה את מכינה|כבר מוכן|מתי יהיה מוכן|ירד כבר|הורד כבר).{0,25}|(?:מצב|כמה).{0,10}(?:ההורדה|ההורדות|הקובץ)/u.test(u) && /(?:הורד|הורדה|הורדות|אחוז|מוכן|מכינה|קובץ)/u.test(u)) return { ...base, intent: 'media_status' };
   if (/(?:תבטל|תבטלי|לבטל|ביטול|תעצור|תעצרי|עצור|תפסיק|תפסיקי).{0,30}(?:הורד|הורדה|את זה|אותו)?|לא רוצה (?:שת|ש)?(?:ו)?ריד|אל תורידי|אל תוריד/u.test(u)) return { ...base, intent: 'cancel' };
   if (/(?:תקריא|תקריאי|תקראי|תקרא|להקריא).{0,30}(?:כתבה|מאמר|דף|אתר|סיפור מ)/u.test(u)) return { ...base, intent: 'read_page' };
@@ -226,6 +228,7 @@ export function heuristicPlan(utterance, { video = null } = {}) {
   // Halachic times and "the nearest X to Y" are computed from the map, not
   // searched (18.11: both got poor web answers).
   if (isZmanimQuestion(u)) return { ...base, intent: 'zmanim', ...placeFromText(u) };
+  if (SONG_MAKE.test(u)) return { ...base, intent: 'song_make' };
   if (isNearbyQuestion(u)) return { ...base, intent: 'nearby', kind: nearbyKind(u).label, ...placeFromText(u) };
   // The video named in the request, not the whole sentence, is what gets searched.
   if (PLAY_WORD.test(u) && !/^(?:לא|אל)(?=$|[\s,.!?])/u.test(u)) return { ...base, intent: 'video_play', ytHe: video && POINT_WORD.test(u) ? '' : u.replace(PLAY_WORD_G, ' ').replace(/(?:הלו|נו|כן|בבקשה|אני רוצה|ש?תשמיעי|לי|את|השיר|הסרטון|הפרק|ה?ו?וידי?או|קובץ שמע|ביוטיוב|יוטיוב)/gu, ' ').replace(/\s+/g, ' ').trim() };
@@ -458,7 +461,7 @@ const META_OPENING = /^\s*(?:בבקשה[,.!]?\s*)?(?:בוצע קיצור|קיצ�
 export function cutStockOpening(text) { const t = String(text || '').replace(META_OPENING, ''); const cut = t.replace(STOCK_OPENING, ''); return cut.length > 20 ? cut : t; }
 
 // Extension 1 speaks as a man and answers briefly; extension 3 as a woman, at length.
-const MALE_SELF = [['מורידה','מוריד'],['מעירה','מעיר'],['ממשיכה','ממשיך'],['משמיעה','משמיע'],['מקשיבה','מקשיב'],['מכינה','מכין'],['יכולה','יכול'],['בטוחה','בטוח'],['זוכרת','זוכר'],['ממליצה','ממליץ'],['יודעת','יודע'],['מבינה','מבין'],['מחפשת','מחפש'],['מצטערת','מצטער'],['שמחה לעזור','שמח לעזור'],['תשמיעי','תשמיע'],['תורידי','תוריד'],['תמשיכי','תמשיך'],['תקריאי','תקריא']];
+const MALE_SELF = [['מורידה','מוריד'],['מעירה','מעיר'],['ממשיכה','ממשיך'],['משמיעה','משמיע'],['מקשיבה','מקשיב'],['מכינה','מכין'],['יכולה','יכול'],['בטוחה','בטוח'],['זוכרת','זוכר'],['ממליצה','ממליץ'],['יודעת','יודע'],['מבינה','מבין'],['מחפשת','מחפש'],['מצטערת','מצטער'],['שמחה לעזור','שמח לעזור'],['תשמיעי','תשמיע'],['יוצרת','יוצר'],['כותבת','כותב'],['תורידי','תוריד'],['תמשיכי','תמשיך'],['תקריאי','תקריא']];
 export function toMaleSelf(text) {
   let t = String(text || '');
   for (const [f, m] of MALE_SELF) t = t.replace(new RegExp('(?<![\\u0590-\\u05FF])' + f + '(?![\\u0590-\\u05FF])', 'gu'), m);
@@ -805,6 +808,23 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   };
 
   if (plan.intent === 'media_status') return out({ mediaStatus: true, reply: '' });
+  if (SONG_MAKE.test(utterance) && !plan.about && ['chat', 'video_find', 'video_play', 'web'].includes(plan.intent)) plan.intent = 'song_make';
+  // Owner, 19.11: a new AI song from the conversation (words, style, voice
+  // talked about here): every detail is read back and he confirms by key.
+  if (plan.intent === 'song_make') {
+    let spec = null;
+    try {
+      const raw = await deps.llm('המתקשר רוצה ליצור עכשיו שיר חדש בבינה מלאכותית. מתוך השיחה ומהבקשה שלו, אספי את פרטי השיר כפי שסוכמו, בלי להמציא מה שלא נאמר. החזירי JSON בלבד: {"title":"שם קצר לשיר","topic":"על מה השיר","style":"סגנון מוזיקלי וכלים, ריק אם לא נאמר","voice":"גבר / ילד / ילדה / אישה, ריק אם לא נאמר","lyrics":"מילות השיר המלאות רק אם נכתבו או הוכתבו בשיחה והמתקשר רוצה אותן, אחרת ריק","brief":"תיאור מלא של הבקשה ליוצר השירים: נושא, סגנון, קול, ומילים אם יש"}\n\nהקשר השיחה:\n' + clip(context, 3500) + '\n\nהמתקשר אמר עכשיו: ' + utterance, { maxTokens: 900, budgetMs: 10000 });
+      const j = JSON.parse(String(raw).match(/\{[\s\S]*\}/)?.[0] || 'null');
+      if (j && (j.brief || j.topic)) spec = j;
+    } catch {}
+    if (!spec) spec = { title: '', topic: utterance, style: '', voice: '', lyrics: '', brief: utterance };
+    const brief = [spec.brief || spec.topic, spec.style ? 'סגנון: ' + spec.style : '', spec.voice ? 'קול: ' + spec.voice : '', spec.lyrics ? 'מילות השיר:\n' + spec.lyrics : ''].filter(Boolean).join('\n').slice(0, 2500);
+    const firstLine = String(spec.lyrics || '').split(/\n|[.!?]/).map(x => x.trim()).filter(Boolean)[0] || '';
+    return out({ confirm: { song: { brief, title: spec.title || '' }, title: 'השיר ' + (spec.title || 'החדש'), videoId: '', mode: 'song' },
+      reply: (voice === 'male' ? 'לפני שאני יוצר' : 'לפני שאני יוצרת') + ' את השיר, אלה הפרטים: ' + [spec.title ? 'שם השיר: ' + spec.title : '', 'נושא: ' + (spec.topic || spec.brief), 'סגנון: ' + (spec.style || 'אבחר סגנון שמתאים לנושא'), 'קול: ' + (spec.voice || 'אבחר קול מתאים'), spec.lyrics ? 'המילים שכתבנו, שמתחילות ב: ' + clip(firstLine, 80) : 'את המילים אכתוב לפי הנושא'].filter(Boolean).join('. ') + '. ' +
+        'ליצירת השיר הקש 1, לשינוי פרטים הקש 2, לביטול הקש 3. היצירה לוקחת בדרך כלל עשר עד עשרים דקות, ובינתיים אפשר להמשיך לדבר.' });
+  }
   // "Download them all": one at a time, and he picks which one first.
   // Owner, 19.11: several of the videos just offered, together, after one
   // confirmation that names every one of them.
@@ -1131,6 +1151,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
 }
 
 export { HE_NUMBER_WORDS };
+
+const SONG_MAKE = /(?:תיצור|תיצרי|ליצור|צור לי|צרי לי|תלחין|תלחיני|להלחין|תקליט|תקליטי|תעשה לי|תעשי לי|תכין לי|תכיני לי|תחבר לי|תחברי לי|תפיק|תפיקי)\s+(?:לי\s+)?(?:את\s+)?(?:ה)?שיר|(?:שיר חדש|שיר משלי|שיר מקורי)\s+(?:ב)?(?:בינה מלאכותית|AI)|(?:עכשיו\s+)?(?:תיצור|תיצרי|תלחין|תלחיני)\s+(?:אותו|את זה)(?=$|[\s,.!?])/u;
 
 const TIPS_ASKED = /(?:טיפ|טיפים|עצה|עצות|המלצות מעשיות|תן לי רעיונות|תני לי רעיונות)/u;
 
