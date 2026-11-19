@@ -4282,7 +4282,10 @@ async function youtubeCallHandler(call) {
     const p=(await import('./youtube-authorized-playback.js'))._pipeline;
     const ffmpegPath=(await import('ffmpeg-static')).default;
     const relay=startRelay(item,{ffmpegPath,log:console,
-      upload:(f,r)=>p.uploadToYemot(f,r,undefined,{convertAudio:false,single:true}),
+      // 16 kHz pieces: Yemot plays a file above 8 kHz only when it converts it on
+      // upload (as youtube-authorized-playback does for sampleRate>8000). Without
+      // it the caller heard silence while the pieces were ready (19.11).
+      upload:(f,r)=>p.uploadToYemot(f,r,undefined,{convertAudio:true,single:true}),
       del:async remote=>{ const x=new URL(p.YEMOT_API_BASE+'/FileAction'); x.searchParams.set('token',p.yemotApiKey()); x.searchParams.set('action','delete'); x.searchParams.set('what',remote); await fetch(x,{signal:AbortSignal.timeout(8000)}).catch(()=>{}); }});
     console.info('[LIVE] caller joined',{id:relay.id,title:String(it.title).slice(0,80)});
     let last=null, waited=0, said=false;
