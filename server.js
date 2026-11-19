@@ -5481,6 +5481,22 @@ app.get('/tv-check', rateLimit(4, 60 * 1000, 'tv-check'), async (req,res)=>{
 });
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
 app.get('/branch2-diag',async (req,res)=>{ let commit=''; try { commit=String(readFileSync(new URL('./.git/HEAD',import.meta.url),'utf8')).trim(); if(commit.startsWith('ref:')) commit=String(readFileSync(new URL('./.git/'+commit.slice(5).trim(),import.meta.url),'utf8')).trim(); } catch {} let engineTest=null, webEvents=[], browserEvents=[]; try { engineTest=(await import('./web-engine-selftest.js')).state; webEvents=(await import('./youtube-direct.js')).webEvents; browserEvents=(await import('./browser-media.js')).browserEvents; } catch {} res.json({commit:commit.slice(0,12), startedAt:BRANCH2_STARTED_AT, keys:branch2Keys.slice(-100), engineTest, webEvents:webEvents.slice(-40), browserEvents:browserEvents.slice(-40)}); });
+// Owner, 19.11: what one download really left in Yemot (phone file quality,
+// extension 7, the אודיו copy, the וידאו file). Read-only; ?recent=1 lists
+// the latest download jobs of this server run.
+app.get('/branch2-saved',rateLimit(20,60*1000,'saved-check'),async (req,res)=>{
+  try{
+    if(req.query.recent){
+      const pick=m=>[...m.entries()].slice(-10).map(([id,j])=>({id,status:j?.status||j?.state||null,mode:j?.mode||null}));
+      return res.json({audio:pick(youtubePlaybackJobs),video:pick(youtubeVideoJobs)});
+    }
+    const id=String(req.query.id||'');
+    if(!/^[A-Za-z0-9_-]{11}$/.test(id))return res.status(400).json({ok:false});
+    const { _pipeline: p } = await import('./youtube-authorized-playback.js');
+    const { savedReport } = await import('./branch2-saved-check.js');
+    res.json(await savedReport(id,{p,ffmpegPath:(await import('ffmpeg-static')).default,lookupCached:lookupCachedYouTubeAudio}));
+  }catch(e){res.status(500).json({ok:false,message:String(e?.message||e).replace(/token=[^&\s]+/g,'token=[x]').slice(0,200)});}
+});
 // Owner, 18.11: run the engine check again for given searches (search words
 // only, never an address; one run at a time; nothing goes to Yemot).
 app.get('/branch2-engine-test',rateLimit(6,60*1000,'engine-test'),async (req,res)=>{
