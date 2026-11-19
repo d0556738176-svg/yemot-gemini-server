@@ -4331,9 +4331,12 @@ async function youtubeCallHandler(call) {
       const deps=await tvDeps();
       const src=await TV.findChannelSource(ch,deps);
       console.info('[TV] channel chosen',{key:ch.key,ok:!!src.page,how:src.how||null});
-      if(!src.page) { note='השידור של '+ch.title+' אינו זמין כרגע. '; continue; }
+      const { noteCall }=await import('./live-relay.js');
+      noteCall({what:'channel chosen',key:ch.key,title:ch.title,source:src.page?(()=>{try{return new URL(src.page).host;}catch{return null;}})():null,how:src.how||null});
+      if(!src.page) { noteCall({what:'told: not available',key:ch.key}); note='השידור של '+ch.title+' אינו זמין כרגע. '; continue; }
       const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,referer:src.referer||null,af:TV.TV_AUDIO_FILTER,
         refresh:async()=>{ TV.forget(ch.key); const f=await TV.findChannelSource(ch,await tvDeps(),{fresh:true}); return f.page?{url:f.page,referer:f.referer||null}:null; }});
+      noteCall({what:'listening ended',key:ch.key,exit:!!r.exit,told:r.say||null});
       if(r.exit) return {exit:true};
       if(r.say&&/לא הצלחתי|לא מגיע|נקטע|הסתיים/.test(r.say)) TV.forget(ch.key);
       note=r.say||'';
@@ -5460,20 +5463,24 @@ app.get('/tv-status', rateLimit(30, 60 * 1000, 'tv-status'), async (req,res)=>{
 });
 // Plays 8 seconds of every channel through the relay's engine, to nowhere
 // (read-only: no call, no upload, nothing kept). One at a time.
-let tvProbeRun=null;
-app.get('/tv-probe', rateLimit(3, 60 * 1000, 'tv-probe'), async (req,res)=>{
-  const TV=await import('./branch2-tv.js'); const { probeStream }=await import('./live-relay.js');
-  const ffmpegPath=(await import('ffmpeg-static')).default;
-  tvProbeRun ||= (async()=>{ const deps=await tvDeps(); const out=[];
-    for(const ch of TV.TV_CHANNELS) {
-      const src=await TV.findChannelSource(ch,deps).catch(()=>({page:null}));
-      if(!src.page) { out.push({key:ch.key,title:ch.title,ok:false,step:'source'}); continue; }
-      const r=await probeStream(src.page,{referer:src.referer||null,impersonate:!!src.impersonate,af:TV.TV_AUDIO_FILTER,ffmpegPath}).catch(e=>({ok:false,step:'error',reason:String(e?.message||e).slice(0,120)}));
-      out.push({key:ch.key,title:ch.title,...r});
-    }
-    return { at:new Date().toISOString(), channels:out };
-  })().finally(()=>setTimeout(()=>{ tvProbeRun=null; },60000));
-  res.json(await tvProbeRun);
+let tvProbe={status:'idle',at:null,channels:[]};
+app.get('/tv-probe', rateLimit(10, 60 * 1000, 'tv-probe'), async (req,res)=>{
+  // Starts in the background (a run takes a few minutes) and answers at once;
+  // open the page again to see the results as they come in.
+  if(tvProbe.status!=='running'&&(req.query.start||!tvProbe.at)) {
+    tvProbe={status:'running',at:new Date().toISOString(),channels:[]};
+    (async()=>{ try {
+      const TV=await import('./branch2-tv.js'); const { probeStream }=await import('./live-relay.js');
+      const ffmpegPath=(await import('ffmpeg-static')).default; const deps=await tvDeps();
+      for(const ch of TV.TV_CHANNELS) {
+        const src=await TV.findChannelSource(ch,deps).catch(()=>({page:null}));
+        if(!src.page) { tvProbe.channels.push({key:ch.key,title:ch.title,ok:false,step:'source'}); continue; }
+        const r=await probeStream(src.page,{referer:src.referer||null,impersonate:!!src.impersonate,af:TV.TV_AUDIO_FILTER,ffmpegPath}).catch(e=>({ok:false,step:'error',reason:String(e?.message||e).slice(0,120)}));
+        tvProbe.channels.push({key:ch.key,title:ch.title,...r});
+      }
+    } finally { tvProbe.status='done'; tvProbe.finishedAt=new Date().toISOString(); } })();
+  }
+  res.json(tvProbe);
 });
 app.get('/tv-check', rateLimit(4, 60 * 1000, 'tv-check'), async (req,res)=>{
   const TV=await import('./branch2-tv.js');
