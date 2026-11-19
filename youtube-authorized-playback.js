@@ -1010,7 +1010,9 @@ async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=
         .catch(e=>console.warn('[EXT7] song not added',{videoId:id,message:String(e?.message||e).slice(0,200)}));
     }
     // Reuse the prepared phone file for the additional website-audio library.
-    if (await webItem(id)) {
+    // Owner, 19.11: extension 5 is now the live TV channels; the website-audio
+    // library no longer copies into it (BRANCH2_EXT5_LIBRARY=on brings it back).
+    if (String(process.env.BRANCH2_EXT5_LIBRARY||'off').toLowerCase()==='on' && await webItem(id)) {
       ext5Job=publishToExt5(id,phone,sourceTitle,{
         readJson:readCacheJson,writeJson:writeCacheJson,
         list:async()=>{

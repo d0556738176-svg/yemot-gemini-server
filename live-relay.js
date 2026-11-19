@@ -56,7 +56,7 @@ export function resolveStreamInfo(url, { bin = ytdlpPath(), timeoutMs = 45000, i
     });
   });
 }
-const ffmpegHeaderArgs = headers => {
+export const ffmpegHeaderArgs = headers => {
   const keep = Object.entries(headers || {}).filter(([k, v]) => /^(user-agent|referer|origin|cookie|accept-language)$/i.test(k) && v && !/[\r\n]/.test(String(v)));
   return keep.length ? ['-headers', keep.map(([k, v]) => k + ': ' + v + '\r\n').join('')] : [];
 };
