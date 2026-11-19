@@ -20,7 +20,7 @@ function fakeFetch(log = []) {
     if (u.includes('nominatim') && u.includes('/reverse')) return json({ address: { road: 'שדרות בן גוריון', house_number: '5', city: 'אשקלון' } });
     if (u.includes('hebcal')) return json(HEBCAL);
     if (u.includes('interpreter')) {
-      const body = decodeURIComponent(String(opts.body || ''));
+      const body = decodeURIComponent(String(opts.body || '') + u);
       if (/name"~"נפרד/.test(body)) return json({ elements: [{ type: 'way', center: { lat: 31.6801, lon: 34.5560 }, tags: { name: 'החוף הנפרד', natural: 'beach' } }] });
       if (/place_of_worship/.test(body)) return json({ elements: [
         { type: 'node', lat: 31.6900, lon: 34.5700, tags: { amenity: 'place_of_worship', religion: 'jewish', name: 'בית כנסת רחוק' } },

@@ -415,6 +415,20 @@ export function pickMany(text, options = []) {
   const nums = ORD.filter(([rx]) => rx.test(t)).map(([, n]) => n).filter(n => n <= opts.length);
   return nums.length >= 2 ? nums.map(n => opts[n - 1]) : [];
 }
+// A model's JSON with lyrics often carries raw line breaks inside strings.
+export function parseLooseJson(raw) {
+  const m = String(raw || '').match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try { return JSON.parse(m[0]); } catch {}
+  let inStr = false, esc = false, out = '';
+  for (const ch of m[0]) {
+    if (esc) { out += ch; esc = false; continue; }
+    if (ch === '\\') { out += ch; esc = true; continue; }
+    if (ch === '"') inStr = !inStr;
+    out += inStr && ch === '\n' ? '\\n' : inStr && ch === '\r' ? '' : ch;
+  }
+  try { return JSON.parse(out); } catch { return null; }
+}
 export function confirmBatch(videos) {
   const list = videos.slice(0, 6);
   return {
@@ -538,7 +552,9 @@ export function answerPrompt({ context, utterance, plan, now, instruction, extra
     // Owner, 12.11 (extension 3): now and then a real compliment, never flattery.
     compliment ? 'בתשובה הזאת מותר לך, רק אם יש לזה סיבה אמיתית בשיחה, לשלב מחמאה קצרה וכנה אחת על משהו ספציפי שהמתקשר אמר או עשה (שאלה חכמה שחשב עליה, רעיון יפה, סקרנות, הומור, התמדה בלימוד), במשפט אחד טבעי באמצע או בסוף התשובה, ולא בפתיחה. בלי הגזמה, בלי מילים כמו "מדהים" או "גאון", ובלי לחזור על מחמאה שכבר נאמרה. אם אין סיבה אמיתית, אל תחמיאי בכלל.' : '',
     // Owner, 19.11: a useful tip now and then, and whenever he asks for tips.
-    TIPS_ASKED.test(utterance) ? 'המתקשר ביקש טיפים או עצות: תני כמה טיפים מעשיים, ברורים ומועילים באמת, כל אחד במשפט או שניים.' : tip ? 'אם יש טיפ מעשי אחד שבאמת יעזור לו בנושא הזה, הוסיפי אותו בסוף התשובה במשפט אחד שמתחיל ב"טיפ קטן:". אם אין טיפ אמיתי ומועיל, אל תוסיפי.' : '',
+    TIPS_ASKED.test(utterance) ? 'המתקשר ביקש טיפים או עצות: תני כמה טיפים מעשיים, ברורים ומועילים באמת, כל אחד במשפט או שניים. כל טיפ פונה אליו בלשון זכר (הקפד, נסה, הימנע, כדאי לך), לעולם לא בלשון נקבה.' : tip ? 'אם יש טיפ מעשי אחד שבאמת יעזור לו בנושא הזה, הוסיפי אותו בסוף התשובה במשפט אחד שמתחיל ב"טיפ קטן:". אם אין טיפ אמיתי ומועיל, אל תוסיפי.' : '',
+    // 19.11: asked to write a song, the model wrote a page of prose.
+    LYRICS_ASKED.test(utterance) ? 'הוא ביקש לכתוב מילים לשיר: כתבי מילים אמיתיות לשיר, קצרות ושירות, בבתים ופזמון חוזר, עם חריזה ומשקל פשוטים שנוח לשיר, בלי תיאור בפרוזה ובלי הסברים מסביב. אחרי המילים, משפט אחד: אם תרצה, אפשר ליצור מהן שיר אמיתי, פשוט אמור תיצרי את השיר.' : '',
     lengthRule(brief, utterance),
     'החזר אובייקט JSON תקין בלבד עם שדה "answer".'
   ].filter(x => x !== '').join('\n');
@@ -815,10 +831,16 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     let spec = null;
     try {
       const raw = await deps.llm('המתקשר רוצה ליצור עכשיו שיר חדש בבינה מלאכותית. מתוך השיחה ומהבקשה שלו, אספי את פרטי השיר כפי שסוכמו, בלי להמציא מה שלא נאמר. החזירי JSON בלבד: {"title":"שם קצר לשיר","topic":"על מה השיר","style":"סגנון מוזיקלי וכלים, ריק אם לא נאמר","voice":"גבר / ילד / ילדה / אישה, ריק אם לא נאמר","lyrics":"מילות השיר המלאות רק אם נכתבו או הוכתבו בשיחה והמתקשר רוצה אותן, אחרת ריק","brief":"תיאור מלא של הבקשה ליוצר השירים: נושא, סגנון, קול, ומילים אם יש"}\n\nהקשר השיחה:\n' + clip(context, 3500) + '\n\nהמתקשר אמר עכשיו: ' + utterance, { maxTokens: 900, budgetMs: 10000 });
-      const j = JSON.parse(String(raw).match(/\{[\s\S]*\}/)?.[0] || 'null');
-      if (j && (j.brief || j.topic)) spec = j;
+      spec = parseLooseJson(raw);
+      if (spec?.answer && typeof spec.answer === 'object') spec = spec.answer;
+      else if (typeof spec?.answer === 'string' && !spec.brief && !spec.topic) spec = parseLooseJson(spec.answer);
+      if (spec && !(spec.brief || spec.topic)) spec = null;
     } catch {}
-    if (!spec) spec = { title: '', topic: utterance, style: '', voice: '', lyrics: '', brief: utterance };
+    // No model: the song is what was just talked about (his last words and the lyrics written).
+    if (!spec) {
+      const lastTurns = (current || []).slice(-3).map(t => String(t.user || '') + '\n' + String(t.assistant || t.gemini || '')).join('\n');
+      spec = { title: '', topic: clip((current || []).slice(-3).map(t => t.user).filter(Boolean).join('. ') || utterance, 200), style: '', voice: '', lyrics: '', brief: clip(lastTurns + '\n' + utterance, 2000) };
+    }
     const brief = [spec.brief || spec.topic, spec.style ? 'סגנון: ' + spec.style : '', spec.voice ? 'קול: ' + spec.voice : '', spec.lyrics ? 'מילות השיר:\n' + spec.lyrics : ''].filter(Boolean).join('\n').slice(0, 2500);
     const firstLine = String(spec.lyrics || '').split(/\n|[.!?]/).map(x => x.trim()).filter(Boolean)[0] || '';
     return out({ confirm: { song: { brief, title: spec.title || '' }, title: 'השיר ' + (spec.title || 'החדש'), videoId: '', mode: 'song' },
@@ -830,6 +852,11 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // confirmation that names every one of them.
   if (['video_play', 'cancel', 'chat'].includes(plan.intent) && PLAY_WORD.test(utterance) && (lastVideo?.options || []).length) {
     const picked = pickMany(utterance, lastVideo.options);
+    const asked = ORD.filter(([rx]) => rx.test(utterance)).map(([, n]) => n);
+    if (asked.length >= 2 && asked.some(n => n > lastVideo.options.length)) {
+      const n = lastVideo.options.length;
+      return out({ ref: lastVideo, reply: 'הצעתי רק ' + (n === 2 ? 'שתי' : n) + ' אפשרויות: ' + lastVideo.options.map((v, i) => (i + 1) + ', ' + clip(cleanTitle(v.title), 60)).join('. ') + '. איזה מהן להוריד? אפשר לומר למשל את אחת ושתיים, או את כולם.' });
+    }
     if (picked.length >= 2) { const c = confirmBatch(picked); return out({ ref: lastVideo, confirm: c.confirm, reply: c.reply }); }
   }
   if (['video_play', 'cancel'].includes(plan.intent) && /(?:את כל|את כולם|הכל|כל השירים|כל הסרטונים|כולם)(?=$|[\s,.!?])/u.test(utterance) && PLAY_WORD.test(utterance))
@@ -1022,7 +1049,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   if (plan.intent === 'nearby') {
     const kindText = plan.kind || utterance;
     const [facts, web] = await Promise.all([
-      within(Number(deps.placeBudgetMs || 13000), (deps.nearbyFacts || realNearby)({ kindText: kindText + ' ' + utterance, place: plan.place, town: plan.town }, { fetchImpl: deps.fetchImpl || fetch, log })).catch(e => { log.warn?.('[PLACE] nearby failed', String(e?.message || e).slice(0, 100)); return null; }),
+      within(Number(deps.placeBudgetMs || 19000), (deps.nearbyFacts || realNearby)({ kindText: kindText + ' ' + utterance, place: plan.place, town: plan.town }, { fetchImpl: deps.fetchImpl || fetch, log })).catch(e => { log.warn?.('[PLACE] nearby failed', String(e?.message || e).slice(0, 100)); return null; }),
       deps.webSearch ? deps.webSearch(plan.search || plan.standalone || utterance, { timeoutMs: 4500 }).catch(() => []) : Promise.resolve([])
     ]);
     if (facts?.unknownPlace && !(web || []).length) return out({ reply: 'לא מצאתי במפה את המקום ' + facts.unknownPlace + '. אפשר לומר לי שם של רחוב או של מקום מוכר לידו, ובאיזו עיר, ואחפש שוב?' });
@@ -1037,7 +1064,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       if (reply) return out({ reply });
     }
     log.warn?.('[PLACE] nothing on the map; falling back to the web');
-    plan.intent = 'web'; plan.search = plan.search || plan.standalone || utterance;
+    plan.intent = 'web'; plan.search = plan.search || plan.standalone || utterance; plan.mapDown = true;
   }
 
   if (plan.intent === 'web') {
@@ -1100,6 +1127,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     }).join('\n\n').slice(0, 6500);
     log.info?.('[EXT3_BRAIN] web research', { queries, results: results.length, pagesRead: pages.length, official: results.filter(r => sourceRank(r.url) === 0).length, sourceChars: sourceText.length });
     const verify = 'בדיקת אמינות לפני שאת עונה: השווי בין המקורות. כשהם סותרים, העדיפי את האתר הרשמי, אחריו את המקור העדכני ביותר, ואמרי במפורש על איזה מקור את מתבססת ("לפי האתר הרשמי של כללית"). אל תצטטי שני מקורות סותרים בלי להכריע או להסביר. ' +
+      (plan.mapDown ? 'המפה לא הייתה זמינה עכשיו. אמרי רק מקומות שכתובים במפורש במקורות, עם השם והכתובת כפי שהם כתובים שם, בלי להעריך מרחקים או זמני הליכה ובלי להמציא שמות של בתי כנסת, רחובות או שכונות. אם המקורות לא מזכירים מקום מתאים ליד המקום שהוא אמר, אמרי בכנות שלא הצלחת לאמת עכשיו, והציעי לשאול שוב בעוד כמה דקות. ' : '') +
       (route ? 'זו שאלה על איך מגיעים ממקום למקום: אמרי רק קווים, חברות, תחנות וזמני נסיעה שכתובים במפורש במקורות, בדיוק כפי שהם, ובדקי שהם באמת בין שני המקומות שהוא אמר (לא עיר אחרת). אם המקורות לא נותנים מסלול ברור, אמרי בכנות שלא מצאת מסלול מאומת, תני את מה שכן ידוע בוודאות, והציעי לבדוק באפליקציית מוביט או במוקד המידע של התחבורה הציבורית בטלפון כוכבית 8787. אסור להמציא קו, החלפה, רכבת או זמן נסיעה. ' : '') +
       (hours ? 'זו שאלה על שעות פתיחה, ולכן כאן עני ממוקד וקצר יחסית (5 עד 8 משפטים) גם אם בדרך כלל את מרחיבה: האם פתוח עכשיו ועד מתי, השעות של היום ושל מחר, הכתובת והטלפון. בלי עצות שלא נשאלו. כתבי שעות תמיד מהמוקדמת למאוחרת, למשל משמונה בבוקר עד אחת בצהריים. אם אין לך התאמה ודאית למקום שביקש, אמרי זאת בשני משפטים ושאלי באיזו עיר הוא נמצא, בלי לפרט נתונים לא ודאיים. אם הסניף שמופיע במקורות נמצא בעיר או בשכונה אחרת ממה שהמתקשר אמר, אמרי איזה סניף מצאת ושאלי אם לזה התכוון. זו שאלה על שעות פתיחה: מצאי את שעות היום הנוכחי (' + now + '), חשבי בעצמך לפי השעה עכשיו האם המקום פתוח או סגור ברגע זה ועד מתי, ואמרי את זה בתחילת התשובה בבירור. אם אין שעות מפורשות ליום הזה, אמרי שאין לך שעות מאומתות להיום והציעי להתקשר למקום, עם מספר הטלפון אם מופיע. ' : '');
     const reply = await ask('המתקשר צריך מידע עדכני ומדויק. לפניך מקורות אמיתיים מהאינטרנט שנאספו ונקראו עכשיו לשאלה הזאת בלבד. אל תערבבי בתשובה מידע מתשובות קודמות שאינו קשור לשאלה הזאת. ' + verify +
@@ -1154,6 +1182,7 @@ export { HE_NUMBER_WORDS };
 
 const SONG_MAKE = /(?:תיצור|תיצרי|ליצור|צור לי|צרי לי|תלחין|תלחיני|להלחין|תקליט|תקליטי|תעשה לי|תעשי לי|תכין לי|תכיני לי|תחבר לי|תחברי לי|תפיק|תפיקי)\s+(?:לי\s+)?(?:את\s+)?(?:ה)?שיר|(?:שיר חדש|שיר משלי|שיר מקורי)\s+(?:ב)?(?:בינה מלאכותית|AI)|(?:עכשיו\s+)?(?:תיצור|תיצרי|תלחין|תלחיני)\s+(?:אותו|את זה)(?=$|[\s,.!?])/u;
 
+const LYRICS_ASKED = /(?:נכתוב|תכתוב|תכתבי|לכתוב|תחבר|תחברי|נחבר|תמציא|תמציאי)\s+(?:לי\s+|ביחד\s+)?(?:מילים\s+ל|(?:ה)?מילים של\s+)?(?:שיר|השיר|פזמון|ניגון)/u;
 const TIPS_ASKED = /(?:טיפ|טיפים|עצה|עצות|המלצות מעשיות|תן לי רעיונות|תני לי רעיונות)/u;
 
 const GREETING = /^(?:שלום|היי|הי|הלו|אהלן|בוקר טוב|ערב טוב|לילה טוב|צהריים טובים|מה נשמע|מה שלומך|מה שלומך היום|מה קורה|מה המצב|מה העניינים|מה איתך|תודה|תודה רבה|יופי|מעולה|אחלה)(?:\s+(?:כפרה|אחי|חביבי|מותק|יקירתי|יקירי|גבר|נשמה|לך|רבה|לך רבה|בבקשה|עליך))*[\s?!.,]*$/u;

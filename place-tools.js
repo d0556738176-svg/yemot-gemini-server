@@ -18,7 +18,9 @@
 // Everything external is injected (fetchImpl), so this file tests offline.
 
 const UA = 'yemot-ai-phone/1.0 (owner phone line; contact via github d0556738176-svg)';
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+// 19.11 from the server: overpass-api.de "at capacity" (502), kumi answers GET
+// in ~3 s but POST times out, mail.ru 504. So: GET, all at once, first wins.
+const OVERPASS = ['https://overpass.kumi.systems/api/interpreter', 'https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
 
 // ---------- text helpers ----------
 const plain = s => String(s || '').replace(/[״"׳'`]/g, '').replace(/[-־–—_,.()]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -130,10 +132,21 @@ async function openMeteoGeo(q, { fetchImpl, timeoutMs = 5000 } = {}) {
   return (j?.results || []).map(x => ({ lat: Number(x.latitude), lon: Number(x.longitude), name: x.name || '', display: [x.name, x.admin2, x.admin1].filter(Boolean).join(', '), town: x.name || '', type: 'town', kind: 'place', bbox: [] }));
 }
 // Overpass with several public servers; the first that answers wins.
-export async function overpass(query, { fetchImpl = fetch, timeoutMs = 7000, servers = OVERPASS } = {}) {
-  const tries = servers.slice(0, 3).map(s => getJson(s, { fetchImpl, timeoutMs, method: 'POST', body: 'data=' + encodeURIComponent(query), headers: { 'content-type': 'application/x-www-form-urlencoded' } })
+export async function overpass(query, { fetchImpl = fetch, timeoutMs = 9000, servers = OVERPASS } = {}) {
+  const tries = servers.map(s => getJson(s + '?data=' + encodeURIComponent(query), { fetchImpl, timeoutMs })
     .then(j => { if (!Array.isArray(j?.elements)) throw new Error('bad overpass answer'); return j.elements; }));
   return Promise.any(tries);
+}
+// When every Overpass server is busy: the map's own search by name around the
+// point ("בית כנסת" near the beach), from Nominatim.
+async function nominatimNear(words, loc, radiusKm, { fetchImpl }) {
+  const d = radiusKm / 111;
+  const u = new URL('https://nominatim.openstreetmap.org/search');
+  u.searchParams.set('q', words); u.searchParams.set('format', 'jsonv2'); u.searchParams.set('accept-language', 'he'); u.searchParams.set('addressdetails', '1');
+  u.searchParams.set('limit', '15'); u.searchParams.set('bounded', '1'); u.searchParams.set('countrycodes', 'il');
+  u.searchParams.set('viewbox', [loc.lon - d, loc.lat + d, loc.lon + d, loc.lat - d].join(','));
+  const j = await getJson(u, { fetchImpl, timeoutMs: 7000 });
+  return (Array.isArray(j) ? j : []).map(x => ({ lat: Number(x.lat), lon: Number(x.lon), tags: { name: x.name || '', 'addr:street': x.address?.road || '', 'addr:housenumber': x.address?.house_number || '', 'addr:city': townOf(x.address) } }));
 }
 const GENERIC = new Set(['חוף', 'החוף', 'רחוב', 'שכונת', 'שכונה', 'אזור', 'ליד', 'של', 'את', 'בית', 'מרכז', 'כיכר', 'גן', 'פארק', 'הים', 'ים']);
 // The place he named, on the map: { lat, lon, label, approx }.
@@ -162,7 +175,8 @@ export async function geocode({ place = '', town = '' } = {}, { fetchImpl = fetc
       const b = townHit.bbox?.length === 4 && Math.abs(townHit.bbox[1] - townHit.bbox[0]) > 0.01 ? townHit.bbox : [townHit.lat - 0.06, townHit.lat + 0.06, townHit.lon - 0.06, townHit.lon + 0.06];
       const rx = words.map(w => w.replace(/[^֐-׿a-zA-Z0-9]/g, '')).filter(Boolean).join('|');
       const q = `[out:json][timeout:12];nwr["name"~"${rx}"](${b[0]},${b[2]},${b[1]},${b[3]});out center tags 30;`;
-      const els = await overpass(q, { fetchImpl }).catch(e => { log.warn?.('[PLACE] landmark search failed', String(e?.message || e).slice(0, 80)); return []; });
+      let els = await overpass(q, { fetchImpl, timeoutMs: 6000 }).catch(e => { log.warn?.('[PLACE] landmark search failed', String(e?.message || e).slice(0, 80)); return null; });
+      if (els === null) els = await nominatimNear(plain(place), townHit, 8, { fetchImpl }).catch(() => []);
       const scored = els.map(e => ({ e, name: e.tags?.name || e.tags?.['name:he'] || '', lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon }))
         .filter(x => Number.isFinite(x.lat) && x.name)
         .map(x => ({ ...x, score: words.filter(w => plain(x.name).includes(w)).length + (/beach|natural/.test(JSON.stringify(x.e.tags)) && /חוף/u.test(place) ? 1 : 0) }))
@@ -335,8 +349,12 @@ export async function nearbyFacts({ kindText = '', place = '', town = '' } = {},
   let items = [];
   for (const radius of [3000, 12000]) {
     const q = '[out:json][timeout:15];(' + kind.filters.map(f => `nwr${f}(around:${radius},${loc.lat},${loc.lon});`).join('') + ');out center tags 60;';
-    const els = await overpass(q, { fetchImpl }).catch(e => { log.warn?.('[PLACE] nearby search failed', String(e?.message || e).slice(0, 80)); return null; });
-    if (els === null) return { loc, kind: kind.label, mapDown: true, items: [] };
+    let els = await overpass(q, { fetchImpl, timeoutMs: 7000 }).catch(e => { log.warn?.('[PLACE] nearby search failed', String(e?.message || e).slice(0, 80)); return null; });
+    if (els === null) {
+      els = await nominatimNear(kind.label.split(' או ')[0], loc, radius / 1000, { fetchImpl }).catch(() => null);
+      if (els === null) return { loc, kind: kind.label, mapDown: true, items: [] };
+      log.info?.('[PLACE] nearby from the map search by name', { found: els.length });
+    }
     const seen = new Set();
     items = els.map(e => ({ tags: e.tags || {}, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon }))
       .filter(x => Number.isFinite(x.lat) && Number.isFinite(x.lon))
