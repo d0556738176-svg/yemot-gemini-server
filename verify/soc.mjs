@@ -2,7 +2,7 @@
 // (each found item is downloaded only until real media arrives, into a temp file), then report.
 const E='https://ext2.176-97-205-41.sslip.io', M='https://main.176-97-205-41.sslip.io', WANT=process.env.WANT||'';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-for(let i=0;i<100;i++){const d=await fetch(E+'/branch2-diag').then(r=>r.json()).catch(()=>({}));console.log('ext2',d.commit);if(String(d.commit||'').startsWith(WANT))break;await sleep(20000);}
+const d0=await fetch(E+'/branch2-diag').then(r=>r.json()).catch(()=>({}));console.log('ext2',d0.commit);
 const Q=process.env.Q;
 const t=await fetch(E+'/branch2-engine-test?n=4&q='+encodeURIComponent(Q)).then(r=>r.json()).catch(e=>({err:String(e)}));
 console.log('trigger',JSON.stringify(t));
