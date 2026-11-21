@@ -3,7 +3,9 @@
 // landed in Yemot (/branch2-saved). Downloads are real (short items).
 const BASE = 'https://ext2.176-97-205-41.sslip.io', WANT = process.env.WANT || '';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-for (let i = 0; i < 100; i++) { const d = await fetch(BASE + '/branch2-diag').then(r => r.json()).catch(() => ({})); console.log('version', d.commit); if (String(d.commit || '').startsWith(WANT)) break; if (i === 99) process.exit(1); await sleep(20000); }
+// The running version must CONTAIN the wanted commit (other work may come after it).
+const contains = async run => { if (!WANT || String(run).startsWith(WANT)) return true; const c = await fetch('https://api.github.com/repos/d0556738176-svg/yemot-gemini-server/compare/' + WANT + '...' + run).then(r => r.json()).catch(() => ({})); return c.status === 'ahead' || c.status === 'identical'; };
+for (let i = 0; i < 100; i++) { const d = await fetch(BASE + '/branch2-diag').then(r => r.json()).catch(() => ({})); if (d.commit && await contains(d.commit)) { console.log('version', d.commit, 'contains', WANT); break; } if (i === 99) process.exit(1); await sleep(20000); }
 const t00 = Date.now(), T = () => '[' + Math.round((Date.now() - t00) / 1000) + 's]';
 const dur = s => { if (!s) return 1e9; let t = 0; const h = s.match(/(\d+)? ?(שעה|שעתיים|שעות)/); if (h) t += h[2] === 'שעה' ? 3600 : h[2] === 'שעתיים' ? 7200 : +h[1] * 3600; const m = s.match(/(\d+)? ?(דקה|דקות)/); if (m) t += m[2] === 'דקה' ? 60 : +m[1] * 60; const x = s.match(/(\d+) שניות/); if (x) t += +x[1]; return t || 1e9; };
 async function call(name, { mode, query, key, minSec = 90, maxSec = 420 }) {
