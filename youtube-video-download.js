@@ -15,7 +15,7 @@
 // up to 90 minutes 720p, longer 480p. Always H.264, which every computer and
 // phone plays.
 import { ISRAEL_ACTOR, actorIdFor, israelRunInput } from './youtube-israel-engine.js';
-import { promises as fs, createWriteStream, createReadStream } from 'node:fs';
+import { promises as fs, createWriteStream, createReadStream, existsSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
@@ -142,6 +142,18 @@ function ffmpeg(ffmpegPath, args) {
 // The whole job. deps: store {read,write}, upload(file, remote), getFile(remote),
 // ffmpegPath, fetchThumbnail, normalizeCover, downloadMetadata, fetchVideoFacts,
 // titleFileName, log.
+// The real length of a media file (ffprobe), or 0.
+function mediaSeconds(file) {
+  return new Promise(resolve => {
+    const bin = ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe'].find(b => existsSync(b)) || 'ffprobe';
+    const p = spawn(bin, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', file], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = ''; p.stdout.on('data', d => { out += d; });
+    const t = setTimeout(() => p.kill('SIGKILL'), 30000);
+    p.on('error', () => { clearTimeout(t); resolve(0); });
+    p.on('close', () => { clearTimeout(t); const v = Number(out.trim()); resolve(Number.isFinite(v) && v > 0 ? v : 0); });
+  });
+}
+
 export async function downloadVideoToYemot(video, deps, env = process.env) {
   const { store, upload, getFile, ffmpegPath, log = console } = deps;
   const videoId = String(video?.videoId || '');
@@ -306,11 +318,22 @@ export async function downloadVideoToYemot(video, deps, env = process.env) {
       const out = [];
       const fullBytes = (await fs.stat(srcFile)).size;
       if (fullBytes <= limit * 0.97) { out.push({ file: await dress(srcFile, path.join(temp, 'video.mp4'), meta), suffix: '' }); return out; }
-      const dur = Number(durationSec) || Number(got.item?.durationSeconds) || 0;
-      const n = Math.ceil(fullBytes / (limit * 0.8)), seg = Math.max(30, Math.floor(dur / n) || 600);
-      const pre = 'r' + round + 'seg';
-      await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', srcFile, '-map', '0', '-c', 'copy', '-f', 'segment', '-segment_time', String(seg), '-reset_timestamps', '1', '-segment_format', 'mp4', path.join(temp, pre + '%03d.mp4')]);
-      const segs = (await fs.readdir(temp)).filter(f => new RegExp('^' + pre + '\\d{3}\\.mp4$').test(f)).sort();
+      // 21.11: the real length of the downloaded file (a website often gives
+      // none: a mako episode was cut in 10-minute parts, each too big for
+      // one upload). Parts that still come out too big are cut smaller.
+      const dur = (await mediaSeconds(srcFile)) || Number(durationSec) || Number(got.item?.durationSeconds) || 0;
+      let n = Math.ceil(fullBytes / (limit * 0.8)), segs = [], pre = '';
+      for (let tryNo = 0; tryNo < 5; tryNo++) {
+        const seg = Math.max(10, Math.floor(dur / n) || 600);
+        pre = 'r' + round + 't' + tryNo + 'seg';
+        await ffmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-y', '-i', srcFile, '-map', '0', '-c', 'copy', '-f', 'segment', '-segment_time', String(seg), '-reset_timestamps', '1', '-segment_format', 'mp4', path.join(temp, pre + '%03d.mp4')]);
+        segs = (await fs.readdir(temp)).filter(f => new RegExp('^' + pre + '\\d{3}\\.mp4$').test(f)).sort();
+        const sizes = await Promise.all(segs.map(f => fs.stat(path.join(temp, f)).then(x => x.size)));
+        if (sizes.every(x => x <= limit * 0.97)) break;
+        log.warn?.('[VIDEO] a part came out bigger than one upload; cutting smaller', { videoId, seg, biggest: Math.max(...sizes), limit });
+        await Promise.all(segs.map(f => fs.rm(path.join(temp, f), { force: true })));
+        n = Math.ceil(n * Math.max(1.6, Math.max(...sizes) / (limit * 0.8)));
+      }
       for (const [k, f] of segs.entries()) {
         const tags = { ...meta, title: meta.title + ' (חלק ' + (k + 1) + ' מתוך ' + segs.length + ')', track: (k + 1) + '/' + segs.length };
         out.push({ file: await dress(path.join(temp, f), path.join(temp, 'r' + round + 'part' + (k + 1) + '.mp4'), tags), suffix: '', part: k + 1 });
