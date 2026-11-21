@@ -90,6 +90,9 @@ async function firecrawl(q, env, fetchImpl, timeoutMs) {
   } catch { return null; }
 }
 
+// Social and video networks searched by name (public posts only).
+export const SOCIAL_SITES = ['tiktok.com', 'facebook.com', 'instagram.com', 'x.com', 't.me', 'soundcloud.com', 'vimeo.com', 'dailymotion.com'];
+
 // What answered the last searches (booleans only), for /web-search-status.
 export const searchStatus = [];
 
@@ -131,12 +134,18 @@ export async function searchWebVideos(query, { env = process.env, fetchImpl = fe
   // Serper gave nothing (credits used up or down): the backup engines.
   let backups = null;
   if (!(vids?.videos?.length || web?.organic?.length)) {
-    const [ls, ls2, jn, fc] = await Promise.all([
+    // 21.11 (owner: "deeper, and the social networks"): the same words also
+    // searched inside the social and video networks, whose public posts the
+    // engines on this server can download.
+    const social = SOCIAL_SITES.map(d => langsearch(q + ' site:' + d, env, fetchImpl, timeoutMs));
+    const [ls, ls2, jn, fc, ...soc] = await Promise.all([
       langsearch(q, env, fetchImpl, timeoutMs), langsearch(q + ' וידאו', env, fetchImpl, timeoutMs),
-      jina(q, env, fetchImpl, timeoutMs), firecrawl(q, env, fetchImpl, timeoutMs),
+      jina(q, env, fetchImpl, timeoutMs), firecrawl(q, env, fetchImpl, timeoutMs), ...social,
     ]);
-    backups = { langsearch: !!(ls?.length || ls2?.length), jina: !!jn?.length, firecrawl: !!fc?.length };
+    const socialHits = soc.flat().filter(Boolean).filter(x => SOCIAL_SITES.some(d => hostOf(x.url).endsWith(d)));
+    backups = { langsearch: !!(ls?.length || ls2?.length), jina: !!jn?.length, firecrawl: !!fc?.length, social: socialHits.length };
     for (const x of [...(ls || []), ...(ls2 || []), ...(jn || []), ...(fc || [])]) add(x, 'backup', MEDIA_HINT.test(x.url + ' ' + x.title) ? 2 : 1);
+    for (const x of socialHits) add(x, 'social', 2);
   }
   // Video results first, then pages that look like they hold media; the
   // original order of each engine is kept within the same weight.

@@ -38,3 +38,20 @@ test('when Serper answers nothing, the backup engines find the pages (19.11)', a
   assert.deepEqual(r.items.map(x => x.url).sort(), ['https://kan.org.il/ep/2', 'https://www.hidabroot.org/video/1']);
   assert.equal(r.engines.backups.langsearch, true);
 });
+
+test('the backup search also looks inside the social networks (21.11)', async () => {
+  const asked = [];
+  const fetchImpl = async (url, o) => {
+    if (/serper/.test(url)) return { ok: false, status: 400, json: async () => ({}) };
+    if (/langsearch/.test(url)) {
+      const q = JSON.parse(o.body).query; asked.push(q);
+      const v = /site:tiktok\.com/.test(q) ? [{ url: 'https://www.tiktok.com/@a/video/1', name: 'סרטון', snippet: '' }] : [];
+      return { ok: true, json: async () => ({ data: { webPages: { value: v } } }) };
+    }
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  const r = await searchWebVideos('ניגון', { env: { SERPER_API_KEY: 'k', LANGSEARCH_API_KEY: 'l' }, fetchImpl });
+  assert.ok(asked.some(q => /site:facebook\.com/.test(q)) && asked.some(q => /site:t\.me/.test(q)));
+  assert.deepEqual(r.items.map(x => x.url), ['https://www.tiktok.com/@a/video/1']);
+  assert.equal(r.engines.backups.social, 1);
+});
