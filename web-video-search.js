@@ -96,9 +96,31 @@ export const SOCIAL_SITES = ['tiktok.com', 'facebook.com', 'instagram.com', 'x.c
 // What answered the last searches (booleans only), for /web-search-status.
 export const searchStatus = [];
 
+// A network named in the request ("ניגון בטיקטוק", "שיר פייסבוק"): only
+// that network is searched, without the name in the words (21.11; the name
+// alone brought unrelated pages from abroad).
+const NAMED_SITES = [
+  [/(?:^|\s)ב?(?:טיקטוק|טיק טוק|tiktok)(?=\s|$)/i, 'tiktok.com'], [/(?:^|\s)ב?(?:פייסבוק|פייס|facebook)(?=\s|$)/i, 'facebook.com'],
+  [/(?:^|\s)ב?(?:אינסטגרם|אינסטה|instagram)(?=\s|$)/i, 'instagram.com'], [/(?:^|\s)ב?(?:טלגרם|telegram)(?=\s|$)/i, 't.me'],
+  [/(?:^|\s)ב?(?:טוויטר|אקס|twitter)(?=\s|$)/i, 'x.com'], [/(?:^|\s)ב?(?:סאונדקלאוד|סאונד קלאוד|soundcloud)(?=\s|$)/i, 'soundcloud.com'],
+  [/(?:^|\s)ב?(?:וימאו|vimeo)(?=\s|$)/i, 'vimeo.com'], [/(?:^|\s)ב?(?:דיילימושן|dailymotion)(?=\s|$)/i, 'dailymotion.com'],
+  [/(?:^|\s)ב?(?:מאקו|mako)(?=\s|$)/i, 'mako.co.il'], [/(?:^|\s)ב?(?:הידברות)(?=\s|$)/i, 'hidabroot.org'],
+];
+export function namedSite(query) {
+  for (const [re, d] of NAMED_SITES) if (re.test(query)) { const rest = query.replace(re, ' ').replace(/\s+/g, ' ').trim(); if (rest) return { site: d, words: rest }; }
+  return null;
+}
+
 export async function searchWebVideos(query, { env = process.env, fetchImpl = fetch, timeoutMs = 9000, max = 30 } = {}) {
-  const q = String(query || '').replace(/\s+/g, ' ').trim().slice(0, 200);
-  if (!q) return { items: [] };
+  const q0 = String(query || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (!q0) return { items: [] };
+  const named = namedSite(q0);
+  if (named) {
+    const r = await searchWebVideos(named.words + ' site:' + named.site, { env, fetchImpl, timeoutMs, max });
+    const only = (r.items || []).filter(x => hostOf(x.url).endsWith(named.site));
+    return { items: only.length ? only : r.items, engines: { ...r.engines, onlySite: named.site } };
+  }
+  const q = q0;
   const base = { gl: 'il', hl: 'iw' };
   const [vids, vidsEn, web, webVideo, webLesson, webDownload, webRecording, tv] = await Promise.all([
     serper('videos', { q, ...base, num: 20 }, env, fetchImpl, timeoutMs),
@@ -137,7 +159,7 @@ export async function searchWebVideos(query, { env = process.env, fetchImpl = fe
     // 21.11 (owner: "deeper, and the social networks"): the same words also
     // searched inside the social and video networks, whose public posts the
     // engines on this server can download.
-    const social = SOCIAL_SITES.map(d => langsearch(q + ' site:' + d, env, fetchImpl, timeoutMs));
+    const social = /\bsite:/.test(q) ? [] : SOCIAL_SITES.map(d => langsearch(q + ' site:' + d, env, fetchImpl, timeoutMs));
     const [ls, ls2, jn, fc, ...soc] = await Promise.all([
       langsearch(q, env, fetchImpl, timeoutMs), langsearch(q + ' וידאו', env, fetchImpl, timeoutMs),
       jina(q, env, fetchImpl, timeoutMs), firecrawl(q, env, fetchImpl, timeoutMs), ...social,

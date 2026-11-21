@@ -55,3 +55,20 @@ test('the backup search also looks inside the social networks (21.11)', async ()
   assert.deepEqual(r.items.map(x => x.url), ['https://www.tiktok.com/@a/video/1']);
   assert.equal(r.engines.backups.social, 1);
 });
+
+test('a network named in the request searches only that network (21.11)', async () => {
+  const { namedSite } = await import('../web-video-search.js');
+  assert.deepEqual(namedSite('שיר אמונה פייסבוק'), { site: 'facebook.com', words: 'שיר אמונה' });
+  assert.deepEqual(namedSite('ניגון בטיקטוק'), { site: 'tiktok.com', words: 'ניגון' });
+  assert.equal(namedSite('שיר אמונה'), null);
+  const asked = [];
+  const fetchImpl = async (url, o) => {
+    if (/serper/.test(url)) return { ok: false, status: 400, json: async () => ({}) };
+    if (/langsearch/.test(url)) { const q = JSON.parse(o.body).query; asked.push(q);
+      return { ok: true, json: async () => ({ data: { webPages: { value: [{ url: 'https://www.facebook.com/watch/?v=1', name: 'שיר', snippet: '' }, { url: 'https://naijagospel.org/x', name: 'x', snippet: '' }] } } }) }; }
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+  const r = await searchWebVideos('שיר אמונה פייסבוק', { env: { SERPER_API_KEY: 'k', LANGSEARCH_API_KEY: 'l' }, fetchImpl });
+  assert.ok(asked.every(q => /site:facebook\.com/.test(q) && !/פייסבוק/.test(q)));
+  assert.deepEqual(r.items.map(x => x.url), ['https://www.facebook.com/watch/?v=1']);
+});
