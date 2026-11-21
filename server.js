@@ -5655,6 +5655,15 @@ app.get('/tv-source-info', rateLimit(6, 60 * 1000, 'tv-source-info'), async (req
         const vars=[info.url];
         if(master&&/#EXT-X-STREAM-INF/.test(master)) for(const l of master.split('\n')) if(l&&!l.startsWith('#')) vars.push(new URL(l.trim(),info.url).href);
         out.deep=[];
+        if(req.query.yt) {
+          // The channel's official YouTube live, measured the same way.
+          const deps=await tvDeps(); let found=[];
+          for(const q of [ch.yt,...(ch.alt||[])].filter(Boolean)) { found=found.concat(await deps.youtubeLiveNow(q).catch(()=>[])); }
+          const yt=TV.pickOfficialLive(ch,found);
+          out.youtube=yt?{url:yt.url,uploader:yt.uploader||null,title:yt.title||null}:{found:found.length,uploaders:[...new Set(found.map(e=>e?.uploader).filter(Boolean))].slice(0,10)};
+          if(yt) { const yi=await resolveStreamInfo(yt.url,{}).catch(()=>null); if(yi?.url) { vars.length=0; vars.push(yi.url); Object.assign(headers,yi.headers||{}); } else { vars.length=0; out.youtube.resolve=yi?.error||'failed'; } }
+          else vars.length=0;
+        }
         for(const v of vars.slice(0,5)) {
           const tmp=pathm.join(os.tmpdir(),'srcinfo-'+key+'.wav');
           const err=await run(['-hide_banner','-loglevel','warning','-y',...ffmpegHeaderArgs(headers),'-i',v,'-t','20','-vn','-c:a','pcm_s16le',tmp],60000);
