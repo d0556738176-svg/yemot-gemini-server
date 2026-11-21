@@ -1,1 +1,1 @@
-soc.mjs
+e2e.mjs
