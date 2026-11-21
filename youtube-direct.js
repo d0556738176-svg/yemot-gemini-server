@@ -106,7 +106,7 @@ export const webEvents = [];
 function webEvent(web, ok, engine, message) {
   if (!web) return;
   let where = ''; try { const u = new URL(web.page || web.url); where = u.hostname + u.pathname.slice(0, 80); } catch {}
-  webEvents.push({ at: new Date().toISOString(), where, title: String(web.title || '').slice(0, 60), ok, engine, ...(message ? { message: String(message).slice(0, 160) } : {}) });
+  webEvents.push({ at: new Date().toISOString(), where, title: String(web.title || '').slice(0, 60), ok, engine, ...(message ? { message: String(message).replace(/\*?~hmac=[0-9a-f]+/gi, '[ticket]').slice(0, 500) } : {}) });
   if (webEvents.length > 100) webEvents.shift();
 }
 
@@ -187,12 +187,14 @@ async function directDownloadPlain(videoId, output, { mode = 'audio', height, ff
   if (web) clients = targets.map(() => '');
   // Use the separately installed, free streaming tool for public web media.
   // YouTube keeps its existing player/download path.
+  let streamFail = null;
   if (web && streamDownloaderPath()) {
     for (const target of targets) {
       try { return await downloadStreamMedia({ ...web, url: target }, output, { mode, height, ffmpegPath, signal, maxBytes, stallMs, onProgress: p => onProgress?.({ done: p.percent, total: 100 }) }); }
       catch (e) {
         if (e?.name === 'AbortError' || e?.code === 'too_large') throw e;
-        log.warn?.('[DIRECT] stream tool failed; trying next free path', { videoId, code: e?.code || 'direct_failed' });
+        streamFail = String(e?.message || e).replace(/[?&~](?:hdnea|hmac|token|sig|exp)[^ ]*/gi, '[ticket]').slice(0, 200);
+        log.warn?.('[DIRECT] stream tool failed; trying next free path', { videoId, code: e?.code || 'direct_failed', message: streamFail });
       }
     }
   }
@@ -222,6 +224,8 @@ async function directDownloadPlain(videoId, output, { mode = 'audio', height, ff
     }
   }
   await fs.rm(output, { force: true }).catch(() => {});
+  // 19.11: the reason of the stream tool too, so a failed site can be fixed.
+  if (last && streamFail) last.message = 'stream tool: ' + streamFail + ' | yt-dlp: ' + String(last.message || '').replace(/\*?~hmac=[0-9a-f]+/gi, '[ticket]');
   throw last || Object.assign(new Error('direct download failed'), { code: 'direct_failed' });
 }
 

@@ -15,7 +15,33 @@ import { streamlinkResolve, streamlinkPath } from './streamlink-media.js';
 const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const YT = /(?:youtube\.com|youtu\.be)\//i;
 
-export async function webCandidates(q, { env = process.env, fetchImpl = fetch, timeoutMs = 20000 } = {}) {
+export async function webCandidates(q, { env = process.env, fetchImpl = fetch, timeoutMs = 20000, native = nativeSearches } = {}) {
+  // 21.11: the sites yt-dlp can search by itself (SoundCloud) are searched
+  // directly too, with no search credits, side by side with the engines.
+  const [fromEngines, fromSites] = await Promise.all([enginesCandidates(q, { env, fetchImpl, timeoutMs }), native ? native(q).catch(() => []) : []]);
+  const seen = new Set(fromEngines.map(x => x.url));
+  return [...fromEngines, ...fromSites.filter(x => !seen.has(x.url))];
+}
+
+// SoundCloud through yt-dlp's own search ("scsearch"): public tracks only.
+export function nativeSearches(q, { bin = ytdlpPath(), timeoutMs = 20000, max = 6 } = {}) {
+  return new Promise(resolve => {
+    const p = spawn(bin, ['--no-warnings', '--ignore-config', '--no-cache-dir', '--flat-playlist', '--dump-single-json', '--socket-timeout', '10', 'scsearch' + max + ':' + q], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    const t = setTimeout(() => { p.kill('SIGKILL'); resolve([]); }, timeoutMs);
+    p.stdout.on('data', d => { out += d; if (out.length > 5e6) p.kill('SIGKILL'); });
+    p.on('error', () => { clearTimeout(t); resolve([]); });
+    p.on('close', () => {
+      clearTimeout(t);
+      try {
+        const j = JSON.parse(out);
+        resolve((j.entries || []).map(e => ({ url: e.url || e.webpage_url, title: e.title || '', snippet: e.uploader || '', source: 'soundcloud', site: 'soundcloud.com' })).filter(x => /^https:\/\/(?:www\.|m\.)?soundcloud\.com\//.test(x.url || '')));
+      } catch { resolve([]); }
+    });
+  });
+}
+
+async function enginesCandidates(q, { env = process.env, fetchImpl = fetch, timeoutMs = 20000 } = {}) {
   const secret = String(env.WEB_HINTS_SECRET || '').trim();
   const base = String(env.WEB_HINTS_URL || 'https://yemot-gemini-server.onrender.com').replace(/\/+$/, '');
   if (!secret || !base) return [];

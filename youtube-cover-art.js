@@ -10,6 +10,7 @@
 import { webItem } from './web-items.js';
 import { promises as fs } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -222,7 +223,19 @@ export function downloadMetadata(videoId, facts = {}, fallbackTitle = null) {
   return Object.fromEntries(Object.entries(m).filter(([, v]) => v !== null && v !== undefined && v !== ''));
 }
 
-function runFfmpeg(ffmpegPath, args, { timeoutMs = 3 * 3600 * 1000, signal } = {}) {
+// 19.11 (download events): the bundled ffmpeg crashed making the אודיו copy
+// of a mako recording ("ffmpeg failed (null)", killed by a signal), so the
+// file never reached אודיו. A crash is redone once with the server's ffmpeg.
+const SERVER_FFMPEG = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find(p => existsSync(p)) || null;
+async function runFfmpeg(ffmpegPath, args, opts = {}) {
+  try { return await runFfmpegWith(ffmpegPath, args, opts); }
+  catch (e) {
+    if (!e?.crashed || !SERVER_FFMPEG || SERVER_FFMPEG === ffmpegPath || opts.signal?.aborted) throw e;
+    console.warn('[DOWNLOADS] bundled ffmpeg crashed; doing it with the server ffmpeg', { signal: e.crashed });
+    return runFfmpegWith(SERVER_FFMPEG, args, opts);
+  }
+}
+function runFfmpegWith(ffmpegPath, args, { timeoutMs = 3 * 3600 * 1000, signal } = {}) {
   return new Promise((resolve, reject) => {
     const p = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
@@ -231,7 +244,7 @@ function runFfmpeg(ffmpegPath, args, { timeoutMs = 3 * 3600 * 1000, signal } = {
     const onAbort = () => p.kill('SIGKILL');
     signal?.addEventListener?.('abort', onAbort, { once: true });
     p.on('error', reject);
-    p.on('close', c => { clearTimeout(t); signal?.removeEventListener?.('abort', onAbort); c === 0 ? resolve() : reject(new Error('ffmpeg failed (' + c + '): ' + err.trim())); });
+    p.on('close', (c, sig) => { clearTimeout(t); signal?.removeEventListener?.('abort', onAbort); c === 0 ? resolve() : reject(Object.assign(new Error('ffmpeg failed (' + c + '): ' + err.trim()), { crashed: c === null && sig && sig !== 'SIGKILL' ? sig : null })); });
   });
 }
 
