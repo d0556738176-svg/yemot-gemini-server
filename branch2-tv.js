@@ -83,6 +83,14 @@ export async function findChannelSource(ch, deps, { fresh = false } = {}) {
       let why = null;
       const it = await deps.inspect({ url: page, title: ch.title }, { timeoutMs: 40000, onFailure: f => { why = f?.reason || null; } }).catch(() => null);
       if (it?.url && it.hasAudio && (it.live || !it.durationSec)) {
+        // A site's own relay link that carries the station's address (e.g.
+        // radiomood.co.il/api/radio-stream?url=...): the station's own stream
+        // first, the relay only if that does not play.
+        const direct = unwrapRelay(it.url);
+        if (direct) {
+          const ok = await deps.resolveStream(direct, {}).catch(() => null);
+          if (ok) { const r = { page: direct, from: page, via: it.url, at: Date.now(), how: 'page-direct', impersonate: false, referer: page }; cache.set(ch.key, r); return r; }
+        }
         const r = { page: it.url, from: page, at: Date.now(), how: 'page', impersonate: !!it.impersonate, referer: it.referer || page };
         cache.set(ch.key, r); return r;
       }
@@ -114,6 +122,18 @@ export async function findChannelSource(ch, deps, { fresh = false } = {}) {
 
 export function forget(key) { cache.delete(key); }
 
+// The stream address inside a relay link's query, if there is one.
+export function unwrapRelay(u) {
+  try {
+    const url = new URL(u);
+    for (const [, v] of url.searchParams) {
+      const d = String(v || '').trim();
+      if (/^https?:\/\/[^\s]+$/i.test(d)) { const inner = new URL(d); if (inner.host !== url.host) return inner.href; }
+    }
+  } catch {}
+  return null;
+}
+
 // Read-only status for /tv-status (no keys, nothing secret).
 export function tvStatus(relays) {
   return TV_CHANNELS.map(ch => {
@@ -143,12 +163,19 @@ export async function checkAllChannels(deps) {
 }
 
 // The radio stations (extension 10) checked the same way, for the status page.
-export async function checkRadio(deps) {
+export const radioCheck = { status: 'idle', at: null, stations: [] };
+export function startRadioCheck(deps) {
+  if (radioCheck.status === 'running') return radioCheck;
+  Object.assign(radioCheck, { status: 'running', at: new Date().toISOString(), stations: [] });
+  checkRadio(deps, row => radioCheck.stations.push(row)).catch(() => {}).finally(() => { radioCheck.status = 'done'; radioCheck.finishedAt = new Date().toISOString(); });
+  return radioCheck;
+}
+export async function checkRadio(deps, onRow = () => {}) {
   const out = [];
   for (const ch of RADIO_CHANNELS) {
     const r = await findChannelSource(ch, deps, { fresh: true }).catch(e => ({ page: null, reason: String(e?.message || e).slice(0, 100) }));
-    const row = { key: ch.key, digit: ch.digit, title: ch.title, ok: !!r.page, page: r.page || null, from: r.from || undefined, how: r.how || null, tried: r.tried || undefined, at: new Date().toISOString() };
-    lastCheck.set(ch.key, row); out.push(row);
+    const row = { key: ch.key, digit: ch.digit, title: ch.title, ok: !!r.page, page: r.page || null, via: r.via || undefined, from: r.from || undefined, how: r.how || null, tried: r.tried || undefined, at: new Date().toISOString() };
+    lastCheck.set(ch.key, row); out.push(row); onRow(row);
   }
   return out;
 }

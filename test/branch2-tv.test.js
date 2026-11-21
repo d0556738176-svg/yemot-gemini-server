@@ -80,3 +80,10 @@ test('relay: consecutive pieces are played together, up to three', async () => {
   assert.equal(direct.url, 'https://cdn.example/live.m3u8?t=1');
   assert.equal(direct.headers.Referer, 'https://site.example/live');
 });
+
+test('a relay link that carries the station address gives that address', async () => {
+  const { unwrapRelay } = await import('../branch2-tv.js');
+  assert.equal(unwrapRelay('https://radiomood.co.il/api/radio-stream?url=' + encodeURIComponent('https://live.example.fm/live.mp3?x=1')), 'https://live.example.fm/live.mp3?x=1');
+  assert.equal(unwrapRelay('https://radiomood.co.il/api/radio-stream?station=kol-chai'), null);
+  assert.equal(unwrapRelay('https://a.example/x?next=https://a.example/y'), null, 'same site: not a relay');
+});
