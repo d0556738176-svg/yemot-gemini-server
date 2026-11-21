@@ -26,6 +26,20 @@ export const TV_CHANNELS = Object.freeze([
   { key: '8', title: 'רדיו ערוץ 14', pages: ['https://www.c14.co.il/radio'] },
 ]);
 
+// Owner, 21.11: main-menu extension 10 = live radio, the same phone sound as
+// extension 5, live only (no replays), in the owner's order. The key 'rN' is
+// the station's own (cache/status), 'digit' is what the caller presses.
+export const RADIO_CHANNELS = Object.freeze([
+  { key: 'r1', digit: '1', title: 'קול חי', pages: ['https://radiomood.co.il/stations/kol-chai', 'https://www.93fm.co.il/'] },
+  { key: 'r2', digit: '2', title: 'קול פליי', pages: ['https://radiomood.co.il/stations/kol-play'] },
+  { key: 'r3', digit: '3', title: 'קול חי מיוזיק', pages: ['https://radiomood.co.il/stations/kol-chai-music'] },
+  { key: 'r4', digit: '4', title: 'קול ברמה', pages: ['https://kol-barama.co.il/live/'] },
+  { key: 'r5', digit: '5', title: 'כאן ב', pages: ['https://radiomood.co.il/stations/kan-bet', 'https://www.kan.org.il/live/radio.aspx?stationid=3'] },
+  { key: 'r6', digit: '6', title: '103 אף אם', pages: ['https://radiomood.co.il/stations/103fm', 'https://103fm.maariv.co.il/'] },
+  { key: 'r7', digit: '7', title: 'גלי ישראל', pages: ['https://radiomood.co.il/stations/galei-israel'] },
+  { key: 'r8', digit: '8', title: 'גלי צהל', pages: ['https://radiomood.co.il/stations/galei-tzahal', 'https://glz.co.il/'] },
+]);
+
 // Speech-friendly phone sound (owner's spec for shiurim/lessons, 18.11): cut
 // the low rumble, gentle noise reduction, loudness with true peak -2 dB.
 export const TV_AUDIO_FILTER = 'highpass=f=100,afftdn=nf=-25,loudnorm=I=-16:TP=-2';
@@ -33,7 +47,7 @@ export const TV_AUDIO_FILTER = 'highpass=f=100,afftdn=nf=-25,loudnorm=I=-16:TP=-
 export function parseOverrides(text) {
   const out = {};
   for (const raw of String(text || '').split(/[\r\n;]+/)) {
-    const m = raw.trim().match(/^([1-8])\s*=\s*(https?:\/\/\S+)$/i);
+    const m = raw.trim().match(/^(r?[1-8])\s*=\s*(https?:\/\/\S+)$/i);
     if (!m) continue;
     try { const u = new URL(m[2]); if (!/^https?:$/.test(u.protocol)) continue; } catch { continue; }
     (out[m[1]] ||= []).push(m[2]);
@@ -126,6 +140,17 @@ export async function checkAllChannels(deps) {
     return out;
   })().finally(() => { checking = null; });
   return checking;
+}
+
+// The radio stations (extension 10) checked the same way, for the status page.
+export async function checkRadio(deps) {
+  const out = [];
+  for (const ch of RADIO_CHANNELS) {
+    const r = await findChannelSource(ch, deps, { fresh: true }).catch(e => ({ page: null, reason: String(e?.message || e).slice(0, 100) }));
+    const row = { key: ch.key, digit: ch.digit, title: ch.title, ok: !!r.page, page: r.page || null, from: r.from || undefined, how: r.how || null, tried: r.tried || undefined, at: new Date().toISOString() };
+    lastCheck.set(ch.key, row); out.push(row);
+  }
+  return out;
 }
 
 export const menuText = (prefix = '') => prefix + 'ברוכים הבאים לשידורים החיים. ' +

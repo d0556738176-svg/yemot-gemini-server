@@ -54,3 +54,32 @@ test('replay hour folder: extension 7 keys, 0 = back to the hours, # = main menu
     assert.ok(ini.split('\n').includes(line), line);
   assert.ok(!/control_play8|control_play9|start=min/.test(ini), 'no file details or dubbing; newest day first');
 });
+
+test('extension 10: the radio list and one extension per station, in the owner order', async () => {
+  const { ext5Layout } = await import('../tv-ext5.js');
+  const { RADIO_CHANNELS } = await import('../branch2-tv.js');
+  const lay = Object.fromEntries(ext5Layout('https://x.example'));
+  assert.match(lay['ivr2:/10'], /api_add_0=tv=radio\n/);
+  assert.deepEqual(RADIO_CHANNELS.map(c => c.digit), ['1', '2', '3', '4', '5', '6', '7', '8']);
+  assert.equal(RADIO_CHANNELS[0].title, 'קול חי'); assert.equal(RADIO_CHANNELS[3].title, 'קול ברמה');
+  for (const c of RADIO_CHANNELS) assert.match(lay['ivr2:/10/' + c.digit], new RegExp('api_add_0=tv=radio' + c.digit + '\\n'));
+  assert.ok(!Object.keys(lay).some(k => k.startsWith('ivr2:/10/9')), 'no replays for radio');
+});
+
+test('main menu takes two digits; every other line kept; old settings saved once', async () => {
+  const { setupMainMenu10, withTwoDigits } = await import('../tv-ext5.js');
+  assert.equal(withTwoDigits('type=menu\r\nhash_extension=yes\ndigits=1\n'), 'type=menu\nhash_extension=yes\ndigits=2\ntimeout=2\ntext_extensions=yes\n');
+  const files = { 'ivr2:/ext.ini': 'type=menu\nhash_extension=yes\ntitle=ראשי\n', 'ivr2:/ExtensionNumbersAndAssociations.ini': '55=/9\n' };
+  const io = { getText: async w => files[w] ?? null, putText: async (w, c) => { files[w] = c; } };
+  const st = await setupMainMenu10(io, { info() {} });
+  assert.equal(st.ok, true);
+  assert.equal(files['ivr2:/ext_before_10.ini'], 'type=menu\nhash_extension=yes\ntitle=ראשי\n');
+  assert.match(files['ivr2:/ext.ini'], /^type=menu\nhash_extension=yes\ntitle=ראשי\ndigits=2\ntimeout=2\ntext_extensions=yes\n$/);
+  assert.match(files['ivr2:/ExtensionNumbersAndAssociations.ini'], /^55=\/9\n00=0\n01=1\n/);
+  files['ivr2:/ext.ini'] += 'x=1\n';
+  await setupMainMenu10(io, { info() {} });
+  assert.equal(files['ivr2:/ext_before_10.ini'], 'type=menu\nhash_extension=yes\ntitle=ראשי\n', 'backup kept from the first time');
+  const other = { 'ivr2:/ext.ini': 'type=api\n' };
+  const s2 = await setupMainMenu10({ getText: async w => other[w] ?? null, putText: async (w, c) => { other[w] = c; } }, { info() {} });
+  assert.ok(s2.skipped); assert.equal(other['ivr2:/ext.ini'], 'type=api\n');
+});

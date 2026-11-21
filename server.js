@@ -4318,7 +4318,7 @@ async function youtubeCallHandler(call) {
         if(relay.stopped) return {say:last===null?'לא הצלחתי להתחבר לשידור החי הזה. אפשר לבחור תוצאה אחרת. ':'השידור החי הסתיים או נקטע. '};
         if(last===null&&Date.now()-startedAt>150000) { relay.stop('no_pieces'); return {say:'השידור החי לא מגיע כרגע. אפשר לנסות שוב בעוד רגע. '}; }
         if(last!==null&&++waited>20) return {say:'השידור החי נקטע. '};
-        const keysText=item.backKey?'בזמן השידור, לחזרה לרשימת הערוצים הקישו אפס, ולתפריט הראשי סולמית.':'בזמן השידור, לעצירה הקש סולמית, ולתפריט הראשי כוכבית.';
+        const keysText=item.backKey?'בזמן השידור, '+(item.backText||'לחזרה לרשימת הערוצים')+' הקישו אפס, ולתפריט הראשי סולמית.':'בזמן השידור, לעצירה הקש סולמית, ולתפריט הראשי כוכבית.';
         const k=String(await call.read([{type:'text',data:sanitizeForYemot(said?'ממשיך להתחבר לשידור, נא להמתין.':'מתחבר לשידור החי של '+it.title+'. ההשמעה תתחיל בעוד כדקה. '+keysText)}],'tap',
           {max_digits:1,min_digits:1,sec_wait:said?5:2,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'lw'+(++tapNo),timeout:10*60*1000})||'None').trim();
         said=true;
@@ -4518,7 +4518,39 @@ async function youtubeCallHandler(call) {
       }
       return call.go_to_folder('/5');
     }
-    let m=part.match(/^live([1-9])$/);
+    // Extension 10 (owner, 21.11): live radio stations, the same sound as
+    // extension 5, no replays. 0 = back to the station list, # = main menu.
+    if(part==='radio') {
+      const R=TV.RADIO_CHANNELS;
+      const rlist=R.map(c=>'ל'+c.title+' הקישו '+c.digit).join(', ');
+      for(let i=0;i<3;i++) {
+        const k=await tap('רדיו חי. '+rlist+'. לחזרה לתפריט הקודם הקישו אפס, ולתפריט הראשי סולמית.',{digits_allowed:[...R.map(c=>c.digit),'0']});
+        branch2KeyLog('radio10',k,0,0);
+        if(k==='None'||k==='0') return call.go_to_folder('/');
+        if(R.some(c=>c.digit===k)) return call.go_to_folder('/10/'+k);
+      }
+      return call.go_to_folder('/');
+    }
+    let m=part.match(/^radio([1-9])$/);
+    if(m) {
+      const ch=TV.RADIO_CHANNELS.find(c=>c.digit===m[1]);
+      if(!ch) return call.go_to_folder('/10');
+      const { noteCall }=await import('./live-relay.js');
+      const src=await TV.findChannelSource(ch,await tvDeps());
+      noteCall({what:'channel chosen',ext:'10/'+ch.digit,key:ch.key,title:ch.title,how:src.how||null,found:!!src.page});
+      if(!src.page) {
+        noteCall({what:'told: not available',key:ch.key});
+        await tap('השידור של '+ch.title+' אינו זמין כרגע.',{sec_wait:2,digits_allowed:['0']});
+        return call.go_to_folder('/10');
+      }
+      const r=await liveListenItem({url:src.page,title:ch.title,impersonate:!!src.impersonate,referer:src.referer||null,af:'anull',master:true,backKey:'0',mainKey:'#',backText:'לחזרה לרשימת התחנות',
+        refresh:async()=>{ TV.forget(ch.key); const f=await TV.findChannelSource(ch,await tvDeps(),{fresh:true}); return f.page?{url:f.page,referer:f.referer||null}:null; }});
+      noteCall({what:'listening ended',key:ch.key,exit:!!r.exit,told:r.say||null});
+      if(r.exit) return call.go_to_folder('/');
+      if(r.say&&/לא הצלחתי|לא מגיע|נקטע|הסתיים/.test(r.say)) TV.forget(ch.key);
+      return call.go_to_folder('/10');
+    }
+    m=part.match(/^live([1-9])$/);
     if(m) {
       const ch=TV.TV_CHANNELS.find(c=>c.key===m[1]);
       if(!ch) return call.go_to_folder('/5');
@@ -5693,6 +5725,12 @@ app.get('/tv-source-info', rateLimit(6, 60 * 1000, 'tv-source-info'), async (req
     res.json(out);
   } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
 });
+// Extension 10 (owner, 21.11): which radio stations have a source now, and
+// how the main menu is set for two digits. Read-only.
+app.get('/radio-check', rateLimit(3, 60 * 1000, 'radio-check'), async (req,res)=>{
+  const TV=await import('./branch2-tv.js'); const { mainMenuStatus }=await import('./tv-ext5.js');
+  res.json({ mainMenu: mainMenuStatus, stations: await TV.checkRadio(await tvDeps()) });
+});
 // Yemot access for the replay hours (extension 5/9), shared by calls and the check.
 async function replayIo() {
   const p=(await import('./youtube-authorized-playback.js'))._pipeline;
@@ -5995,6 +6033,8 @@ async function configureYemotStructure() {
         const getText = async what => { const j = await (await fetch(base + '/GetTextFile?' + new URLSearchParams({ token, what }))).json().catch(() => null); return j?.responseStatus === 'OK' ? String(j.contents ?? '') : null; };
         const putText = async (what, contents) => { const j = await (await fetch(base + '/UploadTextFile', { method: 'POST', body: new URLSearchParams({ token, what, contents }) })).json().catch(() => null); if (j?.responseStatus !== 'OK') throw new Error('UploadTextFile ' + what + ': ' + (j?.message || 'failed')); };
         await setupExt5(publicUrl, { getText, putText, update: (path, settings) => updateExtension(path, settings) }, console);
+        // Extension 10 (radio) needs the main menu to take two digits.
+        await (await import('./tv-ext5.js')).setupMainMenu10({ getText, putText }, console);
       } catch (e) { console.warn('[EXT5 TV] not configured', { message: String(e?.message || e).slice(0, 200) }); }
     }
     // Playback extensions: * = Yemot star menu, 0 = main menu (owner, 12.11).
