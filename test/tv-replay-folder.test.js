@@ -39,3 +39,27 @@ test('every finished hour goes to Yemot as one file, a new number each day, kept
   assert.deepEqual((await RF.hoursToPublish([ch], now)).map(x => x.id), [], 'nothing published twice');
   assert.equal(RF.replayLog[0].ok, true);
 });
+
+test('the hours of a channel can be made again in place: same file number, nothing new added', async () => {
+  const RF = await import('../tv-replay-folder.js');
+  const now = new Date('2026-11-19T20:30:00Z');
+  const ch = { key: '1', title: 'כאן 11' };
+  const yemot = { 'ivr2:/5/9/1/21/000.wav': 'old', 'ivr2:/5/9/1/21/001.wav': 'old' }; const deleted = [];
+  const io = {
+    list: async () => ({ files: [] }), del: async r => { deleted.push(r); delete yemot[r]; },
+    putText: async (w, c) => { yemot[w] = c; }, getText: async w => yemot[w] ?? null,
+    upload: async (f, r) => { if (yemot[r]) throw new Error('old file still in place'); yemot[r] = 'new'; },
+    log: { info() {}, warn() {} },
+  };
+  yemot['ivr2:/5/9/1/21/ext.ini'] = RF.hourIni('1', 'כאן 11', 21);
+  assert.equal(await RF.markRedo('1'), 2);
+  const todo = await RF.hoursToPublish([ch], now);
+  assert.deepEqual(todo.map(x => x.id + '>' + x.number), ['20261118-21>000', '20261119-21>001']);
+  for (const item of todo) await RF.publishHour(item, io);
+  assert.equal(yemot['ivr2:/5/9/1/21/000.wav'], 'new'); assert.equal(yemot['ivr2:/5/9/1/21/001.wav'], 'new');
+  assert.ok(!('ivr2:/5/9/1/21/002.wav' in yemot), 'no new number');
+  assert.deepEqual((await RF.hoursToPublish([ch], now)).map(x => x.id), [], 'done once');
+  mp3('1', '20261119-230000.mp3');
+  const later = await RF.hoursToPublish([ch], new Date('2026-11-20T08:00:00Z'));
+  assert.deepEqual(later.map(x => x.id), ['20261119-22', '20261119-23'], 'new hours still get new numbers');
+});

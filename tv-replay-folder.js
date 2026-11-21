@@ -61,7 +61,32 @@ export async function hoursToPublish(channels, now = new Date()) {
       out.push({ ch, id, hour: Number(id.slice(9)), files: files.sort().map(n => path.join(REC_DIR, ch.key, n)) });
     }
   }
-  return out.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  out.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  // Hours to make again in place (same file number), e.g. after a sound fix.
+  for (const [k, number] of Object.entries(st.redo || {})) {
+    const m = k.match(/^(\d)\/(\d{8}-(\d\d))$/); if (!m) continue;
+    const ch = channels.find(c => c.key === m[1]); if (!ch) continue;
+    const names = (await fs.readdir(path.join(REC_DIR, ch.key)).catch(() => [])).filter(n => n.startsWith(m[2]) && /\.mp3$/.test(n)).sort();
+    if (!names.length) continue;
+    out.push({ ch, id: m[2], hour: Number(m[3]), files: names.map(n => path.join(REC_DIR, ch.key, n)), number });
+  }
+  return out;
+}
+
+// Marks a channel's published hours whose recordings are still here, to be
+// made again in place (owner, 21.11: channel 13's hiss). Returns how many.
+export async function markRedo(key) {
+  const st = loadState(); st.redo ||= {};
+  const names = await fs.readdir(path.join(REC_DIR, key)).catch(() => []);
+  let n = 0;
+  for (const [id, d] of Object.entries(st.done || {})) {
+    const m = id.match(/^(\d)\/(\d{8}-\d\d)$/);
+    if (!m || m[1] !== key || !d?.file) continue;
+    if (!names.some(x => x.startsWith(m[2]) && x.endsWith('.mp3'))) continue;
+    st.redo[id] = d.file; n++;
+  }
+  saveState(st);
+  return n;
 }
 
 const norm = t => String(t || '').replace(/\r/g, '').trim();
@@ -84,7 +109,7 @@ export async function publishHour(item, io) {
   let f0 = (loadState().folders || {})[ch.key + '/' + hour];
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'tvpub-'));
   try {
-    if (!f0) {
+    if (!f0 && !item.number) {
       // First publication into this folder: anything left from the earlier
       // on-demand layout is cleared, so the numbers mean days.
       const dir = await io.list?.(folder).catch(() => null);
@@ -103,21 +128,26 @@ export async function publishHour(item, io) {
     const out = path.join(tmp, 'hour.wav');
     const m = await masterSpeech(raw, out);
     await fs.unlink(raw).catch(() => {});
-    const number = String(f0.next).padStart(3, '0');
+    f0 ||= { next: 0, days: {} };
+    const redo = !!item.number;
+    const number = redo ? item.number : String(f0.next).padStart(3, '0');
     // Settings first: writing them creates the folder in Yemot (measured 19.11:
     // folders 5/1-5/9 were created that way), and a big file sent in parts is
     // moved into its folder at the end - which fails when the folder is missing.
     await saveSettings(folder, hourIni(ch.key, ch.title, hour), io);
+    // Made again in place: the old file goes first, so the new one takes its
+    // number (a big file joined in parts is moved into place at the end).
+    if (redo) await io.del(folder + '/' + number + '.wav').catch(() => {});
     for (let a = 1; ; a++) {
       try { await io.upload(out, folder + '/' + number + '.wav'); break; }
       catch (e) { if (a >= 3) throw e; await new Promise(r => setTimeout(r, 5000 * a)); }
     }
     const s2 = loadState(); s2.done ||= {}; s2.folders ||= {};
-    f0.days[number] = id; f0.next++;
-    s2.folders[ch.key + '/' + hour] = f0;
-    s2.done[ch.key + '/' + id] = { file: number, minutes: Math.round((m?.durationSec || 0) / 60), at: new Date().toISOString() };
+    if (!redo) { f0.days[number] = id; f0.next++; s2.folders[ch.key + '/' + hour] = f0; }
+    if (s2.redo) delete s2.redo[ch.key + '/' + id];
+    s2.done[ch.key + '/' + id] = { file: number, minutes: Math.round((m?.durationSec || 0) / 60), at: new Date().toISOString(), ...(m?.hissCut ? { hissCut: true } : {}) };
     saveState(s2);
-    note({ key: ch.key, hour: id, ok: true, file: number, minutes: Math.round((m?.durationSec || 0) / 60) });
+    note({ key: ch.key, hour: id, ok: true, file: number, minutes: Math.round((m?.durationSec || 0) / 60), ...(redo ? { redo: true } : {}), ...(m?.hissCut ? { hissCut: true } : {}) });
     io.log?.info?.('[TV REPLAY] hour published', { key: ch.key, id, file: number });
     return folder.replace(/^ivr2:/, '');
   } catch (e) {
