@@ -5717,9 +5717,17 @@ setTimeout(()=>{ const run=async()=>{ try {
   run(); setInterval(run, 5*60*1000).unref?.(); }, 3*60*1000).unref?.();
 app.get('/tv-replay-check', rateLimit(20, 60 * 1000, 'tv-replay-check'), async (req,res)=>{
   const TV=await import('./branch2-tv.js'); const RF=await import('./tv-replay-folder.js');
-  const pending=(await RF.hoursToPublish(TV.TV_CHANNELS)).map(x=>x.ch.key+'/'+x.id);
+  const pending=(await RF.hoursToPublish(TV.TV_CHANNELS)).map(x=>x.ch.key+'/'+x.id+(x.number?' (again, file '+x.number+')':''));
   const published={}; for(const ch of TV.TV_CHANNELS) published[ch.key]=RF.publishedHours(ch.key);
-  res.json({ log: RF.replayLog, published, pending });
+  const { hissLog }=await import('./tv-recorder.js');
+  res.json({ log: RF.replayLog, published, pending, hissCut: hissLog });
+});
+// Owner, 21.11 (channel 13 muffled): the channel's hours already in Yemot are
+// made again in place from the recordings still here, with the hiss removed.
+app.get('/tv-replay-redo', rateLimit(3, 60 * 1000, 'tv-replay-redo'), async (req,res)=>{
+  const key=String(req.query.ch||''); if(!/^[1-8]$/.test(key)) return res.status(400).json({error:'ch=1..8'});
+  const RF=await import('./tv-replay-folder.js');
+  res.json({ marked: await RF.markRedo(key) });
 });
 app.get('/tv-status', rateLimit(30, 60 * 1000, 'tv-status'), async (req,res)=>{
   const TV=await import('./branch2-tv.js'); const { _relays, relayHistory }=await import('./live-relay.js');

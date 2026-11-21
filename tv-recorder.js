@@ -155,6 +155,31 @@ export async function makeReplayPiece(bin, file, offsetSec, seconds, out) {
   await fs.unlink(raw).catch(() => {});
   return secs;
 }
+// Owner, 21.11: channel 13 sounded muffled. Measured: its web stream carries
+// loud added hiss above 3 kHz (all its variants; the same speech on its
+// YouTube live is clean), so the peak level was set by the hiss and the speech
+// came out low. Ordinary speech has 10-20 dB less above 3 kHz than below it;
+// a piece where the two are close is hiss-laden, and gets a steep cut above
+// 3.2 kHz (a phone line carries little above ~3.4 kHz anyway). Clean pieces
+// are left exactly as they are.
+export const HISS_CUT = 'lowpass=f=3200,lowpass=f=3200,lowpass=f=3200,lowpass=f=3200';
+export const HISS_MARGIN_DB = 6;
+function bandRms(bin, file, af) {
+  return new Promise(res => {
+    const p = spawn(bin, ['-hide_banner', '-i', file, '-af', af + ',astats=metadata=0:measure_perchannel=none', '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let e = ''; p.stderr.on('data', d => { e = (e + d).slice(-4000); });
+    p.on('error', () => res(null));
+    p.on('close', () => { const m = [...e.matchAll(/RMS level dB:\s*(-?[\d.]+|-inf)/g)].pop(); res(m ? (m[1] === '-inf' ? -120 : Number(m[1])) : null); });
+  });
+}
+export async function hissCheck(file, bin = SYSTEM_FFMPEG.find(b => existsSync(b)) || 'ffmpeg') {
+  const low = await bandRms(bin, file, 'lowpass=f=3000,lowpass=f=3000');
+  const high = await bandRms(bin, file, 'highpass=f=3000,highpass=f=3000');
+  if (low == null || high == null) return { hiss: false, low, high };
+  return { hiss: high > -90 && high >= low - HISS_MARGIN_DB, low, high };
+}
+export const hissLog = []; // last pieces that needed the cut, for the status page
+
 export async function masterSpeech(input, out) {
   const { preparePhoneAudio } = await import('./youtube-phone-audio.js');
   // preparePhoneAudio keeps its working files next to its output under fixed
@@ -162,10 +187,22 @@ export async function masterSpeech(input, out) {
   // the same time must never delete each other's working files (19.11).
   const work = await fs.mkdtemp(path.join(path.dirname(out), 'm-'));
   try {
+    let src = input;
+    const bin = SYSTEM_FFMPEG.find(b => existsSync(b)) || 'ffmpeg';
+    const h = await hissCheck(input, bin).catch(() => ({ hiss: false }));
+    if (h.hiss) {
+      src = path.join(work, 'cut.wav');
+      await new Promise((res, rej) => {
+        const p = spawn(bin, ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-af', HISS_CUT, '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', src], { stdio: ['ignore', 'ignore', 'pipe'] });
+        let e = ''; p.stderr.on('data', d => { e = (e + d).slice(-300); });
+        p.on('error', rej); p.on('close', c => c === 0 ? res() : rej(new Error('hiss cut failed: ' + e.trim().slice(-120))));
+      });
+      hissLog.unshift({ at: new Date().toISOString(), file: path.basename(input), lowDb: h.low, highDb: h.high }); hissLog.length = Math.min(hissLog.length, 20);
+    }
     const tmpOut = path.join(work, 'out.wav');
-    const r = await preparePhoneAudio(input, tmpOut, { kind: 'lesson', sampleRate: 16000 });
+    const r = await preparePhoneAudio(src, tmpOut, { kind: 'lesson', sampleRate: 16000 });
     await fs.rename(tmpOut, out);
-    return r;
+    return r ? { ...r, hissCut: !!h.hiss } : r;
   } finally { await fs.rm(work, { recursive: true, force: true }).catch(() => {}); }
 }
 
