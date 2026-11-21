@@ -5727,9 +5727,11 @@ app.get('/tv-source-info', rateLimit(6, 60 * 1000, 'tv-source-info'), async (req
 });
 // Extension 10 (owner, 21.11): which radio stations have a source now, and
 // how the main menu is set for two digits. Read-only.
-app.get('/radio-check', rateLimit(3, 60 * 1000, 'radio-check'), async (req,res)=>{
+app.get('/radio-check', rateLimit(20, 60 * 1000, 'radio-check'), async (req,res)=>{
   const TV=await import('./branch2-tv.js'); const { mainMenuStatus }=await import('./tv-ext5.js');
-  res.json({ mainMenu: mainMenuStatus, stations: await TV.checkRadio(await tvDeps()) });
+  // Runs in the background (a few minutes); open again for the results.
+  if(req.query.start||TV.radioCheck.status==='idle') TV.startRadioCheck(await tvDeps());
+  res.json({ mainMenu: mainMenuStatus, ...TV.radioCheck });
 });
 // Yemot access for the replay hours (extension 5/9), shared by calls and the check.
 async function replayIo() {
