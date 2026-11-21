@@ -179,7 +179,12 @@ export async function directDownload(videoId, output, opts = {}) {
   throw firstErr;
 }
 
-async function directDownloadPlain(videoId, output, { mode = 'audio', height, ffmpegPath, signal, onProgress, log = console, maxBytes = Infinity, stallMs = 60000, clients = CLIENTS, bin = ytdlpPath(), withCaptions = true, webOverride = null } = {}) {
+// 21.11: joining the picture and sound of a download (yt-dlp, N_m3u8DL-RE)
+// is done with the server's own ffmpeg: the bundled one crashed on a mako
+// episode ("Postprocessing: libpostproc ...") and the video never came.
+const SERVER_FFMPEG = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'].find(b => existsSync(b)) || null;
+async function directDownloadPlain(videoId, output, { mode = 'audio', height, ffmpegPath: ffmpegGiven, signal, onProgress, log = console, maxBytes = Infinity, stallMs = 60000, clients = CLIENTS, bin = ytdlpPath(), withCaptions = true, webOverride = null } = {}) {
+  const ffmpegPath = (process.env.DOWNLOAD_FFMPEG_PATH && existsSync(process.env.DOWNLOAD_FFMPEG_PATH) ? process.env.DOWNLOAD_FFMPEG_PATH : null) || SERVER_FFMPEG || ffmpegGiven;
   if (!/^[A-Za-z0-9_-]{11}$/.test(String(videoId || ''))) throw Object.assign(new Error('invalid video id'), { code: 'invalid_video' });
   // A video from another website (web-items.js): its own link, no YouTube player types.
   const web = webOverride || await refreshMakoItem(await webItem(videoId));

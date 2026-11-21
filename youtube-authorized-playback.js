@@ -892,7 +892,7 @@ export const buildTimings=[];
 async function build(videoId, fallbackUrl=null, signal=undefined, onProgress=()=>{}, consent=false, local=null) {
   const id=String(videoId||'').trim();
   const tm={id,startedAt:new Date().toISOString()};const t00=Date.now();
-  buildTimings.push(tm);if(buildTimings.length>30)buildTimings.shift();
+  const bt=typeof buildTimings!=='undefined'?buildTimings:[];bt.push(tm);if(bt.length>30)bt.shift();
   if(!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Invalid YouTube video id');
   const temp=await fs.mkdtemp(path.join(os.tmpdir(),'authorized-audio-'));
   const source=path.join(temp,id+'.source');

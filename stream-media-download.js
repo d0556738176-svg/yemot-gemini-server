@@ -124,7 +124,9 @@ function run(bin0, args0, { signal, timeoutMs, stallMs = timeoutMs, dir, maxByte
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
     p.on('error', () => finish(Object.assign(new Error('stream tool unavailable'), { code: 'stream_unavailable' })));
-    p.on('close', code => finish(code === 0 ? null : Object.assign(new Error('stream tool failed'), { code: /No stream found to download/i.test(diagnostic)?'stream_no_matching_tracks':'direct_failed' })));
+    // 21.11: the tool's own last words go with the failure (no tickets).
+    const why = () => String(diagnostic).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/https?:\/\/\S+/g, '[address]').replace(/[━─]+/g, ' ').replace(/\s+/g, ' ').trim().slice(-240);
+    p.on('close', code => finish(code === 0 ? null : Object.assign(new Error('stream tool failed (' + code + '): ' + why()), { code: /No stream found to download/i.test(diagnostic)?'stream_no_matching_tracks':'direct_failed' })));
   });
 }
 
