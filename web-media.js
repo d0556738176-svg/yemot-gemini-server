@@ -11,6 +11,7 @@ import { mediaRequestHeaders, mediaHeaderArgs } from './media-request-headers.js
 import { isMakoEpisode, resolveMakoPublic } from './mako-public-media.js';
 import { sniffPage, browserAvailable } from './browser-media.js';
 import { streamlinkResolve, streamlinkPath } from './streamlink-media.js';
+import { telegramResolve, telegramParts } from './telegram-media.js';
 
 const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 const YT = /(?:youtube\.com|youtu\.be)\//i;
@@ -216,6 +217,16 @@ export async function followGoogleRedirect(url, { fetchImpl = fetch } = {}) {
 export async function inspectLink(c0, opts = {}) {
   const c = { ...c0, url: await (opts.followRedirect || followGoogleRedirect)(unwrapRedirect(c0.url)) };
   if (c.url !== c0.url) { c.site = hostOf(c.url); c.source = c.source && /google/i.test(c.source) ? null : c.source; }
+  // Telegram public posts by their own preview page (21.11).
+  if (telegramParts(c.url)) {
+    const tg = await (opts.telegram || telegramResolve)(c.url).catch(() => null);
+    if (tg?.media) {
+      const item = { url: tg.media, page: tg.page, referer: 'https://t.me/', title: tg.title || c.title || 'Telegram', site: 't.me', siteName: 'טלגרם',
+        uploader: tg.uploader, description: tg.description || c.snippet || '', thumbnail: tg.thumbnail, durationSec: tg.durationSec, uploadDate: tg.uploadDate,
+        views: null, tags: null, hasVideo: tg.hasVideo, hasAudio: true, impersonate: false, live: false, httpHeaders: {} };
+      return { ...item, id: registerWebItem(item) };
+    }
+  }
   let failure = null;
   const r = await inspectLinkPlain(c, { ...opts, onFailure: f => { failure = f; } });
   if (r) return r;
