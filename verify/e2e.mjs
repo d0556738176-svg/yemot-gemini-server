@@ -53,7 +53,7 @@ const w1 = !SC.includes('w1') ? null : await call('TikTok key 1 (audio)', { mode
 const w1b = !SC.includes('w1b') ? null : await call('Website key 1 again (should play at once)', { mode: '6', query: 'שיעור הרב זמיר כהן הידברות', key: '1', minSec: 1200, maxSec: 3600 });
 const r0 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
 const v1 = !SC.includes('v1') ? null : await call('YouTube key 2 (video)', { mode: '2', query: 'סרטון קצר על הכותל', key: '2', minSec: 60, maxSec: 360 });
-const w2 = !SC.includes('w2') ? null : await call('Website key 2 (video)', { mode: '6', query: 'ארץ נהדרת קטע מאקו', key: '2', minSec: 60, maxSec: 900 });
+const w2 = !SC.includes('w2') ? null : await call('Website key 2 (video)', { mode: '6', query: 'ארץ נהדרת פרק מאקו', key: '2', minSec: 60, maxSec: 4000 });
 const r1 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
 console.log('recent jobs', JSON.stringify(r1, null, 1));
 console.log('search engines', JSON.stringify(await fetch('https://main.176-97-205-41.sslip.io/web-search-status').then(r => r.json()).catch(e => String(e))));
