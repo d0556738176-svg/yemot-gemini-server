@@ -5622,6 +5622,46 @@ app.get('/tv-replay-probe', rateLimit(6, 60 * 1000, 'tv-replay-probe'), async (r
   }
   res.json({ at:new Date().toISOString(), disk: REC.diskInfo(), filter: TV.TV_AUDIO_FILTER, channels: out });
 });
+// Owner, 21.11: "channel 13 sounds muffled". Read-only: the channel's playlist
+// (addresses without their query strings), the audio tracks ffmpeg sees, and
+// for every channel how much of the recorded sound is above 3 kHz (a muffled
+// source has little there).
+app.get('/tv-source-info', rateLimit(6, 60 * 1000, 'tv-source-info'), async (req,res)=>{
+  try {
+    const TV=await import('./branch2-tv.js'); const REC=await import('./tv-recorder.js');
+    const { resolveStreamInfo, ffmpegHeaderArgs, SYSTEM_FFMPEG }=await import('./live-relay.js');
+    const { existsSync, promises:fsp }=await import('node:fs'); const { spawn }=await import('node:child_process');
+    const pathm=(await import('node:path')).default;
+    const bin=SYSTEM_FFMPEG.filter(b=>existsSync(b))[0];
+    const run=(args,ms=60000)=>new Promise(r=>{ const p=spawn(bin,args,{stdio:['ignore','ignore','pipe']}); let e=''; const k=setTimeout(()=>p.kill('SIGKILL'),ms); p.stderr.on('data',d=>{e=(e+d).slice(-20000);}); p.on('close',()=>{clearTimeout(k);r(e);}); p.on('error',()=>{clearTimeout(k);r(e);}); });
+    const rms=t=>{ const m=[...String(t).matchAll(/RMS level dB:\s*(-?[\d.]+|-inf)/g)].pop(); return m?Number(m[1]==='-inf'?-120:m[1]):null; };
+    const strip=s=>String(s).replace(/(https?:\/\/[^\s"?]+)\?[^\s"]*/g,'$1?…').replace(/(URI="[^"?]+)\?[^"]*/g,'$1?…');
+    const out={ at:new Date().toISOString() };
+    const key=String(req.query.ch||'3');
+    const ch=TV.TV_CHANNELS.find(c=>c.key===key);
+    if(ch) {
+      const src=await TV.findChannelSource(ch,await tvDeps()).catch(()=>({page:null}));
+      const info=src.page?await resolveStreamInfo(src.page,{impersonate:!!src.impersonate,referer:src.referer||null}).catch(()=>null):null;
+      const headers={ 'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36', ...(src.referer?{Referer:src.referer}:{}), ...(info?.headers||{}) };
+      let master=null;
+      if(info?.url) { try { const r=await fetch(info.url,{headers,signal:AbortSignal.timeout(15000)}); master=(await r.text()).slice(0,6000); } catch(e){ master='fetch failed: '+String(e?.message||e).slice(0,80); } }
+      const probe=info?.url?await run(['-hide_banner',...ffmpegHeaderArgs(headers),'-i',info.url],40000):'';
+      out.channel={ key, title:ch.title, from:src.from||null, playlist:master&&strip(master).split('\n').slice(0,80),
+        streams:strip(probe).split('\n').filter(l=>/Program|variant_bitrate|Stream #|Audio|comment/i.test(l)).slice(0,60) };
+    }
+    out.brightness=[];
+    for(const c of TV.TV_CHANNELS) {
+      const dir=pathm.join(REC.REC_DIR,c.key);
+      const names=(await fsp.readdir(dir).catch(()=>[])).filter(n=>/\.mp3$/.test(n)).sort();
+      const f=names.length>1?pathm.join(dir,names[names.length-2]):null;
+      if(!f) { out.brightness.push({key:c.key,title:c.title,file:null}); continue; }
+      const all=rms(await run(['-hide_banner','-ss','60','-t','120','-i',f,'-af','astats=metadata=0','-f','null','-']));
+      const hi=rms(await run(['-hide_banner','-ss','60','-t','120','-i',f,'-af','highpass=f=3000,highpass=f=3000,astats=metadata=0','-f','null','-']));
+      out.brightness.push({key:c.key,title:c.title,file:pathm.basename(f),rmsAll:all,rmsAbove3k:hi,diffDb:all!=null&&hi!=null?Math.round((all-hi)*10)/10:null});
+    }
+    res.json(out);
+  } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
+});
 // Yemot access for the replay hours (extension 5/9), shared by calls and the check.
 async function replayIo() {
   const p=(await import('./youtube-authorized-playback.js'))._pipeline;
