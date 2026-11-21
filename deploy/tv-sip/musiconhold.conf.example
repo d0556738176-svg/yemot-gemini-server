@@ -1,0 +1,26 @@
+; Custom MOH on the EXTERNAL Asterisk server. NOT Yemot music_on_hold.
+; Each command reads a feed URL from the server's restricted environment.
+; Configure these variables in the service environment securely.
+[tv1]
+mode=custom
+application=/opt/tv-sip/feed-audio.sh TV_KAN11_URL
+
+[tv2]
+mode=custom
+application=/opt/tv-sip/feed-audio.sh TV_12_URL
+
+[tv3]
+mode=custom
+application=/opt/tv-sip/feed-audio.sh TV_13_URL
+
+[tv4]
+mode=custom
+application=/opt/tv-sip/feed-audio.sh TV_14_URL
+
+[tv5]
+mode=custom
+application=/opt/tv-sip/feed-audio.sh TV_I24_URL
+
+[tv6]
+mode=custom
+application=/opt/tv-sip/feed-audio.sh TV_KNESSET_URL

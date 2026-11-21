@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.js';
+import { branch2TvHandler, configureBranch2Tv } from './branch2-live-tv.js';
 import { createSongCallHandler } from './song-ivr.js';
 import { handleWorkerCallback, isCloudWorkerConfigured } from './song-cloud.js';
 import { startLinkGuard } from './yemot-link-guard.js';
@@ -6210,6 +6211,8 @@ router.get('/yemot', callHandler);
 // self-reference in every model answer.
 router.get('/yemot-backup', call => callPersona.run({persona:'female',branch:'3'}, () => callHandler(call)));
 router.get('/yemot-youtube', youtubeCallHandler);
+// Independent live TV audio submenu under /2/8 (never replaces the /2 YouTube handler).
+router.get('/yemot-tv', branch2TvHandler);
 // Extension 5: live internet broadcast channels, opened only when the owner turns them on.
 router.get('/yemot-live', liveBroadcastHandler);
 // Extension 4: AI song maker.
@@ -6678,6 +6681,8 @@ async function configureYemotStructure() {
       try { await updateExtension('ivr2:/4',{type:'api',api_link:publicUrl + '/yemot-song'}); } catch {}
     }
   }
+  try { await configureBranch2Tv({updateExtension,publicUrl}); }
+  catch(e) { console.warn('[TV2/8] setup failed safely',String(e?.message||e).slice(0,200)); }
   try { await configureLiveExtension(publicUrl); }
   catch(e) { console.warn('[LIVE5] extension 5 setup failed',String(e?.message||e).slice(0,200)); }
   if (process.env.YEMOT_AUTO_CONFIGURE_ALL_EXTENSIONS === 'true') {
