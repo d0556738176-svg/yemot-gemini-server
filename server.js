@@ -5647,7 +5647,29 @@ app.get('/tv-source-info', rateLimit(6, 60 * 1000, 'tv-source-info'), async (req
       if(info?.url) { try { const r=await fetch(info.url,{headers,signal:AbortSignal.timeout(15000)}); master=(await r.text()).slice(0,6000); } catch(e){ master='fetch failed: '+String(e?.message||e).slice(0,80); } }
       const probe=info?.url?await run(['-hide_banner',...ffmpegHeaderArgs(headers),'-i',info.url],40000):'';
       out.channel={ key, title:ch.title, from:src.from||null, playlist:master&&strip(master).split('\n').slice(0,80),
-        streams:strip(probe).split('\n').filter(l=>/Program|variant_bitrate|Stream #|Audio|comment/i.test(l)).slice(0,60) };
+        streams:strip(probe).split('\n').filter(l=>!/Skip \(/.test(l)&&/variant_bitrate|Stream #/i.test(l)).slice(0,40) };
+      if(req.query.deep&&info?.url) {
+        // 20 s of the source as decoded, at its own rate and channels, then
+        // where its sound sits (bands) and how the two sides relate.
+        const os=(await import('node:os')).default;
+        const vars=[info.url];
+        if(master&&/#EXT-X-STREAM-INF/.test(master)) for(const l of master.split('\n')) if(l&&!l.startsWith('#')) vars.push(new URL(l.trim(),info.url).href);
+        out.deep=[];
+        for(const v of vars.slice(0,5)) {
+          const tmp=pathm.join(os.tmpdir(),'srcinfo-'+key+'.wav');
+          const err=await run(['-hide_banner','-loglevel','warning','-y',...ffmpegHeaderArgs(headers),'-i',v,'-t','20','-vn','-c:a','pcm_s16le',tmp],60000);
+          const meta=await new Promise(r=>{ const p=spawn('/usr/bin/ffprobe',['-v','error','-show_entries','stream=sample_rate,channels','-of','json',tmp]); let o=''; p.stdout.on('data',d=>o+=d); p.on('close',()=>{ try{ r(JSON.parse(o).streams?.[0]||null); }catch{ r(null); } }); p.on('error',()=>r(null)); });
+          const band=async f=>rms(await run(['-hide_banner','-i',tmp,'-af',(f?f+',':'')+'astats=metadata=0','-f','null','-']));
+          const two=meta?.channels>=2;
+          out.deep.push({ src:strip(v).replace(/^.*\//,''), meta, decodeWarnings:strip(err).split('\n').filter(Boolean).slice(-6),
+            all:await band(''), below3k:await band('lowpass=f=3000,lowpass=f=3000'), b3to4k:await band('highpass=f=3000,highpass=f=3000,lowpass=f=4000,lowpass=f=4000'),
+            b4to8k:await band('highpass=f=4000,highpass=f=4000,lowpass=f=8000,lowpass=f=8000'), above8k:await band('highpass=f=8000,highpass=f=8000'),
+            left:two?await band('pan=mono|c0=c0'):null, right:two?await band('pan=mono|c0=c1'):null,
+            mid:two?await band('pan=mono|c0=0.5*c0+0.5*c1'):null, side:two?await band('pan=mono|c0=0.5*c0-0.5*c1'):null,
+            mono16k:await band('aresample=16000,pan=mono|c0=0.5*c0+0.5*c1,lowpass=f=3000,lowpass=f=3000') });
+          await fsp.unlink(tmp).catch(()=>{});
+        }
+      }
     }
     out.brightness=[];
     for(const c of TV.TV_CHANNELS) {
