@@ -4498,7 +4498,7 @@ async function youtubeCallHandler(call) {
         const sub=await tap('להוספת כתובית בעברית לסרטון הקש 1. בלי כתובית הקש 2.',{sec_wait:15});
         if(sub.includes('*')) return {exit:true};
         const v={videoId:it.videoId,title:it.title,durationSeconds:it.durationSeconds,subtitles:sub==='1'};
-        if(!it.web) { const gate=await videoStartGate(v); if(gate) { void import('./download-events.js').then(m=>m.downloadEvent('video-gate',it.videoId,{blocked:String(gate?.code||gate)})); note='ההורדה החינמית של הסרטון הזה מיוטיוב לא זמינה כרגע. אפשר למצוא אותו בחיפוש ביוטיוב ושם לאשר את מנוע הגיבוי. '; continue; } }
+        if(!it.web) { const gate=await videoStartGate(v); if(gate) { void import('./download-events.js').then(m=>m.downloadEvent('video-gate',it.videoId,{ask:gate.ask,subtitles:!!v.subtitles,flow:'web-results'})); note='ההורדה החינמית של הסרטון הזה מיוטיוב לא זמינה כרגע. אפשר למצוא אותו בחיפוש ביוטיוב ושם לאשר את מנוע הגיבוי. '; continue; } }
         const st=startYouTubeVideoJob(v);
         console.info('[WEB_SEARCH] video requested',{videoId:it.videoId,web:it.web,status:st.status,subtitles:v.subtitles});
         note='הורדת הסרטון התחילה'+(v.subtitles?', עם כתובית בעברית':'')+'. הוא יישמר בתיקיית וידאו עם התמונה והפרטים שלו, ומאותה הורדה יוכן גם השמע. אין צורך להמתין על הקו. ';
@@ -4965,7 +4965,7 @@ async function youtubeCallHandler(call) {
           nextPrompt=(ask==='redo'?'הורדת הווידאו מחדש התחילה':'הורדת הווידאו במנוע הגיבוי התחילה')+(v.subtitles?', עם כתובית בעברית מוטבעת בתוך הסרטון.':'.')+' הסרטון יישמר בתיקיית וידאו, ומאותה הורדה יוכן גם השמע. אין צורך להישאר על הקו. אמור חיפוש חדש, או מספר של תוצאה אחרת.';
           continue;
         }
-        if(isNoConfirm(transcript)) { pendingPaidVideo=null; nextPrompt='בסדר, לא הורדתי כלום ולא היה חיוב. אמור מספר של תוצאה אחרת, או חיפוש חדש.'; continue; }
+        if(isNoConfirm(transcript)) { void import('./download-events.js').then(m=>m.downloadEvent('video-declined',pendingPaidVideo?.videoId,{ask:pendingPaidVideo?.ask})); pendingPaidVideo=null; nextPrompt='בסדר, לא הורדתי כלום ולא היה חיוב. אמור מספר של תוצאה אחרת, או חיפוש חדש.'; continue; }
         nextPrompt='לא הבנתי. לאישור אמור כן, לביטול אמור לא.';
         continue;
       }
@@ -5003,7 +5003,7 @@ async function youtubeCallHandler(call) {
         // Owner, 15.11: free direct download first; the paid engine and a
         // second download of a saved video only after a key press.
         const gate=await videoStartGate(v);
-        if(gate){ pendingPaidVideo={...v,ask:gate.ask}; nextPrompt=gate.prompt; continue; }
+        if(gate){ void import('./download-events.js').then(m=>m.downloadEvent('video-gate',v.videoId,{ask:gate.ask,subtitles:!!v.subtitles,flow:'youtube'})); pendingPaidVideo={...v,ask:gate.ask}; nextPrompt=gate.prompt; continue; }
         const st=startYouTubeVideoJob(v);
         console.info('[VIDEO] requested by caller',{videoId:v.videoId,status:st.status,subtitles:yes});
         nextPrompt=yes
@@ -5521,6 +5521,7 @@ app.get('/api/ext3/media', rateLimit(240, 60 * 1000, 'ext3-media'), async (req, 
       const paid = req.query.paid === '1';
       if (mode === 'video' && (!vjob || vjob.status === 'failed')) {
         const gate = paid ? null : await videoStartGate({ ...video, ...subs });
+        if (gate) void import('./download-events.js').then(m => m.downloadEvent('video-gate', videoId, { ask: gate.ask, subtitles: !!subs.subtitles, flow: 'ext3' }));
         vjob = gate ? { status: 'failed', error: gate.ask === 'redo' ? 'redo_needs_consent' : 'paid_needs_consent', subtitles: subs.subtitles }
           : startYouTubeVideoJob({ ...video, ...subs, ...(paid ? { paidConsent: true, redoConsent: true } : {}) });
       }
@@ -5843,6 +5844,11 @@ app.get('/branch2-diag',async (req,res)=>{ let commit=''; try { commit=String(re
 // the latest download jobs of this server run.
 app.get('/branch2-saved',rateLimit(20,60*1000,'saved-check'),async (req,res)=>{
   try{
+    if(req.query.folders){
+      const { _pipeline: p } = await import('./youtube-authorized-playback.js');
+      const { foldersReport } = await import('./branch2-saved-check.js');
+      return res.json(await foldersReport({p,readFolders:()=>p.readCacheJson('ivr2:/2/youtubeaudio/download_folders.json')}));
+    }
     if(req.query.recent){
       const pick=m=>[...m.entries()].slice(-10).map(([id,j])=>({id,status:j?.status||j?.state||null,mode:j?.mode||null}));
       const timings=(await import('./youtube-authorized-playback.js')).buildTimings.slice(-15);

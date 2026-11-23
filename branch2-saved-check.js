@@ -75,7 +75,7 @@ export async function savedReport(id, { p, ffmpegPath, lookupCached }) {
     for (let k = n; k >= 1 && out.audioCopy.length < 4; k--) {
       const dir = k <= 1 ? 'ivr2:/אודיו' : 'ivr2:/אודיו_' + k;
       for (const f of await list(dir).catch(() => [])) {
-        if (!names.some(nm => f.startsWith(nm))) continue;
+        if (!names.some(nm => f.startsWith(nm) || f.startsWith(nm.split('__')[0] + '_חלק_'))) continue; // a long copy is saved in parts (_חלק_N)
         const remote = dir + '/' + f;
         out.audioCopy.push({ path: remote.replace(/^ivr2:/, ''), ...(await meta(remote)), probe: await probe(url(remote)) });
       }
@@ -86,5 +86,30 @@ export async function savedReport(id, { p, ffmpegPath, lookupCached }) {
   const vr = await p.readCacheJson('ivr2:/2/youtubejobs/' + Buffer.from(id).toString('hex') + '/video.json').catch(() => null);
   out.video = vr ? { state: vr.state, quality: vr.quality || null, subtitles: vr.subtitles || null, files: [] } : null;
   for (const f of (vr?.files || []).slice(0, 4)) out.video.files.push({ path: String(f.remote).replace(/^ivr2:/, ''), ...(await meta(f.remote)), probe: /\.mp4$/i.test(f.remote) ? await probe(url(f.remote)) : null });
+  return out;
+}
+
+// Owner, 23.11: what the אודיו and וידאו folders in Yemot really hold, as the
+// Yemot API lists them (count, newest names, sizes, the type Yemot gives each
+// file). Read-only; no token or address is returned.
+export async function foldersReport({ p, readFolders }) {
+  const folders = (await readFolders().catch(() => null)) || {};
+  const out = { at: new Date().toISOString(), folders: [] };
+  const dirs = [];
+  for (const [kind, base] of [['audio', 'אודיו'], ['video', 'וידאו']]) {
+    const n = Math.max(1, Number(folders[kind]?.n) || 1);
+    for (let k = 1; k <= n; k++) dirs.push(k <= 1 ? base : base + '_' + k);
+  }
+  for (const d of dirs) {
+    const u = new URL(p.YEMOT_API_BASE + '/GetIVR2Dir'); u.searchParams.set('token', p.yemotApiKey()); u.searchParams.set('path', 'ivr2:/' + d);
+    const j = await (await fetch(u, { signal: AbortSignal.timeout(30000) })).json().catch(e => ({ error: String(e?.message || e).slice(0, 80) }));
+    const clean = o => Object.fromEntries(Object.entries(o || {}).filter(([k]) => !/token|key|pass|url/i.test(k)).map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 140) : v]));
+    const files = Array.isArray(j?.files) ? j.files : [];
+    const byExt = {};
+    for (const f of files) { const e = String(f.name || '').split('.').pop().toLowerCase(); byExt[e] = (byExt[e] || 0) + 1; }
+    out.folders.push({ dir: d, status: j?.responseStatus || null, message: j?.message ? String(j.message).slice(0, 120) : null, keys: Object.keys(j || {}).filter(k => !/token/i.test(k)),
+      count: files.length, byExt, otherLists: Object.fromEntries(Object.entries(j || {}).filter(([k, v]) => Array.isArray(v) && k !== 'files').map(([k, v]) => [k, v.length])),
+      newest: files.slice(-12).map(clean), first: files.slice(0, 3).map(clean) });
+  }
   return out;
 }
