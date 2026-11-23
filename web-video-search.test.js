@@ -29,3 +29,21 @@ test('engine failures and missing keys remain safe empty results', async () => {
   const r = await searchWebVideos('episode', { env: {}, fetchImpl: async () => { throw Error('should not call'); } });
   assert.deepEqual(r.items, []);
 });
+
+test('a Serper key with no credits is skipped and the backup engines answer at once', async () => {
+  const { searchWebVideos } = await import('./web-video-search.js');
+  let serperCalls = 0, lang = 0;
+  const fetchImpl = async (url) => {
+    if (String(url).includes('serper.dev')) { serperCalls++; return new Response('{"message":"Not enough credits"}', { status: 400 }); }
+    if (String(url).includes('langsearch')) { lang++; return new Response(JSON.stringify({ data: { webPages: { value: [{ url: 'https://example.org/shiur/1', name: 'שיעור' }] } } }), { status: 200 }); }
+    return new Response('{}', { status: 500 });
+  };
+  const env = { SERPER_API_KEY: 'k-test-spent', LANGSEARCH_API_KEY: 'l' };
+  const a = await searchWebVideos('שיעור בדיקה', { env, fetchImpl });
+  assert.ok(a.items.length >= 1);
+  assert.ok(lang > 0);
+  const first = serperCalls;
+  const b = await searchWebVideos('שיעור בדיקה שני', { env, fetchImpl });
+  assert.equal(serperCalls, first, 'the spent key is not called again');
+  assert.ok(b.items.length >= 1);
+});

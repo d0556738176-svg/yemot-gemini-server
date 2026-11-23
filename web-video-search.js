@@ -11,16 +11,29 @@ const SKIP = /(?:wikipedia\.org|wikimedia\.org|google\.[a-z.]+\/(?:search|maps)|
 const clean = t => String(t || '').replace(/\s*[-|–]\s*(YouTube|Vimeo)\s*$/i, '').replace(/\s+/g, ' ').trim();
 const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 
+// Owner, 23.11: when a key's credits run out, the search moves on by itself
+// (next key, then the backup engines). A key that said "no credits" or
+// "refused" is skipped for 30 minutes, so later searches go straight to the
+// backups instead of waiting on it; then it is tried again (a new month or a
+// top-up brings it back with no manual step).
+const serperSpent = new Map();
+export const serperState = () => ({ keys: serperSpent.size, spentNow: [...serperSpent.values()].filter(t => t > Date.now()).length });
 async function serper(path, body, env, fetchImpl, timeoutMs) {
   const keys = Object.keys(env).filter(k => /^SERPER_API_KEY(_\w+)?$/.test(k)).sort().map(k => String(env[k] || '').trim()).filter(Boolean);
   for (const key of keys) {
+    if ((serperSpent.get(key) || 0) > Date.now()) continue;
     try {
       const r = await fetchImpl('https://google.serper.dev/' + path, {
         method: 'POST', signal: AbortSignal.timeout(timeoutMs),
         headers: { 'X-API-KEY': key, 'content-type': 'application/json' }, body: JSON.stringify(body)
       });
-      if (r.status === 401 || r.status === 403 || r.status === 429) continue; // next key
-      if (!r.ok) return null;
+      if (r.status === 401 || r.status === 403 || r.status === 429) { serperSpent.set(key, Date.now() + 30 * 60000); continue; } // next key
+      if (!r.ok) {
+        const t = await r.text().catch(() => '');
+        if (/credit|quota|limit|balance/i.test(t)) { serperSpent.set(key, Date.now() + 30 * 60000); continue; } // used up: next key
+        return null;
+      }
+      serperSpent.delete(key);
       return await r.json();
     } catch { /* next key */ }
   }
@@ -172,7 +185,7 @@ export async function searchWebVideos(query, { env = process.env, fetchImpl = fe
   // Video results first, then pages that look like they hold media; the
   // original order of each engine is kept within the same weight.
   const items = out.map((x, i) => ({ ...x, i })).sort((a, b) => b.weight - a.weight || a.i - b.i).slice(0, max).map(({ i, weight, ...x }) => x);
-  const engines = { videos: !!vids?.videos?.length, web: !!web?.organic?.length, tavily: !!tv?.results?.length, ...(backups ? { backups } : {}) };
+  const engines = { serperSpent: serperState().spentNow, videos: !!vids?.videos?.length, web: !!web?.organic?.length, tavily: !!tv?.results?.length, ...(backups ? { backups } : {}) };
   searchStatus.push({ at: new Date().toISOString(), items: items.length, engines });
   if (searchStatus.length > 30) searchStatus.shift();
   return { items, engines };
