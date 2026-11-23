@@ -118,6 +118,7 @@ const NAMED_SITES = [
   [/(?:^|\s)ב?(?:טוויטר|אקס|twitter)(?=\s|$)/i, 'x.com'], [/(?:^|\s)ב?(?:סאונדקלאוד|סאונד קלאוד|soundcloud)(?=\s|$)/i, 'soundcloud.com'],
   [/(?:^|\s)ב?(?:וימאו|vimeo)(?=\s|$)/i, 'vimeo.com'], [/(?:^|\s)ב?(?:דיילימושן|dailymotion)(?=\s|$)/i, 'dailymotion.com'],
   [/(?:^|\s)ב?(?:מאקו|mako)(?=\s|$)/i, 'mako.co.il'], [/(?:^|\s)ב?(?:הידברות)(?=\s|$)/i, 'hidabroot.org'],
+  [/(?:^|\s)(?:ב|מ)?(?:פרוג|prog)(?=\s|$)/i, 'prog.co.il'], [/(?:^|\s)מ?(?:הידברות)(?=\s|$)/i, 'hidabroot.org'],
 ];
 export function namedSite(query) {
   for (const [re, d] of NAMED_SITES) if (re.test(query)) { const rest = query.replace(re, ' ').replace(/\s+/g, ' ').trim(); if (rest) return { site: d, words: rest }; }
