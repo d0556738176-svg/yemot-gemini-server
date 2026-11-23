@@ -16,7 +16,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
 import { keySlots, keysFor, withKeys, keyReport, isDeadKey, markDeadKey } from './key-slots.js';
 import { currentThread, appendTurn, newThread, selectThread, listThreads, threadContext, spokenWhen, titleOf } from './conversation-threads.js';
-import { ext3Turn, parseKeyOptions, spokenDuration, toMaleSelf, confirmFor, cleanTitle } from './ext3-brain.js';
+import { ext3Turn, parseKeyOptions, spokenDuration, toMaleSelf, confirmFor, cleanTitle, ytdlpSearch } from './ext3-brain.js';
 import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
 import { searchYouTubeVideos } from './youtube-ivr.js';
@@ -6188,7 +6188,9 @@ const songGenerateText = async prompt => {
 };
 const songCallHandler = createSongCallHandler({
   yemotApi, transcribePhoneAudio, generateText: songGenerateText,
-  sanitizeForYemot, withTimeout, getCallerNumber, logDetailedError
+  sanitizeForYemot, withTimeout, getCallerNumber, logDetailedError,
+  // Extension 4, key 3: the YouTube song he names, found free with yt-dlp.
+  searchYouTube: q => ytdlpSearch([q], { count: 5 })
 });
 app.post('/song-worker/callback', rateLimit(60, 60 * 1000, 'song-worker'), express.raw({ type: () => true, limit: '100mb' }), handleWorkerCallback);
 app.get('/health/songs', rateLimit(10, 60 * 1000, 'song-health'), (req, res) => res.json({ ok: true, cloudWorker: isCloudWorkerConfigured(), ...getSongProviderHealth() }));

@@ -25,6 +25,44 @@ export function waitMessage({ title, elapsedSec, stage, first }) {
     '. ממשיכים לחכות. ליציאה לתפריט הראשי הקישו אפס.';
 }
 
+// Owner, 23.11: extension 4 as a menu. 1 = by topic, 2 = by your own lyrics,
+// 3 = a new version of a YouTube song; then voice, style and length, each
+// said back with 1 = confirm / 2 = again. The engine itself is unchanged: the
+// choices become the request it already understands.
+export const SONG_KINDS = { '1': 'לפי נושא', '2': 'לפי מילים שלך', '3': 'גרסה חדשה לשיר מיוטיוב' };
+export const SONG_VOICES = [
+  { key: '1', name: 'זמר גבר', ask: 'בקול של זמר גבר' },
+  { key: '2', name: 'ילד', ask: 'בקול של ילד' },
+  { key: '3', name: 'מקהלת גברים', ask: 'בשירה של מקהלה' },
+  { key: '4', name: 'מקהלת ילדים', ask: 'בשירה של מקהלת ילדים' },
+  { key: '5', name: 'בלי שירה, רק נגינה', ask: 'בלי שירה, נגינה בלבד' }
+];
+export const SONG_STYLES = [
+  { key: '1', name: 'רגוע', ask: 'בסגנון רגוע ושליו, קצב איטי, פסנתר וגיטרה אקוסטית' },
+  { key: '2', name: 'שמח וקצבי', ask: 'בסגנון שמח וקצבי, מתאים לריקוד' },
+  { key: '3', name: 'סוער ועוצמתי', ask: 'בסגנון סוער ועוצמתי, תופים חזקים וגיטרות חשמליות' },
+  { key: '4', name: 'ראפ', ask: 'בסגנון ראפ, ביט היפ הופ, שירה מדוברת וקצבית' },
+  { key: '5', name: 'חסידי', ask: 'בסגנון חסידי שמח, כלי נשיפה וכינור' },
+  { key: '6', name: 'מזרחי', ask: 'בסגנון מזרחי, עוד, כלי מיתר וסלסולים' },
+  { key: '7', name: 'בלדה מרגשת', ask: 'בסגנון בלדה מרגשת, כלי מיתר ופסנתר' },
+  { key: '8', name: 'פופ', ask: 'בסגנון פופ קליט ומודרני' }
+];
+export const SONG_MINUTES = ['1', '2', '3', '4'];
+const minutesText = m => ({ '1': 'דקה אחת', '2': 'שתי דקות', '3': 'שלוש דקות', '4': 'ארבע דקות' })[m] || 'דקה אחת';
+
+/** The request the engine already understands, built from the menu choices. */
+export function buildSongPrompt({ kind, text = '', ytTitle = '', voice, style, minutes }) {
+  const v = SONG_VOICES.find(x => x.key === voice) || SONG_VOICES[0];
+  const st = SONG_STYLES.find(x => x.key === style) || SONG_STYLES[0];
+  const secs = Math.max(30, Math.min(240, Number(minutes || 1) * 60));
+  const what = kind === '2'
+    ? 'שיר עם המילים שהמתקשר הכתיב, בדיוק כפי שנאמרו: ' + text
+    : kind === '3'
+      ? 'קאבר: גרסה חדשה בהשראת השיר "' + ytTitle + '" מיוטיוב, עם מילים חדשות ומקוריות' + (text ? ' בנושא: ' + text : ' באותו נושא כללי ובאותה אווירה')
+      : 'שיר על הנושא: ' + text;
+  return [what, v.ask, st.ask, 'אורך השיר: ' + minutesText(String(minutes)) + ' (' + secs + ' שניות), duration_seconds=' + secs + '.'].join('. ');
+}
+
 export function createSongCallHandler({
   yemotApi,
   transcribePhoneAudio,
@@ -32,7 +70,8 @@ export function createSongCallHandler({
   sanitizeForYemot,
   withTimeout,
   getCallerNumber,
-  logDetailedError
+  logDetailedError,
+  searchYouTube = null
 }) {
   return async function songCallHandler(call) {
     const callId = String(call?.callId || call?.values?.ApiCallId || ('song-' + Date.now()));
@@ -45,23 +84,121 @@ export function createSongCallHandler({
     let clarificationCount = 0;
     warmMusicEngine();
 
+    // ---- the menu (owner, 23.11) ----
+    const tap = async (text, allowed, wait = 10) => String(await call.read([{ type: 'text', data: say(text) }], 'tap', {
+      max_digits: 1, min_digits: 1, sec_wait: wait, allow_empty: true, empty_val: 'None', typing_playback_mode: 'No',
+      digits_allowed: [...allowed, '*'], timeout: 10 * 60 * 1000 }) || 'None').trim();
+    const record = async text => {
+      const path = await call.read([{ type: 'text', data: say(text) }], 'record', { min_length: 1, max_length: 90, no_confirm_menu: true, timeout: 10 * 60 * 1000 });
+      if (!path || path === 'None') return '';
+      const r = await withTimeout(yemotApi.download_file('ivr2:' + path), Number(process.env.REQUEST_TIMEOUT_MS || 30000), 'song menu recording download');
+      return String(await transcribePhoneAudio(r.data) || '').trim();
+    };
+    // Choose from a list, say it back, 1 = confirm, 2 = choose again.
+    const choose = async (question, list) => {
+      for (let round = 0; round < 6; round++) {
+        const k = await tap(question + ' ' + list.map(x => x.name + ' הקש ' + x.key).join(', ') + '.', list.map(x => x.key));
+        if (k === '*') return '*';
+        const pick = list.find(x => x.key === k);
+        if (!pick) continue;
+        const c = await tap('בחרת: ' + pick.name + '. לאישור הקש 1, לבחירה מחדש הקש 2.', ['1', '2']);
+        if (c === '*') return '*';
+        if (c === '1') return pick.key;
+      }
+      return list[0].key;
+    };
+    // Record, say back what was understood, 1 = confirm, 2 = record again.
+    const recordConfirmed = async (ask, sayBack) => {
+      for (let round = 0; round < 5; round++) {
+        const t = await record(ask + ' בסיום הדיבור הקש סולמית.');
+        if (t.length < 2) { ask = 'לא שמעתי. ' + ask; continue; }
+        const c = await tap(sayBack(t) + ' לאישור הקש 1, לביטול והקלטה מחדש הקש 2.', ['1', '2']);
+        if (c === '*') return '*';
+        if (c === '1') return t;
+      }
+      return '';
+    };
+    async function songMenu() {
+      let step = 'kind', kind = '', text = '', ytTitle = '', voice = '', style = '', minutes = '';
+      for (let guard = 0; guard < 40; guard++) {
+        if (step === 'kind') {
+          const k = await tap('ברוכים הבאים ליוצר השירים. ליצירת שיר לפי נושא הקש 1. לשיר לפי מילים שלך הקש 2. לגרסה חדשה לשיר מיוטיוב הקש 3.', ['1', '2', '3'], 12);
+          if (k === '*') return null;
+          if (!SONG_KINDS[k]) continue;
+          kind = k; step = 'content'; continue;
+        }
+        if (step === 'content') {
+          if (kind === '1') {
+            const t = await recordConfirmed('אמור על מה יהיה השיר.', t => 'הנושא שבחרת: ' + t + '.');
+            if (t === '*' || !t) { step = 'kind'; continue; }
+            text = t;
+          } else if (kind === '2') {
+            const t = await recordConfirmed('אמור את מילות השיר, לאט וברור.', t => 'המילים שהבנתי: ' + t + '.');
+            if (t === '*' || !t) { step = 'kind'; continue; }
+            text = t;
+          } else {
+            let found = '';
+            for (let r = 0; r < 4 && !found; r++) {
+              const q = await record('אמור את שם השיר ואת שם הזמר. בסיום הקש סולמית.');
+              if (q.length < 2) continue;
+              let title = q;
+              if (searchYouTube) {
+                const res = await searchYouTube(q).catch(() => []);
+                if (res?.[0]?.title) title = res[0].title;
+              }
+              const c = await tap('מצאתי: ' + title + '. לאישור הקש 1, לחיפוש מחדש הקש 2.', ['1', '2']);
+              if (c === '*') break;
+              if (c === '1') found = title;
+            }
+            if (!found) { step = 'kind'; continue; }
+            ytTitle = found;
+            const t = await tap('על מה יהיו המילים החדשות? להקלטת נושא הקש 1. להשאיר את אותו נושא כללי הקש 2.', ['1', '2']);
+            if (t === '1') { const tt = await recordConfirmed('אמור את הנושא למילים החדשות.', x => 'הנושא שבחרת: ' + x + '.'); if (tt && tt !== '*') text = tt; }
+          }
+          step = 'voice'; continue;
+        }
+        if (step === 'voice') { const v = await choose('באיזה קול?', SONG_VOICES); if (v === '*') { step = 'content'; continue; } voice = v; step = 'style'; continue; }
+        if (step === 'style') { const v = await choose('באיזה סגנון?', SONG_STYLES); if (v === '*') { step = 'voice'; continue; } style = v; step = 'length'; continue; }
+        if (step === 'length') {
+          const m = await choose('באיזה אורך?', SONG_MINUTES.map(x => ({ key: x, name: minutesText(x) })));
+          if (m === '*') { step = 'style'; continue; }
+          minutes = m; step = 'sum'; continue;
+        }
+        if (step === 'sum') {
+          const v = SONG_VOICES.find(x => x.key === voice), st = SONG_STYLES.find(x => x.key === style);
+          const what = kind === '3' ? 'גרסה חדשה לשיר ' + ytTitle + (text ? ', בנושא ' + text : '') : kind === '2' ? 'שיר עם המילים שלך' : 'שיר על ' + text;
+          const c = await tap('לסיכום: ' + what + ', ' + v.name + ', בסגנון ' + st.name + ', באורך ' + minutesText(minutes) + '. ליצירת השיר הקש 1. להתחלה מחדש הקש 2.', ['1', '2'], 12);
+          if (c === '1') return buildSongPrompt({ kind, text, ytTitle, voice, style, minutes });
+          if (c === '*') { step = 'length'; continue; }
+          if (c === '2') { step = 'kind'; continue; }
+        }
+      }
+      return null;
+    }
+
     try {
+      const menuPrompt = await songMenu();
+      if (!menuPrompt) return call.go_to_folder('/');
+      let fromMenu = menuPrompt;
       while (true) {
-        const recordPath = await call.read(
+        let recordPath = null;
+        if (!fromMenu) recordPath = await call.read(
           [{ type: 'text', data: say(prompt) }],
           'record',
           { min_length: 1, max_length: 60, no_confirm_menu: true, timeout: 10 * 60 * 1000 }
         );
-        if (!recordPath || recordPath === 'None') {
-          return call.id_list_message([{ type: 'text', data: 'לא נקלטה בקשה. אפשר להתקשר שוב ולנסות ליצור שיר.' }]);
+        if (fromMenu) { transcript = fromMenu; fromMenu = ''; }
+        else {
+          if (!recordPath || recordPath === 'None') {
+            return call.id_list_message([{ type: 'text', data: 'לא נקלטה בקשה. אפשר להתקשר שוב ולנסות ליצור שיר.' }]);
+          }
+          const response = await withTimeout(
+            yemotApi.download_file('ivr2:' + recordPath),
+            Number(process.env.REQUEST_TIMEOUT_MS || 30000),
+            'song request recording download'
+          );
+          transcript = String(await transcribePhoneAudio(response.data) || '').trim();
         }
-
-        const response = await withTimeout(
-          yemotApi.download_file('ivr2:' + recordPath),
-          Number(process.env.REQUEST_TIMEOUT_MS || 30000),
-          'song request recording download'
-        );
-        transcript = String(await transcribePhoneAudio(response.data) || '').trim();
         if (awaitingClarification && pendingRequest) {
           transcript = pendingRequest + '\nהעדפה נוספת של המתקשר: ' + transcript;
           pendingRequest = '';
