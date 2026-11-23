@@ -4421,13 +4421,15 @@ async function youtubeCallHandler(call) {
       q=typed;
     } else {
       for(let tries=0;!q&&tries<3;tries++) {
-        const rec=await call.read([{type:'text',data:sanitizeForYemot(tries?'לא שמעתי טוב. אמור שוב מה לחפש, ולסיום הקש סולמית.':'חיפוש בכל האתרים באינטרנט. אמור איזה סרטון, הקלטה או שידור חי תרצה לשמוע או לראות, ולסיום ההקלטה הקש סולמית.')}],
-          'record',{min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000});
-        if(!rec||rec==='None') return {say:'לא נקלטה בקשה.'};
         try {
-          const audio=await withTimeout(yemotApi.download_file('ivr2:'+rec),REQUEST_TIMEOUT_MS,'web search recording download');
-          q=String(await transcribePhoneAudio(audio.data)||'').trim()||null;
-        } catch(e) { console.warn('[WEB_SEARCH] transcription failed',{status:geminiErrorStatus(e)}); }
+          const audio=await branch2Voice.capture(call,
+            [{type:'text',data:sanitizeForYemot(tries?'לא שמעתי טוב. אמור שוב מה לחפש, ולסיום הקש סולמית.':'חיפוש בכל האתרים באינטרנט. אמור איזה סרטון, הקלטה או שידור חי תרצה לשמוע או לראות, ולסיום ההקלטה הקש סולמית.')}],
+            ++tapNo);
+          q=String(await transcribePhoneAudio(audio)||'').trim()||null;
+        } catch(e) {
+          if(e instanceof ExitError || isCallerHangupError(e)) throw e;
+          console.warn('[WEB_SEARCH] transcription failed',{status:geminiErrorStatus(e),code:e?.code||'transcription',message:String(e?.message||e).slice(0,120)});
+        }
       }
       if(!q) return {say:'לא הצלחתי להבין את הבקשה.'};
       console.info('[WEB_SEARCH] spoken',{q:q.slice(0,120)});
