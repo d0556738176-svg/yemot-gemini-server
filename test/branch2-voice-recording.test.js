@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createVoiceRecorder, recordingFolder, validRecording} from '../branch2-voice-recording.js';
+import {createVoiceRecorder, recordingFolder, validRecording, repairRecordingWav} from '../branch2-voice-recording.js';
 
 function wav() {
   const b=Buffer.alloc(16044); b.write('RIFF'); b.writeUInt32LE(b.length-8,4);
-  b.write('WAVE',8); return b;
+  b.write('WAVE',8); b.write('fmt ',12); b.writeUInt32LE(16,16);
+  b.writeUInt16LE(1,20); b.writeUInt16LE(1,22); b.writeUInt32LE(8000,24);
+  b.writeUInt32LE(16000,28); b.writeUInt16LE(2,32); b.writeUInt16LE(16,34);
+  b.write('data',36); b.writeUInt32LE(16000,40); return b;
 }
 function setup(download=async()=>({data:wav()})) {
   const calls=[], folders=new Set();
@@ -48,4 +51,14 @@ test('a returned path outside this capture is neither downloaded nor deleted',as
 test('hourly folder changes and empty WAV/JSON are rejected',()=>{
   assert.notEqual(recordingFolder(new Date('2026-11-23T10:00Z')),recordingFolder(new Date('2026-11-23T11:00Z')));
   assert.equal(validRecording(Buffer.alloc(44)),false);assert.equal(validRecording('{}'),false);
+});
+test('repairs the live zero-data WAV header without changing samples; valid files remain untouched',async()=>{
+  const original=wav(); original.writeUInt32LE(52,4); original.writeUInt32LE(0,40);
+  assert.equal(validRecording(original),false);
+  const repaired=repairRecordingWav(original);
+  assert.ok(validRecording(repaired)); assert.deepEqual(repaired.subarray(44),original.subarray(44));
+  assert.equal(original.readUInt32LE(40),0);
+  const good=wav(); assert.equal(repairRecordingWav(good),good);
+  const x=setup(async()=>({data:original}));
+  assert.ok(validRecording(await x.r.capture(x.call,[{}],1)));
 });
