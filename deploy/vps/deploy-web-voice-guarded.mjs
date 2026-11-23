@@ -21,7 +21,7 @@ const lockHash=()=>createHash('sha256').update(readFileSync('/opt/yemot/ext2/pac
 const originalLock=lockHash();
 git('fetch','-q','origin','work/branch-2-confirm-yes-20261025');
 const want=git('rev-parse','origin/work/branch-2-confirm-yes-20261025');
-if(want!=='7fd60759920e4e5bf3642fae70c3c70363cb64b9')throw Error('Branch advanced; deployment deferred for review');
+if(want!=='e6ff0de1f65c7252bd2b47d30c07f7ae75e917e6')throw Error('Branch advanced; deployment deferred for review');
 if(git('diff','--name-only','HEAD',want).split('\n').includes('package-lock.json'))throw Error('Deployment would change local dependency lock');
 git('merge','--ff-only',want);
 if(lockHash()!==originalLock)throw Error('Dependency lock changed unexpectedly');
