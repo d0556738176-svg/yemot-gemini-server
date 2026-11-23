@@ -30,15 +30,44 @@ export const TV_CHANNELS = Object.freeze([
 // extension 5, live only (no replays), in the owner's order. The key 'rN' is
 // the station's own (cache/status), 'digit' is what the caller presses.
 export const RADIO_CHANNELS = Object.freeze([
-  { key: 'r1', digit: '1', title: 'קול חי', pages: ['https://radiomood.co.il/stations/kol-chai', 'https://www.93fm.co.il/'] },
-  { key: 'r2', digit: '2', title: 'קול פליי', pages: ['https://radiomood.co.il/stations/kol-play'] },
-  { key: 'r3', digit: '3', title: 'קול חי מיוזיק', pages: ['https://radiomood.co.il/stations/kol-chai-music'] },
-  { key: 'r4', digit: '4', title: 'קול ברמה', pages: ['https://kol-barama.co.il/live/'] },
-  { key: 'r5', digit: '5', title: 'כאן ב', pages: ['https://radiomood.co.il/stations/kan-bet', 'https://www.kan.org.il/live/radio.aspx?stationid=3'] },
-  { key: 'r6', digit: '6', title: '103 אף אם', pages: ['https://radiomood.co.il/stations/103fm', 'https://103fm.maariv.co.il/'] },
-  { key: 'r7', digit: '7', title: 'גלי ישראל', pages: ['https://radiomood.co.il/stations/galei-israel'] },
-  { key: 'r8', digit: '8', title: 'גלי צהל', pages: ['https://radiomood.co.il/stations/galei-tzahal', 'https://glz.co.il/'] },
+  { key: 'r1', digit: '1', title: 'קול חי', rm: { slug: 'kol-chai', name: 'קול חי' }, pages: ['https://www.93fm.co.il/'] },
+  { key: 'r2', digit: '2', title: 'קול פליי', rm: { slug: 'kol-play', name: 'קול פליי' }, pages: [] },
+  { key: 'r3', digit: '3', title: 'קול חי מיוזיק', rm: { slug: 'kol-chai-music', name: 'קול חי מיוזיק' }, pages: [] },
+  { key: 'r4', digit: '4', title: 'קול ברמה', rm: { slug: 'kol-barama', name: 'קול ברמה' }, pages: ['https://kol-barama.co.il/live/'] },
+  { key: 'r5', digit: '5', title: 'כאן ב', rm: { slug: 'kan-bet', name: 'כאן ב' }, pages: [] },
+  { key: 'r6', digit: '6', title: '103 אף אם', rm: { slug: '103fm', name: '103' }, pages: ['https://103fm.maariv.co.il/include/OnLineView.aspx'] },
+  { key: 'r7', digit: '7', title: 'גלי ישראל', rm: { slug: 'galei-israel', name: 'גלי ישראל' }, pages: [] },
+  { key: 'r8', digit: '8', title: 'גלי צהל', rm: { slug: 'galei-tzahal', name: 'גלי צהל' }, pages: ['https://glzwizzlv.bynetcdn.com/glz_mp3'] },
 ]);
+
+// radiomood.co.il plays every station through its own relay,
+// /api/radio-stream?stationId=stationNNN. Its station pages start the site's
+// default station (station001) in the player, so the page's player must not
+// be used: the station number is taken from the site's own list by the
+// station's name (21.11: all stations had come out as station001).
+export const rmNorm = t => String(t || '').replace(/\([^)]*\)/g, '').replace(/רדיו|fm|אף אם|["'׳״`\s.\-]/gi, '').toLowerCase();
+export function rmStations(html) {
+  const flat = String(html || '').replace(/\\+/g, '');
+  const out = new Map();
+  for (const m of flat.matchAll(/"id":"(station\d+)","name":"(.*?)","imagePath"/g)) if (!out.has(m[1])) out.set(m[1], m[2]);
+  return [...out].map(([id, name]) => ({ id, name }));
+}
+export function rmPick(list, name) {
+  const want = rmNorm(name);
+  return list.find(s => rmNorm(s.name) === want) || null;
+}
+const rmCache = { at: 0, list: [] };
+async function rmStreamFor(ch, deps) {
+  if (!ch.rm) return null;
+  if (Date.now() - rmCache.at > 6 * 3600 * 1000 || !rmCache.list.length) {
+    const get = deps.fetchText || (async u => { const r = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36' }, signal: AbortSignal.timeout(15000) }); return r.ok ? r.text() : ''; });
+    const list = rmStations(await get('https://radiomood.co.il/stations/' + ch.rm.slug).catch(() => ''));
+    if (list.length) Object.assign(rmCache, { at: Date.now(), list });
+  }
+  const st = rmPick(rmCache.list, ch.rm.name);
+  if (!st) return null;
+  return { id: st.id, name: st.name, urls: [0, 1].map(i => 'https://radiomood.co.il/api/radio-stream?stationId=' + st.id + '&sourceIndex=' + i) };
+}
 
 // Speech-friendly phone sound (owner's spec for shiurim/lessons, 18.11): cut
 // the low rumble, gentle noise reduction, loudness with true peak -2 dB.
@@ -75,6 +104,20 @@ export async function findChannelSource(ch, deps, { fresh = false } = {}) {
   const hit = cache.get(ch.key);
   if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit;
   const tried = [];
+  // The owner's own address (channels.txt) first, then the station's own
+  // relay on radiomood by its number, then the station's own pages.
+  const own = (deps.overrides || {})[ch.key] || [];
+  const rmFirst = async () => {
+    const rm = await rmStreamFor(ch, deps).catch(() => null);
+    if (!rm) { if (ch.rm) tried.push('radiomood: ' + ch.rm.name + ' not in the site list'); return null; }
+    for (const u of rm.urls) {
+      const ok = await deps.resolveStream(u, {}).catch(() => null);
+      if (ok) { const r = { page: u, at: Date.now(), how: 'radiomood', station: rm.id + ' ' + rm.name, impersonate: false, referer: 'https://radiomood.co.il/stations/' + ch.rm.slug }; cache.set(ch.key, r); return r; }
+    }
+    tried.push('radiomood ' + rm.id + ' (no sound)');
+    return null;
+  };
+  if (ch.rm && !own.length) { const r = await rmFirst(); if (r) return r; }
   for (const page of candidatesFor(ch, deps.overrides || {})) {
     const src = await deps.resolveStream(page, { impersonate: true }).catch(() => null);
     if (src) { const r = { page, at: Date.now(), how: 'site', impersonate: true }; cache.set(ch.key, r); return r; }
@@ -82,6 +125,7 @@ export async function findChannelSource(ch, deps, { fresh = false } = {}) {
     if (deps.inspect) {
       let why = null;
       const it = await deps.inspect({ url: page, title: ch.title }, { timeoutMs: 40000, onFailure: f => { why = f?.reason || null; } }).catch(() => null);
+      if (it?.url && /radiomood\.co\.il\/api\/radio-stream/.test(it.url)) { tried.push(page + ' (site default player, not used)'); continue; }
       if (it?.url && it.hasAudio && (it.live || !it.durationSec)) {
         // A site's own relay link that carries the station's address (e.g.
         // radiomood.co.il/api/radio-stream?url=...): the station's own stream
@@ -101,6 +145,7 @@ export async function findChannelSource(ch, deps, { fresh = false } = {}) {
       tried.push(page + (why ? ' (' + why + ')' : it ? ' (not live audio)' : ' (no player found)'));
     } else tried.push(page);
   }
+  if (ch.rm && own.length) { const r = await rmFirst(); if (r) return r; }
   if (!ch.yt) { cache.delete(ch.key); return { page: null, tried }; }
   // YouTube "live now": the main search, then the channel's other names.
   let live = [], yt = null; const seen = [];
@@ -174,7 +219,9 @@ export async function checkRadio(deps, onRow = () => {}) {
   const out = [];
   for (const ch of RADIO_CHANNELS) {
     const r = await findChannelSource(ch, deps, { fresh: true }).catch(e => ({ page: null, reason: String(e?.message || e).slice(0, 100) }));
-    const row = { key: ch.key, digit: ch.digit, title: ch.title, ok: !!r.page, page: r.page || null, via: r.via || undefined, from: r.from || undefined, how: r.how || null, tried: r.tried || undefined, at: new Date().toISOString() };
+    let sound;
+    if (r.page && deps.probe) { const pr = await deps.probe(r.page, { referer: r.referer || null }).catch(e => ({ ok: false, reason: String(e?.message || e).slice(0, 80) })); sound = { ok: !!pr?.ok, sec: pr?.audioSec ?? null }; }
+    const row = { key: ch.key, digit: ch.digit, title: ch.title, ok: !!r.page && (!sound || sound.ok), sound, page: r.page || null, station: r.station || undefined, via: r.via || undefined, from: r.from || undefined, how: r.how || null, tried: r.tried || undefined, at: new Date().toISOString() };
     lastCheck.set(ch.key, row); out.push(row); onRow(row);
   }
   return out;

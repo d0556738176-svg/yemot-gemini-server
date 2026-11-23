@@ -5730,7 +5730,10 @@ app.get('/tv-source-info', rateLimit(6, 60 * 1000, 'tv-source-info'), async (req
 app.get('/radio-check', rateLimit(20, 60 * 1000, 'radio-check'), async (req,res)=>{
   const TV=await import('./branch2-tv.js'); const { mainMenuStatus }=await import('./tv-ext5.js');
   // Runs in the background (a few minutes); open again for the results.
-  if(req.query.start||TV.radioCheck.status==='idle') TV.startRadioCheck(await tvDeps());
+  if(req.query.start||TV.radioCheck.status==='idle') {
+    const { probeStream }=await import('./live-relay.js');
+    TV.startRadioCheck({...(await tvDeps()), probe:(u,o)=>probeStream(u,{...o,af:'anull',sec:6})});
+  }
   res.json({ mainMenu: mainMenuStatus, ...TV.radioCheck });
 });
 // Read-only (owner, 21.11, extension 10): what a radio station's page and its
