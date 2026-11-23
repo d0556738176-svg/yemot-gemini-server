@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { dirname } from 'node:path';
 import ffmpegPath from './ffmpeg-path.js';
 import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 import { generateWithFalAceStep, isFalConfigured } from './song-engine-fal.js';
@@ -28,7 +30,29 @@ const MAX_QUEUE_SIZE = Math.max(0, Math.min(10, Number(process.env.SONG_MAX_QUEU
 
 function log(event, details = {}) {
   console.info('[SONG]', event, details);
+  if (/FAILED|ERROR|READY|REQUEST|SELECTED|TIMED|SKIPPED/.test(event)) noteSongEvent(event, details);
 }
+// Owner, 23.11: the last song events (no caller data), kept across restarts,
+// shown in /health/songs so a failure's real reason can be read at once.
+const SONG_EVENTS_FILE = process.env.SONG_EVENTS_FILE || '/var/lib/yemot-data/song-events.json';
+let songEvents = null;
+function loadSongEvents() {
+  if (songEvents) return songEvents;
+  try { songEvents = JSON.parse(readFileSync(SONG_EVENTS_FILE, 'utf8')); if (!Array.isArray(songEvents)) songEvents = []; } catch { songEvents = []; }
+  return songEvents;
+}
+export function noteSongEvent(event, details = {}) {
+  const list = loadSongEvents();
+  const safe = {};
+  for (const [k, v] of Object.entries(details || {})) {
+    if (/phone|caller|userKey|prompt|lyrics|token|key/i.test(k)) continue;
+    safe[k] = typeof v === 'string' ? v.slice(0, 200) : v;
+  }
+  list.push({ at: new Date().toISOString(), event, ...safe });
+  if (list.length > 40) list.splice(0, list.length - 40);
+  try { mkdirSync(dirname(SONG_EVENTS_FILE), { recursive: true }); writeFileSync(SONG_EVENTS_FILE + '.tmp', JSON.stringify(list)); renameSync(SONG_EVENTS_FILE + '.tmp', SONG_EVENTS_FILE); } catch {}
+}
+export function recentSongEvents() { return loadSongEvents().slice(-25); }
 
 function statusOf(provider) {
   const state = providerHealth.get(provider);
@@ -113,6 +137,19 @@ function parseJsonObject(value) {
   if (match) {
     try {
       const parsed = JSON.parse(match[0]);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch {}
+    // Owner, 23.11: long lyrics often come back with real line breaks inside
+    // the "lyrics" string, which is not valid JSON; they are escaped here.
+    let inStr = false, esc = false, out = '';
+    for (const ch of match[0]) {
+      if (esc) { out += ch; esc = false; continue; }
+      if (ch === '\\') { out += ch; esc = true; continue; }
+      if (ch === '"') inStr = !inStr;
+      out += inStr && ch === '\n' ? '\\n' : inStr && ch === '\r' ? '' : inStr && ch === '\t' ? ' ' : ch;
+    }
+    try {
+      const parsed = JSON.parse(out);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
     } catch {}
   }
@@ -890,14 +927,25 @@ export async function createSong({ prompt, callId = '', userKey = 'unknown', gen
       job.status = 'generating_lyrics';
       log('LYRICS_STARTED', { jobId: job.id });
       onStatus({ status: 'generating_lyrics', jobId: job.id });
-      let llmTimer;
-      let spec;
-      try {
-        spec = await Promise.race([
-          generateSongSpec(request, generateText),
-          new Promise((_, reject) => { llmTimer = setTimeout(() => reject(Object.assign(new Error('Song LLM timed out'), { status: 408 })), 30000); })
-        ]);
-      } finally { clearTimeout(llmTimer); }
+      // Owner, 23.11: longer songs (up to 4 minutes) mean longer lyrics; the
+      // writer gets enough time, and one more try if its answer was unusable.
+      const LLM_MS = Math.max(30000, Math.min(150000, Number(process.env.SONG_LLM_TIMEOUT_MS || 70000)));
+      let spec, lastError;
+      for (let attempt = 1; attempt <= 2 && !spec; attempt++) {
+        let llmTimer;
+        try {
+          spec = await Promise.race([
+            generateSongSpec(request, generateText),
+            new Promise((_, reject) => { llmTimer = setTimeout(() => reject(Object.assign(new Error('Song LLM timed out'), { status: 408 })), LLM_MS); })
+          ]);
+        } catch (e) {
+          lastError = e;
+          if (e?.code === 'NEEDS_CLARIFICATION') throw e;
+          log('LYRICS_FAILED', { jobId: job.id, attempt, message: String(e?.message || e).slice(0, 160) });
+          noteSongEvent('lyrics_failed', { attempt, message: String(e?.message || e).slice(0, 160) });
+        } finally { clearTimeout(llmTimer); }
+      }
+      if (!spec) throw lastError || new Error('Song lyrics failed');
       if (spec.needsClarification) {
         job.status = 'needs_clarification';
         return { needsClarification: true, clarificationQuestion: spec.clarificationQuestion, jobId: job.id };
@@ -922,6 +970,7 @@ export function getSongProviderHealth() {
     huggingFaceSpace: statusOf('huggingface-space'),
     backup: statusOf('backup'),
     activeJobs: activeCount,
+    recent: recentSongEvents(),
     queuedJobs: queue.length
   };
 }

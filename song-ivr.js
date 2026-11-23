@@ -7,7 +7,7 @@
 // made and is saved anyway in extension 7 ("the new songs"). If he stays,
 // the song plays here as soon as it is ready.
 import { ExitError, HangupError, TimeoutError } from 'yemot-router2';
-import { createSong, warmMusicEngine, cloudJobStatus } from './song-generator.js';
+import { createSong, warmMusicEngine, cloudJobStatus, noteSongEvent } from './song-generator.js';
 
 const WAIT_SECONDS = Math.max(10, Math.min(60, Number(process.env.SONG_WAIT_PROMPT_SECONDS || 25)));
 const HANGUP_RE = /hang.?up|disconnected|socket hang up|connection closed/i;
@@ -265,6 +265,7 @@ export function createSongCallHandler({
               ? 'כרגע נוצרים שירים רבים. נסו שוב בעוד כמה דקות.'
               : 'מצטער, הייתה תקלה ביצירת השיר. אפשר לנסות שוב מאוחר יותר.';
           logDetailedError('Song generation', jobError);
+          noteSongEvent('ivr_job_error', { code: jobError.code || '', status: jobError.status || '', message: String(jobError.message || jobError).slice(0, 200) });
           return call.id_list_message([{ type: 'text', data: say(message) }]);
         }
 
@@ -294,6 +295,7 @@ export function createSongCallHandler({
       if (error instanceof ExitError) throw error; // normal end: a message was sent / went to a folder
       if (isHangup(error)) return;
       logDetailedError('Song IVR', error);
+      noteSongEvent('ivr_crash', { message: String(error?.message || error).slice(0, 200), at: String(error?.stack || '').split('\n')[1]?.trim().slice(0, 160) || '' });
       return call.id_list_message([{ type: 'text', data: say('מצטער, הייתה תקלה זמנית ביצירת השיר. אפשר לנסות שוב.') }]);
     }
   };

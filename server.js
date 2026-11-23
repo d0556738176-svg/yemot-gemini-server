@@ -6180,10 +6180,11 @@ function latestYemotValue(query) {
 // posts the finished song back to /song-worker/callback.
 const songGenerateText = async prompt => {
   try {
-    const text = await raceSynthesis(prompt, 25000, { maxTokens: 1800, quality: true });
+    // Owner, 23.11: up to 4-minute songs need room for the whole lyrics.
+    const text = await raceSynthesis(prompt, 30000, { maxTokens: 4000, quality: true, validate: t => /\{[\s\S]*"lyrics"[\s\S]*\}/.test(String(t || '')) });
     if (String(text || '').includes('{')) return String(text);
   } catch (e) { console.warn('[SONG] lyrics via fast providers failed', String(e?.message || e).slice(0, 120)); }
-  const result = await generateWithRetry([{ role: 'user', parts: [{ text: prompt }] }], false, false, 30000);
+  const result = await generateWithRetry([{ role: 'user', parts: [{ text: prompt }] }], false, false, 35000);
   return String(result?.response?.text?.() || '');
 };
 const songCallHandler = createSongCallHandler({

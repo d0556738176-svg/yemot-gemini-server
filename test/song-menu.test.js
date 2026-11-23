@@ -44,3 +44,12 @@ test('a whole call: topic, re-record, voice changed once, style, length, summary
   assert.match(joined, /בחרת: ילד. לאישור הקש 1, לבחירה מחדש הקש 2/);
   assert.match(joined, /לסיכום: שיר על שבת קודש, זמר גבר, בסגנון ראפ, באורך שתי דקות/);
 });
+
+test('lyrics with real line breaks inside the JSON are still read (long songs)', async () => {
+  process.env.SONG_EVENTS_FILE = '/tmp/song-events-test.json';
+  const { generateSongSpec } = await import('../song-generator.js');
+  const raw = '{"title":"שבת","language":"he","genre":"pop","mood":"happy","tempo":"120","duration_seconds":120,"lyrics":"[Verse 1]\nשבת שלום\nשבת המלכה\n[Chorus]\nלכה דודי","music_prompt":"happy pop, adult male lead vocals","needs_clarification":false}';
+  const spec = await generateSongSpec({ prompt: 'שיר על שבת. אורך השיר: שתי דקות' }, async () => raw);
+  assert.match(spec.lyrics, /שבת המלכה/);
+  assert.equal(spec.durationSeconds, 120);
+});
