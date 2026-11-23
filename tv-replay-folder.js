@@ -121,7 +121,9 @@ export async function publishHour(item, io) {
     await fs.writeFile(list, files.map(f => "file '" + f.replace(/'/g, "'\\''") + "'").join('\n'));
     const raw = path.join(tmp, 'hour.raw.wav');
     await new Promise((res, rej) => {
-      const p = spawn(bin, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', raw], { stdio: ['ignore', 'ignore', 'pipe'] });
+      // At most one hour (23.11: a recorder restart inside an hour gave channel 12
+      // two overlapping recordings; the joined hour was too long for Yemot).
+      const p = spawn(bin, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-t', '3600', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', raw], { stdio: ['ignore', 'ignore', 'pipe'] });
       let e = ''; p.stderr.on('data', d => { e = (e + d).slice(-300); });
       p.on('error', rej); p.on('close', c => c === 0 ? res() : rej(new Error('joining the hour failed: ' + e.trim().slice(-160))));
     });
@@ -151,7 +153,7 @@ export async function publishHour(item, io) {
     io.log?.info?.('[TV REPLAY] hour published', { key: ch.key, id, file: number });
     return folder.replace(/^ivr2:/, '');
   } catch (e) {
-    note({ key: ch.key, hour: id, ok: false, error: String(e?.message || e).slice(0, 600) });
+    note({ key: ch.key, hour: id, ok: false, files: files.length, error: String(e?.message || e).slice(0, 600) });
     throw e;
   } finally { await fs.rm(tmp, { recursive: true, force: true }).catch(() => {}); }
 }
