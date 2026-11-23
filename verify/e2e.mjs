@@ -8,7 +8,7 @@ const contains = async run => { if (!WANT || String(run).startsWith(WANT)) retur
 for (let i = 0; i < 100; i++) { const d = await fetch(BASE + '/branch2-diag').then(r => r.json()).catch(() => ({})); if (d.commit && await contains(d.commit)) { console.log('version', d.commit, 'contains', WANT); break; } if (i === 99) process.exit(1); await sleep(20000); }
 const t00 = Date.now(), T = () => '[' + Math.round((Date.now() - t00) / 1000) + 's]';
 const dur = s => { if (!s) return 1e9; let t = 0; const h = s.match(/(\d+)? ?(שעה|שעתיים|שעות)/); if (h) t += h[2] === 'שעה' ? 3600 : h[2] === 'שעתיים' ? 7200 : +h[1] * 3600; const m = s.match(/(\d+)? ?(דקה|דקות)/); if (m) t += m[2] === 'דקה' ? 60 : +m[1] * 60; const x = s.match(/(\d+) שניות/); if (x) t += +x[1]; return t || 1e9; };
-async function call(name, { mode, query, key, minSec = 90, maxSec = 420 }) {
+async function call(name, { mode, query, key, minSec = 90, maxSec = 420, subs = '2' }) {
   console.log('\n===== ' + name);
   const id = 'e2e' + Date.now(); let params = {}, picked = false, keyed = false, result = null, tries = 0, yt = 0;
   for (let i = 0; i < 500; i++) {
@@ -33,7 +33,8 @@ async function call(name, { mode, query, key, minSec = 90, maxSec = 420 }) {
       console.log('   PICK', JSON.stringify(pick)); v = pick?.n || '1'; picked = true;
     }
     else if (!keyed && /הקש 1/.test(s) && /(להשמעה|כשמע)/.test(s) && /הקש 2/.test(s)) { v = key; keyed = true; }
-    else if (/כתובית/.test(s) && /הקש 2/.test(s)) v = '2';
+    else if (/מנוע הגיבוי, שעולה|להורדה מחדש הקש 1/.test(s)) { result = { gate: s.slice(0, 200) }; v = '2'; params = { [name]: v }; break; }
+    else if (/כתובית/.test(s) && /הקש 2/.test(s)) v = subs;
     else if (/בחר שפה|באיזו שפה/.test(s)) v = '1';
     else if (keyed && /התחילה|תישמר|ממשיכה ברקע|אין צורך להמתין|יישמר בתיקיית וידאו/.test(s)) { result = { started: true, text: s.slice(0, 200) }; break; }
     else if (/לבחירה הקש את מספר|האתר לא נתן|לא הצליח/.test(s) && keyed) { result = { failed: s.slice(0, 200) }; break; }
@@ -52,6 +53,10 @@ const a1 = !SC.includes('a1') ? null : await call('YouTube key 1 (audio), long',
 const w1 = !SC.includes('w1') ? null : await call('TikTok key 1 (audio)', { mode: '6', query: 'ניגון חסידי טיקטוק', key: '1', minSec: 30, maxSec: 600 }); runs.push(['Website audio', w1?.id]);
 const w1b = !SC.includes('w1b') ? null : await call('Website key 1 again (should play at once)', { mode: '6', query: 'שיעור הרב זמיר כהן הידברות', key: '1', minSec: 1200, maxSec: 3600 });
 const r0 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
+const ya = !SC.includes('ya') ? null : await call('YouTube key 1 (audio), song', { mode: '2', query: 'ניגון חסידי שמחה', key: '1', minSec: 120, maxSec: 480 }); runs.push(['YouTube song audio', ya?.id]);
+const vs = !SC.includes('vs') ? null : await call('YouTube key 2 (video) WITH Hebrew subtitles', { mode: '2', query: 'סרטון קצר על ירושלים', key: '2', minSec: 60, maxSec: 300, subs: '1' });
+const wh = !SC.includes('wh') ? null : await call('Hidabroot key 1 (audio)', { mode: '6', query: 'שיעור קצר מהידברות', key: '1', minSec: 120, maxSec: 1800 }); runs.push(['Hidabroot audio', wh?.id]);
+const wv = !SC.includes('wv') ? null : await call('Hidabroot key 2 (video)', { mode: '6', query: 'סרטון קצר מהידברות', key: '2', minSec: 60, maxSec: 900 });
 const v1 = !SC.includes('v1') ? null : await call('YouTube key 2 (video)', { mode: '2', query: 'סרטון קצר על הכותל', key: '2', minSec: 60, maxSec: 360 });
 const w2 = !SC.includes('w2') ? null : await call('Website key 2 (video)', { mode: '6', query: 'ארץ נהדרת פרק מאקו', key: '2', minSec: 0, maxSec: 99999 });
 const r1 = await fetch(BASE + '/branch2-saved?recent=1').then(r => r.json()).catch(() => ({}));
