@@ -1,2 +1,63 @@
-{"checkedAt":"2026-11-23T23:23:39.636Z","checkedAtMs":1795476219636,"tavilyKeys":2,"providers":{"tavily_primary":{"configured":true,"ok":false,"ms":244,"status":0,"error":"This request exceeds your plan's set usage limit. Please upgrade your plan or contact support@tavily.com"},"tavily_backup":{"configured":true,"ok":false,"ms":254,"status":0,"error":"This request exceeds your plan's set usage limit. Please upgrade your plan or contact support@tavily.com"},"langsearch":{"configured":true,"ok":false,"ms":3501,"status":408,"error":"LangSearch timed out after 3500ms"},"serper":{"configured":true,"ok":true,"ms":1431,"results":1},"jina":{"configured":true,"ok":true,"ms":811,"chars":156},"firecrawl":{"configured":true,"ok":true,"ms":685,"chars":959},"crawl4ai":{"configured":true,"ok":false,"ms":1530,"status":401,"error":"Crawl4AI v1 HTTP 401: HTTP 401"},"cloudflare":{"configured":true,"ok":false,"ms":611,"status":400,"error":"Cloudflare accounts HTTP 400: Invalid request headers (code 6003) | token rejected: Cloudflare token verify HTTP 400: Invalid request headers (code 6003)"}}}
+main 669f423ff2e5 2026-11-23T23:26:06.916Z
+
+######## alive?
+-- Gemini key1 | gemini-3.8-flash | 429 | 233ms | You exceeded your current quota, please check your plan and 
+OK Gemini key1 | gemini-3.5-flash-lite | 200 | 1192ms | כן
+OK Gemini key1 | gemini-3.1-flash-lite | 200 | 4402ms | כן
+-- Gemini key1 | gemini-3.5-flash | 200 | 905ms | 
+-- Gemini key1 | gemini-3.6-flash | TimeoutError | 20002ms | 
+-- Gemini key2 | gemini-3.8-flash | 429 | 259ms | You exceeded your current quota, please check your plan and 
+-- Gemini key3 | gemini-3.8-flash | 429 | 256ms | You exceeded your current quota, please check your plan and 
+-- Gemini key4 | gemini-3.8-flash | 429 | 297ms | You exceeded your current quota, please check your plan and 
+-- Gemini key5 | gemini-3.8-flash | 503 | 1847ms | This model is currently experiencing high demand. Spikes in 
+-- Gemini key6 | gemini-3.8-flash | 200 | 6477ms | 
+-- Gemini key7 | gemini-3.8-flash | 503 | 1922ms | This model is currently experiencing high demand. Spikes in 
+OK Groq | openai/gpt-oss-120b | 200 | 415ms | כן
+OK Groq | openai/gpt-oss-20b | 200 | 393ms | כן
+OK Groq | qwen/qwen3.8-27b | 200 | 106ms | כן
+OK OpenRouter | openrouter/free | 200 | 1981ms | כן
+-- SambaNova | gpt-oss-120b | 402 | 678ms | A payment method is required. Add one at https://cloud.samba
+-- Cohere | command-a-03-2025 | 429 | 300ms | You are using a Trial key, which is limited to 1000 API call
+
+######## מה פירש רש"י על הפסוק "בראשית ברא אלוקים את השמים ואת הארץ"? מה הוא אומר בדיוק?
+-- Gemini key1 | gemini-3.8-flash | 429 | 298ms | You exceeded your current quota, please check your plan and billing details. For more information on this error, head to
+OK Gemini key1 | gemini-3.5-flash-lite | 200 | 1562ms | רש"י מפרש את הפסוק כך: "ולא בא לפרש סדר הבראשית להורות באיזה יום נבראו שמים וארץ, שקודמים היו או זה נברא תחילה, אלא ללמדך שאם יאומות העולם אומרים ליסטים אתם שכבשתם ארצות הגוים, אתם אומרים להם: כל הארץ של הקב"ה היא, הוא בראה ונתנה לאשר ישר בעיניו, ברצונו נתנה וברצונו נטלה ממנו ולנו נתנה."
+-- Gemini key1 | gemini-3.1-flash-lite | 503 | 3772ms | This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.
+-- Gemini key1 | gemini-3.5-flash | TimeoutError | 20002ms | 
+-- Gemini key1 | gemini-3.6-flash | TimeoutError | 20002ms | 
+-- Gemini key2 | gemini-3.8-flash | 429 | 325ms | You exceeded your current quota, please check your plan and billing details. For more information on this error, head to
+-- Gemini key3 | gemini-3.8-flash | 429 | 293ms | You exceeded your current quota, please check your plan and billing details. For more information on this error, head to
+-- Gemini key4 | gemini-3.8-flash | 429 | 358ms | You exceeded your current quota, please check your plan and billing details. For more information on this error, head to
+-- Gemini key5 | gemini-3.8-flash | 503 | 640ms | This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.
+-- Gemini key6 | gemini-3.8-flash | 503 | 1087ms | This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.
+-- Gemini key7 | gemini-3.8-flash | 503 | 1088ms | This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.
+-- Gemini+search key1 | gemini-3.8-flash | 429 | 292ms | You exceeded your current quota, please check your plan and billing details. For more information on this error, head to
+-- Gemini+search key1 | gemini-3.5-flash-lite | 429 | 293ms | You exceeded your current quota, please check your plan and billing details. For more information on this error, head to
+OK Groq | openai/gpt-oss-120b | 200 | 1110ms | רש״י על בראשית א׳: “בְּרֵאשִׁית” – זמן ראשית, לא לפני בריאת האור; “בָּרָא” – יצירה מחודשת, לא תּוֹצָא מִקִּיים. “אֱלֹהִים” – שם יחיד, אך הוא צורת רבים של כבוד, ולכן הוא משמש גם לתיאור שֶׁל שְׁתֵּי תכונות: חכמה (תבונה) וְרָצוֹן. “אֵת הַשָּׁמַיִם וְאֵת הָאָרֶץ” – רש״י מסביר שהמילה “אֵת” כאן היא מילה של תִקְדּוּם, שמציינת שהשמים והארץ הם המושא הישיר של הבריאה; הוא מוסיף שהשמים כוללים את כל המרחב העליון (הכוכבים, המלאכים) והארץ כוללת את כל מה שבארץ (מים, אדמה, צמחים). בקיצור: רש״י מדגיש שהבריאה נעשתה בזמן הראשון, על‑ידי אלוהים (שם יחיד בעל משמעות של כבוד), והקפיד לציין שהשמים והארץ הם שני חלקים נפרדים של היצירה.
+OK Groq | openai/gpt-oss-20b | 200 | 667ms | רש"י מפרש את הפסוק כך: הוא מציין כי בְּרֵאשִׁית בָּרָא אֱלֹהִים אֶת הַשָּׁמַיִם וְאֶת הָאָרֶץ, כלומר, בראשיתו של היקום, אלוהים יצר את השמים ואת הארץ. הוא אינו מוסיף פירושים נוספים מעבר לכך.
+OK Groq | qwen/qwen3.8-27b | 200 | 729ms | רש"י מפרש את הפסוק על פי דברי חז"ל (בראשית רבה) ומסביר את כפילות המילה "בראשית" כך: 1. **"בראשית"** – מתייחסת ל**תורה** (התורה נבראה ראשונה, לפני הבריאה). 2. **"ברא אלוקים"** – מתייחס ל**הבריאה עצמה** (השמים והארץ נבראו בראשית, כלומר בתחילת הבריאה). לכן, הפירוש המדויק של רש"י הוא: **"בתורה נבראו ראשית, ובה נבראו השמים והארץ"**. כלומר, התורה היא העיקרון הראשון, והבריאה נעשתה על פיה.
+-- OpenRouter | openrouter/free | 200 | 5995ms | 
+-- SambaNova | gpt-oss-120b | 402 | 723ms | A payment method is required. Add one at https://cloud.sambanova.ai/plans/billing to continue.
+-- Cohere | command-a-03-2025 | 429 | 286ms | You are using a Trial key, which is limited to 1000 API calls / month. You can continue to use the Trial key for free or
+
+######## מי חיבר את הספר חפץ חיים ומה עיקר תוכנו?
+-- Gemini key1 | gemini-3.8-flash | 429 | 646ms | You exceeded your current quota, please check your plan and billing details. For more information on this error, head to
+OK Gemini key1 | gemini-3.5-flash-lite | 200 | 1823ms | הספר **חפץ חיים** חיבר הרב ישראל מאיר הכהן מראדין (החפץ חיים). עיקר תוכנו הוא הלכות איסור לשון הרע ורכילות על פי התורה, ועידוד שמירת הלשון.
+OK Gemini key1 | gemini-3.1-flash-lite | 200 | 19626ms | את הספר "חפץ חיים" חיבר הרב **ישראל מאיר הכהן מראדין** (ה"חפץ חיים"). עיקר תוכן הספר הוא הלכות **שמירת הלשון** (איסור לשון הרע ורכילות) על פי התלמוד והפוסקים.
+-- Gemini key1 | gemini-3.5-flash | 503 | 2821ms | This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.
+OK Gemini key1 | gemini-3.6-flash | 200 | 5249ms | את הספר "חפץ חיים" חיבר **רבי ישראל מאיר הכהן מראדין** (שבעקבות הספר נודע בעצמו בכינוי "החפץ חיים"). **עיקר תוכנו:** ריכוז וסדר של הלכות שמירת הלשון, המפרטות את איסורי הדיבור על פי ההלכה היהודית – ובעיקר איסורי לשון הרע, רכילות והלבנת פנים.
+-- Gemini key2 | gemini-3.8-flash | 429 | 842ms | You exceeded your current quota, please check your plan and billing details. For more information on this error, head to
+-- Gemini key3 | gemini-3.8-flash | 429 | 847ms | You exceeded your current quota, please check your plan and billing details. For more information on this error, head to
+-- Gemini key4 | gemini-3.8-flash | 503 | 2813ms | This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.
+-- Gemini key5 | gemini-3.8-flash | TimeoutError | 20001ms | 
+OK Gemini key6 | gemini-3.8-flash | 200 | 9713ms | את הספר "חפץ חיים" חיבר **רבי ישראל מאיר הכהן מראדין** (שנודע בעקבות הספר בכינוי "החפץ חיים"). עיקר תוכנו הוא **הלכות איסור לשון הרע, רכילות והוצאת שם רע**, וריכוז כל הכללים והדינים הנוגעים לשמירת הלשון ותרבות הדיבור על פי ההלכה היהודית.
+-- Gemini key7 | gemini-3.8-flash | 503 | 1459ms | This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.
+-- Gemini+search key1 | gemini-3.8-flash | 429 | 791ms | You exceeded your current quota, please check your plan and billing details. For more information on this error, head to
+-- Gemini+search key1 | gemini-3.5-flash-lite | 429 | 791ms | You exceeded your current quota, please check your plan and billing details. For more information on this error, head to
+OK Groq | openai/gpt-oss-120b | 200 | 1270ms | הספר **חפץ חיים** נכתב על ידי **הרב ישראל מאיר הכהן (החפץ חיים)**. הספר עוסק בעיקר **בְּדִין לִשׁוֹן הָרַע** – ההלכות וההנחיות למניעת דיבור פוגעני, כולל איסור לשון הרע, רכילות, והלכות נלוות.
+OK Groq | openai/gpt-oss-20b | 200 | 1126ms | חפץ חיים — ספר שנכתב על ידי יוסף לוי. הספר עוסק בתורת החיים, מוסר ובאופן שבו ניתן ליישם ערכים של אהבה, צדק ושיתוף פעולה בחיי היומיום.
+OK Groq | qwen/qwen3.8-27b | 200 | 769ms | הספר "חפץ חיים" נכתב על ידי הרב יוסף יצחק שניאורסון (החפץ חיים). עיקר תוכנו הוא הלכות ועקרונות הלכתיים בנושא איסור לשון הרע, דבריהם של חסידים, ושמירת הלשון.
+OK OpenRouter | openrouter/free | 200 | 3002ms | אינני בטוח. אני לא יודע מי חיבר את הספר **“חפץ חיים”** או מהווית תוכן הוותיק שלו. מומלץ לבדוק על פי מקורות אחרים (למשל רשימות ספרים ישראליים או פרסומות).
+-- SambaNova | gpt-oss-120b | 402 | 1032ms | A payment method is required. Add one at https://cloud.sambanova.ai/plans/billing to continue.
+-- Cohere | command-a-03-2025 | 429 | 775ms | You are using a Trial key, which is limited to 1000 API calls / month. You can continue to use the Trial key for free or
 exit=0
