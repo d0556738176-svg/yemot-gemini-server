@@ -17,7 +17,8 @@ const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } 
 // backups instead of waiting on it; then it is tried again (a new month or a
 // top-up brings it back with no manual step).
 const serperSpent = new Map();
-export const serperState = () => ({ keys: serperSpent.size, spentNow: [...serperSpent.values()].filter(t => t > Date.now()).length });
+const serperCodes = {}; // answer codes since the start (numbers only, for /web-search-status)
+export const serperState = () => ({ keys: serperSpent.size, spentNow: [...serperSpent.values()].filter(t => t > Date.now()).length, codes: { ...serperCodes } });
 async function serper(path, body, env, fetchImpl, timeoutMs) {
   const keys = Object.keys(env).filter(k => /^SERPER_API_KEY(_\w+)?$/.test(k)).sort().map(k => String(env[k] || '').trim()).filter(Boolean);
   for (const key of keys) {
@@ -27,7 +28,10 @@ async function serper(path, body, env, fetchImpl, timeoutMs) {
         method: 'POST', signal: AbortSignal.timeout(timeoutMs),
         headers: { 'X-API-KEY': key, 'content-type': 'application/json' }, body: JSON.stringify(body)
       });
-      if (r.status === 401 || r.status === 403 || r.status === 429) { serperSpent.set(key, Date.now() + 30 * 60000); continue; } // next key
+      serperCodes[r.status] = (serperCodes[r.status] || 0) + 1;
+      // 429 = too many at once (a short pause); 401/403 = refused or used up.
+      if (r.status === 429) { serperSpent.set(key, Date.now() + 60000); continue; }
+      if (r.status === 401 || r.status === 403) { serperSpent.set(key, Date.now() + 30 * 60000); continue; } // next key
       if (!r.ok) {
         const t = await r.text().catch(() => '');
         if (/credit|quota|limit|balance/i.test(t)) { serperSpent.set(key, Date.now() + 30 * 60000); continue; } // used up: next key
@@ -186,7 +190,7 @@ export async function searchWebVideos(query, { env = process.env, fetchImpl = fe
   // Video results first, then pages that look like they hold media; the
   // original order of each engine is kept within the same weight.
   const items = out.map((x, i) => ({ ...x, i })).sort((a, b) => b.weight - a.weight || a.i - b.i).slice(0, max).map(({ i, weight, ...x }) => x);
-  const engines = { serperSpent: serperState().spentNow, videos: !!vids?.videos?.length, web: !!web?.organic?.length, tavily: !!tv?.results?.length, ...(backups ? { backups } : {}) };
+  const engines = { serperSpent: serperState().spentNow, serperCodes: serperState().codes, videos: !!vids?.videos?.length, web: !!web?.organic?.length, tavily: !!tv?.results?.length, ...(backups ? { backups } : {}) };
   searchStatus.push({ at: new Date().toISOString(), items: items.length, engines });
   if (searchStatus.length > 30) searchStatus.shift();
   return { items, engines };
