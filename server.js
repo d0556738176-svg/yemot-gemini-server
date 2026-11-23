@@ -2587,6 +2587,8 @@ const keyTurn=new Map();
 // The strong model on each Groq key, and each OpenRouter key, share a rotation.
 function keyFamily(p) { const n=String(p.name||''); if((n==='Groq'&&p.big)||/^Groq\d+$/.test(n)) return 'groq'; if(/^OpenRouter\d*$/.test(n)) return 'openrouter'; return ''; }
 function synthCooling(p) { return ((p.big?branch1SynthCooldownsBig:branch1SynthCooldowns).get(p.name)||0)>Date.now(); }
+// 24.11: which model wrote each answer (names only), for the owner's live check.
+const synthWinners=[];
 async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate=null,quality=false,geminiBudgetMs=null}={}){
   prompt=promptWithPersona(prompt);
   // Extension 3: the strong models start at once, the small fast model is only a
@@ -2614,6 +2616,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
       const broken=brokenAnswer(gt);
       if(broken) { console.warn('[BRANCH1_WEB_SYNTH] broken answer rejected',{provider:'Gemini',why:broken}); throw Object.assign(new Error('broken answer'),{status:422}); }
       if(gt) console.info('[BRANCH1_WEB_SYNTH] answered by',{provider:'Gemini',chars:gt.length});
+      if(gt) { synthWinners.push({at:Date.now(),by:'Gemini'}); if(synthWinners.length>200) synthWinners.splice(0,100); }
       return gt;
     } catch(err) {
       const st=geminiErrorStatus(err);
@@ -2664,6 +2667,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
       const broken=brokenAnswer(text);
       if(broken) { console.warn('[BRANCH1_WEB_SYNTH] broken answer rejected',{provider:provider.name,model:provider.model,why:broken}); throw Object.assign(new Error('broken answer'),{status:422}); }
       console.info('[BRANCH1_WEB_SYNTH] answered by',{provider:provider.name,model:provider.model,chars:text.length});
+      synthWinners.push({at:Date.now(),by:provider.name+' '+provider.model}); if(synthWinners.length>200) synthWinners.splice(0,100);
       return text; })
       .catch(err=>{ if([401,402,403].includes(Number(err?.status))) markDeadKey(provider.apiKey); console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
   }
@@ -6345,7 +6349,8 @@ app.get('/owner-check/:name', rateLimit(10, 60 * 1000, 'owner-check'), async (re
     values:{ApiPhone:'0000000009',ApiCallId:id},callId:id,
     read:async items=>{
       const text=(Array.isArray(items)?items:[]).map(x=>x?.type==='file'?'[file '+x.data+']':(x?.data||'')).join(' ').replace(/\s*¶\s*/g,'. ').trim();
-      if(index>0) lines.push('Q'+index+': '+questions[index-1]+'\n  ('+(Date.now()-askedAt)+'ms) '+text+(call.selfTest.lastConfirm?'\n  [confirm '+JSON.stringify(call.selfTest.lastConfirm).slice(0,300)+']':''));
+      const by=[...new Set(synthWinners.filter(w=>w.at>=askedAt).map(w=>w.by))].join(', ');
+      if(index>0) lines.push('Q'+index+': '+questions[index-1]+'\n  ('+(Date.now()-askedAt)+'ms'+(by?', by '+by:'')+') '+text+(call.selfTest.lastConfirm?'\n  [confirm '+JSON.stringify(call.selfTest.lastConfirm).slice(0,300)+']':''));
       call.selfTest.lastConfirm=null;
       if(index>=questions.length) throw new Error('call was disconnected by the caller');
       askedAt=Date.now();
