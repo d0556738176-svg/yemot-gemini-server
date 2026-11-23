@@ -32,7 +32,8 @@ export async function torahSources(question, { llm, fetchImpl = fetch, log = con
     'הפורמט: {"refs":[],"book":"","words":""}\nהשאלה: ' + String(question).slice(0, 400);
   let refs = [], book = '', words = '';
   try {
-    const out = String(await llm(prompt, { planner: true, budgetMs: 5000, maxTokens: 300 }) || '');
+    // The strong model first (the small ones invented places in the live check).
+    const out = String(await llm(prompt, { planner: false, budgetMs: 6000, maxTokens: 300 }) || '');
     const j = JSON.parse(out.match(/\{[\s\S]*\}/)?.[0] || '{}');
     refs = (j.refs || []).map(String).map(x => x.trim()).filter(x => x && x.length < 90).slice(0, maxRefs);
     book = String(j.book || '').trim().slice(0, 60); words = String(j.words || '').trim().slice(0, 40);

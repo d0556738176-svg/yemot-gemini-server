@@ -2593,9 +2593,12 @@ function synthCooling(p) { return ((p.big?branch1SynthCooldownsBig:branch1SynthC
 const synthWinners=[];
 async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate=null,quality=false,geminiBudgetMs=null}={}){
   prompt=promptWithPersona(prompt);
+  // 24.11: extension 1 talks through the same brain as extension 3, so it gets
+  // the same care for true answers (Gemini first, the free models as reserve).
+  const brainQ=()=>isExt3()||brainBranch()==='1';
   // Extension 3: the strong models start at once, the small fast model is only a
   // reserve, and the answer gets enough time and length (not for tiny helpers).
-  if(isExt3() && maxTokens>=700) {
+  if(brainQ() && maxTokens>=700) {
     quality=true; budgetMs=Math.max(budgetMs,EXT3_SYNTH_MS); maxTokens=Math.max(maxTokens,1500);
     geminiBudgetMs=Math.max(Number(geminiBudgetMs||0),EXT3_GEMINI_MS);
   }
@@ -2607,7 +2610,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
   const othersConfigured=Boolean((process.env.GROQ_API_KEY||'').trim()||(process.env.OPENROUTER_API_KEY||'').trim()||extraFastProviders(true).length);
   const racers=gemini?[(async()=>{
     if(othersConfigured) {
-      await new Promise(r=>setTimeout(r,Number(isExt3()?(process.env.EXT3_GEMINI_HEDGE_MS||(quality?0:2500)):quality?(process.env.BRANCH1_QUALITY_GEMINI_HEDGE_MS||700):(process.env.BRANCH1_GEMINI_HEDGE_MS||1800))));
+      await new Promise(r=>setTimeout(r,Number(brainQ()?(process.env.EXT3_GEMINI_HEDGE_MS||(quality?0:2500)):quality?(process.env.BRANCH1_QUALITY_GEMINI_HEDGE_MS||700):(process.env.BRANCH1_GEMINI_HEDGE_MS||1800))));
       if(raceDone) throw Object.assign(new Error('Gemini not needed'),{status:499});
     }
     if(branch1PrimaryCooldown.isCoolingDown('primary')) { console.info('[BRANCH1_WEB_SYNTH] Gemini resting after a failure; skipped'); throw Object.assign(new Error('Gemini cooling down'),{status:503}); }
@@ -2634,19 +2637,19 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     // In quality mode the small fast model is a reserve: it joins only if the
     // strong models have not answered after a short wait (they hit free-tier
     // rate limits under load, and the caller must never get raw excerpts).
-    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(isExt3()?(process.env.EXT3_RESERVE_MS||7000):(process.env.BRANCH1_QUALITY_RESERVE_MS||2500)):0},
+    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(brainQ()?(process.env.EXT3_RESERVE_MS||7000):(process.env.BRANCH1_QUALITY_RESERVE_MS||2500)):0},
     // 24.11 (owner: answers must be true): in extension 1/3 Gemini answers first;
     // the free models only step in if it has not answered in time (they invented
     // Torah sources and names in the live check).
-    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim(),big:true,delayMs:quality&&isExt3()?Number(process.env.EXT3_BIG_DELAY_MS||4000):0},
+    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim(),big:true,delayMs:quality&&brainQ()?Number(process.env.EXT3_BIG_DELAY_MS||4000):0},
     // Extension 3 staggers the backups instead of firing every provider at
     // once: one strong answer per turn, so the free per-minute quotas last the
     // whole call (08.11: all providers were rate-limited by the second call).
-    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),delayMs:isExt3()?Number(process.env.EXT3_OPENROUTER_DELAY_MS||(quality?5000:3000)):0},
-    ...extraFastProviders(true).map(p=>quality&&isExt3()?{...p,delayMs:Number(process.env.EXT3_BIG_DELAY_MS||4000)}:p),
+    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),delayMs:brainQ()?Number(process.env.EXT3_OPENROUTER_DELAY_MS||(quality?5000:3000)):0},
+    ...extraFastProviders(true).map(p=>quality&&brainQ()?{...p,delayMs:Number(process.env.EXT3_BIG_DELAY_MS||4000)}:p),
     // Owner, 10.11: Groq counts each model's free quota separately, so more
     // strong models on the same key = more answers before "rate limited".
-    ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?(isExt3()?7000:5500)+i*800:0}))
+    ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?(brainQ()?7000:5500)+i*800:0}))
   ].filter(p=>p.apiKey&&!isDeadKey(p.apiKey)).map((p,_,all)=>{
     // 13.11: every Groq key fired on every turn, so all of them spent their
     // per-minute quota together and hit "rate limited" together. Now the keys
@@ -4501,8 +4504,9 @@ async function serperPlaces(q,{timeoutMs=4500}={}) {
   for(const key of keysFor('SERPER_API_KEY')) {
     try {
       const r=await fetch('https://google.serper.dev/places',{method:'POST',signal:AbortSignal.timeout(timeoutMs),headers:{'X-API-KEY':key,'content-type':'application/json'},body:JSON.stringify({q:String(q).slice(0,160),gl:'il',hl:'iw'})});
-      if(!r.ok) continue;
+      if(!r.ok) { console.warn('[PLACES] Serper places answered',{status:r.status}); continue; }
       const j=await r.json().catch(()=>null);
+      console.info('[PLACES] Serper places',{found:(j?.places||[]).length});
       return (j?.places||[]).map(p=>({title:String(p.title||''),address:String(p.address||''),phone:String(p.phoneNumber||''),rating:p.rating||null,category:String(p.category||''),website:String(p.website||'')})).filter(p=>p.title);
     } catch {}
   }
