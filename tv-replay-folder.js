@@ -151,7 +151,7 @@ export async function publishHour(item, io) {
     io.log?.info?.('[TV REPLAY] hour published', { key: ch.key, id, file: number });
     return folder.replace(/^ivr2:/, '');
   } catch (e) {
-    note({ key: ch.key, hour: id, ok: false, error: String(e?.message || e).slice(0, 200) });
+    note({ key: ch.key, hour: id, ok: false, error: String(e?.message || e).slice(0, 600) });
     throw e;
   } finally { await fs.rm(tmp, { recursive: true, force: true }).catch(() => {}); }
 }

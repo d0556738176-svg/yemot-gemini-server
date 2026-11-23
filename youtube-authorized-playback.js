@@ -366,7 +366,10 @@ async function uploadToYemotInParts(filePath, remotePath, signal, {convertAudio,
     seen.push(label+': '+body.slice(0,90));result=null;
   }
   if(!result)console.warn('[YouTube IVR] multi-part join answers',seen);
-  if(!result)throw new Error('Yemot multi-part finish failed: '+body.slice(0,300));
+  // Every variant's answer (23.11: only the last one - 'WS name is not
+  // allowed', from an address Yemot does not have - was reported, hiding why
+  // the real join request was refused).
+  if(!result)throw new Error('Yemot multi-part finish failed: '+seen.join(' | ').slice(0,600));
   // Move the joined file from where Yemot put it to its real name.
   const joined='ivr2:/'+String(result.path||'').replace(/^ivr2?:?\/?/,'').replace(/^\/+/,'');
   const fa=async params=>{const u=new URL(YEMOT_API_BASE+'/FileAction');u.searchParams.set('token',yemotApiKey());for(const [k,v] of Object.entries(params))u.searchParams.set(k,v);
