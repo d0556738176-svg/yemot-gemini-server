@@ -19,6 +19,7 @@ import { currentThread, appendTurn, newThread, selectThread, listThreads, thread
 import { ext3Turn, parseKeyOptions, spokenDuration, toMaleSelf, confirmFor, cleanTitle, ytdlpSearch } from './ext3-brain.js';
 import { withTavily, tavilyClient, searchSecondary, findOfficialWebsite, configuredSecondarySearch, readPages, describeImageIndependently, providerHealth } from './web-providers.js';
 import YemotApi from 'yemot-api';
+import { robustDownload } from './yemot-download.js';
 import { searchYouTubeVideos } from './youtube-ivr.js';
 import { getYouTubeTranscript } from './youtube-transcript.js';
 import { downloadAuthorizedAudioToYemot } from './youtube-authorized-playback.js';
@@ -815,6 +816,8 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
 }
 
 const yemotApi = new YemotApi(process.env.YEMOT_API_USERNAME, process.env.YEMOT_API_PASSWORD);
+// Owner, 24.11: recordings always come through (expired session = HTTP 500).
+yemotApi.download_file = robustDownload(yemotApi.download_file.bind(yemotApi));
 const router = YemotRouter({
   printLog: true,
   // Keep the same Call state alive for a long time so a caller can have

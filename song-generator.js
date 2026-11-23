@@ -48,7 +48,7 @@ export function noteSongEvent(event, details = {}) {
     if (/phone|caller|userKey|prompt|lyrics|token|key/i.test(k)) continue;
     safe[k] = typeof v === 'string' ? v.slice(0, 200) : v;
   }
-  list.push({ at: new Date().toISOString(), event, ...safe });
+  list.push({ event, ...safe, at: new Date().toISOString() });
   if (list.length > 40) list.splice(0, list.length - 40);
   try { mkdirSync(dirname(SONG_EVENTS_FILE), { recursive: true }); writeFileSync(SONG_EVENTS_FILE + '.tmp', JSON.stringify(list)); renameSync(SONG_EVENTS_FILE + '.tmp', SONG_EVENTS_FILE); } catch {}
 }
@@ -438,6 +438,13 @@ function musicProviders() {
       id: 'ace-step',
       configured: () => !!String(env.ACESTEP_API_URL || '').trim() && !!String(env.ACESTEP_API_KEY || '').trim(),
       run: generateWithAceStep
+    },
+    {
+      // 24.11: the official ACE-Step Space on a free GPU (about a minute) goes
+      // before the CPU runner whenever a Hugging Face token is set.
+      id: 'huggingface-space-first',
+      configured: () => !!String(env.HF_TOKEN || '').trim() && String(env.HF_MUSIC_SPACE_ENABLED || '').toLowerCase() !== 'false',
+      run: generateWithHuggingFaceSpace
     },
     {
       // Free: the official model on a GitHub Actions runner (CPU, minutes).

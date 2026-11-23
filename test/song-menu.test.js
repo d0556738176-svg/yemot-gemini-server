@@ -53,3 +53,25 @@ test('lyrics with real line breaks inside the JSON are still read (long songs)',
   assert.match(spec.lyrics, /שבת המלכה/);
   assert.equal(spec.durationSeconds, 120);
 });
+
+test('a request from the menu never asks the caller to clarify (no "60 or 180 seconds?")', () => {
+  assert.match(buildSongPrompt({ kind: '1', text: 'שבת', voice: '1', style: '1', minutes: '3' }), /אל תשאל שאלות הבהרה/);
+});
+
+test('when the writer still asks a question, the menu caller is not asked to record again', async () => {
+  process.env.SONG_EVENTS_FILE = '/tmp/song-events-test.json';
+  let records = 0, writerCalls = 0;
+  const taps = ['1', '1', '1', '1', '1', '1', '1', '1', '1', '5', '5', '5', '5', '5', '5'];
+  const call = { callId: 'song-clar', values: {},
+    read: async (items, mode) => { if (mode === 'record') { records++; return '/rec.wav'; } const k = taps.shift(); if (k === undefined) throw new Error('call was disconnected'); return k; },
+    id_list_message: async () => {}, go_to_folder: async () => {} };
+  const handler = createSongCallHandler({
+    yemotApi: { download_file: async () => ({ data: Buffer.from('x') }) },
+    transcribePhoneAudio: async () => 'שבת',
+    generateText: async () => { writerCalls++; return writerCalls === 1 ? '{"needs_clarification":true,"clarification_question":"60 או 180 שניות?"}' : 'not json'; },
+    sanitizeForYemot: x => x, withTimeout: p => p, getCallerNumber: () => '0500000001', logDetailedError: () => {}
+  });
+  await handler(call).catch(() => {});
+  assert.equal(records, 1, 'only the topic was recorded');
+  assert.ok(writerCalls >= 2, 'the writer was asked again by itself');
+});

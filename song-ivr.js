@@ -60,7 +60,8 @@ export function buildSongPrompt({ kind, text = '', ytTitle = '', voice, style, m
     : kind === '3'
       ? 'קאבר: גרסה חדשה בהשראת השיר "' + ytTitle + '" מיוטיוב, עם מילים חדשות ומקוריות' + (text ? ' בנושא: ' + text : ' באותו נושא כללי ובאותה אווירה')
       : 'שיר על הנושא: ' + text;
-  return [what, v.ask, st.ask, 'אורך השיר: ' + minutesText(String(minutes)) + ' (' + secs + ' שניות), duration_seconds=' + secs + '.'].join('. ');
+  return [what, v.ask, st.ask, 'אורך השיר: ' + minutesText(String(minutes)) + ' (' + secs + ' שניות), duration_seconds=' + secs + '.',
+    'כל הפרטים כבר נבחרו בתפריט, כולל האורך: אל תשאל שאלות הבהרה (needs_clarification=false) וצור את השיר.'].join('. ');
 }
 
 export function createSongCallHandler({
@@ -269,6 +270,15 @@ export function createSongCallHandler({
           return call.id_list_message([{ type: 'text', data: say(message) }]);
         }
 
+        if (jobResult?.needsClarification && menuPrompt && clarificationCount < 2) {
+          // Owner, 24.11: everything was chosen in the menu, so the caller is
+          // never asked again (it used to ask "60 or 180 seconds?"); the
+          // writer is told once more to just write the song.
+          clarificationCount++;
+          noteSongEvent('menu_clarification_skipped', { question: String(jobResult.clarificationQuestion || '').slice(0, 120) });
+          fromMenu = menuPrompt + ' חובה ליצור את השיר עכשיו לפי הפרטים האלה, בלי שום שאלה.';
+          continue;
+        }
         if (jobResult?.needsClarification) {
           if (clarificationCount >= 1) {
             return call.id_list_message([{ type: 'text', data: 'לא הצלחתי להבין את הסגנון המבוקש. אפשר להתחיל שוב עם תיאור קצר יותר.' }]);
@@ -295,7 +305,7 @@ export function createSongCallHandler({
       if (error instanceof ExitError) throw error; // normal end: a message was sent / went to a folder
       if (isHangup(error)) return;
       logDetailedError('Song IVR', error);
-      noteSongEvent('ivr_crash', { message: String(error?.message || error).slice(0, 200), at: String(error?.stack || '').split('\n')[1]?.trim().slice(0, 160) || '' });
+      noteSongEvent('ivr_crash', { message: String(error?.message || error).slice(0, 200), where: String(error?.stack || '').split('\n')[1]?.trim().slice(0, 160) || '' });
       return call.id_list_message([{ type: 'text', data: say('מצטער, הייתה תקלה זמנית ביצירת השיר. אפשר לנסות שוב.') }]);
     }
   };
