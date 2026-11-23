@@ -4094,7 +4094,6 @@ async function batchQueue() {
     store: branch2Store,
     concurrency: Math.max(1, Math.min(3, Number(process.env.BRANCH2_BATCH_CONCURRENCY || 1))),
     start: async item => {
-      await (await import('./resource-guard.js')).waitForRoom({ label: 'batch ' + item.videoId });
       const v = { videoId: item.videoId, title: item.title, channelTitle: item.channelTitle, durationSeconds: item.durationSeconds ?? null, subtitles: item.subtitles };
       if (item.kind === 'video') {
         const gate = await videoStartGate(v).catch(() => null);
@@ -5798,6 +5797,21 @@ app.get('/tv-relay-test', rateLimit(4, 60 * 1000, 'tv-relay-test'), async (req,r
   } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,200)}); }
   finally { await fsp.rm(tmp,{recursive:true,force:true}).catch(()=>{}); }
 });
+// Read-only (23.11): what Yemot really holds for the live pieces now
+// (/2/live/<channel>/<run>/...), and the play paths the server gives callers.
+app.get('/live-yemot-check', rateLimit(10, 60 * 1000, 'live-yemot-check'), async (req,res)=>{
+  try {
+    const io=await replayIo(); const { _relays }=await import('./live-relay.js');
+    const out={ relays:[] };
+    for(const r of _relays.values()) {
+      const pieces=r.pieces.slice(-4).map(p=>p.play);
+      const folder=pieces[0]?'ivr2:'+pieces[0].replace(/\/[^/]+$/,''):null;
+      const dir=folder?await io.list(folder).catch(e=>({error:String(e?.message||e).slice(0,100)})):null;
+      out.relays.push({ title:r.title, stopped:r.stopped, pieces:r.next, play:pieces, yemot:dir?{folder, files:(dir.files||[]).map(f=>({name:f.name,size:f.size,duration:f.duration||f.durationStr||null})).slice(-8), error:dir.error||null}:null });
+    }
+    res.json(out);
+  } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
+});
 // Yemot access for the replay hours (extension 5/9), shared by calls and the check.
 async function replayIo() {
   const p=(await import('./youtube-authorized-playback.js'))._pipeline;
@@ -5869,7 +5883,6 @@ app.get('/tv-check', rateLimit(4, 60 * 1000, 'tv-check'), async (req,res)=>{
   res.json({ channels: await TV.checkAllChannels(await tvDeps()) });
 });
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
-app.get('/server-resources',rateLimit(20,60*1000,'resources'),async (req,res)=>{ try { res.json(await (await import('./server-resources.js')).resourcesReport()); } catch(e){ res.status(500).json({ok:false}); } });
 app.get('/branch2-diag',async (req,res)=>{ let commit=''; try { commit=String(readFileSync(new URL('./.git/HEAD',import.meta.url),'utf8')).trim(); if(commit.startsWith('ref:')) commit=String(readFileSync(new URL('./.git/'+commit.slice(5).trim(),import.meta.url),'utf8')).trim(); } catch {} let downloadEvents=[]; try { downloadEvents=await (await import('./download-events.js')).recentDownloadEvents(60); } catch {}
   let engineTest=null, webEvents=[], browserEvents=[]; try { engineTest=(await import('./web-engine-selftest.js')).state; webEvents=(await import('./youtube-direct.js')).webEvents; browserEvents=(await import('./browser-media.js')).browserEvents; } catch {} res.json({commit:commit.slice(0,12), startedAt:BRANCH2_STARTED_AT, keys:branch2Keys.slice(-100), downloadEvents, engineTest, webEvents:webEvents.slice(-40), browserEvents:browserEvents.slice(-40)}); });
 // Owner, 19.11: what one download really left in Yemot (phone file quality,
@@ -6290,7 +6303,6 @@ app.listen(port,async()=>{
       tempDir:()=>fsp.mkdtemp(pathm.join(os.tmpdir(),'ext7-')),
       removeDir:dir=>fsp.rm(dir,{recursive:true,force:true}).catch(()=>{})
     };
-    await (await import('./resource-guard.js')).waitForRoom({ label: 'ext7 catch-up' });
     await ext7.backfillExt7(ext7io);
     // 19.11: big songs saved in pieces before the fix never reached 7: the
     // songs of the last 3 days that are missing there are added once.

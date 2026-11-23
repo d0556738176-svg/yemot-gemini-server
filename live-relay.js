@@ -63,10 +63,13 @@ export const ffmpegHeaderArgs = headers => {
   return keep.length ? ['-headers', keep.map(([k, v]) => k + ': ' + v + '\r\n').join('')] : [];
 };
 
-// Letters and digits only: Yemot's play list reads '-' and '.' as separators
-// (23.11: a '-' in the run name made every live piece unplayable).
-export const runName = (id, now = Date.now()) => String(id).replace(/[^A-Za-z0-9]/g, '') + 'r' + now.toString(36);
-export const piecePath = (run, n) => '/2/live/' + run + '/' + n;
+// Yemot folder per channel as it worked up to 23.11 (/2/live/<id>), and in
+// it one sub-folder per run named in digits only (like any Yemot extension),
+// files 000, 001... as before - so the cleanup of a stopped run never touches
+// the next run's files. 23.11: a '-' in the folder name made every
+// piece unplayable.
+export const runTag = (now = Date.now()) => String(now % 1000000).padStart(6, '0');
+export const piecePath = (id, tag, n) => '/2/live/' + String(id).replace(/[^A-Za-z0-9]/g, '') + '/' + tag + '/' + n;
 // deps: { ffmpegPath, upload(file, remote), del(remote), log }
 export function startRelay(item, deps) {
   const id = liveIdFor(item.url);
@@ -78,8 +81,8 @@ export function startRelay(item, deps) {
   // folder and the Yemot pieces of the next run of the same channel.
   // Letters and digits only: Yemot's play list reads '-' and '.' as separators
   // (23.11: a '-' here made every live piece unplayable).
-  const run = runName(id);
-  const dir = path.join(os.tmpdir(), 'live-' + run);
+  const tag = runTag();
+  const dir = path.join(os.tmpdir(), 'live-' + id + '-' + tag);
   const r = { id, title: item.title, url: item.url, pieces: [], next: 0, stopped: false, error: null, startedAt: Date.now(), lastSeen: Date.now(), proc: null, events: [] };
   // What happened, kept for the read-only status page (no keys, no tokens).
   r.note = (what, extra = {}) => { r.events.push({ at: new Date().toISOString(), what, ...extra }); if (r.events.length > 25) r.events.shift(); };
@@ -163,12 +166,12 @@ export function startRelay(item, deps) {
       const names = (await fs.readdir(dir).catch(() => [])).filter(n => /^\d{3}\.wav$/.test(n)).sort();
       for (const n of names.slice(0, -1)) {
         const no = Number(n.slice(0, 3)), file = path.join(dir, n);
-        const remote = 'ivr2:' + piecePath(run, n);
+        const remote = 'ivr2:' + piecePath(id, tag, n);
         // An empty piece (no sound came in that stretch) is not sent: Yemot
         // refuses it ("File upload expected") and it would only be silence.
         const size = (await fs.stat(file).catch(() => null))?.size || 0;
         if (size < 4000) { r.note('empty piece skipped', { no, bytes: size }); r.next = Math.max(r.next, no + 1); await fs.rm(file, { force: true }).catch(() => {}); continue; }
-        try { await deps.upload(file, remote); r.pieces.push({ no, remote, play: piecePath(run, n).replace(/\.wav$/, '') }); r.next = Math.max(r.next, no + 1); }
+        try { await deps.upload(file, remote); r.pieces.push({ no, remote, play: piecePath(id, tag, n).replace(/\.wav$/, '') }); r.next = Math.max(r.next, no + 1); }
         catch (e) { log.warn?.('[LIVE] upload failed', { id, no, message: String(e?.message || e).slice(0, 120) }); r.note('upload failed', { no, message: String(e?.message || e).slice(0, 120) }); }
         await fs.rm(file, { force: true }).catch(() => {});
       }

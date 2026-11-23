@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 // 23.11: a '-' in the live folder name made every piece unplayable on the
-// phone (Yemot reads '-' and '.' in a play list as separators).
-test('live pieces are played from paths of letters, digits and slashes only', async () => {
+// phone. The folder is the channel's own (as it worked before); each run has
+// its own file names, digits only.
+test('live pieces: the channel folder, digit-only file names, a new name per run', async () => {
   const L = await import('../live-relay.js');
-  const a = L.runName('lc4a5348b0f'), b = L.runName('lc4a5348b0f', Date.now() + 5000);
-  assert.notEqual(a, b, 'every run its own folder');
-  const play = L.piecePath(a, '000.wav').replace(/\.wav$/, '');
-  assert.match(play, /^[A-Za-z0-9/]+$/);
-  assert.match(L.runName('a-b.c'), /^[A-Za-z0-9]+$/);
+  const a = L.runTag(1000000123456), b = L.runTag(1000000999999);
+  assert.match(a, /^\d{6}$/); assert.notEqual(a, b);
+  const play = L.piecePath('lc4a5348b0f', a, '000.wav').replace(/\.wav$/, '');
+  assert.equal(play, '/2/live/lc4a5348b0f/123456/000');
+  assert.match(play, /^\/2\/live\/[A-Za-z0-9]+\/\d{6}\/\d{3}$/);
 });
