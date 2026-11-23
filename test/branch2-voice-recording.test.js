@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createVoiceRecorder, recordingFolder, validRecording, repairRecordingWav} from '../branch2-voice-recording.js';
+import {createVoiceRecorder, recordingFolder, validRecording} from '../branch2-voice-recording.js';
 
 function wav() {
   const b=Buffer.alloc(16044); b.write('RIFF'); b.writeUInt32LE(b.length-8,4);
@@ -52,13 +52,10 @@ test('hourly folder changes and empty WAV/JSON are rejected',()=>{
   assert.notEqual(recordingFolder(new Date('2026-11-23T10:00Z')),recordingFolder(new Date('2026-11-23T11:00Z')));
   assert.equal(validRecording(Buffer.alloc(44)),false);assert.equal(validRecording('{}'),false);
 });
-test('repairs the live zero-data WAV header without changing samples; valid files remain untouched',async()=>{
-  const original=wav(); original.writeUInt32LE(52,4); original.writeUInt32LE(0,40);
-  assert.equal(validRecording(original),false);
-  const repaired=repairRecordingWav(original);
-  assert.ok(validRecording(repaired)); assert.deepEqual(repaired.subarray(44),original.subarray(44));
-  assert.equal(original.readUInt32LE(40),0);
-  const good=wav(); assert.equal(repairRecordingWav(good),good);
-  const x=setup(async()=>({data:original}));
-  assert.ok(validRecording(await x.r.capture(x.call,[{}],1)));
+test('an unfinished WAV header is retried until the file is complete, without rewriting samples',async()=>{
+  const incomplete=wav(); incomplete.writeUInt32LE(52,4); incomplete.writeUInt32LE(0,40);
+  assert.equal(validRecording(incomplete),false);
+  let attempts=0;const good=wav();const x=setup(async()=>({data:++attempts===1?incomplete:good}));
+  assert.deepEqual(await x.r.capture(x.call,[{}],1),good);
+  assert.equal(attempts,2);assert.equal(incomplete.readUInt32LE(40),0);
 });
