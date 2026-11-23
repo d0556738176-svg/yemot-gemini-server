@@ -60,7 +60,8 @@ export async function runEngineSelfTest({ env = process.env, log = console, ffmp
         let failure = null;
         const it = await web.inspectLink(c, { timeoutMs: 30000, browserMs: 30000, onFailure: f => { failure = f.reason; } }).catch(() => null);
         const host = (() => { try { return new URL(web.unwrapRedirect(c.url)).hostname.replace(/^www\./, ''); } catch { return ''; } })();
-        if (!it || it.youtube) { row.checked.push({ host, ok: false, why: it?.youtube ? 'youtube' : failure || 'no media', sec: Math.round((Date.now() - t0) / 1000) }); continue; }
+        const path = (() => { try { return new URL(web.unwrapRedirect(c.url)).pathname.slice(0, 50); } catch { return ''; } })(); // no query (may hold anything)
+        if (!it || it.youtube) { row.checked.push({ host, path, ok: false, why: it?.youtube ? 'youtube' : failure || 'no media', sec: Math.round((Date.now() - t0) / 1000) }); continue; }
         const g = it.live ? { ok: true, bytes: 0, err: null } : await grab(it, ffmpegPath);
         row.checked.push({ host, ok: g.ok, engine: g.engine || (it.browser ? 'browser/streamlink' : 'yt-dlp'), found: it.browser ? 'browser/streamlink' : 'yt-dlp', live: !!it.live, sec: Math.round((Date.now() - t0) / 1000), title: String(it.title || '').slice(0, 60), ...(g.ok ? {} : { why: g.err }) });
         if (g.ok) row.found++;

@@ -152,7 +152,7 @@ export async function viaBrowser(c, opts = {}) {
     if (!live && dur && dur < 5) continue;
     const item = {
       url: m.url, page: c.url, referer: m.headers?.Referer || c.url, browser: true,
-      title: String(s.title || c.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || hostOf(c.url),
+      title: pickTitle(s.title, c.title) || hostOf(c.url),
       site: hostOf(c.url) || c.site, siteName: null, uploader: c.source || null, description: String(c.snippet || '').slice(0, 4000),
       thumbnail: s.image || c.image || null, durationSec: live ? null : dur, uploadDate: null, views: null, tags: null,
       hasVideo: live ? false : hasVideo, hasAudio, impersonate: false, live, httpHeaders: mediaRequestHeaders(m.headers),
@@ -165,6 +165,14 @@ export async function viaBrowser(c, opts = {}) {
 // One link -> a playable item, a YouTube link ({youtube}), or null.
 // A search result that is a Google redirect ("google.com/url?q=...") is the
 // page it points to (the site is then named correctly too).
+// 23.11: a page or file "title" that is not a name (a block page, "index",
+// a bare file name, a date) gives way to the title the search showed.
+const NOT_A_TITLE = /^(?:index(?:\s.*)?|untitled|video|audio|watch|player|embed|stream|playlist|master|default|home|\d[\d\s:./-]*)$|block page|access denied|just a moment|attention required|are you a robot|captcha|403 forbidden|404|not found|error/i;
+export function pickTitle(...titles) {
+  const ok = titles.map(t => String(t || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return (ok.find(t => !NOT_A_TITLE.test(t) && !/^[\w.-]+\.(?:m3u8|mpd|mp4|mp3|m4a|ts|aac)$/i.test(t)) || ok[0] || '').slice(0, 200);
+}
+
 export function unwrapRedirect(url) {
   try {
     const u = new URL(url);
@@ -302,7 +310,7 @@ async function inspectLinkPlain(c, opts = {}) {
   const bareTitle = page && (!j.title || /^[\w.-]+$/.test(String(j.title)));
   const item = {
     url: pageUrl, page: page ? page.url : null, referer: page ? page.httpHeaders?.Referer || page.url : null,
-    title: String((bareTitle ? page.title || c.title : j.title) || c.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || hostOf(shownUrl),
+    title: (bareTitle ? pickTitle(page.title, c.title, j.title) : pickTitle(j.title, page?.title, c.title)) || hostOf(shownUrl),
     site: hostOf(shownUrl) || c.site, siteName: j.extractor_key && j.extractor_key !== 'Generic' ? j.extractor_key : null,
     uploader: j.uploader || j.channel || j.creator || c.source || null, description: String(j.description || c.snippet || '').slice(0, 4000),
     thumbnail: j.thumbnail || page?.image || c.image || null, durationSec, uploadDate: j.upload_date || null, views: Number.isFinite(j.view_count) ? j.view_count : null,

@@ -98,3 +98,11 @@ test('Mako resolved source uses the authorized UA and referer through registrati
   assert.equal(item.referer, 'https://www.mako.co.il/');
   assert.equal(item.page, url);
 });
+
+test('a block page, "index" or a bare file name gives way to the search title', async () => {
+  const { pickTitle } = await import('./web-media.js');
+  assert.equal(pickTitle('Radware Block Page', 'תוכנית מאקו'), 'תוכנית מאקו');
+  assert.equal(pickTitle('index 2026-11-23 17:08', 'הישרדות פרק 11'), 'הישרדות פרק 11');
+  assert.equal(pickTitle('master.m3u8', 'פרק 3'), 'פרק 3');
+  assert.equal(pickTitle('שיעור הרב', 'אחר'), 'שיעור הרב');
+});
