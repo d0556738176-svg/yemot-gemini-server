@@ -1,6 +1,6 @@
-ext2 running 5d9307304e59 2026-11-23T15:54:30.492Z
-res "SyntaxError: Unexpected end of JSON input"
-trigger {"err":"SyntaxError: Unexpected end of JSON input"}
-
-search engines []
+branch2-diag 200 {"commit":"aca692145f6d","startedAt":"2026-11-23T16:51:36.380Z","downloadEvents":[{"at":"2026-11-19T21:28:54.799Z","kind":"video-start","id":"wmnAMMFGQ6Z","title":"מעשה קטן של אדם גדול - הידברות (1)","subtitles":false},{"at":"2026-11-19T21:30:07.241Z","kind":"audio","id":"wmnAMMFGQ6Z","ok"
+server-resources 200 {"at":"2026-11-23T16:59:33.935Z","cpus":2,"load":[4.17,3.3,2.37],"cpuBusyPct":93,"uptimeH":205,"memMB":{"total":3916,"available":2850,"swapTotal":2048,"swapFree":2005},"disk":[{"fs":"/","totalMB":45240,"usedMB":23307,"freeMB":19972,"usePct":"54%"},{"fs":"/","totalMB":45240,"usedMB":23307,"freeMB
+web-search-status 200 {"searches":[]}
+health 200 {"ok":true,"service":"yemot-gemini-server"}
+health 200 {"ok":true,"service":"yemot-gemini-server"}
 exit=0
