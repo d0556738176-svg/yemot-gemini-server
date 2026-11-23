@@ -5766,6 +5766,31 @@ app.get('/radio-page-scan', rateLimit(6, 60 * 1000, 'radio-page-scan'), async (r
     res.json({ page, scripts:scripts.length, streams:[...found].slice(0,80), stationIds:[...ids].slice(0,80), context:ctx.slice(0,12).map(x=>x.slice(0,700)) });
   } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
 });
+// Read-only (23.11, channel 13 would not connect): the live path of a channel
+// done here only - its source, 25 s cut into pieces exactly like the relay,
+// each piece's size, and one piece mastered and measured. Nothing goes to Yemot.
+app.get('/tv-relay-test', rateLimit(4, 60 * 1000, 'tv-relay-test'), async (req,res)=>{
+  const os=(await import('node:os')).default, pathm=(await import('node:path')).default, { promises:fsp, existsSync }=await import('node:fs');
+  const tmp=await fsp.mkdtemp(pathm.join(os.tmpdir(),'rtest-'));
+  try {
+    const TV=await import('./branch2-tv.js'); const L=await import('./live-relay.js'); const REC=await import('./tv-recorder.js');
+    const all=[...TV.TV_CHANNELS,...TV.RADIO_CHANNELS]; const ch=all.find(c=>c.key===String(req.query.ch||'3'));
+    if(!ch) return res.status(400).json({error:'ch'});
+    const src=await TV.findChannelSource(ch,await tvDeps(),{fresh:!!req.query.fresh});
+    const info=src.page?await L.resolveStreamInfo(src.page,{impersonate:!!src.impersonate,referer:src.referer||null}):null;
+    if(!info?.url) return res.json({ch:ch.key,source:src.page||null,ok:false,step:'resolve',reason:info?.error||null});
+    const hdr=L.ffmpegHeaderArgs({'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36',...(src.referer?{Referer:src.referer}:{}),...(info.headers||{})});
+    const bin=L.SYSTEM_FFMPEG.find(b=>existsSync(b));
+    const { spawn }=await import('node:child_process');
+    const err=await new Promise(r=>{ const p=spawn(bin,['-hide_banner','-loglevel','warning','-reconnect','1','-reconnect_streamed','1',...hdr,'-i',info.url,'-t','25','-vn','-ac','1','-ar','16000','-c:a','pcm_s16le','-af','anull','-f','segment','-segment_time','8','-reset_timestamps','1',pathm.join(tmp,'%03d.wav')],{stdio:['ignore','ignore','pipe']}); let e=''; const k=setTimeout(()=>p.kill('SIGKILL'),90000); p.stderr.on('data',d=>{e=(e+d).slice(-1500);}); p.on('close',c=>{clearTimeout(k);r({code:c,e});}); p.on('error',x=>{clearTimeout(k);r({code:null,e:String(x)});}); });
+    const names=(await fsp.readdir(tmp)).filter(n=>/^\d{3}\.wav$/.test(n)).sort();
+    const pieces=[]; for(const n of names) pieces.push({n,bytes:(await fsp.stat(pathm.join(tmp,n))).size});
+    let mastered=null;
+    if(names[0]) { const m=pathm.join(tmp,'m.wav'); try { const r=await REC.masterSpeech(pathm.join(tmp,names[0]),m); mastered={bytes:(await fsp.stat(m)).size,hissCut:!!r?.hissCut,quality:await REC.pieceQuality(bin,m)}; } catch(e) { mastered={error:String(e?.message||e).slice(0,200)}; } }
+    res.json({ch:ch.key,title:ch.title,source:src.page.replace(/\?.*/,''),stream:info.url.replace(/\?.*/,''),ffmpeg:{code:err.code,warnings:err.e.split('\n').filter(l=>l&&!/Skip \(/.test(l)).slice(-12)},pieces,mastered});
+  } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,200)}); }
+  finally { await fsp.rm(tmp,{recursive:true,force:true}).catch(()=>{}); }
+});
 // Yemot access for the replay hours (extension 5/9), shared by calls and the check.
 async function replayIo() {
   const p=(await import('./youtube-authorized-playback.js'))._pipeline;
