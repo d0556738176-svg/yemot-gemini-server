@@ -159,13 +159,24 @@ export async function publishHour(item, io) {
 // Runs every few minutes: publishes every finished hour, oldest first, one
 // at a time. A failure stops the round; the next round tries again.
 let running = false;
-export async function publishPending(channels, io) {
+export const failedAt = new Map(); // hour -> { at, tries } (this server run)
+export async function publishPending(channels, io, now = Date.now()) {
   if (running) return 0; running = true;
-  let n = 0;
+  let n = 0, failures = 0;
   try {
     for (const item of await hoursToPublish(channels)) {
-      try { await publishHour(item, io); n++; }
-      catch (e) { io.log?.warn?.('[TV REPLAY] hour not published; tried again later', { key: item.ch.key, id: item.id, message: String(e?.message || e).slice(0, 160) }); break; }
+      // One hour that fails (23.11: a Yemot error on channel 12's 16:00) must
+      // not hold up every other channel: it waits and is tried again later
+      // (5 min, then 10, 20... up to an hour); the round goes on to the next.
+      const k = item.ch.key + '/' + item.id;
+      const f = failedAt.get(k);
+      if (f && now - f.at < Math.min(60, 5 * 2 ** (f.tries - 1)) * 60000) continue;
+      try { await publishHour(item, io); n++; failedAt.delete(k); }
+      catch (e) {
+        failedAt.set(k, { at: now, tries: (f?.tries || 0) + 1 });
+        io.log?.warn?.('[TV REPLAY] hour not published; tried again later', { key: item.ch.key, id: item.id, message: String(e?.message || e).slice(0, 160) });
+        if (++failures >= 3) break; // Yemot itself in trouble: next round
+      }
     }
   } finally { running = false; }
   return n;

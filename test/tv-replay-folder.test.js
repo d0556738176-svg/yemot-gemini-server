@@ -63,3 +63,18 @@ test('the hours of a channel can be made again in place: same file number, nothi
   const later = await RF.hoursToPublish([ch], new Date('2026-11-20T08:00:00Z'));
   assert.deepEqual(later.map(x => x.id), ['20261119-22', '20261119-23'], 'new hours still get new numbers');
 });
+
+test('one hour that fails does not hold up the other channels', async () => {
+  const RF = await import('../tv-replay-folder.js');
+  mp3('5', '20261119-100000.mp3'); mp3('6', '20261119-100000.mp3');
+  const chs = [{ key: '5', title: 'a' }, { key: '6', title: 'b' }];
+  const yemot = {}; const tried = [];
+  const io = { list: async () => ({ files: [] }), del: async () => {}, putText: async (w, c) => { yemot[w] = c; }, getText: async w => yemot[w] ?? null,
+    upload: async (f, r) => { tried.push(r); if (r.includes('/5/9/5/')) throw new Error('WS name is not allowed'); yemot[r] = 'x'; }, log: { info() {}, warn() {} } };
+  const n = await RF.publishPending(chs, io);
+  assert.equal(n, 1, 'channel 6 published although channel 5 failed');
+  assert.ok(yemot['ivr2:/5/9/6/10/000.wav']);
+  const before = tried.length;
+  await RF.publishPending(chs, io);
+  assert.equal(tried.filter(r => r.includes('/5/9/5/')).length, tried.slice(0, before).filter(r => r.includes('/5/9/5/')).length, 'the failed hour waits before the next try');
+});
