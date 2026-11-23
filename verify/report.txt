@@ -1,55 +1,55 @@
 
- 2026-11-23T17:01:19.763Z load [ 2.16, 2.99, 2.37 ] cpu 26 avail 2851 disk 53% tmp ["5042\t/tmp","1\t/var/tmp","159\t/var/log/journal","48\t/root/.cache"]
-   ffmpeg {"count":7,"rssMB":632,"cpu":47.599999999999994,"oldestMin":8}
-   node {"count":3,"rssMB":429,"cpu":3.7,"oldestMin":72}
-   fwupd {"count":1,"rssMB":35,"cpu":0,"oldestMin":12298}
-   multipathd {"count":1,"rssMB":27,"cpu":0,"oldestMin":12323}
-   systemd-journal {"count":1,"rssMB":25,"cpu":0,"oldestMin":67}
-   caddy {"count":1,"rssMB":22,"cpu":0,"oldestMin":12306}
-   systemd {"count":2,"rssMB":21,"cpu":0,"oldestMin":12323}
-   systemd-resolve {"count":1,"rssMB":12,"cpu":0,"oldestMin":12323}
-   cpu 100 4 0m ps ps -eo pid,ppid,etimes,pcpu,rss,comm,args --sort=-rss --no-headers
-   cpu 39.6 133 7m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 3.7 256 10m node /usr/bin/node server.js
-   cpu 1.5 95 8m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 1.4 95 6m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 1.3 87 7m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 1.3 84 6m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 1.3 69 6m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
+######## trigger {"ok":true,"started":["שיעור הרב זמיר כהן מהידברות","שיר חנוכה בפרוג","תוכנית במאקו","פרק site:13tv.co.il","פודקאסט site:kan.org.il","ניגון חסידי בפייסבוק"]}
 
- 2026-11-23T17:02:04.273Z load [ 1.12, 2.6, 2.27 ] cpu 8 avail 2866 disk 53% tmp ["5042\t/tmp","1\t/var/tmp","159\t/var/log/journal","48\t/root/.cache"]
-   ffmpeg {"count":7,"rssMB":632,"cpu":44.099999999999994,"oldestMin":8}
-   node {"count":3,"rssMB":425,"cpu":4.2,"oldestMin":72}
-   fwupd {"count":1,"rssMB":35,"cpu":0,"oldestMin":12298}
-   multipathd {"count":1,"rssMB":27,"cpu":0,"oldestMin":12324}
-   systemd-journal {"count":1,"rssMB":25,"cpu":0,"oldestMin":68}
-   caddy {"count":1,"rssMB":22,"cpu":0,"oldestMin":12306}
-   systemd {"count":2,"rssMB":21,"cpu":0,"oldestMin":12324}
-   systemd-resolve {"count":1,"rssMB":12,"cpu":0,"oldestMin":12324}
-   cpu 100 4 0m ps ps -eo pid,ppid,etimes,pcpu,rss,comm,args --sort=-rss --no-headers
-   cpu 36.1 133 8m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 4.2 252 10m node /usr/bin/node server.js
-   cpu 1.5 95 8m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 1.4 95 7m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 1.3 87 8m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 1.3 84 7m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 1.3 69 7m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
+שיעור הרב זמיר כהן מהידברות | candidates 2 | ok 1
+   OK  hidabroot.org yt-dlp 11s הרב זמיר כהן: המקרא - שיעור מ"א - הידברו 
+   NO  hidabroot.org  24s  unsupported
 
- 2026-11-23T17:02:47.124Z load [ 1.37, 2.45, 2.23 ] cpu 72 avail 2647 disk 54% tmp ["5126\t/tmp","1\t/var/tmp","159\t/var/log/journal","48\t/root/.cache"]
-   ffmpeg {"count":8,"rssMB":765,"cpu":46.89999999999999,"oldestMin":9}
-   node {"count":3,"rssMB":438,"cpu":15.200000000000001,"oldestMin":73}
-   yt-dlp {"count":2,"rssMB":78,"cpu":101.4,"oldestMin":0}
-   fwupd {"count":1,"rssMB":35,"cpu":0,"oldestMin":12299}
-   multipathd {"count":1,"rssMB":27,"cpu":0,"oldestMin":12325}
-   caddy {"count":1,"rssMB":22,"cpu":0,"oldestMin":12307}
-   systemd {"count":2,"rssMB":21,"cpu":0,"oldestMin":12325}
-   systemd-journal {"count":1,"rssMB":16,"cpu":0.3,"oldestMin":0}
-   cpu 78.5 76 0m yt-dlp /usr/local/bin/yt-dlp --no-warnings -j -f bestaudio/best[height<=480]/best --no-playlist --impersonate chrome -- [url]
-   cpu 33.3 133 9m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 22.9 2 0m yt-dlp /usr/local/bin/yt-dlp --no-warnings -j -f bestaudio/best[height<=480]/best --no-playlist --impersonate chrome -- [url]
-   cpu 9.3 122 0m node /usr/bin/node server.js
-   cpu 5.9 253 11m node /usr/bin/node server.js
-   cpu 5.6 130 0m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 1.5 95 9m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
-   cpu 1.4 95 8m ffmpeg /usr/bin/ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -headers User-Agent: Mozilla/5.0 (Windows NT 1
+שיר חנוכה בפרוג | candidates 2 | ok 1
+   OK  prog.co.il yt-dlp 12s וובינר קולינרי חנוכה (1) 
+   NO  prog.co.il  41s  unsupported
+
+תוכנית במאקו | candidates 2 | ok 2
+   OK  mako.co.il yt-dlp 16s ״רק אומרת את דעתי, ומשלמים לי עליה״: מאי 
+   OK  mako.co.il browser/streamlink 46s Radware Block Page 
+
+פרק site:13tv.co.il | candidates 2 | ok 2
+   OK  13tv.co.il browser/streamlink 45s הישרדות, עונה 8, פרק 11: פרק הדחה שוק! ל 
+   OK  13tv.co.il yt-dlp 17s index 2026-11-23 17:08 
+
+פודקאסט site:kan.org.il | candidates 2 | ok 2
+   OK  kan.org.il yt-dlp 17s פודקאסט – אין על האמת 
+   OK  kan.org.il yt-dlp 28s פודקאסט - אור ואהבה 
+
+ניגון חסידי בפייסבוק | candidates 2 | ok 2
+   OK  facebook.com yt-dlp 19s ניגון חסידי 
+   OK  facebook.com yt-dlp 13s לרביעיית הניגון יש גרוב חסידי-ישראלי קצב 
+
+######## trigger {"ok":true,"started":["ניגון חסידי באינסטגרם","ניגון חסידי בטיקטוק","שיעור תורה בטלגרם","ניגון חסידי בסאונדקלאוד","ניגון בוימאו","שיעור גמרא דף יומי להאזנה"]}
+
+ניגון חסידי באינסטגרם | candidates 2 | ok 2
+   OK  instagram.com yt-dlp 13s Video by danielzamirmusic 
+   OK  instagram.com yt-dlp 11s Video by 613nb_fashion 
+
+ניגון חסידי בטיקטוק | candidates 2 | ok 2
+   OK  tiktok.com yt-dlp 9s 06&ניגון ברדיצ׳ב (התבודדות) 🎤🎶@AVIRAMS 
+   OK  tiktok.com yt-dlp 11s #שמוליקברגר #shmulikberger #dj #music #j 
+
+שיעור תורה בטלגרם | candidates 2 | ok 2
+   OK  t.me yt-dlp 5s האם תקום ממשלה עם המפלגות החרדיות והמפלג 
+   OK  t.me yt-dlp 5s גרמניה: הקנצלר מרץ: אירופה מוכנה לנהל מש 
+
+ניגון חסידי בסאונדקלאוד | candidates 2 | ok 2
+   OK  soundcloud.com yt-dlp 11s Region Gasconha Prospectiva : Pitaya 
+   OK  soundcloud.com yt-dlp 10s Danske Bank - Handelskrigen kom og gik - 
+
+ניגון בוימאו | candidates 2 | ok 2
+   OK  vimeo.com browser/streamlink 110s Niggun ניגון - Short animation film 
+   OK  vimeo.com browser/streamlink 32s Animus Visualizer: Tycho - Dye Music Vid 
+
+שיעור גמרא דף יומי להאזנה | candidates 2 | ok 0
+   NO  google.com  20s  unsupported
+   NO  google.com  21s  unsupported
+
+search engines [[55,false,false,""],[52,false,false,""],[77,false,false,""],[47,false,false,""],[40,false,false,""],[40,true,true,""]]
 exit=0
