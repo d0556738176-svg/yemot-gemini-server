@@ -6469,6 +6469,11 @@ async function sendOwnerTzintuk(phones) {
 }
 // Shows whether each web key works (never the keys themselves). The result is
 // cached for hours, so opening this page costs at most one tiny call per provider.
+// Owner, 24.11: answer models, alive or not, and (with ?q=) how each answers. Names and codes only.
+app.get('/health/models', rateLimit(3, 60 * 1000, 'model-health'), async (req,res)=>{
+  try { const { modelHealth } = await import('./model-health.js'); res.set('cache-control','no-store').json(await modelHealth({ q: String(req.query.q||'').slice(0,300) })); }
+  catch(e) { res.status(500).json({ok:false,error:String(e?.message||e).slice(0,160)}); }
+});
 app.get('/health/providers', rateLimit(6, 60 * 1000, 'provider-health'), async (req,res)=>{
   try { res.json(await providerHealth()); }
   catch(e) { res.status(500).json({ok:false,error:String(e?.message||e).slice(0,160)}); }
