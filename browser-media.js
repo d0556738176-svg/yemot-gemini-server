@@ -1,3 +1,4 @@
+import os from 'node:os';
 // Browser engine for extension 2 (owner, 18.11: "the most advanced engine,
 // downloading from as many sites as possible"). A page the downloader cannot
 // read is opened in a real (headless) Chromium, the way a person's browser
@@ -71,7 +72,8 @@ function idleClose() {
   idleTimer.unref?.();
 }
 async function slot(fn) {
-  const max = Math.max(1, Number(process.env.BROWSER_PAGES) || 2);
+  // 23.11: one page at a time on a 2-core server (each page is a whole browser tab).
+  const max = Math.max(1, Number(process.env.BROWSER_PAGES) || (os.cpus().length <= 2 ? 1 : 2));
   if (busy >= max) await new Promise(r => waiting.push(r));
   busy++;
   try { return await fn(); } finally { busy--; waiting.shift()?.(); idleClose(); }

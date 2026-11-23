@@ -2,7 +2,7 @@
 // not only YouTube. Text pieces the call reads; the call itself is in server.js.
 
 const SITES = {
-  'hidabroot.org': 'הידברות', 'yutorah.org': 'יו תורה', 'kan.org.il': 'כאן', 'soundcloud.com': 'סאונדקלאוד',
+  'hidabroot.org': 'הידברות', 'prog.co.il': 'פרוג', 'yutorah.org': 'יו תורה', 'kan.org.il': 'כאן', 'soundcloud.com': 'סאונדקלאוד',
   'dailymotion.com': 'דיילימושן', 'vimeo.com': 'וימאו', 'archive.org': 'ארכיון האינטרנט', 'facebook.com': 'פייסבוק',
   'instagram.com': 'אינסטגרם', 'youtube.com': 'יוטיוב', 'youtu.be': 'יוטיוב', 'music.youtube.com': 'יוטיוב מיוזיק',
   'kol-halashon.com': 'קול הלשון', 'kolhalashon.com': 'קול הלשון', 'meirtv.com': 'מאיר', 'meirtv.co.il': 'מאיר',
