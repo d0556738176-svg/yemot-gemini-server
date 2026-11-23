@@ -5255,6 +5255,11 @@ async function callHandler(call) {
         if(!fixed&&!ext3Done&&isWeatherQuestion(userTranscript)&&extractWeatherLocation(userTranscript)) {
           try { fixed=await answerWeatherDirect(userTranscript); console.info('[EXT3_WEATHER] forecast service',{callId:activeKey}); } catch(e) { console.warn('[EXT3_WEATHER] forecast failed; the brain answers',{status:e?.status||0}); }
         }
+        // 24.11: the date of a holiday or fast is computed (Hebcal, Israel), not guessed.
+        if(!fixed&&!ext3Done) {
+          try { const { answerHoliday }=await import('./jewish-calendar.js'); const h=await answerHoliday(userTranscript); if(h) { fixed=h; console.info('[EXT3_CALENDAR] holiday date',{callId:activeKey}); } }
+          catch(e) { console.warn('[EXT3_CALENDAR] Hebcal failed; the brain answers',{message:String(e?.message||e).slice(0,80)}); }
+        }
         // Owner, 18.11: "search the whole web for a recording/video of ..." =
         // extension 2's deep web search, with the results read there and a
         // key press before any download.
