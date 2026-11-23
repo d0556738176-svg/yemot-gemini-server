@@ -8,6 +8,7 @@
 const MEDIA_HINT = /(video|watch|vod|player|play|media|embed|shiur|lecture|audio|podcast|episode|mp3|mp4|m3u8|וידאו|שיעור|הרצאה|האזנה|צפייה)/i;
 const SKIP = /(?:wikipedia\.org|wikimedia\.org|google\.[a-z.]+\/(?:search|maps)|spotify\.com)|\.(pdf|docx?|xlsx?|pptx?|zip|rar|exe|apk)(\?|$)|\/(search|tag|tags|category|login|signin|account)\b|facebook\.com\/(groups|pages)\//i;
 
+const GOOGLE_PAGE = /^https?:\/\/(?:www\.|books\.|news\.|accounts\.|support\.|play\.)?google\.[a-z.]+\//i; // not drive/docs/podcasts
 const clean = t => String(t || '').replace(/\s*[-|–]\s*(YouTube|Vimeo)\s*$/i, '').replace(/\s+/g, ' ').trim();
 const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
 
@@ -152,8 +153,11 @@ export async function searchWebVideos(query, { env = process.env, fetchImpl = fe
   ]);
   const out = [], seen = new Set();
   const add = (x, from, weight) => {
-    const url = String(x.link || x.url || '').trim();
-    if (!/^https?:\/\//i.test(url) || SKIP.test(url)) return;
+    let url = String(x.link || x.url || '').trim();
+    // 23.11: a Google forwarding link becomes the page it points to; any other
+    // Google page (search, books, a sign-in) holds no recording and is left out.
+    try { const g = new URL(url); if (/(^|\.)google\.[a-z.]+$/i.test(g.hostname) && /^\/url$/i.test(g.pathname)) { const t = g.searchParams.get('q') || g.searchParams.get('url'); if (t && /^https?:\/\//i.test(t)) url = t; } } catch {}
+    if (!/^https?:\/\//i.test(url) || SKIP.test(url) || GOOGLE_PAGE.test(url)) return;
     // Query strings frequently identify the video. Strip tracking fields only;
     // removing every query collapsed all YouTube watch links into one result.
     let canonical;

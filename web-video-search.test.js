@@ -47,3 +47,17 @@ test('a Serper key with no credits is skipped and the backup engines answer at o
   assert.equal(serperCalls, first, 'the spent key is not called again');
   assert.ok(b.items.length >= 1);
 });
+
+test('Google forwarding links become their page; other Google pages are left out', async () => {
+  const { searchWebVideos } = await import('./web-video-search.js');
+  const fetchImpl = async (url) => {
+    if (String(url).includes('langsearch')) return new Response(JSON.stringify({ data: { webPages: { value: [
+      { url: 'https://www.google.com/url?q=https://example.org/shiur/7&sa=U', name: 'שיעור 7' },
+      { url: 'https://www.google.com/search?q=x', name: 'חיפוש' },
+      { url: 'https://books.google.co.il/books?id=1', name: 'ספר' },
+    ] } } }), { status: 200 });
+    return new Response('{}', { status: 500 });
+  };
+  const r = await searchWebVideos('שיעור דף יומי', { env: { LANGSEARCH_API_KEY: 'l' }, fetchImpl });
+  assert.deepEqual(r.items.map(x => x.url), ['https://example.org/shiur/7']);
+});
