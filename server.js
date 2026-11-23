@@ -5786,8 +5786,14 @@ app.get('/tv-relay-test', rateLimit(4, 60 * 1000, 'tv-relay-test'), async (req,r
     const names=(await fsp.readdir(tmp)).filter(n=>/^\d{3}\.wav$/.test(n)).sort();
     const pieces=[]; for(const n of names) pieces.push({n,bytes:(await fsp.stat(pathm.join(tmp,n))).size});
     let mastered=null;
-    if(names[0]) { const m=pathm.join(tmp,'m.wav'); try { const r=await REC.masterSpeech(pathm.join(tmp,names[0]),m); mastered={bytes:(await fsp.stat(m)).size,hissCut:!!r?.hissCut,quality:await REC.pieceQuality(bin,m)}; } catch(e) { mastered={error:String(e?.message||e).slice(0,200)}; } }
-    res.json({ch:ch.key,title:ch.title,source:src.page.replace(/\?.*/,''),stream:info.url.replace(/\?.*/,''),ffmpeg:{code:err.code,warnings:err.e.split('\n').filter(l=>l&&!/Skip \(/.test(l)).slice(-12)},pieces,mastered});
+    let heard=null;
+    if(names[0]) { const m=pathm.join(tmp,'m.wav'); try { const r=await REC.masterSpeech(pathm.join(tmp,names[0]),m); mastered={bytes:(await fsp.stat(m)).size,hissCut:!!r?.hissCut,quality:await REC.pieceQuality(bin,m)};
+      // What is actually said (owner, 23.11: check each station really plays itself).
+      if(req.query.listen) { const all=pathm.join(tmp,'all.wav'); const list=pathm.join(tmp,'l.txt'); await fsp.writeFile(list,names.slice(0,3).map(n=>"file '"+pathm.join(tmp,n)+"'").join('\n'));
+        await new Promise(r=>{ const p=spawn(bin,['-hide_banner','-loglevel','error','-y','-f','concat','-safe','0','-i',list,'-c:a','pcm_s16le',all]); p.on('close',()=>r()); p.on('error',()=>r()); });
+        heard=String(await transcribePhoneAudio(await fsp.readFile(all)).catch(e=>'(transcription failed: '+String(e?.message||e).slice(0,80)+')')).slice(0,400); }
+    } catch(e) { mastered={error:String(e?.message||e).slice(0,200)}; } }
+    res.json({ch:ch.key,title:ch.title,source:src.page.replace(/\?.*/,''),stream:info.url.replace(/\?.*/,''),ffmpeg:{code:err.code,warnings:err.e.split('\n').filter(l=>l&&!/Skip \(/.test(l)).slice(-12)},pieces,mastered,heard});
   } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,200)}); }
   finally { await fsp.rm(tmp,{recursive:true,force:true}).catch(()=>{}); }
 });
