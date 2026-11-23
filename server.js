@@ -1,3 +1,4 @@
+import { createVoiceRecorder } from './branch2-voice-recording.js';
 import { geminiKeysFrom } from './gemini-keys.js';
 import { progressAnnouncement } from './youtube-playback-progress.js';
 import { playbackAwake } from './playback-awake.js';
@@ -584,6 +585,26 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
 }
 
 const yemotApi = new YemotApi(process.env.YEMOT_API_USERNAME, process.env.YEMOT_API_PASSWORD);
+const branch2Voice = createVoiceRecorder({
+  api: async (method, params) => {
+    const { _pipeline: p } = await import('./youtube-authorized-playback.js');
+    const response = await fetch(p.YEMOT_API_BASE + '/' + method, {
+      method: 'POST', body: new URLSearchParams({ token: p.yemotApiKey(), ...params }),
+      signal: AbortSignal.timeout(20000)
+    });
+    if (!response.ok) throw Object.assign(new Error('Recording storage HTTP ' + response.status), { code: 'recording_storage' });
+    return response.json();
+  },
+  download: async remote => {
+    const { _pipeline: p } = await import('./youtube-authorized-playback.js');
+    const u = new URL(p.YEMOT_API_BASE + '/DownloadFile');
+    u.searchParams.set('token', p.yemotApiKey()); u.searchParams.set('path', remote);
+    const response = await fetch(u, { signal: AbortSignal.timeout(20000) });
+    if (!response.ok) throw Object.assign(new Error('Recording download HTTP ' + response.status), { code: 'recording_download' });
+    return { data: Buffer.from(await response.arrayBuffer()) };
+  }
+});
+
 const router = YemotRouter({
   printLog: true,
   // Keep the same Call state alive for a long time so a caller can have
@@ -4859,32 +4880,17 @@ async function youtubeCallHandler(call) {
       }
       voiceOnce=false;
       let fromKeys=!!keyTranscript;
-      const recordPath=fromKeys?null:await call.read(
-        [{type:'text',data:sanitizeForYemot(prompt)}],
-        'record',
-        {min_length:1,max_length:60,no_confirm_menu:true,timeout:10*60*1000}
-      );
-      if(!fromKeys&&(!recordPath||recordPath==='None'))
-        return call.id_list_message([{type:'text',data:'לא נקלטה בקשה. להתראות'}]);
-
       let transcript;
       if(fromKeys) { transcript=keyTranscript; keyTranscript=null; }
       else {
-      const audioResponse=await withTimeout(
-        yemotApi.download_file('ivr2:'+recordPath),
-        REQUEST_TIMEOUT_MS,
-        'youtube conversational recording download'
-      );
-      // A failed/empty transcription must NOT drop the caller out of the
-      // extension. transcribePhoneAudio THROWS when every speech provider fails
-      // (observed live: Deepgram empty + all Gemini fallbacks empty → the outer
-      // catch exited extension 2 mid-call). Catch it here, re-prompt, and keep
-      // the call in the loop; only after a few failures end gracefully.
       try {
-        transcript=await transcribePhoneAudio(audioResponse.data);
+        const audioBuffer=await branch2Voice.capture(call,
+          [{type:'text',data:sanitizeForYemot(prompt)}],++tapNo);
+        transcript=await transcribePhoneAudio(audioBuffer);
       } catch(txErr) {
+        if(txErr instanceof ExitError || isCallerHangupError(txErr)) throw txErr;
         transcriptFailAttempts++;
-        console.warn('[YouTube IVR] transcription failed; staying in extension and re-prompting',{attempt:transcriptFailAttempts,status:geminiErrorStatus(txErr)});
+        console.warn('[YouTube IVR] transcription failed; staying in extension and re-prompting',{attempt:transcriptFailAttempts,status:geminiErrorStatus(txErr),code:txErr?.code||'transcription',message:String(txErr?.message||txErr).slice(0,120)});
         if(transcriptFailAttempts>=4) return call.id_list_message([{type:'text',data:'מתקשה לשמוע אותך כרגע. אפשר לנסות שוב בעוד רגע. להתראות.'}]);
         nextPrompt='לא שמעתי אותך טוב. אמור שוב את הבקשה או את מספר התוצאה, ולסיום הקש סולמית.';
         continue;
