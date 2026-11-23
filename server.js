@@ -5844,6 +5844,14 @@ app.get('/branch2-diag',async (req,res)=>{ let commit=''; try { commit=String(re
 // the latest download jobs of this server run.
 app.get('/branch2-saved',rateLimit(20,60*1000,'saved-check'),async (req,res)=>{
   try{
+    if(req.query.probe){
+      // Owner, 23.11: would "yes to video" start for this item without the
+      // backup-engine question? (yt-dlp --simulate only; nothing is saved.)
+      const v=String(req.query.probe||'');
+      if(!/^[A-Za-z0-9_-]{11}$/.test(v))return res.status(400).json({ok:false});
+      const gate=await videoStartGate({videoId:v,subtitles:req.query.subs==='1'}).catch(e=>({error:String(e?.message||e).slice(0,120)}));
+      return res.json({id:v,gate:gate?{ask:gate.ask||null,error:gate.error||null}:null});
+    }
     if(req.query.folders){
       const { _pipeline: p } = await import('./youtube-authorized-playback.js');
       const { foldersReport } = await import('./branch2-saved-check.js');
