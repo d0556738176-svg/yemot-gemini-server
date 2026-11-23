@@ -16,7 +16,7 @@ console.log('ACTIVE_DOWNLOAD_JOBS',active.length);
 if(active.length)throw Error('Downloads active: deployment deferred');
 const git=(...a)=>execFileSync('git',['-C','/opt/yemot/ext2',...a],{encoding:'utf8'}).trim();
 const dirty=git('status','--porcelain').split('\n').filter(Boolean);
-if(dirty.some(l=>l.slice(3)!=='package-lock.json'))throw Error('Other working tree changes; deployment deferred');
+if(dirty.some(l=>l.trim().replace(/^\\S+\\s+/,'')!=='package-lock.json'))throw Error('Other working tree changes; deployment deferred');
 const lockHash=()=>createHash('sha256').update(readFileSync('/opt/yemot/ext2/package-lock.json')).digest('hex');
 const originalLock=lockHash();
 git('fetch','-q','origin','work/branch-2-confirm-yes-20261025');
