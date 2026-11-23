@@ -24,5 +24,24 @@ for n in main ext2; do
   logger -t yemot-update "$n updated to $(git -C $d rev-parse --short HEAD) (waited ${waited}s)"
   [ $n = main ] && bash $ROOT/main/deploy/vps/maintain.sh >/dev/null 2>&1
 done
+# Live conversation checks of extensions 1 and 3 (owner, 24.11): a question
+# list on the side branch verify/ask becomes an owner-check (the same as the
+# owner running ask.mjs by hand). It changes nothing in the system: no code,
+# no restart; the check runs as one simulated call, phone 0000000009.
+ask_sha=$(git -C $ROOT/main ls-remote -q origin refs/heads/verify/ask 2>/dev/null | cut -f1)
+if [ -n "$ask_sha" ] && [ "$ask_sha" != "$(cat $ROOT/.ask-seen 2>/dev/null)" ]; then
+  echo "$ask_sha" > $ROOT/.ask-seen
+  if git -C $ROOT/main fetch -q origin verify/ask 2>/dev/null; then
+    git -C $ROOT/main show FETCH_HEAD:ask/request.json 2>/dev/null | node -e '
+      let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{
+        const j=JSON.parse(s), fs=require("fs");
+        if(!/^[a-f0-9]{24}$/.test(j.name||"")) return;
+        const q=(j.questions||[]).map(String).map(x=>x.slice(0,400)).filter(Boolean).slice(0,20);
+        if(!q.length) return;
+        fs.mkdirSync("/var/lib/yemot-report",{recursive:true,mode:0o700});
+        fs.writeFileSync("/var/lib/yemot-report/"+j.name+".ask",JSON.stringify({branch:j.branch==="1"?"1":"3",questions:q}),{mode:0o600});
+      }catch{}});' && logger -t yemot-update "conversation check queued"
+  fi
+fi
 # keep this script itself current
 cmp -s $ROOT/main/deploy/vps/update.sh /usr/local/bin/yemot-update || install -m 755 $ROOT/main/deploy/vps/update.sh /usr/local/bin/yemot-update
