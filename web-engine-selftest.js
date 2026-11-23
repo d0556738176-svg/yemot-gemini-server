@@ -38,6 +38,7 @@ async function grab(item, ffmpegPath) {
 export async function runEngineSelfTest({ env = process.env, log = console, ffmpegPath = 'ffmpeg', queries = QUERIES, perQuery = 3 } = {}) {
   if (state.status === 'running') return state;
   Object.assign(state, { status: 'running', startedAt: new Date().toISOString(), finishedAt: null, sites: [] });
+  await (await import('./resource-guard.js')).waitForRoom({ label: 'engine check', maxWaitMs: 10 * 60000 });
   const { ytdlpPath } = await import('./youtube-direct.js');
   const { streamDownloaderPath } = await import('./stream-media-download.js');
   const { browserPath } = await import('./browser-media.js');

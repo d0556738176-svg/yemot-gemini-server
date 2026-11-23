@@ -4094,6 +4094,7 @@ async function batchQueue() {
     store: branch2Store,
     concurrency: Math.max(1, Math.min(3, Number(process.env.BRANCH2_BATCH_CONCURRENCY || 1))),
     start: async item => {
+      await (await import('./resource-guard.js')).waitForRoom({ label: 'batch ' + item.videoId });
       const v = { videoId: item.videoId, title: item.title, channelTitle: item.channelTitle, durationSeconds: item.durationSeconds ?? null, subtitles: item.subtitles };
       if (item.kind === 'video') {
         const gate = await videoStartGate(v).catch(() => null);
@@ -6289,6 +6290,7 @@ app.listen(port,async()=>{
       tempDir:()=>fsp.mkdtemp(pathm.join(os.tmpdir(),'ext7-')),
       removeDir:dir=>fsp.rm(dir,{recursive:true,force:true}).catch(()=>{})
     };
+    await (await import('./resource-guard.js')).waitForRoom({ label: 'ext7 catch-up' });
     await ext7.backfillExt7(ext7io);
     // 19.11: big songs saved in pieces before the fix never reached 7: the
     // songs of the last 3 days that are missing there are added once.
