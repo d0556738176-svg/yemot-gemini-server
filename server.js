@@ -402,6 +402,21 @@ function promptWithPersona(prompt) {
   return callPersona.getStore()?.persona==='female' ? FEMININE_SELF_INSTRUCTION+'\n\n'+prompt : prompt;
 }
 
+const geminiModelRest = new Map(), geminiModelOk = new Map(), geminiModel429 = new Map();
+function geminiModelRestOn(model, status, key, fastPhone=false) {
+  const now = Date.now();
+  if (status === 429) {
+    const keys = (geminiModel429.get(model) || []).filter(x => now - x.at < 10 * 60000 && x.key !== key);
+    keys.push({ key, at: now }); geminiModel429.set(model, keys);
+    if (keys.length >= 2) { geminiModelRest.set(model, now + 15 * 60000); console.warn('[Gemini] model quota used up on several keys; resting the model', { model, minutes: 15 }); }
+  } else if (status === 503) geminiModelRest.set(model, now + 45000);
+  else if (status === 408 && fastPhone) geminiModelRest.set(model, now + 60000);
+}
+function geminiModelOrder(n) {
+  const idx = Array.from({ length: n }, (_, i) => i);
+  const recent = i => (Date.now() - (geminiModelOk.get(MODEL_NAMES[i]) || 0)) < 10 * 60000;
+  return idx.sort((a, b) => (recent(b) - recent(a)) || (a - b));
+}
 async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, timeoutOverrideMs=null, phoneBudgetOverrideMs=null) {
   contents=withPersona(contents);
   if (!modelsByName.length || !modelsByName[0]?.length)
@@ -417,9 +432,15 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, 
   const phoneDeadline = fastPhone ? Date.now() + phoneBudgetMs : Infinity;
   let lastError;
 
-  for (let mi=0; mi<groups.length; mi++) {
+  // 24.11: a model whose daily quota is used up (429 on two keys) or that is
+  // overloaded (503) or too slow for the phone rests as a whole, so the turn
+  // reaches a working model at once; models that answered lately go first.
+  const order = geminiModelOrder(groups.length);
+  for (const mi of order) {
     if (fastPhone && Date.now() >= phoneDeadline) break;
+    if ((geminiModelRest.get(MODEL_NAMES[mi]) || 0) > Date.now()) continue;
     for (let ki=0; ki<groups[mi].length; ki++) {
+      if ((geminiModelRest.get(MODEL_NAMES[mi]) || 0) > Date.now()) break;
       if (fastPhone && Date.now() >= phoneDeadline) break;
       const cooldownKey = MODEL_NAMES[mi] + ':key:' + (ki + 1);
       const cooldownUntil = geminiQuotaCooldowns.get(cooldownKey) || 0;
@@ -443,17 +464,20 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, 
             } : {})
           };
           const attemptTimeoutMs = fastPhone ? Math.max(500, Math.min(timeoutMs, phoneDeadline - Date.now())) : timeoutMs;
-          return await withTimeout(
+          const out = await withTimeout(
             groups[mi][ki].generateContent(request),
             attemptTimeoutMs,
             MODEL_NAMES[mi] + ' key #' + (ki+1)
           );
+          geminiModelOk.set(MODEL_NAMES[mi], Date.now());
+          return out;
         } catch(e) {
           lastError=e;
           const status=geminiErrorStatus(e);
           if (status === 429) {
             lastGeminiQuotaError = e;
             geminiQuotaCooldowns.set(cooldownKey, Date.now() + GEMINI_QUOTA_COOLDOWN_MS);
+            geminiModelRestOn(MODEL_NAMES[mi], 429, ki);
             console.warn('[Gemini] quota/rate limit; cooling down this model/key and trying next', {
               model: MODEL_NAMES[mi], key: ki + 1, status, fastPhone,
               cooldownMs: GEMINI_QUOTA_COOLDOWN_MS
@@ -467,6 +491,7 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, 
             break;
           }
           if (status === 408 || status === 503 || (status >= 500 && status < 600)) {
+            geminiModelRestOn(MODEL_NAMES[mi], status, ki, fastPhone);
             console.warn('[Gemini] transient error; trying next configured model/key', {
               model: MODEL_NAMES[mi], key: ki + 1, status, fastPhone
             });
@@ -1374,8 +1399,15 @@ async function answerWeatherDirect(transcript) {
   weatherUrl.searchParams.set('longitude',String(place.longitude));
   weatherUrl.searchParams.set('current','temperature_2m,apparent_temperature,precipitation,rain,weather_code,wind_speed_10m');
   weatherUrl.searchParams.set('daily','weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max');
-  const wantsWeek=/(?:השבוע|בשבוע|ימים הקרובים|בימים הקרובים|לשבוע|סוף השבוע|בשבת|ביום (?:ראשון|שני|שלישי|רביעי|חמישי|שישי))/u.test(String(transcript||''));
-  weatherUrl.searchParams.set('forecast_days',wantsWeek?'7':'2');
+  const tx=String(transcript||'');
+  // 24.11: "מחר", "מחרתיים", "ביום רביעי", "בשבת" = that day's forecast.
+  const WD=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
+  const todayIdx=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem',weekday:'short'}).format(new Date()));
+  let askDay=/מחרתיים/u.test(tx)?2:/(?:^|\s)ו?ל?מחר(?=$|[\s,.?!])/u.test(tx)?1:0;
+  const wdm=tx.match(/(?:ביום|ליום|יום)\s+(ראשון|שני|שלישי|רביעי|חמישי|שישי)|(?:^|\s)ב?שבת(?=$|[\s,.?!])/u);
+  if(!askDay&&wdm) { const w=wdm[1]?WD.indexOf(wdm[1]):6; askDay=(w-todayIdx+7)%7; }
+  const wantsWeek=!askDay&&/(?:השבוע|בשבוע|ימים הקרובים|בימים הקרובים|לשבוע|סוף השבוע)/u.test(tx);
+  weatherUrl.searchParams.set('forecast_days',wantsWeek||askDay>1?'7':'2');
   weatherUrl.searchParams.set('timezone','Asia/Jerusalem');
   const weatherResponse=await withTimeout(fetch(weatherUrl),REQUEST_TIMEOUT_MS,'current weather');
   if(!weatherResponse.ok) throw Object.assign(new Error('Weather HTTP '+weatherResponse.status),{status:503});
@@ -1389,6 +1421,11 @@ async function answerWeatherDirect(transcript) {
   const feels=Math.round(Number(current.apparent_temperature));
   const wind=Math.round(Number(current.wind_speed_10m));
   const condition=codes[current.weather_code] || 'תנאי מזג אוויר לא ידועים';
+  if(askDay>0&&Array.isArray(daily.time)&&daily.time[askDay]) {
+    const k=askDay, lo=Math.round(Number(daily.temperature_2m_min?.[k])), hi=Math.round(Number(daily.temperature_2m_max?.[k])), rain=Number(daily.precipitation_probability_max?.[k]);
+    const dn=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',weekday:'long',day:'numeric',month:'long'}).format(new Date(daily.time[k]+'T12:00:00'));
+    return (k===1?'מחר, ':k===2?'מחרתיים, ':'')+dn+', ב'+sanitizeForYemot(place.name||location)+': '+(codes[daily.weather_code?.[k]]||'')+', בין '+lo+' ל־'+hi+' מעלות'+(Number.isFinite(rain)?', וסיכוי לגשם של כ'+rain+' אחוזים':'')+'.'+(Number.isFinite(rain)&&rain>=50?' כדאי לקחת מטרייה.':'');
+  }
   let answer='ב'+sanitizeForYemot(place.name||location)+' כרגע '+condition+', הטמפרטורה '+temp+' מעלות ומרגיש כמו '+feels+' מעלות, עם רוח של כ'+wind+' קילומטר לשעה.';
   const max=Number(daily.temperature_2m_max?.[0]), min=Number(daily.temperature_2m_min?.[0]), rainChance=Number(daily.precipitation_probability_max?.[0]);
   const todayCondition=codes[daily.weather_code?.[0]] || condition;
@@ -2566,7 +2603,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
   const othersConfigured=Boolean((process.env.GROQ_API_KEY||'').trim()||(process.env.OPENROUTER_API_KEY||'').trim()||extraFastProviders(true).length);
   const racers=gemini?[(async()=>{
     if(othersConfigured) {
-      await new Promise(r=>setTimeout(r,Number(isExt3()?(process.env.EXT3_GEMINI_HEDGE_MS||2500):quality?(process.env.BRANCH1_QUALITY_GEMINI_HEDGE_MS||700):(process.env.BRANCH1_GEMINI_HEDGE_MS||1800))));
+      await new Promise(r=>setTimeout(r,Number(isExt3()?(process.env.EXT3_GEMINI_HEDGE_MS||(quality?0:2500)):quality?(process.env.BRANCH1_QUALITY_GEMINI_HEDGE_MS||700):(process.env.BRANCH1_GEMINI_HEDGE_MS||1800))));
       if(raceDone) throw Object.assign(new Error('Gemini not needed'),{status:499});
     }
     if(branch1PrimaryCooldown.isCoolingDown('primary')) { console.info('[BRANCH1_WEB_SYNTH] Gemini resting after a failure; skipped'); throw Object.assign(new Error('Gemini cooling down'),{status:503}); }
@@ -2582,7 +2619,9 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
       const st=geminiErrorStatus(err);
       // 13.11: a slow answer is our own time limit (the planner gives Gemini 2.5 s),
       // not a Gemini failure: resting all 7 keys for it left the answers with no Gemini.
-      if([429,500,502,503,504].includes(st)) branch1PrimaryCooldown.cool('primary',st);
+      // 24.11: one model's quota or overload no longer rests all of Gemini
+      // (each model rests by itself in generateWithRetry); only a server error does.
+      if([500,502,504].includes(st)) branch1PrimaryCooldown.cool('primary',st);
       throw err;
     }
   })()]:[];
@@ -2590,16 +2629,19 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     // In quality mode the small fast model is a reserve: it joins only if the
     // strong models have not answered after a short wait (they hit free-tier
     // rate limits under load, and the caller must never get raw excerpts).
-    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(isExt3()?(process.env.EXT3_RESERVE_MS||4500):(process.env.BRANCH1_QUALITY_RESERVE_MS||2500)):0},
-    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim(),big:true},
+    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_MODEL||'openai/gpt-oss-20b').trim(),delayMs:quality?Number(isExt3()?(process.env.EXT3_RESERVE_MS||7000):(process.env.BRANCH1_QUALITY_RESERVE_MS||2500)):0},
+    // 24.11 (owner: answers must be true): in extension 1/3 Gemini answers first;
+    // the free models only step in if it has not answered in time (they invented
+    // Torah sources and names in the live check).
+    {name:'Groq',baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model:(process.env.GROQ_ACCURATE_MODEL||'openai/gpt-oss-120b').trim(),big:true,delayMs:quality&&isExt3()?Number(process.env.EXT3_BIG_DELAY_MS||4000):0},
     // Extension 3 staggers the backups instead of firing every provider at
     // once: one strong answer per turn, so the free per-minute quotas last the
     // whole call (08.11: all providers were rate-limited by the second call).
-    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),delayMs:isExt3()?Number(process.env.EXT3_OPENROUTER_DELAY_MS||3000):0},
-    ...extraFastProviders(true),
+    {name:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',apiKey:(process.env.OPENROUTER_API_KEY||'').trim(),model:(process.env.OPENROUTER_MODEL||'openrouter/free').trim(),delayMs:isExt3()?Number(process.env.EXT3_OPENROUTER_DELAY_MS||(quality?5000:3000)):0},
+    ...extraFastProviders(true).map(p=>quality&&isExt3()?{...p,delayMs:Number(process.env.EXT3_BIG_DELAY_MS||4000)}:p),
     // Owner, 10.11: Groq counts each model's free quota separately, so more
     // strong models on the same key = more answers before "rate limited".
-    ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?5500+i*800:0}))
+    ...String(process.env.GROQ_EXTRA_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean).map((model,i)=>({name:'Groq:'+model.split('/').pop(),baseUrl:'https://api.groq.com/openai/v1',apiKey:(process.env.GROQ_API_KEY||'').trim(),model,big:true,delayMs:quality?(isExt3()?7000:5500)+i*800:0}))
   ].filter(p=>p.apiKey&&!isDeadKey(p.apiKey)).map((p,_,all)=>{
     // 13.11: every Groq key fired on every turn, so all of them spent their
     // per-minute quota together and hit "rate limited" together. Now the keys
@@ -4448,6 +4490,18 @@ async function searchExa(q,{timeoutMs=4000}={}) {
   },{label:'Exa'});
   return (j.results||[]).map(x=>({title:String(x.title||''),url:String(x.url||''),snippet:String(x.text||'').slice(0,1500)}));
 }
+// 24.11: Google's map listings through Serper (name, address, phone, rating).
+async function serperPlaces(q,{timeoutMs=4500}={}) {
+  for(const key of keysFor('SERPER_API_KEY')) {
+    try {
+      const r=await fetch('https://google.serper.dev/places',{method:'POST',signal:AbortSignal.timeout(timeoutMs),headers:{'X-API-KEY':key,'content-type':'application/json'},body:JSON.stringify({q:String(q).slice(0,160),gl:'il',hl:'iw'})});
+      if(!r.ok) continue;
+      const j=await r.json().catch(()=>null);
+      return (j?.places||[]).map(p=>({title:String(p.title||''),address:String(p.address||''),phone:String(p.phoneNumber||''),rating:p.rating||null,category:String(p.category||''),website:String(p.website||'')})).filter(p=>p.title);
+    } catch {}
+  }
+  return [];
+}
 async function ext3WebSearch(q,{timeoutMs=4500}={}) {
   // Each engine gets the same short window; a slow one is simply left out.
   const capped=p=>Promise.race([p,new Promise(r=>setTimeout(()=>r([]),timeoutMs).unref?.())]);
@@ -4608,6 +4662,7 @@ async function runExt3Brain(utterance, phone, callId, turnHistory, now, media=''
       ? raceSynthesis(prompt,budgetMs,{maxTokens:Math.min(maxTokens,600),gemini:true,geminiBudgetMs:2500})
       : raceSynthesis(prompt,budgetMs,{maxTokens,quality:true}),
     webSearch:(q,o)=>ext3WebSearch(q,{timeoutMs:Math.min(o?.timeoutMs||3500,3500)}),
+    placesSearch:(q,o)=>serperPlaces(q,{timeoutMs:Math.min(o?.timeoutMs||4500,4500)}),
     youtubeProxy:async(kind,params)=>{
       const secret=String(process.env.EXT3_MEDIA_SECRET||'').trim(); if(!secret) throw Object.assign(new Error('no proxy'),{status:503});
       const u=new URL(String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'')+'/api/ext3/youtube/'+kind);
@@ -5180,7 +5235,16 @@ async function callHandler(call) {
           replyText=h?.prompt||'חזרנו לשיחה. אפשר להמשיך.';
           ext3Done=true;
         }
-        const fixed=ext3Done?null:answerIsraelTimeQuestion(userTranscript)||answerDailyDateQuestion(userTranscript);
+        // 24.11: the time AND the Hebrew date when both are asked (only the time was said).
+        let fixed=ext3Done?null:[answerIsraelTimeQuestion(userTranscript),answerDailyDateQuestion(userTranscript)].filter(Boolean).join('. ')||null;
+        // 24.11: "thank you" / "goodbye" is answered at once (it waited 30 s for busy models).
+        if(!fixed&&!ext3Done&&/^(?:תודה|תודה רבה|תודה לך|תודה רבה לך|יישר כח|יישר כוח|ישר כח|שכוייח|כל הכבוד|מעולה תודה|להתראות|ביי|יום טוב|לילה טוב|שבוע טוב|שבת שלום)[.!, ]*(?:תודה|להתראות|ביי)?[.!, ]*$/u.test(userTranscript.trim()))
+          fixed=/להתראות|ביי|לילה טוב|יום טוב|שבוע טוב|שבת שלום/u.test(userTranscript)?'בשמחה רבה. '+(/שבת שלום/u.test(userTranscript)?'שבת שלום ומבורכת!':/שבוע טוב/u.test(userTranscript)?'שבוע טוב ומבורך!':'להתראות, ותמיד אפשר לחזור אליי.'):'בשמחה רבה! אם יש עוד משהו, אני כאן.';
+        // 24.11: the weather from the forecast service itself (Celsius, the right day),
+        // not from web pages (the live check read Fahrenheit and named the wrong weekday).
+        if(!fixed&&!ext3Done&&isWeatherQuestion(userTranscript)&&extractWeatherLocation(userTranscript)) {
+          try { fixed=await answerWeatherDirect(userTranscript); console.info('[EXT3_WEATHER] forecast service',{callId:activeKey}); } catch(e) { console.warn('[EXT3_WEATHER] forecast failed; the brain answers',{status:e?.status||0}); }
+        }
         // Owner, 18.11: "search the whole web for a recording/video of ..." =
         // extension 2's deep web search, with the results read there and a
         // key press before any download.

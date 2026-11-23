@@ -92,8 +92,8 @@ export function resolveDate(text, plannerDate = '', now = new Date()) {
   if (/מחרתיים/u.test(t)) return addDays(today, 2);
   if (/(?:^|\s)מחר(?=$|[\s?.,!])/u.test(t)) return addDays(today, 1);
   if (/אתמול/u.test(t)) return addDays(today, -1);
-  if (/(?:מוצאי שבת|מוצ״ש|מוצש|צאת השבת|יציאת השבת|הבדלה)/u.test(t)) { const w = weekday(today); return addDays(today, (6 - w + 7) % 7); }
-  if (/(?:כניסת השבת|הדלקת נרות|ערב שבת|שישי)/u.test(t)) { const w = weekday(today); return addDays(today, (5 - w + 7) % 7); }
+  if (/(?:מוצאי שבת|מוצ״ש|מוצש|צאת (?:ה)?שבת|יציאת (?:ה)?שבת|יוצאת (?:ה)?שבת|הבדלה)/u.test(t)) { const w = weekday(today); return addDays(today, (6 - w + 7) % 7); }
+  if (/(?:כניסת (?:ה)?שבת|נכנסת (?:ה)?שבת|הדלקת נרות|ערב שבת|שישי|זמני (?:ה)?שבת)/u.test(t)) { const w = weekday(today); return addDays(today, (5 - w + 7) % 7); }
   for (const [name, idx] of DAY_NAMES) {
     if (new RegExp('(?:ביום|יום|ב)' + name + '(?=$|[\\s?.,!])', 'u').test(t)) { const w = weekday(today); return addDays(today, (idx - w + 7) % 7); }
   }
@@ -311,7 +311,7 @@ export function localZmanim(lat, lon, date) {
   };
 }
 // Words that mean he is asking for a halachic time of day.
-export const ZMANIM_WORDS = /(?:קריאת שמע|ק״ש|קש של|זמן ק\s*ש|סוף זמן|זמן תפילה|סוף זמן תפילה|הנץ|נץ החמה|זריחה|שקיעה|עלות השחר|עלות|צאת הכוכבים|צאת השבת|יציאת השבת|כניסת השבת|הדלקת נרות|זמן הדלקה|הבדלה|מוצאי שבת|חצות|מנחה גדולה|מנחה קטנה|פלג המנחה|זמני היום|זמני תפילה|זמן ציצית|משיכיר|בין השמשות|רבנו תם|רבינו תם|תחילת הצום|סוף הצום|צאת הצום|זמנים הלכתיים|זמני הלכה|לפי הגרא|לפי הגר״א|מגן אברהם|המג״א)/u;
+export const ZMANIM_WORDS = /(?:כניסת\s+שבת|צאת\s+שבת|יציאת\s+שבת|זמני\s+(?:ה)?שבת|(?:נכנסת|יוצאת|נכנס|יוצא)\s+(?:ה)?שבת|כניסת\s+(?:ה)?חג|צאת\s+(?:ה)?חג|קריאת שמע|ק״ש|קש של|זמן ק\s*ש|סוף זמן|זמן תפילה|סוף זמן תפילה|הנץ|נץ החמה|זריחה|שקיעה|עלות השחר|עלות|צאת הכוכבים|צאת השבת|יציאת השבת|כניסת השבת|הדלקת נרות|זמן הדלקה|הבדלה|מוצאי שבת|חצות|מנחה גדולה|מנחה קטנה|פלג המנחה|זמני היום|זמני תפילה|זמן ציצית|משיכיר|בין השמשות|רבנו תם|רבינו תם|תחילת הצום|סוף הצום|צאת הצום|זמנים הלכתיים|זמני הלכה|לפי הגרא|לפי הגר״א|מגן אברהם|המג״א)/u;
 // "What is alot hashachar?" asks for an explanation, not for today's time.
 const EXPLAIN = /(?:מה זה|מה פירוש|מה הפירוש|מה המשמעות|למה|מדוע|מה ההבדל|תסביר|תסבירי|הסבר|מה המקור|מאיפה|מי קבע|איך מחשבים|איך יודעים)/u;
 export function isZmanimQuestion(text) { const t = String(text || ''); return ZMANIM_WORDS.test(t) && !(EXPLAIN.test(t) && !/(?:מתי|באיזו שעה|באיזה שעה|עד מתי|היום|מחר)/u.test(t)); }

@@ -26,6 +26,7 @@
 
 import { isCapabilityQuestion, SYSTEM_FACTS } from './caller-intent.js';
 import { travelFacts as realTravel } from './travel-tools.js';
+import { isTorahQuestion, torahSources } from './torah-sources.js';
 import { isZmanimQuestion, isNearbyQuestion, nearbyKind, spokenTime, sameTown, zmanimFacts as realZmanim, nearbyFacts as realNearby, spokenDistance, businessHours as realBusinessHours, OPEN_NOW } from './place-tools.js';
 
 const HE_NUMBER_WORDS = { 'אחת': 1, 'אחד': 1, 'שתיים': 2, 'שניים': 2, 'שלוש': 3, 'שלושה': 3 };
@@ -1201,10 +1202,14 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
 
   if (plan.intent === 'nearby') {
     const kindText = plan.kind || utterance;
+    let listed = [];
     let [facts, web] = await Promise.all([
       within(Number(deps.placeBudgetMs || 19000), (deps.nearbyFacts || realNearby)({ kindText: kindText + ' ' + utterance, place: plan.place, town: plan.town, openNow: OPEN_NOW.test(utterance + ' ' + plan.standalone) }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() })).catch(e => { log.warn?.('[PLACE] nearby failed', String(e?.message || e).slice(0, 100)); return null; }),
-      deps.webSearch ? deps.webSearch(plan.search || plan.standalone || utterance, { timeoutMs: 4500 }).catch(() => []) : Promise.resolve([])
-    ]);
+      deps.webSearch ? deps.webSearch(plan.search || plan.standalone || utterance, { timeoutMs: 4500 }).catch(() => []) : Promise.resolve([]),
+      // 24.11: Google's map listings too (businesses the free map does not have,
+      // e.g. a computer room in Beit Shemesh), with address and phone.
+      deps.placesSearch ? deps.placesSearch([kindText, plan.place, plan.town].filter(Boolean).join(' ').replace(/^(?:איפה\s+)?(?:יש\s+)?/u, ''), { timeoutMs: 4500 }).catch(() => []) : Promise.resolve([])
+    ]).then(([f, w, p]) => { listed = p || []; return [f, w]; });
     // "Open now" and the map has no hours for them: their hours from the web,
     // and the pharmacies on duty tonight (Owner, 19.11).
     const openAsk = OPEN_NOW.test(utterance + ' ' + plan.standalone);
@@ -1220,10 +1225,12 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       }
       log.info?.('[PLACE] open-now hours looked up on the web', { queries: qs.length, results: more.length });
     }
+    const listedText = (listed || []).slice(0, 6).map((p, i) => 'מקום ' + (i + 1) + ' (מגוגל מפות): ' + clip(p.title, 90) + (p.category ? ', ' + clip(p.category, 40) : '') + (p.address ? ', כתובת: ' + clip(p.address, 90) : '') + (p.phone ? ', טלפון: ' + p.phone : '') + (p.rating ? ', דירוג ' + p.rating : '')).join('\n');
+    if (listedText) { web = [{ title: 'מקומות מגוגל מפות', url: 'https://maps.google.com/', snippet: listedText.replace(/\n/g, ' | ') }, ...(web || [])]; log.info?.('[PLACE] Google map listings', { found: listed.length }); }
     if (facts?.unknownPlace && !(web || []).length) return out({ reply: 'לא מצאתי במפה את המקום ' + facts.unknownPlace + '. אפשר לומר לי שם של רחוב או של מקום מוכר לידו, ובאיזו עיר, ואחפש שוב?' });
     if (facts?.items?.length || (web || []).length) {
       log.info?.('[PLACE] nearby', { kind: facts?.kind, place: facts?.loc?.label, town: facts?.loc?.town, found: facts?.items?.length || 0, web: (web || []).length, approx: !!facts?.loc?.approx });
-      const webText = (web || []).slice(0, 7).map((r, i) => 'תוצאת חיפוש ' + (i + 1) + ': ' + clip(r.title, 110) + ' (' + hostOf(r.url).slice(0, 40) + ')\n' + clip(r.snippet, 300)).join('\n');
+      const webText = (web || []).slice(0, 7).map((r, i) => 'תוצאת חיפוש ' + (i + 1) + ': ' + clip(r.title, 110) + ' (' + hostOf(r.url).slice(0, 40) + ')\n' + clip(r.snippet, r.url === 'https://maps.google.com/' ? 1100 : 300)).join('\n');
       const reply = await ask('המתקשר שואל איפה יש ' + (facts?.kind || 'מקום') + ' קרוב למקום מסוים. ' +
         (facts?.items?.length ? 'לפניך רשימה מהמפה, ממוינת מהקרוב לרחוק, עם המרחק בקו אווירי והכתובת. התחילי בתשובה ישירה: הקרוב ביותר, שמו בדיוק כפי שהוא כתוב ברשימה, כמה רחוק ובאיזה רחוב. אחר כך עוד אחד או שניים קרובים. אל תתארי מסלול הליכה או פניות, ואל תשני שמות. כשכתוב ליד מקום אם הוא פתוח או סגור עכשיו, אמרי את זה כפי שכתוב; כשהוא שאל מה פתוח עכשיו, פתחי במקום הפתוח הקרוב ביותר. כשבמפה אין שעות, חפשי בתוצאות החיפוש את שעות הפתיחה של אותו מקום או רשימת בתי מרקחת תורנים בעיר, וחשבי לפי השעה עכשיו אם פתוח; אם גם שם אין, אמרי בכנות שאין לך שעות מאומתות והציעי להתקשר, עם הטלפון אם מופיע. אם במפה אין לו שם, אמרי שזה ' + facts.kind + ' שמופיע במפה בלי שם, עם הכתובת. ' : 'במפה לא נמצאו תוצאות, ענה רק לפי תוצאות החיפוש. ') +
         'תוצאות החיפוש באינטרנט עוזרות רק כשהן מדברות בבירור על אותו מקום ממש (למשל בית כנסת שנמצא בתוך החוף או צמוד אליו); אל תמציאי מרחקים, כתובות או שמות שלא מופיעים. אם הוא שאל על מקום בעיר מסוימת, אל תציעי מקומות בעיר אחרת. בלי זמני תפילה אם אינם כתובים; אפשר להציע לברר במקום.',
@@ -1234,6 +1241,13 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     log.warn?.('[PLACE] nothing on the map; falling back to the web');
     plan.intent = 'web'; plan.search = plan.search || plan.standalone || utterance; plan.mapDown = true;
   }
+
+  // 24.11 (owner: true answers on every subject): a question on a Torah text
+  // gets the real text from Sefaria; then it is answered from that text.
+  let torah = null;
+  if (['chat', 'web'].includes(plan.intent) && !plan.about && isTorahQuestion(utterance + ' ' + (plan.standalone || '')))
+    torah = await within(7000, torahSources(plan.standalone || utterance, { llm: deps.llm, fetchImpl: deps.fetchImpl || fetch, log })).catch(() => null);
+  if (torah) plan.intent = 'chat';
 
   if (plan.intent === 'web') {
     const q1 = plan.search || plan.standalone || utterance;
@@ -1332,6 +1346,13 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     const list = (prefs || []).map(x => String(x || '').trim()).filter(Boolean);
     if (list.length && /(?:ביקשתי|הוראה|הוראות|כללים|אמרתי לך ש?לא|ש?לא תדבר|ש?לא תדברי|מה אסור)/u.test(utterance))
       return out({ reply: 'ביקשת ממני: ' + list.slice(-5).map(x => x.replace(/[.!]+$/, '')).join('. וגם: ') + '. ואני מקפיד על זה.' });
+    // 24.11: "what did I ask at the start / just now?" straight from this call's
+    // own turns (a model listed the wrong questions in the live check).
+    const mine = (current || []).map(t => String(t.user || '').trim()).filter(Boolean);
+    if (mine.length && /(?:שאלתי|ביקשתי|אמרתי)/u.test(utterance) && /(?:בתחילת|בהתחלה|ראשונ|הראשון|קודם כל)/u.test(utterance))
+      return out({ reply: 'בתחילת השיחה שאלת: ' + clip(mine[0], 160) + (mine[1] ? '. ואחר כך: ' + clip(mine[1], 160) : '') + '.' });
+    if (mine.length && /(?:שאלתי|ביקשתי|אמרתי)/u.test(utterance) && /(?:לפני רגע|עכשיו|קודם|האחרונ|בפעם הקודמת בשיחה)/u.test(utterance) && !/(?:בשיחה הקודמת|בפעם הקודמת שהתקשרתי)/u.test(utterance))
+      return out({ reply: 'לפני רגע שאלת: ' + clip(mine[mine.length - 1], 200) + '.' });
     const reply = await ask('המתקשר שואל על שיחות קודמות או על עצמו. ענה רק מתוך הקשר השיחה, הסיכום וההוראות הקבועות שלו. פני אליו בלשון זכר ובגוף שני ("ביקשת ממני ש..."), במשפטים שלמים וברורים. כשהוא שואל פרט אחד, ענה עליו בפשטות. כשהוא שואל מה דיברנו, סכמי את הנושאים העיקריים לפי הסדר, עם הפרטים החשובים (למשל שם מדויק של סרטון שהומלץ). אם פרט לא מופיע, אמרי בכנות שאינך זוכרת אותו.', '', { maxTokens: 1000, budgetMs: 10000 });
     return out({ reply });
   }
@@ -1343,10 +1364,13 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
 
   // chat (talk, explanation, teaching, continuing an offer, a new standing instruction)
   const lessonWanted = looksLikeLessonRequest(utterance) || (plan.continueOffer && lessonRef);
-  let reply = await ask('את עוזרת חכמה ונבונה בטלפון, עם ידע רחב בכל תחום. עני על מה שהמתקשר אמר עכשיו, בהמשך טבעי לשיחה.' +
+  const codeAsk = /(?:קוד|תכנות|לתכנת|פייתון|python|ג'?אווה|java|javascript|סקריפט|פונקציה|משתנה|לולאה|שגיאה|באג|error|undefined|html|css|sql|אלגוריתם|רקורסיה|מחלקה|אובייקט)/iu.test(utterance);
+  let reply = await ask('את עוזרת חכמה ונבונה בטלפון, עם ידע רחב בכל תחום. עני על מה שהמתקשר אמר עכשיו, בהמשך טבעי לשיחה. ענה רק על מה שאת בטוחה בו; שמות, מקורות, תאריכים ומספרים רק כשהם ידועים לך בוודאות, ואם לא - אמרי בכנות שאינך בטוחה.' +
+    (codeAsk ? ' זו שאלה על תכנות והתשובה נשמעת בטלפון: הסבירי במילים פשוטות וברורות, שלב אחר שלב. כשצריך קוד, תארי אותו במילים (למשל: "פונקציה בשם עצרת שמקבלת מספר n; אם n קטן או שווה לאחת היא מחזירה אחת; אחרת היא מחזירה n כפול עצרת של n פחות אחת"), בלי סימנים, סוגריים או גרשיים שאי אפשר להקריא. בשגיאה: מה גורם לה בדרך כלל ואיך בודקים ומתקנים, בנקודות קצרות.' : '') +
     (plan.instruction ? ' המתקשר נתן עכשיו הוראה קבועה: "' + plan.instruction + '". אשרי בקצרה ובחום שתזכרי ותקיימי אותה מעכשיו, והמשיכי בהתאם.' : '') +
-    (plan.about ? ' הוא שואל על המערכת עצמה ועל מה שהיא יודעת לעשות. עני בדיוק על מה ששאל, בכנות, רק מתוך העובדות על המערכת שלמטה, בלי לבצע שום פעולה ובלי להבטיח מה שלא כתוב שם. אם שאל "רק מ..." או "מאיזה אתרים", אמרי במפורש את התשובה. בסוף הציעי בקצרה איך לבקש את זה.' : ''),
-    plan.about ? SYSTEM_FACTS : '', { maxTokens: 2000, budgetMs: 13000 });
+    (plan.about ? ' הוא שואל על המערכת עצמה ועל מה שהיא יודעת לעשות. עני בדיוק על מה ששאל, בכנות, רק מתוך העובדות על המערכת שלמטה, בלי לבצע שום פעולה ובלי להבטיח מה שלא כתוב שם. אם שאל "רק מ..." או "מאיזה אתרים", אמרי במפורש את התשובה. בסוף הציעי בקצרה איך לבקש את זה.' : '') +
+    (torah ? ' לפנייך הטקסט המקורי מספריא. בססי את התשובה רק עליו: צטטי במדויק את המילים החשובות כפי שהן כתובות, אמרי את מראה המקום, והסבירי בפשטות. אל תייחסי למחבר דבר שלא כתוב בטקסט. אם הטקסט לא עונה על השאלה, אמרי זאת.' : '') +
+    '', plan.about ? SYSTEM_FACTS : torah ? torah.text : '', { maxTokens: 2000, budgetMs: 13000 });
   if (stuck) {
     // Keys must be clear: one short line and the options, nothing garbled around them.
     const keys = parseKeyOptions(reply) || parseKeyOptions(numberedToKeys(reply));
