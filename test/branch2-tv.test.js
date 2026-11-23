@@ -87,3 +87,24 @@ test('a relay link that carries the station address gives that address', async (
   assert.equal(unwrapRelay('https://radiomood.co.il/api/radio-stream?station=kol-chai'), null);
   assert.equal(unwrapRelay('https://a.example/x?next=https://a.example/y'), null, 'same site: not a relay');
 });
+
+test('radiomood: the station number comes from the site list by name, never the default player', async () => {
+  const TV = await import('../branch2-tv.js');
+  const raw = String.raw`"stations\\\":[{\\\"id\\\":\\\"station001\\\",\\\"name\\\":\\\"גלגל\\\\\\\"צ\\\",\\\"imagePath\\\":\\\"/a.webp\\\"},{\\\"id\\\":\\\"station002\\\",\\\"name\\\":\\\"גלי צה\\\\\\\"ל (גל\\\\\\\"צ)\\\",\\\"imagePath\\\":\\\"/b.webp\\\"},{\\\"id\\\":\\\"station003\\\",\\\"name\\\":\\\"כאן ב׳\\\",\\\"imagePath\\\":\\\"/c.webp\\\"},{\\\"id\\\":\\\"station020\\\",\\\"name\\\":\\\"רדיו קול חי\\\",\\\"imagePath\\\":\\\"/d.webp\\\"},{\\\"id\\\":\\\"station021\\\",\\\"name\\\":\\\"קול חי מיוזיק\\\",\\\"imagePath\\\":\\\"/e.webp\\\"},{\\\"id\\\":\\\"station030\\\",\\\"name\\\":\\\"103FM\\\",\\\"imagePath\\\":\\\"/f.webp\\\"}]`;
+  const list = TV.rmStations(raw);
+  assert.equal(list.length, 6);
+  const pick = n => TV.rmPick(list, n)?.id;
+  assert.equal(pick('גלי צהל'), 'station002');
+  assert.equal(pick('כאן ב'), 'station003');
+  assert.equal(pick('קול חי'), 'station020');
+  assert.equal(pick('קול חי מיוזיק'), 'station021');
+  assert.equal(pick('103'), 'station030');
+  assert.equal(pick('קול פליי'), undefined);
+  // The whole lookup: the relay address of the right station, checked to play.
+  const ch = TV.RADIO_CHANNELS.find(c => c.digit === '8');
+  TV.forget(ch.key);
+  const played = [];
+  const r = await TV.findChannelSource(ch, { fetchText: async () => raw, resolveStream: async u => { played.push(u); return { url: u }; }, overrides: {} }, { fresh: true });
+  assert.equal(r.page, 'https://radiomood.co.il/api/radio-stream?stationId=station002&sourceIndex=0');
+  assert.ok(!played.some(u => /station001/.test(u)), 'never the default station');
+});
