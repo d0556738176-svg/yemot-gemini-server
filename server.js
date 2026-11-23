@@ -5868,6 +5868,7 @@ app.get('/tv-check', rateLimit(4, 60 * 1000, 'tv-check'), async (req,res)=>{
   res.json({ channels: await TV.checkAllChannels(await tvDeps()) });
 });
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
+app.get('/server-resources',rateLimit(20,60*1000,'resources'),async (req,res)=>{ try { res.json(await (await import('./server-resources.js')).resourcesReport()); } catch(e){ res.status(500).json({ok:false}); } });
 app.get('/branch2-diag',async (req,res)=>{ let commit=''; try { commit=String(readFileSync(new URL('./.git/HEAD',import.meta.url),'utf8')).trim(); if(commit.startsWith('ref:')) commit=String(readFileSync(new URL('./.git/'+commit.slice(5).trim(),import.meta.url),'utf8')).trim(); } catch {} let downloadEvents=[]; try { downloadEvents=await (await import('./download-events.js')).recentDownloadEvents(60); } catch {}
   let engineTest=null, webEvents=[], browserEvents=[]; try { engineTest=(await import('./web-engine-selftest.js')).state; webEvents=(await import('./youtube-direct.js')).webEvents; browserEvents=(await import('./browser-media.js')).browserEvents; } catch {} res.json({commit:commit.slice(0,12), startedAt:BRANCH2_STARTED_AT, keys:branch2Keys.slice(-100), downloadEvents, engineTest, webEvents:webEvents.slice(-40), browserEvents:browserEvents.slice(-40)}); });
 // Owner, 19.11: what one download really left in Yemot (phone file quality,
