@@ -657,7 +657,9 @@ async function generateBranch1WithFallback(contents, useWebSearch=false, fastPho
     } catch (error) {
       primaryError=error;
       const status=geminiErrorStatus(error);
-      if ([429,408,500,502,503,504].includes(status)) {
+      // 24.11: our own short phone time limit (408) is not a Gemini failure, and
+      // one busy model (503) rests by itself in generateWithRetry.
+      if ([429,500,502,504].includes(status)) {
         const cooldownMs=branch1PrimaryCooldown.cool('primary',status);
         console.warn('[BRANCH1 FALLBACK] opening primary Gemini circuit after provider failure',{status,cooldownMs,useWebSearch,fastPhone});
       }

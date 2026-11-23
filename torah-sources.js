@@ -18,7 +18,7 @@ export async function sefariaText(ref, { fetchImpl = fetch, timeoutMs = 5000 } =
   const v = (j?.versions || []).find(x => x?.text && flat(x.text).length) || null;
   const text = v ? flat(v.text).join(' ') : '';
   if (!text) return null;
-  return { ref: j.ref || ref, heRef: j.heRef || '', text: text.slice(0, 3500) };
+  return { ref: j.ref || ref, heRef: j.heRef || '', text: text.slice(0, 1600) };
 }
 
 // The places to read, from a fast model; nothing invented is kept, because a
@@ -45,7 +45,7 @@ export async function torahSources(question, { llm, fetchImpl = fetch, log = con
   const got = [...byRef.filter(Boolean), ...bySearch].filter((g, i, a) => a.findIndex(x => x.ref === g.ref) === i).slice(0, 5);
   log.info?.('[TORAH] Sefaria sources', { asked: refs.length, found: got.length });
   if (!got.length) return null;
-  return { refs: got.map(g => g.ref), text: got.map(g => 'מקור: ' + (g.heRef || g.ref) + '\n' + g.text).join('\n\n') };
+  return { refs: got.map(g => g.ref), first: got[0], text: got.map(g => 'מקור: ' + (g.heRef || g.ref) + '\n' + g.text).join('\n\n').slice(0, 4200) };
 }
 
 // "What does Avot say about silence": Sefaria's own search inside that book.
@@ -58,5 +58,5 @@ export async function sefariaSearch(book, words, { fetchImpl = fetch, timeoutMs 
   const j = await r.json().catch(() => null);
   const seen = new Set();
   return (j?.hits?.hits || []).map(h => h._source).filter(x => x?.ref && !seen.has(x.ref) && seen.add(x.ref))
-    .map(x => ({ ref: x.ref, heRef: x.heRef || '', text: strip(x.exact || x.naive_lemmatizer || '').slice(0, 1500) })).filter(x => x.text);
+    .map(x => ({ ref: x.ref, heRef: x.heRef || '', text: strip(x.exact || x.naive_lemmatizer || '').slice(0, 900) })).filter(x => x.text);
 }

@@ -1365,12 +1365,14 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // chat (talk, explanation, teaching, continuing an offer, a new standing instruction)
   const lessonWanted = looksLikeLessonRequest(utterance) || (plan.continueOffer && lessonRef);
   const codeAsk = /(?:קוד|תכנות|לתכנת|פייתון|python|ג'?אווה|java|javascript|סקריפט|פונקציה|משתנה|לולאה|שגיאה|באג|error|undefined|html|css|sql|אלגוריתם|רקורסיה|מחלקה|אובייקט)/iu.test(utterance);
-  let reply = await ask('את עוזרת חכמה ונבונה בטלפון, עם ידע רחב בכל תחום. עני על מה שהמתקשר אמר עכשיו, בהמשך טבעי לשיחה. ענה רק על מה שאת בטוחה בו; שמות, מקורות, תאריכים ומספרים רק כשהם ידועים לך בוודאות, ואם לא - אמרי בכנות שאינך בטוחה.' +
+  let reply = await (async () => ask('את עוזרת חכמה ונבונה בטלפון, עם ידע רחב בכל תחום. עני על מה שהמתקשר אמר עכשיו, בהמשך טבעי לשיחה. ענה רק על מה שאת בטוחה בו; שמות, מקורות, תאריכים ומספרים רק כשהם ידועים לך בוודאות, ואם לא - אמרי בכנות שאינך בטוחה.' +
     (codeAsk ? ' זו שאלה על תכנות והתשובה נשמעת בטלפון: הסבירי במילים פשוטות וברורות, שלב אחר שלב. כשצריך קוד, תארי אותו במילים (למשל: "פונקציה בשם עצרת שמקבלת מספר n; אם n קטן או שווה לאחת היא מחזירה אחת; אחרת היא מחזירה n כפול עצרת של n פחות אחת"), בלי סימנים, סוגריים או גרשיים שאי אפשר להקריא. בשגיאה: מה גורם לה בדרך כלל ואיך בודקים ומתקנים, בנקודות קצרות.' : '') +
     (plan.instruction ? ' המתקשר נתן עכשיו הוראה קבועה: "' + plan.instruction + '". אשרי בקצרה ובחום שתזכרי ותקיימי אותה מעכשיו, והמשיכי בהתאם.' : '') +
     (plan.about ? ' הוא שואל על המערכת עצמה ועל מה שהיא יודעת לעשות. עני בדיוק על מה ששאל, בכנות, רק מתוך העובדות על המערכת שלמטה, בלי לבצע שום פעולה ובלי להבטיח מה שלא כתוב שם. אם שאל "רק מ..." או "מאיזה אתרים", אמרי במפורש את התשובה. בסוף הציעי בקצרה איך לבקש את זה.' : '') +
     (torah ? ' לפנייך הטקסט המקורי מספריא. בססי את התשובה רק עליו: צטטי במדויק את המילים החשובות כפי שהן כתובות, אמרי את מראה המקום, והסבירי בפשטות. אל תייחסי למחבר דבר שלא כתוב בטקסט. אם הטקסט לא עונה על השאלה, אמרי זאת.' : '') +
-    '', plan.about ? SYSTEM_FACTS : torah ? torah.text : '', { maxTokens: 2000, budgetMs: 13000 });
+    '', plan.about ? SYSTEM_FACTS : torah ? torah.text : '', { maxTokens: 2000, budgetMs: 13000 }))()
+    // 24.11: every model busy, but the real text is in hand: it is read out.
+    .catch(e => { if (!torah?.first) throw e; const f = torah.first; return 'הנה מה שכתוב ב' + (f.heRef || f.ref) + ': ' + clip(f.text.replace(/[\u0591-\u05C7]/g, ''), 700) + '. אם תרצה, אסביר את זה בהמשך.'; });
   if (stuck) {
     // Keys must be clear: one short line and the options, nothing garbled around them.
     const keys = parseKeyOptions(reply) || parseKeyOptions(numberedToKeys(reply));
