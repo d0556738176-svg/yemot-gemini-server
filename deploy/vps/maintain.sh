@@ -23,6 +23,28 @@ WantedBy=timers.target
 UNIT
 systemctl daemon-reload
 systemctl enable --now yemot-clean.timer
+# Disk guard (23.11): every 10 minutes, old temporary files go when the disk
+# is getting full (files still open are kept).
+install -m 755 /opt/yemot/main/deploy/vps/disk-guard.sh /usr/local/bin/yemot-disk-guard
+cat > /etc/systemd/system/yemot-disk.service <<'UNIT'
+[Unit]
+Description=Keep the disk from filling with temporary files
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=/usr/local/bin/yemot-disk-guard
+UNIT
+cat > /etc/systemd/system/yemot-disk.timer <<'UNIT'
+[Unit]
+Description=Disk guard every 10 minutes
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now yemot-disk.timer
 # YouTube changes often: the downloader of extension 2 updates itself every
 # night (and now), so direct downloads keep working (15.11).
 cat > /etc/systemd/system/yemot-ytdlp.service <<'UNIT'
