@@ -1,0 +1,56 @@
+ext2 9ac9f1758a80 2026-11-23T14:36:50.682Z
+2026-11-19T21:30:08.007Z video wmnAMMFGQ6Z true  ivr2:/וידאו/מעשה_קטן_של_אדם_גדול_הידברות_1__Ma_ase_Katan_Shel_Adam_Gadol_Hidabrut_1.mp4
+2026-11-19T21:30:09.487Z ext7 wmnAMMFGQ6Z true  149
+2026-11-19T21:30:43.231Z audio-copy wmnAMMFGQ6Z true  ivr2:/אודיו/מעשה_קטן_של_אדם_גדול_הידברות_1__Ma_ase_Katan_Shel_Adam_Gadol_Hidabrut_1.flac
+2026-11-19T23:30:47.038Z audio wVwmXGZIYky false web_download_failed the website did not give the recording
+2026-11-19T23:31:40.109Z audio ilhiy6mZYiE true  
+2026-11-19T23:32:07.295Z ext7 ilhiy6mZYiE true  150
+2026-11-19T23:32:40.896Z audio-copy ilhiy6mZYiE true  ivr2:/אודיו/הרב_ברוך_רוזנבלום_פרשת_ויצא_תשפ_ז_השתיקה_שהצילה_את_העולם_השיעור_המרכזי_חלק_1__Harav_Baruch_Rosenblum_Parashat_Vayetza_Tashaz_HaShtika_Shehatzila_Hao_Chelek_1.m4a | ivr2:/אודיו/הרב_ברוך_רוזנבלום_פרשת_ויצא_תשפ_ז_השתיקה_שהצילה_את_ה
+2026-11-19T23:53:15.594Z audio wO160ZeUFR5 true  
+2026-11-19T23:53:17.752Z ext7 wO160ZeUFR5 true  151
+2026-11-19T23:53:19.076Z audio-copy wO160ZeUFR5 false  ffmpeg failed (null): 
+2026-11-20T00:00:11.646Z audio w0eXwkjKXAy false web_download_failed the website did not give the recording
+2026-11-20T08:52:32.317Z audio w0eXwkjKXAy false web_download_failed the website did not give the recording
+2026-11-20T09:05:25.442Z audio wVwmXGZIYky false web_download_failed the website did not give the recording
+2026-11-21T19:57:08.973Z audio wQVpU2kF43H true  
+2026-11-21T19:57:09.837Z ext7 wQVpU2kF43H true  152
+2026-11-21T19:57:13.899Z audio-copy wQVpU2kF43H true  ivr2:/אודיו/איזה_ניגון_יפה_של_רבנו_נחמן_אין_ייאוש_בעולם_כלל_קצת_אמונה_משנה_עול__Eize_Nigon_Yafe_Shel_Ravnu_Nachman_Ein_Yaush_Baolam_Klal_Ktzat_Emuna_M.flac
+2026-11-21T19:58:45.992Z video-start wYuF0TUIp6g undefined  ארץ נהדרת עונה 24 פרק 4 - מסיבת ההמלצות הגדולה | 12+
+2026-11-21T20:00:11.165Z video wYuF0TUIp6g false web_download_failed the website did not give the video
+2026-11-21T20:36:05.134Z video-start wz8BObdlR7m undefined  ארץ נהדרת עונה 23 פרק 17 - מהדורת הארי: תוכנית מיוחדת | 12+
+2026-11-21T20:39:12.414Z video wz8BObdlR7m false video_too_large A video part is still larger than one upload
+2026-11-21T20:39:41.795Z audio wz8BObdlR7m true  
+2026-11-21T20:39:57.514Z ext7 wz8BObdlR7m true  153
+2026-11-21T20:40:19.193Z audio-copy wz8BObdlR7m true  ivr2:/אודיו/ארץ_נהדרת_עונה_23_פרק_17_מהדורת_הארי_תוכנית_מיוחדת__Eretz_Nehederet_Ona_23_Perek_17_Mahadura_Harry_Tochnit_Meyuchedet.m4a
+2026-11-21T20:58:02.065Z video-start wYuF0TUIp6g undefined  ארץ נהדרת עונה 24 פרק 4 - מסיבת ההמלצות הגדולה | 12+
+2026-11-21T21:01:09.870Z audio wYuF0TUIp6g true  
+2026-11-21T21:01:25.514Z ext7 wYuF0TUIp6g true  154
+2026-11-21T21:01:51.454Z audio-copy wYuF0TUIp6g true  ivr2:/אודיו/ארץ_נהדרת_עונה_24_פרק_4_מסיבת_ההמלצות_הגדולה__Eretz_Nehederet_Ona_24_Perek_4_Mesibat_HaHamlatsot_HaGdola.m4a
+2026-11-21T21:02:06.073Z video wYuF0TUIp6g true  ivr2:/וידאו/ארץ_נהדרת_עונה_24_פרק_4_מסיבת_ההמלצות_הגדולה_חלק_1__Eretz_Nehederet_Ona_24_Perek_4_Mesibat_HaHamlatsot_HaGdola_Chelek_1.mp4
+2026-11-21T22:59:50.514Z audio w0eXwkjKXAy true  
+2026-11-21T23:00:08.278Z ext7 w0eXwkjKXAy true  155
+2026-11-21T23:00:31.761Z audio-copy w0eXwkjKXAy true  ivr2:/אודיו/ארץ_נהדרת_עונה_24_פרק_1_תוכנית_פתיחת_העונה__Eretz_Nehederet_Ona_24_Perek_1_Tochnit_Ptichat_Ha_ona.m4a
+2026-11-21T23:14:23.096Z audio wyjtEfoO4SY true  
+2026-11-21T23:14:38.953Z ext7 wyjtEfoO4SY true  156
+2026-11-21T23:14:57.547Z audio-copy wyjtEfoO4SY true  ivr2:/אודיו/הבריחה_עונה_1_פרק_6_הטוויסט_של_העונה__HaBericha_Onah_1_Perek_6_HaTwist_Shel_HaOnah.m4a
+2026-11-21T23:40:03.632Z audio wlCee0kJh3l true  
+2026-11-21T23:40:19.463Z ext7 wlCee0kJh3l true  157
+2026-11-21T23:50:07.340Z audio-copy wlCee0kJh3l true  ivr2:/אודיו/איך_לבחור_פרק_לייב_התשובה_חלק_1__Eich_Livchor_Perek_Live_Hateshuva_Chelek_1.m4a | ivr2:/אודיו/איך_לבחור_פרק_לייב_התשובה_חלק_2__Eich_Livchor_Perek_Live_Hateshuva_Chelek_2.m4a
+2026-11-22T13:20:50.585Z audio K14GL_ucT44 true  
+2026-11-22T13:20:53.792Z ext7 K14GL_ucT44 true  158
+2026-11-22T13:21:02.394Z audio-copy K14GL_ucT44 true  ivr2:/אודיו/לכבוד_הילולת_הצדיק_פועל_הישועות_ה_בת_עין_בני_ברק_י_ב_כסלו_תשפ_ז__Lchvod_Hilolt_Htzdik_Poal_Hishoaot_A_Bt_Ain_Bni_Brk_Y_B_Kslo_Tshf_Z.flac
+webEvents []
+recent {"audio":[],"video":[],"ext7Newest":[{"id":"K14GL_ucT44","file":"158","title":"לכבוד הילולת הצדיק פועל הישועות ה\"בת עין\" - בני ברק י\"ב כסלו תשפ\"ז","at":"2026-11-22T13:20:50.849Z"},{"id":"wlCee0kJh3l","file":"157","title":"איך לבחור? פרק לייב [התשובה]","at":"2026-11-21T23:40:03.897Z"},{"id":"wyjtEfoO4SY","file":"156","title":"הבריחה עונה 1 פרק 6 - הטוויסט של העונה | 12+","at":"2026-11-21T23:14:23.340Z"},{"id":"w0eXwkjKXAy","file":"155","title":"ארץ נהדרת עונה 24 פרק 1 - תוכנית פתיחת העונה | 12+","at":"2026-11-21T22:59:50.757Z"},{"id":"wYuF0TUIp6g","file":"154","title":"ארץ נהדרת עונה 24 פרק 4 - מסיבת ההמלצות הגדולה | 12+","at":"2026-11-21T21:01:10.064Z"},{"id":"wz8BObdlR7m","file":"153","title":"ארץ נהדרת עונה 23 פרק 17 - מהדורת הארי: תוכנית מיוחדת | 12+","at":"2026-11-21T20:39:41.993Z"}]}
+
+#### wYuF0TUIp6g {"ext7":"154","audioCopyNames":["ארץ_נהדרת_עונה_24_פרק_4_מסיבת_ההמלצות_הגדולה__Eretz_Nehederet_Ona_24_Perek_4_Mesibat_HaHamlatsot_HaGdola"],"audioCopy":[{"path":"/אודיו/ארץ_נהדרת_עונה_24_פרק_4_מסיבת_ההמלצות_הגדולה__Eretz_Nehederet_Ona_24_Perek_4_Mesibat_HaHamlatsot_HaGdola.m4a","size":39508339}],"video":{"state":"done","subtitles":"not_requested","files":[{"path":"/וידאו/ארץ_נהדרת_עונה_24_פרק_4_מסיבת_ההמלצות_הגדולה_חלק_1__Eretz_Nehederet_Ona_24_Perek_4_Mesibat_HaHamlatsot_HaGdola_Chelek_1.mp4","size":50722212,"exists":true},{"path":"/וידאו/ארץ_נהדרת_עונה_24_פרק_4_מסיבת_ההמלצות_הגדולה_חלק_2__Eretz_Nehederet_Ona_24_Perek_4_Mesibat_HaHamlatsot_HaGdola_Chelek_2.mp4","size":47690737,"exists":true},{"path":"/וידאו/ארץ_נהדרת_עונה_24_פרק_4_מסיבת_ההמלצות_הגדולה_חלק_3__Eretz_Nehederet_Ona_24_Perek_4_Mesibat_HaHamlatsot_HaGdola_Chelek_3.mp4","size":48119533,"exists":true},{"path":"/וידאו/ארץ_נהדרת_עונה_24_פרק_4_מסיבת_ההמלצות_הגדולה_חלק_4__Eretz_Nehederet_Ona_24_Perek_4_Mesibat_HaHamlatsot_HaGdola_Chelek_4.mp4","size":47700646,"exists":true}]}}
+
+#### wz8BObdlR7m {"ext7":"153","audioCopyNames":["ארץ_נהדרת_עונה_23_פרק_17_מהדורת_הארי_תוכנית_מיוחדת__Eretz_Nehederet_Ona_23_Perek_17_Mahadura_Harry_Tochnit_Meyuchedet"],"audioCopy":[{"path":"/אודיו/ארץ_נהדרת_עונה_23_פרק_17_מהדורת_הארי_תוכנית_מיוחדת__Eretz_Nehederet_Ona_23_Perek_17_Mahadura_Harry_Tochnit_Meyuchedet.m4a","size":36786884}],"video":null}
+
+#### w0eXwkjKXAy {"ext7":"155","audioCopyNames":["ארץ_נהדרת_עונה_24_פרק_1_תוכנית_פתיחת_העונה__Eretz_Nehederet_Ona_24_Perek_1_Tochnit_Ptichat_Ha_ona"],"audioCopy":[{"path":"/אודיו/ארץ_נהדרת_עונה_24_פרק_1_תוכנית_פתיחת_העונה__Eretz_Nehederet_Ona_24_Perek_1_Tochnit_Ptichat_Ha_ona.m4a","size":41119053}],"video":null}
+
+#### wyjtEfoO4SY {"ext7":"156","audioCopyNames":["הבריחה_עונה_1_פרק_6_הטוויסט_של_העונה__HaBericha_Onah_1_Perek_6_HaTwist_Shel_HaOnah"],"audioCopy":[{"path":"/אודיו/הבריחה_עונה_1_פרק_6_הטוויסט_של_העונה__HaBericha_Onah_1_Perek_6_HaTwist_Shel_HaOnah.m4a","size":32894389}],"video":null}
+
+#### wlCee0kJh3l {"ext7":"157","audioCopyNames":["איך_לבחור_פרק_לייב_התשובה__Eich_Livchor_Perek_Live_Hateshuva"],"audioCopy":[],"video":null}
+
+#### K14GL_ucT44 {"ext7":"158","audioCopyNames":["לכבוד_הילולת_הצדיק_פועל_הישועות_ה_בת_עין_בני_ברק_י_ב_כסלו_תשפ_ז__Lchvod_Hilolt_Htzdik_Poal_Hishoaot_A_Bt_Ain_Bni_Brk_Y_B_Kslo_Tshf_Z"],"audioCopy":[{"path":"/אודיו/לכבוד_הילולת_הצדיק_פועל_הישועות_ה_בת_עין_בני_ברק_י_ב_כסלו_תשפ_ז__Lchvod_Hilolt_Htzdik_Poal_Hishoaot_A_Bt_Ain_Bni_Brk_Y_B_Kslo_Tshf_Z.flac","size":32240558}],"video":null}
+exit=0
