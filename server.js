@@ -5733,6 +5733,29 @@ app.get('/radio-check', rateLimit(20, 60 * 1000, 'radio-check'), async (req,res)
   if(req.query.start||TV.radioCheck.status==='idle') TV.startRadioCheck(await tvDeps());
   res.json({ mainMenu: mainMenuStatus, ...TV.radioCheck });
 });
+// Read-only (owner, 21.11, extension 10): what a radio station's page and its
+// scripts on the same site say about stream addresses and station ids. Only the
+// pages listed for the stations, and scripts on those same sites.
+app.get('/radio-page-scan', rateLimit(6, 60 * 1000, 'radio-page-scan'), async (req,res)=>{
+  try {
+    const TV=await import('./branch2-tv.js');
+    const ch=TV.RADIO_CHANNELS.find(c=>c.digit===String(req.query.d||''));
+    if(!ch) return res.status(400).json({error:'d=1..8'});
+    const page=ch.pages[Number(req.query.p||0)]||ch.pages[0];
+    const UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+    const get=async u=>{ try { const r=await fetch(u,{headers:{'User-Agent':UA},signal:AbortSignal.timeout(15000)}); return r.ok?(await r.text()).slice(0,3e6):''; } catch { return ''; } };
+    const html=await get(page); const host=new URL(page).host;
+    const scripts=[...html.matchAll(/<script[^>]+src=["']([^"']+)["']/g)].map(m=>{ try { return new URL(m[1],page).href; } catch { return null; } }).filter(u=>u&&new URL(u).host===host).slice(0,40);
+    const want=String(req.query.q||'').trim();
+    const pat=/https?:\/\/[^\s"'<>\\]+?(?:\.mp3|\.aac|\.m3u8|\.pls|icecast|streamtheworld|\/live|\/stream|radio-stream)[^\s"'<>\\]*/gi;
+    const found=new Set(); const ids=new Set(); const ctx=[];
+    const scan=(t,src)=>{ for(const m of t.matchAll(pat)) found.add(m[0].slice(0,240)); for(const m of t.matchAll(/station\d{3}/g)) ids.add(m[0]);
+      if(want) { let i=-1, n=0; while((i=t.indexOf(want,i+1))>=0&&n<6) { ctx.push(src+': '+t.slice(Math.max(0,i-300),i+300).replace(/\s+/g,' ')); n++; } } };
+    scan(html,'page');
+    for(const u of scripts) scan(await get(u),u.replace(/^.*\//,''));
+    res.json({ page, scripts:scripts.length, streams:[...found].slice(0,80), stationIds:[...ids].slice(0,80), context:ctx.slice(0,12).map(x=>x.slice(0,700)) });
+  } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
+});
 // Yemot access for the replay hours (extension 5/9), shared by calls and the check.
 async function replayIo() {
   const p=(await import('./youtube-authorized-playback.js'))._pipeline;
