@@ -40,7 +40,16 @@ export async function torahSources(question, { llm, fetchImpl = fetch, log = con
   } catch {}
   if (!refs.length && !(book && words)) return null;
   const [byRef, bySearch] = await Promise.all([
-    Promise.all(refs.map(ref => sefariaText(ref, { fetchImpl }).catch(() => null))),
+    Promise.all(refs.map(async ref => {
+      const t = await sefariaText(ref, { fetchImpl }).catch(() => null);
+      if (t) return t;
+      // 24.11: a commentator who says nothing on this verse (Rashi has no words
+      // on "יהי אור"): his words on the next verse, marked as such.
+      const m = ref.match(/^(.+ on .+ )(\d+):(\d+)$/);
+      if (!m) return null;
+      const next = await sefariaText(m[1] + m[2] + ':' + (Number(m[3]) + 1), { fetchImpl }).catch(() => null);
+      return next ? { ...next, heRef: (next.heRef || next.ref) + ' (על הפסוק עצמו אין לו פירוש; זה פירושו על הפסוק הבא)' } : null;
+    })),
     book && words ? sefariaSearch(book, words, { fetchImpl }).catch(() => []) : Promise.resolve([]),
   ]);
   const got = [...byRef.filter(Boolean), ...bySearch].filter((g, i, a) => a.findIndex(x => x.ref === g.ref) === i).slice(0, 5);
