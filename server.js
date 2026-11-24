@@ -4468,7 +4468,17 @@ const branch1Search=createBranch1Search(searchWebDirect);
 // LangSearch), merged: one answer is built from more of the web.
 // Our own free meta-search (SearXNG on Render): one query goes to many public
 // engines (Google, Bing, DuckDuckGo, Brave, Mojeek, Wikipedia...) at once.
+// 24.11: our own SearXNG on this server first (local, no quota), then SEARXNG_URL.
+let localSearxDownUntil=0;
 async function searchSearxng(q,{timeoutMs=4000}={}) {
+  const local=String(process.env.SEARXNG_LOCAL_URL||'http://127.0.0.1:8888');
+  if(Date.now()>localSearxDownUntil) {
+    try {
+      const u=new URL(local+'/search'); u.searchParams.set('q',q); u.searchParams.set('format','json'); u.searchParams.set('language','he'); u.searchParams.set('safesearch','2');
+      const r=await fetch(u,{signal:AbortSignal.timeout(timeoutMs),headers:{'Accept':'application/json'}});
+      if(r.ok) { const j=await r.json(); const out=(j.results||[]).slice(0,12).map(x=>({title:String(x.title||''),url:String(x.url||''),snippet:String(x.content||''),engines:x.engines})); console.info('[SEARXNG] local results',{count:out.length}); if(out.length) return out; }
+    } catch(e) { if(/ECONNREFUSED|fetch failed/i.test(String(e?.cause?.code||e?.message||''))) localSearxDownUntil=Date.now()+5*60000; }
+  }
   const base=String(process.env.SEARXNG_URL||'').replace(/\/+$/,'');
   if(!base) return [];
   const u=new URL(base+'/search'); u.searchParams.set('q',q); u.searchParams.set('format','json'); u.searchParams.set('language','all'); u.searchParams.set('safesearch','2');
@@ -4521,7 +4531,7 @@ async function ext3WebSearch(q,{timeoutMs=4500}={}) {
     capped(searchWebDirect(q,{timeoutMs:Math.min(timeoutMs,3500)})),
     keysFor('SERPER_API_KEY').length?capped(searchSerper(q,{timeoutMs,count:8})):Promise.resolve([]),
     keysFor('LANGSEARCH_API_KEY').length?capped(searchLangSearch(q,{timeoutMs,count:6})):Promise.resolve([]),
-    process.env.SEARXNG_URL?capped(searchSearxng(q,{timeoutMs})):Promise.resolve([]),
+    capped(searchSearxng(q,{timeoutMs}).catch(()=>[])),
     keysFor('EXA_API_KEY').length?capped(searchExa(q,{timeoutMs})):Promise.resolve([])
   ]);
   const seen=new Set(), out=[];
@@ -5259,7 +5269,7 @@ async function callHandler(call) {
         }
         // 24.11: the date of a holiday or fast is computed (Hebcal, Israel), not guessed.
         if(!fixed&&!ext3Done) {
-          try { const { answerHoliday }=await import('./jewish-calendar.js'); const h=await answerHoliday(userTranscript); if(h) { fixed=h; console.info('[EXT3_CALENDAR] holiday date',{callId:activeKey}); } }
+          try { const { answerHoliday, answerTorahCalendar }=await import('./jewish-calendar.js'); const h=await answerTorahCalendar(userTranscript)||await answerHoliday(userTranscript); if(h) { fixed=h; console.info('[EXT3_CALENDAR] Jewish calendar answer',{callId:activeKey}); } }
           catch(e) { console.warn('[EXT3_CALENDAR] Hebcal failed; the brain answers',{message:String(e?.message||e).slice(0,80)}); }
         }
         // Owner, 18.11: "search the whole web for a recording/video of ..." =

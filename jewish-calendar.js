@@ -44,3 +44,44 @@ export async function answerHoliday(text, { fetchImpl = fetch, now = new Date(),
   const span = ['פסח', 'סוכות'].includes(name) ? match.filter(x => !/ערב/u.test(x.title)) : [first];
   return name + ' יחול ב' + dayName(span[0].date) + ', ' + hebDate(span[0].date) + '.' + soon + (span.length > 1 ? ' החג נמשך עד ' + dayName(span[span.length - 1].date) + '.' : '') + (['פסח', 'סוכות', 'שבועות', 'ראש השנה', 'יום כיפור'].includes(name) ? ' החג נכנס בערב שלפני כן.' : '');
 }
+
+// "What is this week's parasha?", "the haftarah", "today's daf yomi" (Israel).
+const BOOKS = { Genesis: 'בראשית', Exodus: 'שמות', Leviticus: 'ויקרא', Numbers: 'במדבר', Deuteronomy: 'דברים', Joshua: 'יהושע', Judges: 'שופטים', 'I Samuel': 'שמואל א', 'II Samuel': 'שמואל ב', 'I Kings': 'מלכים א', 'II Kings': 'מלכים ב', Isaiah: 'ישעיהו', Jeremiah: 'ירמיהו', Ezekiel: 'יחזקאל', Hosea: 'הושע', Joel: 'יואל', Amos: 'עמוס', Obadiah: 'עובדיה', Jonah: 'יונה', Micah: 'מיכה', Nahum: 'נחום', Habakkuk: 'חבקוק', Zephaniah: 'צפניה', Haggai: 'חגי', Zechariah: 'זכריה', Malachi: 'מלאכי' };
+function spokenRef(ref) {
+  return String(ref || '').split('|')[0].split(';').map(p => p.trim()).filter(Boolean).map(p => {
+    const m = p.match(/^(.+?) (\d+):(\d+)(?:-(?:(\d+):)?(\d+))?$/);
+    if (!m) return p;
+    const book = BOOKS[m[1]] || m[1];
+    return book + ' פרק ' + m[2] + ' פסוק ' + m[3] + (m[5] ? ' עד ' + (m[4] && m[4] !== m[2] ? 'פרק ' + m[4] + ' פסוק ' : 'פסוק ') + m[5] : '');
+  }).join(', ועוד ');
+}
+export function torahCalendarAsked(text) {
+  const t = String(text || '');
+  if (/(?:פרשת|פרשה)\s*(?:ה)?שבוע|איזו פרשה|איזה פרשה|מה הפרשה|פרשת השבוע|קוראים השבוע|קוראים בשבת|ההפטרה|הפטרה|מפטירים/u.test(t)) return /(?:הבא|הבאה|בעוד שבוע|שבוע הבא)/u.test(t) ? 'parsha-next' : /(?:הפטרה|ההפטרה|מפטירים)/u.test(t) ? 'haftarah' : 'parsha';
+  if (/(?:ה?דף ה?יומי|דף יומי)/u.test(t) && !/(?:שיעור|תשמיע|להשמיע|לשמוע|תוריד|הקלטה)/u.test(t)) return /מחר/u.test(t) ? 'daf-tomorrow' : 'daf';
+  return null;
+}
+export async function answerTorahCalendar(text, { fetchImpl = fetch, now = new Date(), timeoutMs = 5000 } = {}) {
+  const kind = torahCalendarAsked(text);
+  if (!kind) return null;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now);
+  const end = new Date(now.getTime() + 16 * 86400000).toISOString().slice(0, 10);
+  const u = 'https://www.hebcal.com/hebcal?v=1&cfg=json&s=on&i=on&leyning=on&F=on&lg=he&start=' + today + '&end=' + end;
+  const j = await (await fetchImpl(u, { signal: AbortSignal.timeout(timeoutMs) })).json();
+  const items = (j?.items || []).map(x => ({ date: String(x.date).slice(0, 10), cat: x.category, title: plain(x.hebrew || x.title), leyning: x.leyning || {} }));
+  if (kind.startsWith('daf')) {
+    const want = kind === 'daf' ? today : new Date(Date.parse(today) + 86400000).toISOString().slice(0, 10);
+    const d = items.find(x => x.cat === 'dafyomi' && x.date === want);
+    return d ? (kind === 'daf' ? 'הדף היומי היום הוא ' : 'הדף היומי מחר הוא ') + d.title + '.' : null;
+  }
+  const weeks = items.filter(x => x.cat === 'parashat');
+  const p = kind === 'parsha-next' ? weeks[1] : weeks[0];
+  if (!p) {
+    const hol = items.find(x => x.cat === 'holiday' && x.date >= today);
+    return hol ? 'בשבת הקרובה לא קוראים פרשה רגילה, כי זה ' + hol.title + '.' : null;
+  }
+  const h = p.leyning.haftarah ? spokenRef(p.leyning.haftarah) : '';
+  const special = String(p.leyning.haftarah || '').split('|')[1] ? ' (הפטרה מיוחדת: ' + String(p.leyning.haftarah).split('|')[1].trim().replace('Chanukah', 'חנוכה').replace('Day', 'יום').replace('(on Shabbat)', 'בשבת') + ')' : '';
+  if (kind === 'haftarah') return 'ההפטרה של ' + p.title + ', ב' + dayName(p.date) + ', היא ב' + h + special + '.';
+  return (kind === 'parsha-next' ? 'בשבת שאחרי, ' : 'פרשת השבוע היא ') + p.title.replace(/^פרשת\s+/u, kind === 'parsha-next' ? 'קוראים את פרשת ' : '') + ', שנקראת ב' + dayName(p.date) + '.' + (h ? ' ההפטרה: ' + h + special + '.' : '') + ' אם תרצה, אספר לך על מה הפרשה.';
+}
