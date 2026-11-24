@@ -815,7 +815,7 @@ function readableArticle(text) {
 export async function ext3Turn(input, deps) {
   const r = await ext3TurnInner(input, deps);
   // 24.11: a model sometimes starts with the JSON field's name ("answer, ...").
-  if (r && typeof r.reply === 'string') r.reply = r.reply.replace(/^\s*(?:answer|reply|תשובה)\s*[,:]\s*/i, '');
+  if (r && typeof r.reply === 'string') r.reply = r.reply.replace(/^\s*["'{\s]*(?:answer|reply|תשובה)["']?\s*[,:]\s*["']?/i, '');
   return input.voice === 'male' && r && r.reply ? { ...r, reply: toMaleSelf(r.reply) } : r;
 }
 async function ext3TurnInner({ utterance, summary = '', prior = [], current = [], now = '', prefs = [], media = '', voice = 'female', brief = false }, deps) {
