@@ -1383,6 +1383,14 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     '', plan.about ? SYSTEM_FACTS : torah ? torah.text : '', { maxTokens: 2000, budgetMs: 13000 }))()
     // 24.11: every model busy, but the real text is in hand: it is read out.
     .catch(e => { if (!torah?.first) throw e; const f = torah.first; return 'הנה מה שכתוב ב' + (f.heRef || f.ref) + ': ' + clip(f.text.replace(/[\u0591-\u05C7]/g, ''), 700) + '. אם תרצה, אסביר את זה בהמשך.'; });
+  // 24.11: an answer about a Torah text that hardly uses the text's own words
+  // was made up by a weak model (live check): the text itself is read instead.
+  if (torah?.first && reply && !/הנה מה שכתוב ב/u.test(reply)) {
+    const words = t => String(t || '').replace(/[\u0591-\u05C7]/g, '').split(/[^\u05D0-\u05EA]+/).filter(w => w.length >= 3);
+    const src = new Set(words(torah.text)), ans = words(reply);
+    const hit = ans.filter(w => src.has(w)).length / Math.max(1, ans.length);
+    if (hit < 0.18) { log.warn?.('[TORAH] answer far from the source text; reading the source', { hit: Math.round(hit * 100) }); const f = torah.first; reply = 'הנה מה שכתוב ב' + (f.heRef || f.ref) + ': ' + clip(f.text.replace(/[\u0591-\u05C7]/g, ''), 700) + '. אם תרצה, אסביר את זה בהמשך.'; }
+  }
   if (stuck) {
     // Keys must be clear: one short line and the options, nothing garbled around them.
     const keys = parseKeyOptions(reply) || parseKeyOptions(numberedToKeys(reply));
