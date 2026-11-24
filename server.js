@@ -5264,8 +5264,17 @@ async function callHandler(call) {
           fixed=/להתראות|ביי|לילה טוב|יום טוב|שבוע טוב|שבת שלום/u.test(userTranscript)?'בשמחה רבה. '+(/שבת שלום/u.test(userTranscript)?'שבת שלום ומבורכת!':/שבוע טוב/u.test(userTranscript)?'שבוע טוב ומבורך!':'להתראות, ותמיד אפשר לחזור אליי.'):'בשמחה רבה! אם יש עוד משהו, אני כאן.';
         // 24.11: the weather from the forecast service itself (Celsius, the right day),
         // not from web pages (the live check read Fahrenheit and named the wrong weekday).
-        if(!fixed&&!ext3Done&&isWeatherQuestion(userTranscript)&&extractWeatherLocation(userTranscript)) {
-          try { fixed=await answerWeatherDirect(userTranscript); console.info('[EXT3_WEATHER] forecast service',{callId:activeKey}); } catch(e) { console.warn('[EXT3_WEATHER] forecast failed; the brain answers',{status:e?.status||0}); }
+        // "and the weather there on Shabbat?": the town said earlier in the call.
+        let weatherAsk=userTranscript;
+        if(!fixed&&!ext3Done&&isWeatherQuestion(userTranscript)) {
+          const own=extractWeatherLocation(userTranscript);
+          if(!own||/^(?:שם|כאן|פה|אצלי|באזור|אצלנו|שמה)$/u.test(own)) {
+            const prev=(turnHistory||[]).slice(-6).reverse().map(t=>extractWeatherLocation('מזג האוויר '+String(t.user||'')+' '+String(t.gemini||t.assistant||'').slice(0,200))).find(c=>c&&!/^(?:שם|כאן|פה)$/u.test(c));
+            if(prev) weatherAsk=userTranscript.replace(/(?:^|\s)(?:שם|כאן|פה|שמה)(?=[\s?.!,]|$)/gu,' ')+' ב'+prev;
+          }
+        }
+        if(!fixed&&!ext3Done&&isWeatherQuestion(weatherAsk)&&extractWeatherLocation(weatherAsk)&&!/^(?:שם|כאן|פה)$/u.test(extractWeatherLocation(weatherAsk))) {
+          try { fixed=await answerWeatherDirect(weatherAsk); console.info('[EXT3_WEATHER] forecast service',{callId:activeKey}); } catch(e) { console.warn('[EXT3_WEATHER] forecast failed; the brain answers',{status:e?.status||0}); }
         }
         // 24.11: the date of a holiday or fast is computed (Hebcal, Israel), not guessed.
         if(!fixed&&!ext3Done) {
