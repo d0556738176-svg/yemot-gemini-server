@@ -84,7 +84,9 @@ export function spokenDate(iso, today) {
 // The day he asks about, from his words (the planner's date wins when valid).
 export function resolveDate(text, plannerDate = '', now = new Date()) {
   const today = israelDate(now);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(plannerDate)) {
+  // 24.11: "מתי כניסת שבת" means this Friday even when the planner filled in today.
+  const shabbatWords = /(?:כניסת (?:ה)?שבת|נכנסת (?:ה)?שבת|הדלקת נרות|ערב שבת|צאת (?:ה)?שבת|יציאת (?:ה)?שבת|יוצאת (?:ה)?שבת|מוצאי שבת|הבדלה)/u.test(String(text || ''));
+  if (/^\d{4}-\d{2}-\d{2}$/.test(plannerDate) && !(shabbatWords && plannerDate === today)) {
     const diff = (Date.parse(plannerDate) - Date.parse(today)) / 86400000;
     if (diff >= -2 && diff <= 400) return plannerDate;
   }

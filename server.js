@@ -1375,8 +1375,8 @@ function extractWeatherLocation(transcript) {
   // Otherwise the words after "מזג האוויר", without time words and a glued ב/ל.
   const after=q.match(/(?:מזג\s*(?:ה)?אוויר|תחזית(?:\s+(?:ה)?מזג\s*(?:ה)?אוויר)?)\s+(.+)$/u);
   if(!after) return null;
-  const stop=/^(?:הצפוי|צפוי|יהיה|היום|מחר|למחר|השבוע|בשבוע|הקרוב|הקרובים|בימים|ימים|עכשיו|כרגע|בעיר|באזור|של|עם|גם|תחפש|תחפשי|באינטרנט|לי|מה|איך|הוא|היא)$/u;
-  const words=after[1].split(' ').filter(w=>!stop.test(w));
+  const stop=/^(?:הצפוי|צפוי|יהיה|היום|מחר|למחר|מחרתיים|השבוע|בשבוע|הקרוב|הקרובים|בימים|ימים|עכשיו|כרגע|בעיר|באזור|של|עם|גם|תחפש|תחפשי|באינטרנט|לי|מה|איך|הוא|היא|ב?שבת|ביום|ליום|יום|ראשון|שני|שלישי|רביעי|חמישי|שישי|שם|כאן|פה|שמה|אצלי|אצלנו|ו?מה)$/u;
+  const words=after[1].replace(/[?.!,]/g,' ').split(/\s+/).filter(w=>w&&!stop.test(w));
   if(!words.length) return null;
   const place=words.slice(0,2).join(' ').replace(/^(?:ב|ל|של)(?=[א-ת]{2,})/u,'');
   return place.length>=2?place:null;
