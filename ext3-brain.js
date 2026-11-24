@@ -1389,7 +1389,10 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     const words = t => String(t || '').replace(/[\u0591-\u05C7]/g, '').split(/[^\u05D0-\u05EA]+/).filter(w => w.length >= 3);
     const src = new Set(words(torah.text)), ans = words(reply);
     const hit = ans.filter(w => src.has(w)).length / Math.max(1, ans.length);
-    if (hit < 0.18) { log.warn?.('[TORAH] answer far from the source text; reading the source', { hit: Math.round(hit * 100) }); const f = torah.first; reply = 'הנה מה שכתוב ב' + (f.heRef || f.ref) + ': ' + clip(f.text.replace(/[\u0591-\u05C7]/g, ''), 700) + '. אם תרצה, אסביר את זה בהמשך.'; }
+    // A "quote" (words with vowel points) must really be in the text.
+    const quoted = String(reply).split(/\s+/).filter(w => /[\u05B0-\u05BC]/.test(w)).map(w => w.replace(/[\u0591-\u05C7]/g, '').replace(/[^\u05D0-\u05EA]/g, '')).filter(w => w.length >= 3);
+    const quoteOk = quoted.length < 3 || quoted.filter(w => src.has(w)).length / quoted.length >= 0.6;
+    if (hit < 0.18 || !quoteOk) { log.warn?.('[TORAH] answer far from the source text; reading the source', { hit: Math.round(hit * 100) }); const f = torah.first; reply = 'הנה מה שכתוב ב' + (f.heRef || f.ref) + ': ' + clip(f.text.replace(/[\u0591-\u05C7]/g, ''), 700) + '. אם תרצה, אסביר את זה בהמשך.'; }
   }
   if (stuck) {
     // Keys must be clear: one short line and the options, nothing garbled around them.
