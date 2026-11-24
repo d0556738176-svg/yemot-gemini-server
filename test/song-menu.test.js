@@ -75,3 +75,29 @@ test('when the writer still asks a question, the menu caller is not asked to rec
   assert.equal(records, 1, 'only the topic was recorded');
   assert.ok(writerCalls >= 2, 'the writer was asked again by itself');
 });
+
+test('9 = say it yourself, 0 = more styles / let the system choose', async () => {
+  const { buildSongPrompt: b } = await import('../song-ivr.js');
+  assert.match(b({ kind: '1', text: 'שבת', voice: { custom: 'קול עמוק של חזן' }, style: 'x2', minutes: { custom: 'דקה וחצי' } }), /בקול: קול עמוק של חזן.*כליזמר.*אורך השיר כפי שביקש: דקה וחצי/);
+  assert.match(b({ kind: '1', text: 'שבת', voice: '1', style: 'auto', minutes: '1' }), /שהכי מתאים לנושא/);
+  const said = [];
+  // kind 1, topic ok, voice 9 -> said "חזן" ok -> ok, style 0 -> more 0 (auto), length 1 ok, summary 1
+  const taps = ['1', '1', '9', '1', '0', '0', '1', '1', '1', '5', '5'];
+  const words = ['שבת', 'חזן'];
+  let prompt = '';
+  const call = { callId: 'song-9', values: {},
+    read: async (items, mode) => { said.push(items.map(x => x.data).join(' ')); if (mode === 'record') return '/r.wav'; const k = taps.shift(); if (k === undefined) throw new Error('call was disconnected'); return k; },
+    id_list_message: async () => {}, go_to_folder: async () => {} };
+  const handler = createSongCallHandler({
+    yemotApi: { download_file: async () => ({ data: Buffer.from('x') }) },
+    transcribePhoneAudio: async () => words.shift() || 'x',
+    generateText: async p => { prompt = p; throw new Error('stop'); },
+    sanitizeForYemot: x => x, withTimeout: p => p, getCallerNumber: () => '0500000002', logDetailedError: () => {}, prewarm: () => {}
+  });
+  await handler(call).catch(() => {});
+  const all = said.join('\n');
+  assert.match(all, /לבחירה אחרת בדיבור הקש 9/);
+  assert.match(all, /לסגנונות נוספים הקש 0/);
+  assert.match(all, /לסיכום: שיר על שבת, חזן, בסגנון בחירה של המערכת, באורך דקה אחת/);
+  assert.match(prompt, /בקול: חזן/);
+});

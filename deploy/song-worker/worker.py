@@ -84,7 +84,43 @@ def wait_for_result(task, timeout=3300, poll_seconds=5):
     raise RuntimeError("generation timed out")
 
 
+def wait_for_song(limit=1800, poll=5):
+    """Warm runner (owner, 24.11): the engine is ready before the caller has
+    finished choosing; ask the phone server for the song until one is given."""
+    global JOB, TICKET, RAW, P
+    url = CB.rsplit("/", 1)[0] + "/next?" + urllib.parse.urlencode({"job": JOB, "ticket": TICKET})
+    started = time.time()
+    while time.time() - started < limit:
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url), timeout=30) as r:
+                if r.status == 200:
+                    d = json.loads(r.read())
+                    JOB, TICKET, RAW = d["job"], d["ticket"], d["payload"]
+                    P = json.loads(base64.b64decode(RAW).decode("utf-8"))
+                    print("::add-mask::" + TICKET, flush=True)
+                    log("song received after", round(time.time() - started), "s")
+                    return True
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 410):
+                log("no song for this runner"); return False
+        except Exception as e:
+            log("next retry", str(e)[:80])
+        time.sleep(poll)
+    log("no song came"); return False
+
+
 def main():
+    if P.get("warm"):
+        deadline = time.time() + 1500
+        while True:
+            try:
+                api("/health", timeout=30); break
+            except Exception as e:
+                if time.time() > deadline: raise RuntimeError("ACE-Step server did not start: " + str(e)[:100])
+                time.sleep(10)
+        log("server up, waiting for a song")
+        if not wait_for_song():
+            return
     callback("status", stage="starting")
     deadline = time.time() + 1500
     while True:
@@ -102,7 +138,9 @@ def main():
         # Lossless master (owner, 15.11: "the best quality"); the phone server
         # makes the phone, extension-7 and mp3 copies from it.
         "audio_format": "flac",
-        "inference_steps": 8, "batch_size": 1, "use_random_seed": True,
+        # Same seed on both runners of a song (owner, 24.11): either one's song is the same song.
+        "inference_steps": 8, "batch_size": 1,
+        **({"use_random_seed": False, "seed": int(P["seed"])} if P.get("seed") is not None else {"use_random_seed": True}),
     }, timeout=120)
     task = (sub.get("data") or {}).get("task_id")
     if not task: raise RuntimeError("no task id: " + json.dumps(sub)[:200])
@@ -121,6 +159,7 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         log("FAILED", str(e)[:300])
-        callback("error", message=str(e)[:250])
+        if not P.get("warm"):
+            callback("error", message=str(e)[:250])
         sys.exit(1)
 

@@ -47,20 +47,40 @@ export const SONG_STYLES = [
   { key: '7', name: 'בלדה מרגשת', ask: 'בסגנון בלדה מרגשת, כלי מיתר ופסנתר' },
   { key: '8', name: 'פופ', ask: 'בסגנון פופ קליט ומודרני' }
 ];
+// 24.11: more styles (key 0 in the style list) and "choose for me".
+export const SONG_MORE_STYLES = [
+  { key: '1', id: 'x1', name: 'אקפלה, שירה בלי כלים', ask: 'בסגנון אקפלה, שירה בלבד בלי כלי נגינה, הרמוניות קוליות' },
+  { key: '2', id: 'x2', name: 'כליזמר', ask: 'בסגנון כליזמר, קלרינט, כינור ואקורדיון' },
+  { key: '3', id: 'x3', name: 'שיר ילדים', ask: 'בסגנון שיר ילדים שמח, פשוט וקליט' },
+  { key: '4', id: 'x4', name: 'רוק', ask: 'בסגנון רוק, גיטרות חשמליות ותופים' },
+  { key: '5', id: 'x5', name: "ג'אז", ask: "בסגנון ג'אז, פסנתר, קונטרבס וסקסופון" },
+  { key: '6', id: 'x6', name: 'שיר שמחה לחתונה', ask: 'בסגנון שיר שמחה לחתונה, חגיגי וקצבי, כלי נשיפה' },
+  { key: '7', id: 'x7', name: 'שיר ערש', ask: 'בסגנון שיר ערש שקט ועדין, קצב איטי מאוד' },
+  { key: '8', id: 'x8', name: 'ריקודי, אלקטרוני', ask: 'בסגנון ריקודי אלקטרוני, ביט מהיר וסינתיסייזרים' }
+];
+const AUTO_STYLE = { id: 'auto', name: 'בחירה של המערכת', ask: 'בסגנון המוזיקלי שהכי מתאים לנושא ולמילים' };
 export const SONG_MINUTES = ['1', '2', '3', '4'];
 const minutesText = m => ({ '1': 'דקה אחת', '2': 'שתי דקות', '3': 'שלוש דקות', '4': 'ארבע דקות' })[m] || 'דקה אחת';
 
 /** The request the engine already understands, built from the menu choices. */
+// A choice is a key of the list, or { custom: 'what he said' } (key 9).
+export function voiceOf(voice) { return voice?.custom ? { name: voice.custom, ask: 'בקול: ' + voice.custom } : SONG_VOICES.find(x => x.key === voice) || SONG_VOICES[0]; }
+export function styleOf(style) {
+  if (style?.custom) return { name: style.custom, ask: 'בסגנון: ' + style.custom };
+  if (style === 'auto') return AUTO_STYLE;
+  return SONG_MORE_STYLES.find(x => x.id === style) || SONG_STYLES.find(x => x.key === style) || SONG_STYLES[0];
+}
+export function lengthText(minutes) { return minutes?.custom ? minutes.custom : minutesText(String(minutes)); }
 export function buildSongPrompt({ kind, text = '', ytTitle = '', voice, style, minutes }) {
-  const v = SONG_VOICES.find(x => x.key === voice) || SONG_VOICES[0];
-  const st = SONG_STYLES.find(x => x.key === style) || SONG_STYLES[0];
+  const v = voiceOf(voice);
+  const st = styleOf(style);
   const secs = Math.max(30, Math.min(240, Number(minutes || 1) * 60));
   const what = kind === '2'
     ? 'שיר עם המילים שהמתקשר הכתיב, בדיוק כפי שנאמרו: ' + text
     : kind === '3'
       ? 'קאבר: גרסה חדשה בהשראת השיר "' + ytTitle + '" מיוטיוב, עם מילים חדשות ומקוריות' + (text ? ' בנושא: ' + text : ' באותו נושא כללי ובאותה אווירה')
       : 'שיר על הנושא: ' + text;
-  return [what, v.ask, st.ask, 'אורך השיר: ' + minutesText(String(minutes)) + ' (' + secs + ' שניות), duration_seconds=' + secs + '.',
+  return [what, v.ask, st.ask, minutes?.custom ? 'אורך השיר כפי שביקש: ' + minutes.custom + ' (בין 30 ל-240 שניות)' : 'אורך השיר: ' + minutesText(String(minutes)) + ' (' + secs + ' שניות), duration_seconds=' + secs + '.',
     'כל הפרטים כבר נבחרו בתפריט, כולל האורך: אל תשאל שאלות הבהרה (needs_clarification=false) וצור את השיר.'].join('. ');
 }
 
@@ -72,7 +92,8 @@ export function createSongCallHandler({
   withTimeout,
   getCallerNumber,
   logDetailedError,
-  searchYouTube = null
+  searchYouTube = null,
+  prewarm = null
 }) {
   return async function songCallHandler(call) {
     const callId = String(call?.callId || call?.values?.ApiCallId || ('song-' + Date.now()));
@@ -84,6 +105,7 @@ export function createSongCallHandler({
     let awaitingClarification = false;
     let clarificationCount = 0;
     warmMusicEngine();
+    try { prewarm?.(); } catch {}
 
     // ---- the menu (owner, 23.11) ----
     const tap = async (text, allowed, wait = 10) => String(await call.read([{ type: 'text', data: say(text) }], 'tap', {
@@ -96,17 +118,24 @@ export function createSongCallHandler({
       return String(await transcribePhoneAudio(r.data) || '').trim();
     };
     // Choose from a list, say it back, 1 = confirm, 2 = choose again.
-    const choose = async (question, list) => {
+    // 9 = say it in your own words (owner, 24.11); extra = { key, name } adds one more key (0).
+    const choose = async (question, list, extra = null) => {
       for (let round = 0; round < 6; round++) {
-        const k = await tap(question + ' ' + list.map(x => x.name + ' הקש ' + x.key).join(', ') + '.', list.map(x => x.key));
+        const k = await tap(question + ' ' + list.map(x => x.name + ' הקש ' + x.key).join(', ') + '.' + (extra ? ' ' + extra.name + ' הקש ' + extra.key + '.' : '') + ' לבחירה אחרת בדיבור הקש 9.', [...list.map(x => x.key), '9', ...(extra ? [extra.key] : [])]);
         if (k === '*') return '*';
+        if (extra && k === extra.key) return { extra: true };
+        if (k === '9') {
+          const said = await recordConfirmed('אמור במילים שלך מה תרצה.', t => 'בחרת: ' + t + '.');
+          if (said === '*' || !said) continue;
+          return { custom: said };
+        }
         const pick = list.find(x => x.key === k);
         if (!pick) continue;
         const c = await tap('בחרת: ' + pick.name + '. לאישור הקש 1, לבחירה מחדש הקש 2.', ['1', '2']);
         if (c === '*') return '*';
-        if (c === '1') return pick.key;
+        if (c === '1') return pick.id || pick.key;
       }
-      return list[0].key;
+      return list[0].id || list[0].key;
     };
     // Record, say back what was understood, 1 = confirm, 2 = record again.
     const recordConfirmed = async (ask, sayBack) => {
@@ -159,16 +188,25 @@ export function createSongCallHandler({
           step = 'voice'; continue;
         }
         if (step === 'voice') { const v = await choose('באיזה קול?', SONG_VOICES); if (v === '*') { step = 'content'; continue; } voice = v; step = 'style'; continue; }
-        if (step === 'style') { const v = await choose('באיזה סגנון?', SONG_STYLES); if (v === '*') { step = 'voice'; continue; } style = v; step = 'length'; continue; }
+        if (step === 'style') {
+          let v = await choose('באיזה סגנון?', SONG_STYLES, { key: '0', name: 'לסגנונות נוספים' });
+          if (v === '*') { step = 'voice'; continue; }
+          if (v?.extra) {
+            v = await choose('סגנונות נוספים:', SONG_MORE_STYLES, { key: '0', name: 'שהמערכת תבחר את הסגנון המתאים' });
+            if (v === '*') continue;
+            if (v?.extra) v = 'auto';
+          }
+          style = v; step = 'length'; continue;
+        }
         if (step === 'length') {
           const m = await choose('באיזה אורך?', SONG_MINUTES.map(x => ({ key: x, name: minutesText(x) })));
           if (m === '*') { step = 'style'; continue; }
           minutes = m; step = 'sum'; continue;
         }
         if (step === 'sum') {
-          const v = SONG_VOICES.find(x => x.key === voice), st = SONG_STYLES.find(x => x.key === style);
+          const v = voiceOf(voice), st = styleOf(style);
           const what = kind === '3' ? 'גרסה חדשה לשיר ' + ytTitle + (text ? ', בנושא ' + text : '') : kind === '2' ? 'שיר עם המילים שלך' : 'שיר על ' + text;
-          const c = await tap('לסיכום: ' + what + ', ' + v.name + ', בסגנון ' + st.name + ', באורך ' + minutesText(minutes) + '. ליצירת השיר הקש 1. להתחלה מחדש הקש 2.', ['1', '2'], 12);
+          const c = await tap('לסיכום: ' + what + ', ' + v.name + ', בסגנון ' + st.name + ', באורך ' + lengthText(minutes) + '. ליצירת השיר הקש 1. להתחלה מחדש הקש 2.', ['1', '2'], 12);
           if (c === '1') return buildSongPrompt({ kind, text, ytTitle, voice, style, minutes });
           if (c === '*') { step = 'length'; continue; }
           if (c === '2') { step = 'kind'; continue; }

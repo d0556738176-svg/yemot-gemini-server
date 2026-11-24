@@ -9,7 +9,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { YemotRouter, ExitError } from 'yemot-router2';
 import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.js';
 import { createSongCallHandler } from './song-ivr.js';
-import { handleWorkerCallback, isCloudWorkerConfigured } from './song-cloud.js';
+import { handleWorkerCallback, handleWorkerNext, isCloudWorkerConfigured, prewarmRunners, warmStatus } from './song-cloud.js';
 import { startLinkGuard } from './yemot-link-guard.js';
 import { getSongProviderHealth, createSong, cloudJobStatus } from './song-generator.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -6294,10 +6294,14 @@ const songCallHandler = createSongCallHandler({
   yemotApi, transcribePhoneAudio, generateText: songGenerateText,
   sanitizeForYemot, withTimeout, getCallerNumber, logDetailedError,
   // Extension 4, key 3: the YouTube song he names, found free with yt-dlp.
-  searchYouTube: q => ytdlpSearch([q], { count: 5 })
+  searchYouTube: q => ytdlpSearch([q], { count: 5 }),
+  // Two runners start getting ready the moment a caller enters extension 4.
+  prewarm: () => prewarmRunners(2).catch(() => 0)
 });
 app.post('/song-worker/callback', rateLimit(60, 60 * 1000, 'song-worker'), express.raw({ type: () => true, limit: '100mb' }), handleWorkerCallback);
-app.get('/health/songs', rateLimit(10, 60 * 1000, 'song-health'), (req, res) => res.json({ ok: true, cloudWorker: isCloudWorkerConfigured(), ...getSongProviderHealth() }));
+// Owner, 24.11: runners started ahead ask here for their song.
+app.get('/song-worker/next', rateLimit(120, 60 * 1000, 'song-worker-next'), handleWorkerNext);
+app.get('/health/songs', rateLimit(10, 60 * 1000, 'song-health'), (req, res) => res.json({ ok: true, cloudWorker: isCloudWorkerConfigured(), warmRunners: warmStatus(), ...getSongProviderHealth() }));
 
 app.get(['/yemot', '/yemot-backup'], (req, res, next) => {
   if (req.query?.hangup === 'yes') return next();

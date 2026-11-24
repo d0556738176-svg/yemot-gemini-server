@@ -42,6 +42,48 @@ export function verifyTicket(jobId, ticket, secret = env('SONG_CALLBACK_SECRET')
 
 export function onOrphanSong(handler) { orphanHandler = handler; }
 
+// ---- Owner, 24.11: runners made ready ahead, two per song ----
+// When a caller enters extension 4, two runners are started at once with no
+// song yet ("warm"); they install the engine and load the model while he
+// chooses, then ask /song-worker/next for their song. Every song goes to two
+// runners with the same seed: the first finished song is played, the other is
+// ignored, so one stuck runner never loses a song.
+const warmSlots = new Map(); // warmId -> { createdAt, jobId|null, payload|null }
+const WARM_TTL_MS = 30 * 60000;
+const MAX_WARM = Number(process.env.SONG_WARM_MAX || 4);
+const runnersOf = new Map(); // jobId -> { left, errors }
+function freshWarm() {
+  const now = Date.now();
+  for (const [id, w] of warmSlots) if (now - w.createdAt > WARM_TTL_MS) warmSlots.delete(id);
+  return [...warmSlots.entries()].filter(([, w]) => !w.jobId);
+}
+export async function prewarmRunners(count = 2, { dispatch = dispatchSongJob } = {}) {
+  if (!isCloudWorkerConfigured()) return 0;
+  const idle = freshWarm().length;
+  const want = Math.max(0, Math.min(count - idle, MAX_WARM - warmSlots.size));
+  let started = 0;
+  for (let i = 0; i < want; i++) {
+    const id = 'warm-' + randomUUID();
+    warmSlots.set(id, { createdAt: Date.now(), jobId: null, payload: null });
+    try { await dispatch(id, { warm: true }); started++; }
+    catch (e) { warmSlots.delete(id); log('WARM_DISPATCH_FAILED', { message: String(e?.message || e).slice(0, 120) }); break; }
+  }
+  if (started) log('WARM_STARTED', { started, idle });
+  return started;
+}
+export function warmStatus() { return { idle: freshWarm().length, total: warmSlots.size }; }
+// GET /song-worker/next?job=<warmId>&ticket=..  ->  204 (no song yet) or the song.
+export function handleWorkerNext(req, res) {
+  const id = String(req.query?.job || '').slice(0, 80);
+  if (!/^warm-[A-Za-z0-9-]{8,80}$/.test(id) || !verifyTicket(id, req.query?.ticket)) return res.status(403).json({ ok: false });
+  const w = warmSlots.get(id);
+  if (!w) return res.status(410).json({ ok: false, gone: true });
+  if (!w.jobId) return res.status(204).end();
+  warmSlots.delete(id);
+  log('WARM_CLAIMED', { warmId: id.slice(0, 13), jobId: w.jobId });
+  return res.json({ ok: true, job: w.jobId, ticket: ticketFor(w.jobId), payload: Buffer.from(JSON.stringify(w.payload), 'utf8').toString('base64') });
+}
+
 // Everything the runner needs (and echoes back), kept small: the workflow
 // input limit is 65 KB in total.
 export function buildJobPayload(spec, meta = {}) {
@@ -93,7 +135,7 @@ export async function generateWithCloudWorker(spec, meta = {}) {
   if (!isCloudWorkerConfigured()) throw Object.assign(new Error('Cloud song worker is not configured'), { status: 503 });
   const jobId = meta.jobId || randomUUID();
   const timeoutMs = Math.max(5 * 60000, Math.min(60 * 60000, Number(process.env.SONG_WORKER_TIMEOUT_MS || 45 * 60000)));
-  const payload = buildJobPayload(spec, meta);
+  const payload = { ...buildJobPayload(spec, meta), seed: Math.floor(Math.random() * 2 ** 31) };
   const result = new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(jobId);
@@ -101,14 +143,23 @@ export async function generateWithCloudWorker(spec, meta = {}) {
     }, timeoutMs);
     pending.set(jobId, { resolve: v => { clearTimeout(timer); resolve(v); }, reject: e => { clearTimeout(timer); reject(e); }, meta, startedAt: Date.now() });
   });
-  try {
-    await dispatchSongJob(jobId, payload);
-  } catch (error) {
-    pending.get(jobId)?.reject(error);
-    pending.delete(jobId);
-    throw error;
+  // Two runners per song: ready ones first, new ones for the rest.
+  const RACE = Math.max(1, Math.min(3, Number(process.env.SONG_RUNNERS_PER_SONG || 2)));
+  const warm = freshWarm().slice(0, RACE);
+  for (const [id, w] of warm) { w.jobId = jobId; w.payload = payload; }
+  runnersOf.set(jobId, { left: RACE, errors: 0 });
+  log('SONG_RUNNERS', { jobId, warm: warm.length, cold: RACE - warm.length });
+  let dispatched = 0, lastError = null;
+  for (let i = warm.length; i < RACE; i++) {
+    try { await dispatchSongJob(jobId, payload); dispatched++; }
+    catch (error) { lastError = error; }
   }
-  watchRun(jobId, payload);
+  if (!warm.length && !dispatched) {
+    pending.get(jobId)?.reject(lastError);
+    pending.delete(jobId);
+    throw lastError || new Error('no song runner could start');
+  }
+  if (dispatched) watchRun(jobId, payload);
   return result;
 }
 
@@ -178,9 +229,16 @@ export async function handleWorkerCallback(req, res) {
   }
   if (kind === 'error') {
     const message = String(req.query?.message || 'worker failed').slice(0, 300);
-    log('WORKER_FAILED', { jobId, message, waiting: !!waiter });
-    if (waiter) { pending.delete(jobId); waiter.reject(Object.assign(new Error('Cloud worker failed: ' + message), { status: 502 })); }
+    const r = runnersOf.get(jobId);
+    if (r) { r.errors++; r.left--; }
+    log('WORKER_FAILED', { jobId, message, waiting: !!waiter, runnersLeft: r ? r.left : 0 });
+    // The other runner may still make the song: only the last failure counts.
+    if (waiter && (!r || r.left <= 0)) { pending.delete(jobId); waiter.reject(Object.assign(new Error('Cloud worker failed: ' + message), { status: 502 })); }
     return res.json({ ok: true });
+  }
+  if (delivered.has(jobId)) {
+    log('SECOND_RUNNER_IGNORED', { jobId });
+    return res.json({ ok: true, duplicate: true });
   }
   const audio = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   if (audio.length < 20000) {
