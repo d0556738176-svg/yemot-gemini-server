@@ -1278,8 +1278,13 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     // entry, worked out for this minute, then from the web sources.
     const bizName = hours ? (plan.business || '') : '';
     const mapHoursP = bizName && (plan.town || plan.place) ? within(9000, (deps.businessHours || realBusinessHours)({ name: bizName, place: plan.place && !sameTown(plan.place, bizName) ? plan.place : '', town: plan.town }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() })).catch(() => null) : Promise.resolve(null);
+    // 24.11: a business's phone, address or hours: its Google map listing too.
+    const placeAsk = deps.placesSearch && /(?:טלפון|מספר של|המספר|כתובת|איפה נמצא|איפה נמצאת|שעות פתיחה|פתוח|פתוחה|עד מתי)/u.test(utterance + ' ' + plan.standalone);
+    const placesP = placeAsk ? deps.placesSearch((plan.business ? plan.business + ' ' + (plan.town || plan.place || '') : q1).replace(/(?:מה|מהו|תגיד|תגידי|לי|את|ה?טלפון|ה?מספר|של|ה?כתובת|שעות פתיחה)(?=\s|$)/gu, ' ').replace(/\s+/g, ' ').trim(), { timeoutMs: 4500 }).catch(() => []) : Promise.resolve([]);
     const sets = await Promise.allSettled(queries.map(q => deps.webSearch(q, { timeoutMs: 4500 })));
     const mapHours = await mapHoursP;
+    const listedPlaces = await placesP;
+    if (listedPlaces.length) { sets.unshift({ status: 'fulfilled', value: [{ title: 'מקומות מגוגל מפות', url: 'https://maps.google.com/', snippet: listedPlaces.slice(0, 5).map((p, i) => 'מקום ' + (i + 1) + ': ' + p.title + (p.category ? ', ' + p.category : '') + (p.address ? ', כתובת: ' + p.address : '') + (p.phone ? ', טלפון: ' + p.phone : '')).join(' | ') }] }); log.info?.('[EXT3_BRAIN] Google map listings for a business', { found: listedPlaces.length }); }
     // "Where do they sell X in <town>": the shops of that kind on the map too.
     const BUY = /(?:איפה מוכרים|איפה קונים|איפה אפשר לקנות|איפה משיגים|איפה להשיג|איפה יש לקנות|מי מוכר)/u;
     const shopKind = BUY.test(utterance + ' ' + plan.standalone) && (plan.town || plan.place) ? (nearbyKind(utterance + ' ' + plan.standalone + ' ' + (plan.kind || '')) || (/(?:^|\s)ה?ספר(?=\s|$)/u.test(utterance + ' ' + plan.standalone) ? nearbyKind('ספרים') : null)) : null;
@@ -1301,6 +1306,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       // Official sites first, then news, then the rest; social pages last.
       results.sort((a, b) => sourceRank(a.url) - sourceRank(b.url));
     }
+    // Google's map listing (name, address, phone) stays first and whole.
+    { const gi = results.findIndex(r => r.url === 'https://maps.google.com/'); if (gi > 0) results.unshift(...results.splice(gi, 1)); }
     if (!results.length && mapText) results.push({ url: 'https://www.openstreetmap.org/', title: 'המפה הפתוחה', snippet: mapText });
     if (!results.length) {
       log.warn?.('[EXT3_BRAIN] web search found nothing; answering from knowledge with a caveat');
@@ -1309,7 +1316,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     }
     let pages = [];
     if (deps.readPages) {
-      const urls = results.filter(r => sourceRank(r.url) < 3).slice(0, multi ? 4 : 3).map(r => r.url);
+      const urls = results.filter(r => sourceRank(r.url) < 3 && r.url !== 'https://maps.google.com/').slice(0, multi ? 4 : 3).map(r => r.url);
       // Pages that answer within ~4 s are read; the rest stay as search snippets.
       pages = await Promise.race([deps.readPages(urls, { timeoutMs: 4000 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 4200).unref?.())]);
     }
@@ -1318,7 +1325,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     const label = u => sourceRank(u) === 0 ? ' [אתר רשמי]' : sourceRank(u) === 1 ? ' [אתר חדשות]' : sourceRank(u) === 3 ? ' [רשת חברתית, פחות אמין]' : '';
     const sourceText = results.slice(0, 8).map((r, i) => {
       const page = byUrl.get(String(r.url).replace(/[#?].*$/, ''));
-      const body = page?.content ? clip(page.content, Math.min(2200, Math.max(300, budget))) : clip(r.snippet, 420);
+      const body = page?.content ? clip(page.content, Math.min(2200, Math.max(300, budget))) : clip(r.snippet, r.url === 'https://maps.google.com/' ? 1100 : 420);
       budget -= body.length;
       return 'מקור ' + (i + 1) + label(r.url) + ': ' + clip(r.title, 120) + ' (' + hostOf(r.url).slice(0, 50) + ')\n' + body;
     }).join('\n\n').slice(0, 6500);

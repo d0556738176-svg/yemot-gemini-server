@@ -4501,12 +4501,14 @@ async function searchExa(q,{timeoutMs=4000}={}) {
 }
 // 24.11: Google's map listings through Serper (name, address, phone, rating).
 async function serperPlaces(q,{timeoutMs=4500}={}) {
-  for(const key of keysFor('SERPER_API_KEY')) {
+  for(const key of keysFor('SERPER_API_KEY')) for(let attempt=0;attempt<2;attempt++) {
     try {
+      if(attempt) await new Promise(res=>setTimeout(res,800)); // 24.11: a moment's "too many at once" is tried again
       const r=await fetch('https://google.serper.dev/places',{method:'POST',signal:AbortSignal.timeout(timeoutMs),headers:{'X-API-KEY':key,'content-type':'application/json'},body:JSON.stringify({q:String(q).slice(0,160),gl:'il',hl:'iw'})});
-      if(!r.ok) { console.warn('[PLACES] Serper places answered',{status:r.status}); continue; }
+      if(!r.ok) { console.warn('[PLACES] Serper places answered',{status:r.status}); if(r.status===429&&!attempt) continue; break; }
       const j=await r.json().catch(()=>null);
       console.info('[PLACES] Serper places',{found:(j?.places||[]).length});
+      if(!(j?.places||[]).length&&!attempt) continue;
       return (j?.places||[]).map(p=>({title:String(p.title||''),address:String(p.address||''),phone:String(p.phoneNumber||''),rating:p.rating||null,category:String(p.category||''),website:String(p.website||'')})).filter(p=>p.title);
     } catch {}
   }
