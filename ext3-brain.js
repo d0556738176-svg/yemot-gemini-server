@@ -1247,7 +1247,9 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   // 24.11 (owner: true answers on every subject): a question on a Torah text
   // gets the real text from Sefaria; then it is answered from that text.
   let torah = null;
-  if (['chat', 'web'].includes(plan.intent) && !plan.about && isTorahQuestion(utterance + ' ' + (plan.standalone || '')))
+  // 24.11: "what is this week's parasha about?" from the parasha's own verses.
+  if (['chat', 'web', 'recall'].includes(plan.intent)) torah = await within(8000, (deps.parshaFacts || (async (u, o) => (await import('./jewish-calendar.js')).parshaFacts(u, o)))(utterance + ' ' + (plan.standalone || ''), { fetchImpl: deps.fetchImpl || fetch })).catch(() => null);
+  if (!torah && ['chat', 'web'].includes(plan.intent) && !plan.about && isTorahQuestion(utterance + ' ' + (plan.standalone || '')))
     torah = await within(7000, torahSources(plan.standalone || utterance, { llm: deps.llm, fetchImpl: deps.fetchImpl || fetch, log })).catch(() => null);
   if (torah) plan.intent = 'chat';
 
@@ -1379,13 +1381,14 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     (plan.instruction ? ' המתקשר נתן עכשיו הוראה קבועה: "' + plan.instruction + '". אשרי בקצרה ובחום שתזכרי ותקיימי אותה מעכשיו, והמשיכי בהתאם.' : '') +
     (plan.about ? ' הוא שואל על המערכת עצמה ועל מה שהיא יודעת לעשות. עני בדיוק על מה ששאל, בכנות, רק מתוך העובדות על המערכת שלמטה, בלי לבצע שום פעולה ובלי להבטיח מה שלא כתוב שם. אם שאל "רק מ..." או "מאיזה אתרים", אמרי במפורש את התשובה. בסוף הציעי בקצרה איך לבקש את זה.' : '') +
     (!torah && isTorahQuestion(utterance) ? ' זו שאלה על טקסט תורני, ולא נמצא עכשיו הטקסט המקורי: אל תצטטי ואל תייחסי שום דבר למפרש או לספר אלא אם את בטוחה בו לגמרי; אמרי בכנות שלא מצאת את הלשון המדויקת, ותני רק את מה שאת בטוחה בו.' : '') +
-    (torah ? ' לפנייך הטקסט המקורי מספריא. בססי את התשובה רק עליו: צטטי במדויק את המילים החשובות כפי שהן כתובות, אמרי את מראה המקום, והסבירי בפשטות. אל תייחסי למחבר דבר שלא כתוב בטקסט. אם הטקסט לא עונה על השאלה, אמרי זאת.' : '') +
+    (torah?.summary ? ' לפנייך פתיחת שבע העליות של הפרשה מתוך הפסוקים עצמם. ספרי בשפה חמה ופשוטה, בסדר, מה קורה בפרשה: הסיפורים והנושאים העיקריים, כפי שעולים מהפסוקים; אל תוסיפי אירועים שלא מופיעים בהם, ואל תצטטי מדרשים.' : '') +
+    (torah && !torah.summary ? ' לפנייך הטקסט המקורי מספריא. בססי את התשובה רק עליו: צטטי במדויק את המילים החשובות כפי שהן כתובות, אמרי את מראה המקום, והסבירי בפשטות. אל תייחסי למחבר דבר שלא כתוב בטקסט. אם הטקסט לא עונה על השאלה, אמרי זאת.' : '') +
     '', plan.about ? SYSTEM_FACTS : torah ? torah.text : '', { maxTokens: 2000, budgetMs: 13000 }))()
     // 24.11: every model busy, but the real text is in hand: it is read out.
     .catch(e => { if (!torah?.first) throw e; const f = torah.first; return 'הנה מה שכתוב ב' + (f.heRef || f.ref) + ': ' + clip(f.text.replace(/[\u0591-\u05C7]/g, ''), 700) + '. אם תרצה, אסביר את זה בהמשך.'; });
   // 24.11: an answer about a Torah text that hardly uses the text's own words
   // was made up by a weak model (live check): the text itself is read instead.
-  if (torah?.first && reply && !/הנה מה שכתוב ב/u.test(reply)) {
+  if (torah?.first && !torah.summary && reply && !/הנה מה שכתוב ב/u.test(reply)) {
     const words = t => String(t || '').replace(/[\u0591-\u05C7]/g, '').split(/[^\u05D0-\u05EA]+/).filter(w => w.length >= 3);
     const src = new Set(words(torah.text)), ans = words(reply);
     const hit = ans.filter(w => src.has(w)).length / Math.max(1, ans.length);
@@ -1442,7 +1445,7 @@ const ZMAN_ASK = [
 export function zmanReply(facts, text) {
   const t = String(text || ''), times = facts?.times || {};
   if (/(?:זמני היום|כל הזמנים|זמני תפילה|זמנים הלכתיים|זמני הלכה)/u.test(t)) return null;
-  if (/הדלקת נרות|כניסת השבת|זמן הדלקה/u.test(t)) {
+  if (/הדלקת נרות|כניסת (?:ה)?שבת|נכנסת (?:ה)?שבת|זמן הדלקה/u.test(t)) {
     const line = facts.text.split('\n').find(l => l.startsWith('הדלקת נרות'));
     if (!line) return null;
     return 'הדלקת נרות שבת ' + facts.when + ' ב' + facts.loc.label + ' היא ב' + line.split(': ').pop() + ', ' + line.slice(line.indexOf('(') + 1, line.indexOf(')')) + '. השקיעה ב' + spokenTime(times.sunset) + '. בלוחות שונים יש לפעמים הבדל של דקה או שתיים, וכדאי לנהוג לפי הלוח של המקום.';

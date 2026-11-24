@@ -57,6 +57,7 @@ function spokenRef(ref) {
 }
 export function torahCalendarAsked(text) {
   const t = String(text || '');
+  if (/(?:על מה|מה קורה|ספר לי|תספר|תספרי|תסביר|תסבירי|סיכום|תסכם|תסכמי).{0,20}(?:ה?פרשה|פרשת)/u.test(t)) return null; // the content, not the name
   if (/(?:פרשת|פרשה)\s*(?:ה)?שבוע|איזו פרשה|איזה פרשה|מה הפרשה|פרשת השבוע|קוראים השבוע|קוראים בשבת|ההפטרה|הפטרה|מפטירים/u.test(t)) return /(?:הבא|הבאה|בעוד שבוע|שבוע הבא)/u.test(t) ? 'parsha-next' : /(?:הפטרה|ההפטרה|מפטירים)/u.test(t) ? 'haftarah' : 'parsha';
   if (/(?:ה?דף ה?יומי|דף יומי)/u.test(t) && !/(?:שיעור|תשמיע|להשמיע|לשמוע|תוריד|הקלטה)/u.test(t)) return /מחר/u.test(t) ? 'daf-tomorrow' : 'daf';
   return null;
@@ -84,4 +85,23 @@ export async function answerTorahCalendar(text, { fetchImpl = fetch, now = new D
   const special = String(p.leyning.haftarah || '').split('|')[1] ? ' (הפטרה מיוחדת: ' + String(p.leyning.haftarah).split('|')[1].trim().replace('Chanukah', 'חנוכה').replace('Day', 'יום').replace('(on Shabbat)', 'בשבת') + ')' : '';
   if (kind === 'haftarah') return 'ההפטרה של ' + p.title + ', ב' + dayName(p.date) + ', היא ב' + h + special + '.';
   return (kind === 'parsha-next' ? 'בשבת שאחרי, ' : 'פרשת השבוע היא ') + p.title.replace(/^פרשת\s+/u, kind === 'parsha-next' ? 'קוראים את פרשת ' : '') + ', שנקראת ב' + dayName(p.date) + '.' + (h ? ' ההפטרה: ' + h + special + '.' : '') + ' אם תרצה, אספר לך על מה הפרשה.';
+}
+
+// "What is the parasha about?": the opening verses of each of its seven
+// readings, from Sefaria, so the summary is made from the real text.
+export async function parshaFacts(text, { fetchImpl = fetch, now = new Date(), timeoutMs = 6000 } = {}) {
+  const t = String(text || '');
+  // Only this (or next) week's parasha; "פרשת בראשית" by name is a Torah question.
+  if (!/(?:על מה|מה קורה|ספר לי|תספר|תספרי|תסביר|תסבירי|סיכום|תסכם|תסכמי|מה כתוב).{0,20}(?:הפרשה|פרשה זו|פרשת השבוע|פרשת שבוע)/u.test(t)) return null;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now);
+  const end = new Date(now.getTime() + 16 * 86400000).toISOString().slice(0, 10);
+  const j = await (await fetchImpl('https://www.hebcal.com/hebcal?v=1&cfg=json&s=on&i=on&leyning=on&lg=he&start=' + today + '&end=' + end, { signal: AbortSignal.timeout(timeoutMs) })).json();
+  const p = (j?.items || []).filter(x => x.category === 'parashat')[/(?:הבא|הבאה|שבוע הבא)/u.test(t) ? 1 : 0];
+  if (!p?.leyning) return null;
+  const parts = ['1', '2', '3', '4', '5', '6', '7'].map(k => String(p.leyning[k] || '').match(/^(.+? \d+:\d+)/)?.[1]).filter(Boolean);
+  const first = (ref) => ref.replace(/:(\d+)$/, (m, v) => ':' + v + '-' + (Number(v) + 2));
+  const got = await Promise.all(parts.map(r => fetchImpl('https://www.sefaria.org/api/v3/texts/' + encodeURIComponent(first(r)) + '?version=hebrew&return_format=text_only', { signal: AbortSignal.timeout(timeoutMs) }).then(r => r.ok ? r.json() : null).then(x => x && { ref: x.heRef || x.ref, text: [].concat(x.versions?.[0]?.text || []).flat(9).join(' ').replace(/<[^>]+>/g, '').replace(/[\u0591-\u05C7]/g, '').slice(0, 420) }).catch(() => null)));
+  const ok = got.filter(x => x?.text);
+  if (!ok.length) return null;
+  return { title: plain(p.hebrew || p.title), summary: true, first: ok[0], text: plain(p.hebrew || p.title) + ', פתיחת כל אחת משבע העליות:\n' + ok.map(x => x.ref + ': ' + x.text).join('\n') };
 }
