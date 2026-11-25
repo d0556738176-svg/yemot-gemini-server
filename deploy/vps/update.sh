@@ -43,5 +43,16 @@ if [ -n "$ask_sha" ] && [ "$ask_sha" != "$(cat $ROOT/.ask-seen 2>/dev/null)" ]; 
       }catch{}});' && logger -t yemot-update "conversation check queued"
   fi
 fi
+# Owner's log extract (25.11): a request on the side branch verify/logs
+# becomes a read-only extract of the server log (deploy/vps/log-extract.mjs),
+# served for 2 hours at /owner-report/<name>. Changes nothing, restarts nothing.
+logs_sha=$(git -C $ROOT/main ls-remote -q origin refs/heads/verify/logs 2>/dev/null | cut -f1)
+if [ -n "$logs_sha" ] && [ "$logs_sha" != "$(cat $ROOT/.logs-seen 2>/dev/null)" ]; then
+  echo "$logs_sha" > $ROOT/.logs-seen
+  if git -C $ROOT/main fetch -q origin verify/logs 2>/dev/null; then
+    req=$(git -C $ROOT/main show FETCH_HEAD:logs/request.json 2>/dev/null | head -c 2000)
+    [ -n "$req" ] && timeout 120 node $ROOT/main/deploy/vps/log-extract.mjs "$req" >/dev/null 2>&1 && logger -t yemot-update "log extract written"
+  fi
+fi
 # keep this script itself current
 cmp -s $ROOT/main/deploy/vps/update.sh /usr/local/bin/yemot-update || install -m 755 $ROOT/main/deploy/vps/update.sh /usr/local/bin/yemot-update
