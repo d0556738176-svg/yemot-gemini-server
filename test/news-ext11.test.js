@@ -104,3 +104,10 @@ test('probe output', () => {
   assert.deepEqual(N.parseProbe('is_live|NA\n'), { live: 'is_live', durationSec: null });
   assert.deepEqual(N.parseProbe('not_live|3600\n'), { live: 'not_live', durationSec: 3600 });
 });
+
+test('a broadcast that has not started is waited for, not given up', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'yt-'));
+  const bin = path.join(dir, 'yt-dlp');
+  writeFileSync(bin, '#!/bin/sh\necho "ERROR: [youtube] x: This live event will begin in a few moments." >&2\nexit 1\n', { mode: 0o755 });
+  assert.equal((await N.probeVideo('mLJTlNR1BIQ', bin)).live, 'is_upcoming');
+});

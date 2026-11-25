@@ -234,7 +234,10 @@ export function probeVideo(videoId, bin, timeoutMs = 60000) {
     const t = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
     p.stdout.on('data', d => { o += d; }); p.stderr.on('data', d => { e = (e + d).slice(-400); });
     p.on('error', () => { clearTimeout(t); resolve({ live: 'error', error: 'yt-dlp not runnable' }); });
-    p.on('close', c => { clearTimeout(t); resolve(c === 0 ? parseProbe(o) : { live: 'error', error: e.trim().split('\n').pop()?.slice(0, 160) || 'exit ' + c }); });
+    // A broadcast that has not started yet is an error for yt-dlp ("This live
+    // event will begin in a few moments", "Premieres in 10 minutes"): it waits.
+    p.on('close', c => { clearTimeout(t); const err = e.trim().split('\n').pop()?.slice(0, 160) || 'exit ' + c;
+      resolve(c === 0 ? parseProbe(o) : /live event will begin|premieres? in|will begin in|is_upcoming|scheduled to start/i.test(e) ? { live: 'is_upcoming', error: err } : { live: 'error', error: err }); });
   });
 }
 
