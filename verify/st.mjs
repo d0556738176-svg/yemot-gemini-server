@@ -1,9 +1,6 @@
-const r=await fetch('https://yedid-nefesh.com/',{headers:{'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130 Safari/537.36','accept-language':'he'}});
-const h=await r.text();
-console.log('status',r.status,'len',h.length);
-const urls=[...new Set(h.match(/https?:\/\/[^"'\s<>\\]+/g)||[])];
-console.log('urls',urls.length); for(const u of urls.slice(0,60)) console.log(u.slice(0,200));
-const vid=[...h.matchAll(/(?:mp4|m3u8|video|objectstorage)[^"'<>]{0,120}/gi)].slice(0,20).map(m=>m[0]); console.log('video-ish',JSON.stringify(vid,null,1).slice(0,3000));
-const i=h.indexOf('__NEXT_DATA__'); console.log('next',i, i>0?h.slice(i,i+1500):'');
-const apis=[...new Set(h.match(/\/api\/[A-Za-z0-9_\/\-]+/g)||[])]; console.log('apis',apis.slice(0,40));
-for (const p of ['/api/channel','/api/posts','/api/messages','/robots.txt','/sitemap.xml']) { const x=await fetch('https://yedid-nefesh.com'+p).then(async r=>r.status+' '+(await r.text()).slice(0,300)).catch(e=>'ERR '+e); console.log(p,x.replace(/\s+/g,' ')); }
+const h=await fetch('https://yedid-nefesh.com/',{headers:{'user-agent':'Mozilla/5.0 Chrome/130','accept-language':'he'}}).then(r=>r.text());
+const i=h.indexOf('/post/1413'); console.log(h.slice(i-200,i+2600));
+console.log('-----'); const j=h.indexOf('video-embedded'); console.log(h.slice(j-1500,j+400));
+const p=await fetch('https://yedid-nefesh.chatfree.app/post/1413',{headers:{'user-agent':'Mozilla/5.0 Chrome/130'}}).then(async r=>r.status+' '+(await r.text())).catch(e=>'ERR '+e);
+console.log('----- post page', p.length); const k=p.indexOf('video-embedded'); console.log(p.slice(0,200)); console.log(k, p.slice(Math.max(0,k-1200),k+300));
+const v=(h.match(/video-embedded#\]\((https:[^)]+)\)/)||[])[1]; if(v){ const r=await fetch(v,{method:'HEAD'}); console.log('video head',r.status,r.headers.get('content-type'),r.headers.get('content-length')); }
