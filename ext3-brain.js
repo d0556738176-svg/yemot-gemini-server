@@ -1295,7 +1295,10 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     // one search for each, and sources from each of them (13.11: the dollar was lost).
     const parts = (plan.searches || []).length >= 2 ? plan.searches : splitRequests(utterance);
     const multi = parts.length >= 2;
-    const queries = multi ? parts.slice(0, 3) : [...new Set([q1, plan.standalone, hours ? q1.replace(/\s*(?:עכשיו|כרגע|היום)\s*/g, ' ') + ' שעות פתיחה' : '', route ? q1.replace(/\s*(?:עכשיו|כרגע|היום|הכי מהר|הכי מהיר|בבקשה)\s*/g, ' ') + ' קווי אוטובוס moovit' : ''].filter(Boolean))].slice(0, 3);
+    const queries = multi ? parts.slice(0, 3) : [...new Set([q1, plan.standalone, hours ? q1.replace(/\s*(?:עכשיו|כרגע|היום)\s*/g, ' ') + ' שעות פתיחה' : '', route ? q1.replace(/\s*(?:עכשיו|כרגע|היום|הכי מהר|הכי מהיר|בבקשה)\s*/g, ' ') + ' קווי אוטובוס moovit' : '',
+      // 25.11: who holds an office now, and today's prices, are searched with this year too
+      // ("מי הנשיא של ארצות הברית" found only an old article and the list of all presidents).
+      !/\b20\d\d\b/.test(q1) && /(?:מי ה?(?:נשיא|ראש|שר|שרה|מנכ|יו"ר|רמטכ|מפכ|נגיד)|מי מכהן|מי עומד בראש|מחיר|שער|כמה עולה)/u.test(utterance + ' ' + plan.standalone) ? q1.replace(/\s*(?:עכשיו|כרגע|היום|החודש)\s*/g, ' ').trim() + ' ' + new Date().getFullYear() : ''].filter(Boolean))].slice(0, 3);
     // Owner, 19.11: a named business's hours come first from the map's own
     // entry, worked out for this minute, then from the web sources.
     const bizName = hours ? (plan.business || '') : '';
