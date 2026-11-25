@@ -5448,9 +5448,14 @@ async function mediaDetails(videoId, title, dub, hint = {}) {
   try {
     const { videoLanguage } = await import('./youtube-video-facts.js');
     const lang = videoLanguage(facts, v.title);
-    if (lang && lang.code !== 'he') lines.push('שפת הסרטון: ' + lang.name);
+    // 25.11: a Hebrew title with a wrongly declared language (Knesset Channel
+    // videos are marked English) is not called foreign.
+    if (lang && lang.code !== 'he' && !/[\u05d0-\u05ea]/.test(String(v.title || ''))) lines.push('שפת הסרטון: ' + lang.name);
   } catch {}
-  let desc = String(facts?.description || '').replace(/https?:\/\/\S+/g, ' ').replace(/\s+/g, ' ').trim();
+  // The description without the channel's standing footer (links, "follow
+  // us", app and social lists), which says nothing about this video.
+  let desc = String(facts?.description || '').split(/\n\s*\n|[◄►•]|(?:^|\s)(?:לצפייה ב|עקבו אחרי|הצטרפו אלינו|מוזמנים למצוא אותנו|הישארו מעודכנים|להצטרפות|הירשמו לערוץ|Subscribe|Follow us)/i)[0]
+    .replace(/https?:\/\/\S+/g, ' ').replace(/#\S+/g, ' ').replace(/\s+/g, ' ').trim();
   if (desc) {
     desc = desc.slice(0, 300);
     if (!/[\u05d0-\u05ea]/.test(desc)) {

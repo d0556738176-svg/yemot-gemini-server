@@ -5,7 +5,8 @@
 // caller to the SAME file at the SAME place (go_to_folder_and_play).
 //   8 -> the file's details, spoken in Hebrew.
 //   9 -> "translate to Hebrew dubbing? 1 = yes, 2 = cancel"; 1 starts the job.
-const clean = t => String(t || '').replace(/https?:\/\/\S+/gi, ' ').replace(/[|=&.,"“”‘’'\\*_#<>\[\]{}\-–—]/g, ' ').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+// Emoji and symbols are removed (the speech engine reads them as noise or names).
+const clean = t => String(t || '').replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u200d\ufe0f\u25c4\u25ba\u2022]/gu, ' ').replace(/https?:\/\/\S+/gi, ' ').replace(/[|=&.,"“”‘’'\\*_#<>\[\]{}\-–—]/g, ' ').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
 
 export function parseWhat(what) {
   const m = /^ivr2:\/?(.*?)\/?([^/]+?)(?:\.[A-Za-z0-9]{2,4})?$/.exec(String(what || ''));
