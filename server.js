@@ -2858,6 +2858,9 @@ async function answerBusinessHoursDirect(transcript) {
       console.warn('[BUSINESS_HOURS] synthesis unavailable; using deterministic answer',{status:geminiErrorStatus(e)});
     }
   }
+  if(isExt3() && !directHoursAnswer.startsWith('מצאתי באתר הרשמי')) {
+    return 'לא מצאתי שעות פתיחה מאומתות לסניף שביקשת. אם יש לך את כתובת עמוד הסניף, אוכל לנסות לפתוח אותו.';
+  }
   return directHoursAnswer;
 
 }
@@ -2976,7 +2979,26 @@ function parseJinaMarkdownResults(markdown){
   }
   return dedupeSearchResults(results);
 }
+const ext3SearchCache=new Map();
+const EXT3_SEARCH_CACHE_TTL_MS=30000;
+const EXT3_SEARCH_CACHE_MAX_ENTRIES=100;
+
 async function searchWebDirect(query, options={}) {
+  const q=String(query||'').trim();
+  if(!q || !isExt3()) return searchWebDirectUncached(query,options);
+  const key=JSON.stringify([q,Boolean(options.deep)]);
+  const cached=ext3SearchCache.get(key);
+  if(cached && cached.expiresAt>Date.now()) return cached.results.map(item=>({...item}));
+  ext3SearchCache.delete(key);
+  const results=await searchWebDirectUncached(q,options);
+  if(results.length) {
+    ext3SearchCache.set(key,{expiresAt:Date.now()+EXT3_SEARCH_CACHE_TTL_MS,results:results.map(item=>({...item}))});
+    if(ext3SearchCache.size>EXT3_SEARCH_CACHE_MAX_ENTRIES) ext3SearchCache.delete(ext3SearchCache.keys().next().value);
+  }
+  return results;
+}
+
+async function searchWebDirectUncached(query, options={}) {
   const q=String(query||'').trim();
   if(!q) return [];
   const timeoutMs=Number(options.timeoutMs||DIRECT_WEB_QUERY_TIMEOUT_MS);
@@ -3016,9 +3038,20 @@ async function searchWebDirect(query, options={}) {
   const runSecondary=async()=>{
     const {provider,results}=await searchSecondary(q,{timeoutMs:Math.min(Math.max(timeoutMs,2500),4000)});
     console.info('[DIRECT_WEB] secondary engine answered',{provider,query:q.slice(0,140),results:results.length});
-    return results.map(item=>({...item,url:normalizeSearchHref(item.url)})).filter(item=>item.title&&item.url);
+    const usable=results.map(item=>({...item,url:normalizeSearchHref(item.url)})).filter(item=>item.title&&item.url);
+    if(!usable.length) throw Object.assign(new Error('Secondary engine returned no usable results'),{status:502});
+    return usable;
   };
-  {
+  if(isExt3() && secondaryAvailable) {
+    try { return await runSecondary(); }
+    catch(e) {
+      console.warn('[DIRECT_WEB] branch 3 secondary engines unavailable',{status:geminiErrorStatus(e)});
+    }
+    try { return await runTavily(); }
+    catch(e) {
+      console.warn('[DIRECT_WEB] branch 3 Tavily unavailable; using public fallbacks',{status:geminiErrorStatus(e)});
+    }
+  } else {
     const hedgeMs=Number(process.env.BRANCH1_SEARCH_HEDGE_MS||(deepSearch?2200:1300));
     let secondaryStarted=null;
     const tavilyAttempt=runTavily();
@@ -5557,7 +5590,10 @@ async function callHandler(call) {
         replyText='לפני רגע שאלת: '+asked[0]+'.'+(asked[1]?' ולפני זה: '+asked[1]+'.':'')+(asked[2]?' ובהתחלה: '+asked[2]+'.':'');
         console.info('[CALL_FLOW] within-call recall answered from this call',{callId:activeKey,turns:asked.length});
       }
-      if(!directDataRequest && !withinCallRecall) {
+      const ext3Introduction=!explicitSearchOnly && /^(?:(?:שלום|היי|ספרי לי(?: בקצרה)?)\s*[,.:]?\s*)?(?:מי את(?: ומה את יכולה לעשות בשבילי)?|מה את יכולה לעשות(?: בשבילי)?)[?.!\s]*$/u.test(originalSpokenTranscript.trim());
+      if(ext3Introduction) {
+        replyText='אני העוזרת של שלוחה שלוש. אפשר לבקש ממני לחפש מידע עדכני, לקרוא עמוד ציבורי או להרחיב על תשובה קודמת.';
+      } else if(!directDataRequest && !withinCallRecall) {
         const longAnswer=isLongAnswerRequest(userTranscript);
         const recall=typeof isMemoryRecall==='function'&&isMemoryRecall(originalSpokenTranscript);
         const conversationalHistory=recall?(relevantHistoryText||currentConversationText(turnHistory)):(currentConversationText(turnHistory)||relevantHistoryText);
@@ -6482,7 +6518,12 @@ async function runBranch1EndToEndSelfTest(questions=BRANCH1_E2E_QUESTIONS) {
 // Extension 3 shares the engine; one conversational turn checks that it answers
 // and speaks about itself in the feminine.
 async function runBranch3SelfTest() {
-  await callPersona.run({persona:'female',branch:'3'},()=>runBranch1EndToEndSelfTest(['ספרי לי בקצרה מי את ומה את יכולה לעשות בשבילי','תחפשי באינטרנט מי ראש עיריית ירושלים']));
+  await callPersona.run({persona:'female',branch:'3'},()=>runBranch1EndToEndSelfTest([
+    'ספרי לי בקצרה מי את ומה את יכולה לעשות בשבילי',
+    'מה שעות הפתיחה של סופר פארם בקניון עזריאלי בתל אביב לכל יום בשבוע',
+    'תפתחי את https://shop.super-pharm.co.il/branches/branchPage?code=61',
+    'תמשיכי לקרוא מהדף'
+  ]));
 }
 // Owner's deep check of extension 3 (08.11): two simulated calls from a test
 // number. Call A: introduction, advice, a follow-up ("the first one"), web
