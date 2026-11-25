@@ -142,5 +142,7 @@ systemctl enable --now yemot-builder >/dev/null 2>&1
 echo "addresses: main_changed=$changed_main ext2_changed=$changed_ext2"
 # 25.11 (owner approved): our own search engine (SearXNG, local only, low
 # priority), set up or kept up to date in the background.
-nohup setsid bash /opt/yemot/main/deploy/vps/searxng-setup.sh >/dev/null 2>&1 < /dev/null &
+# Its own short-lived system job (a background child of this update would be
+# stopped together with the update job; 25.11 it never got past apt).
+systemctl is-active -q yemot-searxng-setup 2>/dev/null || systemd-run --quiet --no-block --collect --unit=yemot-searxng-setup --property=Nice=15 /bin/bash /opt/yemot/main/deploy/vps/searxng-setup.sh >/dev/null 2>&1 || true
 echo MAINTAIN-OK
