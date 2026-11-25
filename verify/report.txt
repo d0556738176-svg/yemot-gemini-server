@@ -1,63 +1,23 @@
-status 200 len 21043
-urls 31
-https://fonts.googleapis.com/css2?family=Assistant:wght@200;400;600;700&display=swap
-http://www.w3.org/2000/svg
-https://yedid-nefesh.chatfree.app/
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/20/d8/20d8c22e886213c914c0f366cf8f3bd54f2f2182f19fb12858ddc68aaf111e99
-https://schema.org
-https://yedid-nefesh.chatfree.app/post/1414
-https://hel1.your-objectstorage.com/chatfree-yedid-…
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/2e/09/2e09c2f28b0b5133e9d5f8a417a693a8ece4095bbeceab65e59145e265417522)
-https://yedid-nefesh.chatfree.app/post/1413
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/95/dc/95dcbadd2ef4f1fbc02117d0fde0f8096404a514a10025a714cb8479a7a8bc…
-https://yedid-nefesh.chatfree.app/post/1412
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/54/bc/54bc9888e867766b071e3334554b1d65bd077223d80f143341aca09004a657f9)
-https://yedid-nefesh.chatfree.app/post/1411
-https://hel1.yo…
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/cf/09/cf097dff095e139ebdd2e05462dbc96bdbb8942392bdb81ab68a9e2722e7c4fb)
-https://yedid-nefesh.chatfree.app/post/1410
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/bf/7b/bf7bac5d8870032a17027bb909f59577b1e9e6c32cacf2eadb20996f1ed93f30)
-https://yedid-nefesh.chatfree.app/post/1409
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/d9/dd/d9ddf9a37319d1f502dedbfb120e471bb0e6f5c74b20252a190f4bc925192075…
-https://yedid-nefesh.chatfree.app/post/1408
-https://hel1.your-objectsto…
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/27/e9/27e9dd428555e7edfb2d70acb1bc9e87ffd75917b7a2fd986dde864642c5571a)
-https://yedid-nefesh.chatfree.app/post/1407
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/a1/01/a101517b1b21718de304a09c2c8c65287592ff4fee7b62ccad3a1a9acd9f3d49)
-https://yedid-nefesh.chatfree.app/post/1406
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/98/14/9814e6adaab2891a4e1ee2f58097c0a2fa411c7018b89f0588eb82…
-https://yedid-nefesh.chatfree.app/post/1405
-https://yedid-nefesh.chatfree.app/post/1404
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/fe/3c/fe3c75346be14fca49ca3aa1dd399eb6fc658f754c90a6f526d87cdd26b8b8f1)
-https://yedid-nefesh.chatfree.app/post/1403
-https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/3c/3d/3c3d83dc1d3430f62d7faa5a2f894dda4413421b6e4033abcfc43e6220253ff2)
-video-ish [
- "objectstorage.com/chatfree-yedid-nefsh/20/d8/20d8c22e886213c914c0f366cf8f3bd54f2f2182f19fb12858ddc68aaf111e99",
- "objectstorage.com/chatfree-yedid-nefsh/20/d8/20d8c22e886213c914c0f366cf8f3bd54f2f2182f19fb12858ddc68aaf111e99",
- "objectstorage.com/chatfree-yedid-…",
- "objectstorage.com/chatfree-yedid-nefsh/2e/09/2e09c2f28b0b5133e9d5f8a417a693a8ece4095bbeceab65e59145e265417522) **📍ארה&#34;ב: ארבעים ",
- "video-embedd…",
- "video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/95/dc/95dcbadd2ef4f1fbc02117d0fde0f8096404a514a1002",
- "objectstorage.com/chatfree-yedid-…",
- "objectstorage.com/chatfree-yedid-nefsh/54/bc/54bc9888e867766b071e3334554b1d65bd077223d80f143341aca09004a657f9) ##### **תעודת האחריות ",
- "objectstorage.com/chatfree-yedid-nefsh/cf/09/cf097dff095e139ebdd2e05462dbc96bdbb8942392bdb81ab68a9e2722e7c4fb) --- &lt;div style=&#34",
- "objectstorage.com/chatfree-yedid-…",
- "objectstorage.com/chatfree-yedid-nefsh/bf/7b/bf7bac5d8870032a17027bb909f59577b1e9e6c32cacf2eadb20996f1ed93f30) ##### **תבחרו את הקשה ",
- "video-embedded…",
- "video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/d9/dd/d9ddf9a37319d1f502dedbfb120e471bb0e6f5c74b202",
- "objectstorage.com/chatfree-yedid-nefsh/27/e9/27e9dd428555e7edfb2d70acb1bc9e87ffd75917b7a2fd986dde864642c5571a) --- &lt;div style=&#34",
- "objectstorage.com/chatfree-yedid-…",
- "objectstorage.com/chatfree-yedid-nefsh/a1/01/a101517b1b21718de304a09c2c8c65287592ff4fee7b62ccad3a1a9acd9f3d49) ##### **איך מפסיקים לה",
- "video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/98/14/9814e6adaab2891a4e1ee2f58097c0a2fa411c7018b89",
- "objectstorage.com/chatfree-yedid-nefsh/fe/3c/fe3c75346be14fca49ca3aa1dd399eb6fc658f754c90a6f526d87cdd26b8b8f1) --- &lt;div style=&#34",
- "video-embedded#](ht…",
- "video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/3c/3d/3c3d83dc1d3430f62d7faa5a2f894dda4413421b6e403"
-]
-next -1 
-apis []
-/api/channel 401 User not authenticated 
-/api/posts 401 User not authenticated 
-/api/messages 401 User not authenticated 
-/robots.txt 200 User-agent: * Allow: / Disallow: /api/ Disallow: /admin/ Sitemap: https://yedid-nefesh.chatfree.app/sitemap.xml 
-/sitemap.xml 200 <?xml version="1.0" encoding="UTF-8"?> <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"> <url> <loc>https://yedid-nefesh.chatfree.app/</loc> </url> <url> <loc>https://yedid-nefesh.chatfree.app/post/1414</loc> </url> <url> <loc>https://yedid-nefesh.chatfree.app/post/1
+/2e/09/2e09c2f28b0b5133e9d5f8a417a693a8ece4095bbeceab65e59145e265417522) **📍ארה&#34;ב: ארבעים שנה מנקה בבית ספר ואז הבית ספר נקרא…</p></article><article><h2><a href="https://yedid-nefesh.chatfree.app/post/1413">##### **לא לחשוב היום על מחר🤚** 💥קטע חזק מהרב רפאל רובין [video-embedd…</a></h2><time datetime="2026-11-25T18:30:10Z">2026-11-25</time><p>##### **לא לחשוב היום על מחר🤚** 💥קטע חזק מהרב רפאל רובין [video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/95/dc/95dcbadd2ef4f1fbc02117d0fde0f8096404a514a10025a714cb8479a7a8bc…</p></article><article><h2><a href="https://yedid-nefesh.chatfree.app/post/1412">[image-embedded#l](https://hel1.your-objectstorage.com/chatfree-yedid-…</a></h2><time datetime="2026-11-25T16:45:10Z">2026-11-25</time><p>[image-embedded#l](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/54/bc/54bc9888e867766b071e3334554b1d65bd077223d80f143341aca09004a657f9) ##### **תעודת האחריות האישית שלכם🫶** בימים האחרונים…</p></article><article><h2><a href="https://yedid-nefesh.chatfree.app/post/1411">##### **לקבל יותר טוב ממה שמבקשים😍** [image-embedded#](https://hel1.yo…</a></h2><time datetime="2026-11-25T15:00:10Z">2026-11-25</time><p>##### **לקבל יותר טוב ממה שמבקשים😍** [image-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/cf/09/cf097dff095e139ebdd2e05462dbc96bdbb8942392bdb81ab68a9e2722e7c4fb) --- &lt;div style=&#34;…</p></article><article><h2><a href="https://yedid-nefesh.chatfree.app/post/1410">[image-embedded#l](https://hel1.your-objectstorage.com/chatfree-yedid-…</a></h2><time datetime="2026-11-25T12:00:10Z">2026-11-25</time><p>[image-embedded#l](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/bf/7b/bf7bac5d8870032a17027bb909f59577b1e9e6c32cacf2eadb20996f1ed93f30) ##### **תבחרו את הקשה שלכם💪** להשמין זה קשה. להיות ב…</p></article><article><h2><a href="https://yedid-nefesh.chatfree.app/post/1409">##### **לכבד כל עוד הם כאן🫶** 💥קטע חזק מהרב שניר גואטה [video-embedded…</a></h2><time datetime="2026-11-25T10:30:10Z">2026-11-25</time><p>##### **לכבד כל עוד הם כאן🫶** 💥קטע חזק מהרב שניר גואטה [video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/d9/dd/d9ddf9a37319d1f502dedbfb120e471bb0e6f5c74b20252a190f4bc925192075…</p></article><article><h2><a href="https://yedid-nefesh.chatfree.app/post/1408">##### **משהו קטן מהלב🥲** [image-embedded#](https://hel1.your-objectsto…</a></h2><time datetime="2026-11-25T09:40:10Z">2026-11-25</time><p>##### **משהו קטן מהלב🥲** [image-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/27/e9/27e9dd428555e7edfb2d70acb1bc9e87ffd75917b7a2fd986dde864642c5571a) --- &lt;div style=&#34;font-family:…</p></article><article><h2><a href="https://yedid-nefesh.chatfree.app/post/1407">[image-embedded#l](https://hel1.your-obje
+-----
+did-nefsh/20/d8/20d8c22e886213c914c0f366cf8f3bd54f2f2182f19fb12858ddc68aaf111e99">
+    <link rel="canonical" href="https://yedid-nefesh.chatfree.app/">
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","description":"צאט ערוץ ידיד נפש - טיפים, עצות ותובנות לחיים שמחים ומאושרים, רגעים של השראה יומיים מכל הלב🫶\nבטחון עצמי, אמונה ובטחון, סיפורי ומשפטי מוטיבציה בגובה עיניים\nערוץ ידיד נפש⚡","name":"ידיד נפש⚡","url":"https://yedid-nefesh.chatfree.app/"}</script>
+</head>
+
+<body>
+  <app-root><main style="visibility:hidden;position:absolute;left:-9999px" aria-hidden="true"><h1>ידיד נפש⚡</h1><p>צאט ערוץ ידיד נפש - טיפים, עצות ותובנות לחיים שמחים ומאושרים, רגעים של השראה יומיים מכל הלב🫶
+בטחון עצמי, אמונה ובטחון, סיפורי ומשפטי מוטיבציה בגובה עיניים
+ערוץ ידיד נפש⚡</p><article><h2><a href="https://yedid-nefesh.chatfree.app/post/1414">[image-embedded#l](https://hel1.your-objectstorage.com/chatfree-yedid-…</a></h2><time datetime="2026-11-25T19:45:10Z">2026-11-25</time><p>[image-embedded#l](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/2e/09/2e09c2f28b0b5133e9d5f8a417a693a8ece4095bbeceab65e59145e265417522) **📍ארה&#34;ב: ארבעים שנה מנקה בבית ספר ואז הבית ספר נקרא…</p></article><article><h2><a href="https://yedid-nefesh.chatfree.app/post/1413">##### **לא לחשוב היום על מחר🤚** 💥קטע חזק מהרב רפאל רובין [video-embedd…</a></h2><time datetime="2026-11-25T18:30:10Z">2026-11-25</time><p>##### **לא לחשוב היום על מחר🤚** 💥קטע חזק מהרב רפאל רובין [video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/95/dc/95dcbadd2ef4f1fbc02117d0fde0f8096404a514a10025a714cb8479a7a8bc…</p></article><article><h2><a href="https://yedid-nefesh.chatfree.app/post/1412">[image-embedded#l](https://hel1.your-objectstorage.com/chatfree-yedid-…</a></h2><time datetime="2026-11-25T16:45:10Z">2026-11-25</time><p>[image-embedded#l](https://hel1.your-o
+----- post page 17336
+200 <!doctype html>
+<html dir="rtl" lang="he" data-channel-theme="channel-light" data-beasties-container>
+
+<head>
+  <meta charset="utf-8">
+  <title>##### **לא לחשוב היום על מחר🤚** 💥קטע חזק מהרב רפאל
+13210 w.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cpath d='M16.2 2.2C20.2 1.2 24.6 2.2 28.8 2.2C33.0 2.2 37.2 2.1 41.3 2.2C45.5 2.3 49.7 2.7 53.9 2.9C58.1 3.0 62.3 3.3 66.5 3.4C70.7 3.5 75.0 2.9 79.1 3.4C83.1 3.9 88.0 4.1 90.6 6.3C93.3 8.4 94.0 12.5 94.8 16.2C95.6 19.9 95.1 24.6 95.6 28.8C96.1 33.0 97.1 37.2 97.6 41.3C98.1 45.5 98.5 49.7 98.6 53.9C98.7 58.1 98.6 62.3 98.4 66.5C98.3 70.7 98.5 75.0 97.8 79.1C97.1 83.2 96.6 88.3 94.3 91.0C91.9 93.7 87.6 94.5 83.8 95.2C80.0 96.0 75.4 95.3 71.2 95.6C67.0 95.8 62.8 96.4 58.7 96.5C54.5 96.7 50.3 96.5 46.1 96.4C41.9 96.4 37.7 96.1 33.5 96.3C29.3 96.4 25.2 97.4 20.9 97.3C16.7 97.3 11.2 98.0 8.0 95.7C4.8 93.5 2.8 87.9 1.8 83.8C0.9 79.7 2.0 75.4 2.3 71.2C2.5 67.0 2.8 62.8 3.3 58.7C3.8 54.5 4.7 50.3 5.1 46.1C5.4 41.9 5.7 37.7 5.5 33.5C5.3 29.3 4.0 25.1 3.9 20.9C3.8 16.7 2.8 11.5 4.8 8.4C6.9 5.2 12.2 3.2 16.2 2.2Z' fill='%23fff'/%3E%3C/svg%3E")}</style><link rel="stylesheet" href="/assets/styles-Z7M4PCXK.css" media="print" onload="this.media='all'"><noscript><link rel="stylesheet" href="/assets/styles-Z7M4PCXK.css"></noscript>    <meta name="description" content="##### **לא לחשוב היום על מחר🤚** 💥קטע חזק מהרב רפאל רובין [video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/95/dc/95dcbadd2ef4f1fbc02117d0fde0f8096404a514a10025a714cb8479a7a8bc…">
+    <meta property="og:title" content="##### **לא לחשוב היום על מחר🤚** 💥קטע חזק מהרב רפאל רובין [video-embedd… | ידיד נפש⚡">
+    <meta property="og:desc
+video head 403 application/xml 272
 exit=0
