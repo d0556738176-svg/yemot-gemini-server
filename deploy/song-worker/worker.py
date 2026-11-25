@@ -40,6 +40,33 @@ def callback(kind, body=None, ctype="audio/flac", **extra):
     return False
 
 
+class AlreadyDelivered(Exception):
+    pass
+
+
+LAST_BEAT = [0.0]
+
+
+def beat(force=False):
+    """Owner, 25.11: a sign of life every minute, so the phone server sees at
+    once a runner that lost contact and sends the song to a new one. The
+    answer says when the other runner already delivered this song: this one
+    then stops and frees its runner."""
+    if not force and time.time() - LAST_BEAT[0] < 60:
+        return
+    LAST_BEAT[0] = time.time()
+    q = {"job": JOB, "ticket": TICKET, "kind": "status", "stage": "alive"}
+    try:
+        req = urllib.request.Request(CB + "?" + urllib.parse.urlencode(q), data=b"{}", headers={"content-type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=20) as r:
+            d = json.loads(r.read() or b"{}")
+    except Exception as e:
+        log("beat failed", str(e)[:80])
+        return
+    if d.get("done"):
+        raise AlreadyDelivered()
+
+
 def api(path, body=None, timeout=60, raw=False):
     req = urllib.request.Request(API + path, data=None if body is None else json.dumps(body).encode(),
                                  headers={"Authorization": "Bearer " + KEY, "Content-Type": "application/json"},
@@ -56,6 +83,7 @@ def wait_for_result(task, timeout=3300, poll_seconds=5):
     failures = 0
     while time.monotonic() - started < timeout:
         time.sleep(poll_seconds)
+        beat()
         try:
             response = api("/query_result", {"task_id_list": [task]})
         except (urllib.error.URLError, TimeoutError, ConnectionError):
@@ -124,6 +152,7 @@ def main():
     callback("status", stage="starting")
     deadline = time.time() + 1500
     while True:
+        beat()
         try:
             api("/health", timeout=30); break
         except Exception as e:
@@ -146,6 +175,7 @@ def main():
     if not task: raise RuntimeError("no task id: " + json.dumps(sub)[:200])
     t1 = time.time()
     audio_path = wait_for_result(task)
+    beat(force=True)  # the other runner may have finished first: then do not upload again
     audio = api(audio_path, raw=True, timeout=120)
     log("generated", len(audio), "bytes in", round(time.time() - t1), "s")
     if len(audio) < 20000: raise RuntimeError("audio too small")
@@ -157,6 +187,9 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except AlreadyDelivered:
+        log("the other runner already delivered this song; stopping")
+        sys.exit(0)
     except Exception as e:
         log("FAILED", str(e)[:300])
         if not P.get("warm"):

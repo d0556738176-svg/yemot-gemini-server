@@ -13,12 +13,39 @@
 // RENDER_EXTERNAL_URL, optional SONG_WORKER_REPO (owner/name),
 // SONG_WORKER_WORKFLOW (file name), SONG_WORKER_REF (branch).
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 const pending = new Map();
-// Songs whose mp3 already arrived (the watcher then stops).
-const delivered = new Set();
 let orphanHandler = null;
 const log = (event, details = {}) => console.info('[SONG_CLOUD]', event, details);
+
+// Owner, 25.11 ("no problems ever while the song is made"): what the cloud
+// stage needs survives a restart of this service. Songs already delivered (so
+// a late second runner never makes a second copy) and songs still being made
+// (so their watcher starts again after the restart) are kept on disk.
+const STATE_DIR = process.env.SONG_STATE_DIR || '/var/lib/yemot-data';
+const DELIVERED_FILE = STATE_DIR + '/song-delivered.json';
+const ACTIVE_FILE = STATE_DIR + '/song-cloud-jobs.json';
+function readJson(file, fallback) { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return fallback; } }
+function writeJson(file, data) {
+  try { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file + '.tmp', JSON.stringify(data)); renameSync(file + '.tmp', file); } catch {}
+}
+// Songs whose audio already arrived (the watcher then stops).
+const delivered = new Set(readJson(DELIVERED_FILE, []).slice(-300));
+function markDelivered(jobId) {
+  delivered.add(jobId);
+  writeJson(DELIVERED_FILE, [...delivered].slice(-300));
+  forgetActive(jobId);
+}
+const active = readJson(ACTIVE_FILE, {}) || {};
+function rememberActive(jobId, entry) { active[jobId] = { ...entry, at: Date.now() }; writeJson(ACTIVE_FILE, active); }
+function forgetActive(jobId) { if (active[jobId]) { delete active[jobId]; writeJson(ACTIVE_FILE, active); } }
+export function isCloudJobActive(jobId) { return !!active[jobId] && !delivered.has(jobId); }
+// Last sign of life from any runner of a song (status pings, every minute).
+const beats = new Map();
+const STALL_MS = Math.max(3 * 60000, Number(process.env.SONG_STALL_MS || 8 * 60000));
+const FIRST_BEAT_MS = Math.max(10 * 60000, Number(process.env.SONG_FIRST_BEAT_MS || 30 * 60000));
 
 function env(name, fallback = '') { return String(process.env[name] || fallback).trim(); }
 function publicBase() {
@@ -134,7 +161,7 @@ export async function dispatchSongJob(jobId, payload) {
 export async function generateWithCloudWorker(spec, meta = {}) {
   if (!isCloudWorkerConfigured()) throw Object.assign(new Error('Cloud song worker is not configured'), { status: 503 });
   const jobId = meta.jobId || randomUUID();
-  const timeoutMs = Math.max(5 * 60000, Math.min(60 * 60000, Number(process.env.SONG_WORKER_TIMEOUT_MS || 45 * 60000)));
+  const timeoutMs = Math.max(5 * 60000, Math.min(90 * 60000, Number(process.env.SONG_WORKER_TIMEOUT_MS || 60 * 60000)));
   const payload = { ...buildJobPayload(spec, meta), seed: Math.floor(Math.random() * 2 ** 31) };
   const result = new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -159,7 +186,12 @@ export async function generateWithCloudWorker(spec, meta = {}) {
     pending.delete(jobId);
     throw lastError || new Error('no song runner could start');
   }
-  if (dispatched) watchRun(jobId, payload);
+  // 25.11: every song is watched, also one that went only to ready runners
+  // (before, those had no watcher and a stuck runner lost the song).
+  const titles = warm.map(([id]) => id);
+  const since = Math.min(Date.now(), ...warm.map(([, w]) => w.createdAt));
+  rememberActive(jobId, { payload, titles, since });
+  watchRun(jobId, payload, { titles, since });
   return result;
 }
 
@@ -167,44 +199,95 @@ export async function generateWithCloudWorker(spec, meta = {}) {
 // caller's song was lost after a long wait. Every 2 minutes the run is looked
 // up on GitHub; a run that ended without success is sent again (same job, so
 // the same waiter gets the song), at most twice.
-export async function findRun(jobId, since, { fetchImpl = fetch } = {}) {
+async function listRuns(names, since, { fetchImpl = fetch } = {}) {
   const repo = env('SONG_WORKER_REPO', 'd0556738176-svg/yemot-gemini-server');
   const workflow = env('SONG_WORKER_WORKFLOW', 'song-worker.yml');
-  const r = await fetchImpl('https://api.github.com/repos/' + repo + '/actions/workflows/' + encodeURIComponent(workflow) + '/runs?event=workflow_dispatch&per_page=30', {
+  const r = await fetchImpl('https://api.github.com/repos/' + repo + '/actions/workflows/' + encodeURIComponent(workflow) + '/runs?event=workflow_dispatch&per_page=40', {
     headers: { authorization: 'Bearer ' + env('GITHUB_DISPATCH_TOKEN'), accept: 'application/vnd.github+json', 'user-agent': 'yemot-song-worker' },
     signal: AbortSignal.timeout(15000)
   });
   if (!r.ok) return null;
   const j = await r.json().catch(() => null);
-  return (j?.workflow_runs || []).filter(x => x.display_title === 'song ' + jobId && Date.parse(x.created_at) >= since - 60000)
-    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0] || null;
+  return (j?.workflow_runs || []).filter(x => names.has(x.display_title) && Date.parse(x.created_at) >= since - 60000)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+}
+export async function findRun(jobId, since, { fetchImpl = fetch } = {}) {
+  const runs = await listRuns(new Set(['song ' + jobId]), since, { fetchImpl });
+  return runs?.[0] || null;
+}
+export async function cancelRun(runId, { fetchImpl = fetch } = {}) {
+  const repo = env('SONG_WORKER_REPO', 'd0556738176-svg/yemot-gemini-server');
+  const r = await fetchImpl('https://api.github.com/repos/' + repo + '/actions/runs/' + encodeURIComponent(runId) + '/cancel', {
+    method: 'POST',
+    headers: { authorization: 'Bearer ' + env('GITHUB_DISPATCH_TOKEN'), accept: 'application/vnd.github+json', 'user-agent': 'yemot-song-worker' },
+    signal: AbortSignal.timeout(15000)
+  });
+  return r.status === 202 || r.ok;
 }
 
-export function watchRun(jobId, payload, { everyMs = 120000, maxRetries = 2, fetchImpl = fetch, dispatch = dispatchSongJob } = {}) {
-  let retries = 0, since = Date.now();
+// 15.11 + 25.11: every minute the song's runners are checked. A song is sent
+// to a new runner (same job, so the same waiter still gets it), at most twice:
+//  - when all its runs ended without a song (a crash, out of disk), or
+//  - when no runner gave a sign of life for STALL_MS (a runner that lost
+//    contact used to hang for an hour before GitHub ended it). The silent runs
+//    are cancelled so they do not hold a runner.
+export function watchRun(jobId, payload, { everyMs = 60000, maxRetries = 2, fetchImpl = fetch, dispatch = dispatchSongJob, cancel = cancelRun, titles = [], since: since0 = Date.now(), stallMs = STALL_MS, firstBeatMs = FIRST_BEAT_MS } = {}) {
+  let retries = 0, since = since0, clock = Date.now(), busy = false;
   const started = Date.now();
+  const names = new Set(['song ' + jobId, ...titles.map(t => 'song ' + t)]);
   // Goes on after the caller hung up or his wait ended: a resent song is then
   // finished on its own (orphan path) and still lands in extension 7.
   const timer = setInterval(async () => {
-    if (delivered.has(jobId) || Date.now() - started > 3 * 3600000) return clearInterval(timer);
+    if (delivered.has(jobId)) return clearInterval(timer);
+    if (Date.now() - started > 3 * 3600000) { forgetActive(jobId); return clearInterval(timer); }
+    if (busy) return;
+    busy = true;
     try {
-      const run = await findRun(jobId, since, { fetchImpl });
-      if (!run || run.status !== 'completed' || run.conclusion === 'success') return;
+      const runs = await listRuns(names, since, { fetchImpl }).catch(() => null);
       if (delivered.has(jobId)) return clearInterval(timer);
+      const live = (runs || []).filter(r => r.status !== 'completed');
+      const ended = !!runs?.length && !live.length;
+      if (ended && runs.some(r => r.conclusion === 'success')) return;
+      const beat = beats.get(jobId) || 0;
+      const silentFor = Date.now() - Math.max(beat, clock);
+      const stalled = beat >= clock ? silentFor > stallMs : silentFor > firstBeatMs;
+      if (!ended && !stalled) return;
       if (retries >= maxRetries) {
         clearInterval(timer);
+        forgetActive(jobId);
+        for (const r of live) await cancel(r.id, { fetchImpl }).catch(() => false);
         const w = pending.get(jobId); pending.delete(jobId);
-        log('WORKER_GAVE_UP', { jobId, conclusion: run.conclusion, retries });
+        log('WORKER_GAVE_UP', { jobId, why: ended ? 'failed' : 'silent', retries });
         w?.reject(Object.assign(new Error('Cloud worker failed ' + (retries + 1) + ' times'), { status: 502 }));
         return;
       }
-      retries++; since = Date.now();
-      log('WORKER_RUN_FAILED_RETRYING', { jobId, conclusion: run.conclusion, retry: retries });
+      retries++;
+      for (const r of live) {
+        const ok = await cancel(r.id, { fetchImpl }).catch(() => false);
+        log('WORKER_SILENT_CANCELLED', { jobId, run: r.id, ok });
+      }
+      since = clock = Date.now();
+      names.clear(); names.add('song ' + jobId);
+      log(ended ? 'WORKER_RUN_FAILED_RETRYING' : 'WORKER_STALLED_RETRYING', { jobId, retry: retries, silentMin: Math.round(silentFor / 60000) });
       await dispatch(jobId, payload);
     } catch (e) { log('WORKER_WATCH_ERROR', { jobId, message: String(e?.message || e).slice(0, 120) }); }
+    finally { busy = false; }
   }, everyMs);
   timer.unref?.();
   return timer;
+}
+
+// After a restart of this service: songs still being made get their watcher
+// back; the song then arrives through the orphan path (extensions 4 and 7).
+export function resumeCloudJobs({ watch = watchRun } = {}) {
+  let n = 0;
+  for (const [jobId, e] of Object.entries(active)) {
+    if (delivered.has(jobId) || Date.now() - Number(e.at || 0) > 3 * 3600000 || !e.payload) { forgetActive(jobId); continue; }
+    watch(jobId, e.payload, { titles: e.titles || [], since: Number(e.since) || Date.now() });
+    n++;
+  }
+  if (n) log('WATCHERS_RESUMED', { songs: n });
+  return n;
 }
 
 export function cloudJobStatus(jobId) {
@@ -223,9 +306,15 @@ export async function handleWorkerCallback(req, res) {
   const kind = String(req.query?.kind || 'audio');
   const waiter = pending.get(jobId);
   if (kind === 'status') {
-    if (waiter) waiter.stage = String(req.query?.stage || '').slice(0, 40);
-    log('WORKER_STATUS', { jobId, stage: req.query?.stage, waiting: !!waiter });
-    return res.json({ ok: true, waiting: !!waiter });
+    const stage = String(req.query?.stage || '').slice(0, 40);
+    if (waiter && stage !== 'alive') waiter.stage = stage;
+    beats.set(jobId, Date.now());
+    const done = delivered.has(jobId);
+    // Heartbeats every minute are not logged; stage changes are.
+    if (stage !== 'alive') log('WORKER_STATUS', { jobId, stage, waiting: !!waiter, done });
+    // done: the other runner already delivered this song, so this one stops
+    // at once and frees its runner (before, it ran on for about 50 minutes).
+    return res.json({ ok: true, waiting: !!waiter, done });
   }
   if (kind === 'error') {
     const message = String(req.query?.message || 'worker failed').slice(0, 300);
@@ -250,7 +339,7 @@ export async function handleWorkerCallback(req, res) {
   try { payload = JSON.parse(Buffer.from(String(req.headers['x-song-payload'] || ''), 'base64').toString('utf8')); } catch {}
   const flac = audio.subarray(0, 4).toString('latin1') === 'fLaC';
   const generated = { audio, contentType: flac ? 'audio/flac' : 'audio/mpeg', provider: 'github-cpu', model: 'acestep-v15-turbo' };
-  delivered.add(jobId);
+  markDelivered(jobId);
   log('AUDIO_RECEIVED', { jobId, bytes: audio.length, waiting: !!waiter });
   res.json({ ok: true });
   if (waiter) {

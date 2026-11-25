@@ -11,7 +11,7 @@ import { liveBroadcastHandler, configureLiveExtension } from './live-broadcast.j
 import { createSongCallHandler } from './song-ivr.js';
 import { handleWorkerCallback, handleWorkerNext, isCloudWorkerConfigured, prewarmRunners, warmStatus } from './song-cloud.js';
 import { startLinkGuard } from './yemot-link-guard.js';
-import { getSongProviderHealth, createSong, cloudJobStatus } from './song-generator.js';
+import { getSongProviderHealth, createSong, cloudJobStatus, resumeSongJobs } from './song-generator.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
 import { googleNewsRss } from './news-feed.js';
@@ -6975,6 +6975,8 @@ process.on('SIGTERM',()=>{
   },250);
 });
 app.listen(port,async()=>{
+  // Owner, 25.11: songs cut off by a restart are made again on their own.
+  setTimeout(()=>{ try { resumeSongJobs({ generateText: songGenerateText }); } catch(e){ console.warn('[SONG] resume failed', String(e?.message||e).slice(0,120)); } }, 45000).unref?.();
   console.log('server running on port '+port);
   // Check every web key once right after a new build, so each deploy leaves a
   // clear ok/failed line per provider in the logs. Wake-ups from sleep do not

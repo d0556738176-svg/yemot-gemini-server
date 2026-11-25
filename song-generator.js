@@ -9,7 +9,7 @@ import ffmpegPath from './ffmpeg-path.js';
 import { generateWithHuggingFaceSpace } from './song-generator-hf-space.js';
 import { generateWithFalAceStep, isFalConfigured } from './song-engine-fal.js';
 import { generateWithAceMusic, isAceMusicConfigured } from './song-engine-acemusic.js';
-import { generateWithCloudWorker, isCloudWorkerConfigured, onOrphanSong } from './song-cloud.js';
+import { generateWithCloudWorker, isCloudWorkerConfigured, onOrphanSong, isCloudJobActive, resumeCloudJobs } from './song-cloud.js';
 import { publishSongToExt7, yemotToken } from './song-ext7.js';
 
 const YEMOT_API_BASE = 'https://www.call2all.co.il/ym/api';
@@ -856,6 +856,7 @@ async function buildAndUpload(spec, job) {
   try {
     job.status = 'generating_music';
     job.songId = uuid;
+    if (job.id) journalSet(job.id, { stage: 'music', songId: uuid, spec });
     job.onStatus?.({ status: 'generating_music', songId: uuid, title: spec.title, durationSeconds: spec.durationSeconds });
     log('MUSIC_GENERATION_STARTED', { id: uuid, durationSeconds: spec.durationSeconds });
     const generated = await generateAudio(spec, { jobId: uuid, callId: job.callId, caller: job.userKey, title: spec.title });
@@ -882,6 +883,7 @@ onOrphanSong(async (generated, payload, jobId) => {
   };
   const id = /^[0-9a-f-]{36}$/.test(String(jobId)) ? String(jobId) : randomUUID();
   log('ORPHAN_SONG_DELIVERY', { id, title: spec.title });
+  journalDropSong(id);
   await deliverSong(spec, generated, { callId: payload?.callId || '', status: 'orphan' }, newRecord(id, spec, { callId: payload?.callId || '' }), id);
 });
 
@@ -913,6 +915,50 @@ function pumpQueue() {
   }
 }
 
+// Owner, 25.11 ("no problems ever while the song is made"): every update of
+// the server restarted it and lost the songs still at the lyrics or queue
+// stage. Each request is now written down until it ends; after a restart the
+// unfinished ones are made again on their own and land in extensions 4 and 7.
+const JOURNAL_FILE = process.env.SONG_JOURNAL_FILE || '/var/lib/yemot-data/song-journal.json';
+const JOURNAL_MAX_AGE_MS = 4 * 3600000;
+function readJournal() { try { const j = JSON.parse(readFileSync(JOURNAL_FILE, 'utf8')); return j && typeof j === 'object' ? j : {}; } catch { return {}; } }
+function writeJournal(j) {
+  try { mkdirSync(dirname(JOURNAL_FILE), { recursive: true }); writeFileSync(JOURNAL_FILE + '.tmp', JSON.stringify(j)); renameSync(JOURNAL_FILE + '.tmp', JOURNAL_FILE); } catch {}
+}
+function journalSet(id, patch) {
+  const j = readJournal();
+  j[id] = { ...(j[id] || { at: Date.now() }), ...patch };
+  writeJournal(j);
+}
+function journalDrop(id) { const j = readJournal(); if (j[id]) { delete j[id]; writeJournal(j); } }
+function journalDropSong(songId) {
+  const j = readJournal(); let changed = false;
+  for (const [id, e] of Object.entries(j)) if (e.songId === songId) { delete j[id]; changed = true; }
+  if (changed) writeJournal(j);
+}
+
+export function resumeSongJobs({ generateText } = {}) {
+  resumeCloudJobs();
+  const j = readJournal();
+  let resumed = 0;
+  for (const [id, e] of Object.entries(j)) {
+    const tooOld = Date.now() - Number(e.at || 0) > JOURNAL_MAX_AGE_MS;
+    const tooMany = Number(e.resumes || 0) >= 2;
+    // In the cloud stage its own watcher took over (song-cloud.js).
+    if (e.stage === 'music' && e.songId && isCloudJobActive(e.songId)) continue;
+    if (tooOld || tooMany || !e.prompt) { delete j[id]; log('SONG_RESUME_DROPPED', { jobId: id, tooOld, tooMany }); continue; }
+    j[id] = { ...e, resumes: Number(e.resumes || 0) + 1 };
+    resumed++;
+    log('SONG_RESUMED', { jobId: id, stage: e.stage || 'queued' });
+    const run = e.stage === 'music' && e.spec
+      ? enqueueJob(() => buildAndUpload(e.spec, { id, callId: '', userKey: e.userKey || '', prompt: e.prompt, status: 'resumed', onStatus: () => {} }).finally(() => journalDrop(id)))
+      : createSong({ prompt: e.prompt, userKey: e.userKey || 'unknown', generateText, resumeOf: id });
+    Promise.resolve(run).catch(error => log('SONG_RESUME_FAILED', { jobId: id, message: String(error?.message || error).slice(0, 160) }));
+  }
+  writeJournal(j);
+  return resumed;
+}
+
 function enqueueJob(run) {
   if (activeCount >= MAX_CONCURRENT_JOBS && queue.length >= MAX_QUEUE_SIZE) {
     throw Object.assign(new Error('Song generation queue is full'), { status: 503, code: 'QUEUE_FULL' });
@@ -922,15 +968,18 @@ function enqueueJob(run) {
   return promise;
 }
 
-export async function createSong({ prompt, callId = '', userKey = 'unknown', generateText, onStatus = () => {} }) {
+export async function createSong({ prompt, callId = '', userKey = 'unknown', generateText, onStatus = () => {}, resumeOf = '' }) {
   const request = normalizeSongRequest({ prompt });
   if (!request.prompt) throw Object.assign(new Error('Empty song prompt'), { code: 'NEEDS_CLARIFICATION' });
   if (activeJobs.has(callId) && callId) return activeJobs.get(callId);
-  const job = { id: randomUUID(), callId: String(callId || ''), userKey: String(userKey || ''), prompt: request.prompt, status: 'queued', onStatus };
-  log('SONG_REQUEST', { jobId: job.id, promptChars: request.prompt.length, durationSeconds: request.durationSeconds });
+  const job = { id: resumeOf || randomUUID(), callId: String(callId || ''), userKey: String(userKey || ''), prompt: request.prompt, status: 'queued', onStatus };
+  log('SONG_REQUEST', { jobId: job.id, promptChars: request.prompt.length, durationSeconds: request.durationSeconds, resumed: !!resumeOf });
+  journalSet(job.id, { prompt: String(prompt || '').slice(0, 4000), userKey: job.userKey.slice(0, 40), stage: 'queued' });
   onStatus({ status: 'queued', jobId: job.id });
-  const promise = enqueueJob(async () => {
+  let promise;
+  try { promise = enqueueJob(async () => {
     try {
+      journalSet(job.id, { stage: 'lyrics' });
       job.status = 'generating_lyrics';
       log('LYRICS_STARTED', { jobId: job.id });
       onStatus({ status: 'generating_lyrics', jobId: job.id });
@@ -961,8 +1010,10 @@ export async function createSong({ prompt, callId = '', userKey = 'unknown', gen
       return await buildAndUpload(spec, job);
     } finally {
       activeJobs.delete(callId);
+      // Ended (made or failed for good): nothing to resume after a restart.
+      journalDrop(job.id);
     }
-  });
+  }); } catch (error) { journalDrop(job.id); throw error; }
   if (callId) activeJobs.set(callId, promise);
   return promise;
 }
