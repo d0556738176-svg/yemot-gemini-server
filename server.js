@@ -5915,7 +5915,12 @@ app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)
     const { diskInfo, REC_DIR }=await import('./tv-recorder.js');
     const { readdirSync, statSync }=await import('node:fs'); const pth=await import('node:path');
     const sizeOf=d=>{ let n=0; try { for(const e of readdirSync(d,{withFileTypes:true})){ const f=pth.join(d,e.name); try { n+=e.isDirectory()?sizeOf(f):statSync(f).size; } catch {} } } catch {} return n; };
-    res.json({ status:N.status, inYemot:{ next:idx.next||0, archives:idx.archives||0, files:items.length, newest:items.slice(0,15) }, disk, tvRecordingsGB:Math.round(sizeOf(REC_DIR)/1e8)/10, tvDisk:diskInfo() });
+    // The settings Yemot really holds for 11 and 11/1, and the main menu's
+    // digit lines (11 needs two digits). No keys or passwords are in them.
+    const rio=await replayIo(); const lines=t=>t==null?null:String(t).replace(/\r/g,'').split('\n').filter(Boolean);
+    const settings={ '/11':lines(await rio.getText('ivr2:/11/ext.ini').catch(()=>null)), '/11/1':lines(await rio.getText('ivr2:/11/1/ext.ini').catch(()=>null)),
+      mainMenu:(lines(await rio.getText('ivr2:/ext.ini').catch(()=>null))||[]).filter(l=>/^(type|digits|timeout|text_extensions)=/.test(l)) };
+    res.json({ settings, status:N.status, inYemot:{ next:idx.next||0, archives:idx.archives||0, files:items.length, newest:items.slice(0,15) }, disk, tvRecordingsGB:Math.round(sizeOf(REC_DIR)/1e8)/10, tvDisk:diskInfo() });
   } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
 });
 // Replays (owner, 19.11): every finished hour of every channel is uploaded to
