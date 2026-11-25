@@ -4,7 +4,7 @@
 // key. Every model is asked once, all at the same time, 20 s at most.
 import { keySlots } from './key-slots.js';
 
-const GEMINI_DEFAULT = 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite';
+const GEMINI_DEFAULT = 'gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3.8-flash,gemini-3.6-flash';
 function compatible(env) {
   const out = [];
   const add = (name, baseUrl, keyEnv, models) => keySlots(keyEnv).slice(0, 1).forEach(s => models.forEach(model => out.push({ name, baseUrl, key: s.key, model })));

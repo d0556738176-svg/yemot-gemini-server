@@ -126,12 +126,17 @@ const configuredModelNames = (process.env.GEMINI_MODELS || 'gemini-3.8-flash,gem
 const normalizedConfiguredModelNames = configuredModelNames.map(name =>
   name === 'gemini-3.5-flash' ? 'gemini-3.6-flash' : name
 );
-const MODEL_NAMES = [...new Set([
+// Owner, 25.11: on the free tier Gemini 3.8/3.6 Flash allow only 20 requests a
+// day per project, while 3.5/3.1 Flash-Lite allow 500. Flash-Lite answers
+// first (25 times more answers per key); Flash stays as a later fallback.
+// GEMINI_KEEP_MODEL_ORDER=1 keeps the configured order as is.
+const MODEL_NAMES = (list => process.env.GEMINI_KEEP_MODEL_ORDER === '1' ? list : [...list.filter(m => /flash-lite/i.test(m)), ...list.filter(m => !/flash-lite/i.test(m))])([...new Set([
   ...normalizedConfiguredModelNames,
-  'gemini-3.6-flash',
   'gemini-3.5-flash-lite',
-  'gemini-3.1-flash-lite'
-])];
+  'gemini-3.1-flash-lite',
+  'gemini-3.6-flash'
+])]);
+console.info('[Gemini] answer models in order', MODEL_NAMES);
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 30000);
 const PHONE_GEMINI_TIMEOUT_MS = Number(process.env.PHONE_GEMINI_TIMEOUT_MS || 6000);
 // Long answers are intentionally given the normal generation budget instead of the
