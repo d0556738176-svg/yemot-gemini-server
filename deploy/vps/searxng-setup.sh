@@ -10,21 +10,27 @@ set -u
 LOG=/var/log/yemot-searxng-setup.log
 exec >>"$LOG" 2>&1
 echo "== $(date -Is) setup"
+exec 9>/run/yemot-searxng-setup.lock
+flock -n 9 || { echo "another setup is running"; exit 0; }
 export DEBIAN_FRONTEND=noninteractive
 if [ ! -x /opt/searxng/venv/bin/python ] || [ ! -d /opt/searxng/src/.git ]; then
+  echo "installing system packages"
   apt-get install -y -q python3-venv python3-dev build-essential libxslt1-dev zlib1g-dev libffi-dev libssl-dev git >/dev/null || true
 fi
 id searxng >/dev/null 2>&1 || useradd --system --home-dir /opt/searxng --shell /usr/sbin/nologin searxng
 mkdir -p /opt/searxng /etc/searxng
 if [ ! -d /opt/searxng/src/.git ]; then
+  echo "downloading SearXNG"
   git clone -q --depth 1 https://github.com/searxng/searxng /opt/searxng/src || { echo "clone failed"; exit 1; }
   rm -f /opt/searxng/.installed
 fi
 [ -x /opt/searxng/venv/bin/python ] || python3 -m venv /opt/searxng/venv || exit 1
 if [ ! -f /opt/searxng/.installed ]; then
+  echo "installing SearXNG (a few minutes)"
   nice -n 15 /opt/searxng/venv/bin/pip install -q -U pip setuptools wheel pyyaml msgspec typing_extensions || exit 1
   nice -n 15 /opt/searxng/venv/bin/pip install -q --use-pep517 --no-build-isolation -e /opt/searxng/src || exit 1
   touch /opt/searxng/.installed
+  echo "installed"
 fi
 key=$(sed -n 's/^  secret_key: "\(.*\)"$/\1/p' /etc/searxng/settings.yml 2>/dev/null | head -1)
 [ -n "$key" ] || key=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')

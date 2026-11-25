@@ -410,6 +410,9 @@ function promptWithPersona(prompt) {
 }
 
 const geminiModelRest = new Map(), geminiModelOk = new Map(), geminiModel429 = new Map();
+// 25.11: the last Gemini tries (model, key number, status, time), for /health/usage.
+const geminiTraceLog=[]; let geminiTraceTry=null;
+function geminiTrace(x){ geminiTraceLog.push({at:new Date().toISOString().slice(11,19),...x}); if(geminiTraceLog.length>80) geminiTraceLog.splice(0,40); }
 function geminiModelRestOn(model, status, key, fastPhone=false) {
   const now = Date.now();
   if (status === 429) {
@@ -445,6 +448,8 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, 
   // overloaded (503) or too slow for the phone rests as a whole, so the turn
   // reaches a working model at once; models that answered lately go first.
   const order = geminiModelOrder(groups.length);
+  const resting = order.filter(mi => (geminiModelRest.get(MODEL_NAMES[mi]) || 0) > Date.now()).map(mi => MODEL_NAMES[mi]);
+  if (resting.length) geminiTrace({ resting, budgetMs: phoneBudgetMs });
   for (const mi of order) {
     if (fastPhone && Date.now() >= phoneDeadline) break;
     if ((geminiModelRest.get(MODEL_NAMES[mi]) || 0) > Date.now()) continue;
@@ -474,16 +479,20 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, 
           };
           const attemptTimeoutMs = fastPhone ? Math.max(500, Math.min(timeoutMs, phoneDeadline - Date.now())) : timeoutMs;
           countUse('gemini '+MODEL_NAMES[mi]+' key'+(ki+1));
+          const tTry = Date.now();
+          geminiTraceTry = { model: MODEL_NAMES[mi], key: ki + 1, at: tTry, budgetMs: attemptTimeoutMs };
           const out = await withTimeout(
             groups[mi][ki].generateContent(request),
             attemptTimeoutMs,
             MODEL_NAMES[mi] + ' key #' + (ki+1)
           );
           geminiModelOk.set(MODEL_NAMES[mi], Date.now());
+          geminiTrace({ model: MODEL_NAMES[mi], key: ki + 1, ok: true, ms: Date.now() - tTry });
           return out;
         } catch(e) {
           lastError=e;
           const status=geminiErrorStatus(e);
+          geminiTrace({ model: MODEL_NAMES[mi], key: ki + 1, ok: false, status, ms: Date.now() - (geminiTraceTry?.at || Date.now()), budgetMs: geminiTraceTry?.budgetMs || 0 });
           if (status === 429) {
             lastGeminiQuotaError = e;
             geminiQuotaCooldowns.set(cooldownKey, Date.now() + GEMINI_QUOTA_COOLDOWN_MS);
@@ -2623,7 +2632,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
       await new Promise(r=>setTimeout(r,Number(brainQ()?(process.env.EXT3_GEMINI_HEDGE_MS||0):quality?(process.env.BRANCH1_QUALITY_GEMINI_HEDGE_MS||700):(process.env.BRANCH1_GEMINI_HEDGE_MS||1800))));
       if(raceDone) throw Object.assign(new Error('Gemini not needed'),{status:499});
     }
-    if(branch1PrimaryCooldown.isCoolingDown('primary')) { console.info('[BRANCH1_WEB_SYNTH] Gemini resting after a failure; skipped'); throw Object.assign(new Error('Gemini cooling down'),{status:503}); }
+    if(branch1PrimaryCooldown.isCoolingDown('primary')) { geminiTrace({skipped:'primary cooling'}); console.info('[BRANCH1_WEB_SYNTH] Gemini resting after a failure; skipped'); throw Object.assign(new Error('Gemini cooling down'),{status:503}); }
     try {
       const r=await generateWithRetry([{role:'user',parts:[{text:prompt}]}],false,true,geminiBudgetMs?Math.min(geminiBudgetMs,7500):null,Number(geminiBudgetMs||process.env.BRANCH1_PHONE_GEMINI_BUDGET_MS||2200));
       branch1PrimaryCooldown.clear('primary');
@@ -6673,7 +6682,7 @@ app.get('/health/search-local', rateLimit(6, 60 * 1000, 'search-local'), async (
 app.get('/health/usage',(req,res)=>{
   const days={};
   for(const [k,n] of usageToday) { const [d,name]=k.split('|'); (days[d]=days[d]||{})[name]=n; }
-  res.json({at:new Date().toISOString(),days,winners:synthWinners.slice(-40).map(w=>({at:new Date(w.at).toISOString(),by:w.by}))});
+  res.json({at:new Date().toISOString(),days,winners:synthWinners.slice(-40).map(w=>({at:new Date(w.at).toISOString(),by:w.by})),gemini:geminiTraceLog.slice(-60)});
 });
 app.get('/health/models', rateLimit(3, 60 * 1000, 'model-health'), async (req,res)=>{
   try { const { modelHealth } = await import('./model-health.js'); res.set('cache-control','no-store').json(await modelHealth({ q: String(req.query.q||'').slice(0,300) })); }
