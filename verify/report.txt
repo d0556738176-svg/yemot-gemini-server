@@ -1,19 +1,63 @@
-main version 5c5a45e5d424
-started: 3 questions in extension 3. Read /owner-report/938e2aea766992d70b695cb3 in a few minutes.
-live check, extension 3, 2026-11-25T17:34:24.578Z
-Q1: מה השיעורים האחרונים של הרב אילן גוזל ביוטיוב
-  (8521ms, by Groq openai/gpt-oss-120b) אלה ההעלאות האחרונות בערוץ הרב אילן גוזל העמוד הרשמי, מהחדש לישן, למשה ליאון ראש עיריית ירושלים והנער החרדי היתום בן ה 15…, 12 דקות הקש 1, להצדיק רבי דוד אבוחצירא הגיע מעולמות עליונים בכדי לפגוש את…, 7 דקות הקש 2, למלווה בריבית מקפיד על אחרים מחניף שונא אחרים נוקם ונוטר אז…, שעה ו 7 דקות הקש 3, ללכבוד הילולת הצדיק פועל הישועות ה בת עין בני ברק י ב כסלו…, 9 דקות הקש 4, להזקן הציע לנהג מונית קח 500 ש ח וסגור את המונית בשבת שיעור…, 11 דקות הקש 5, לכגודל הקושי הניסיונות והצער שעוברים כך גודל השכר שמקבלים…, 19 דקות הקש 6, אפשר גם להוריד כמה יחד, אמור תוריד את כולם, או למשל את אחת ושלוש
-Q2: תוריד לי את כולם
-  (3097ms, by Groq2 openai/gpt-oss-120b) לפני שאני מורידה, רק לוודא שאלה הקבצים הנכונים, 6 יחד, 1, משה ליאון ראש עיריית ירושלים והנער החרדי היתום בן ה 15 בסיפור מרגש…, 12 דקות, 2, הצדיק רבי דוד אבוחצירא הגיע מעולמות עליונים בכדי לפגוש את אחיו הצדיק…, 7 דקות, 3, מלווה בריבית מקפיד על אחרים מחניף שונא אחרים נוקם ונוטר אז סימן שאין…, שעה ו 7 דקות, 4, לכבוד הילולת הצדיק פועל הישועות ה בת עין בני ברק י ב כסלו תשפ ז, 9 דקות, 5, הזקן הציע לנהג מונית קח 500 ש ח וסגור את המונית בשבת שיעור כזה לא…, 11 דקות, 6, כגודל הקושי הניסיונות והצער שעוברים כך גודל השכר שמקבלים , 19 דקות, להורדת כולם כקובצי שמע הקש 1, כווידאו עם אפשרות לכתובית הקש 2, לביטול הקש 3
-  [confirm {"batch":[{"videoId":"7iMXVnmw4vA","title":"משה ליאון ראש עיריית ירושלים והנער החרדי היתום בן ה-15 בסיפור מרגש שלא תשאיר עין אחת יבשה 👑👑👑","channelTitle":"הרב אילן גוזל - העמוד הרשמי","durationSec":737,"language":"iw"},{"videoId":"_njysBkq_8I","title":"הצדיק רבי דוד אבוחצירא הגיע מעולמות עליונים ]
-Q3: 3
-  (6ms) ביטלתי, ולא הורדתי כלום, על מה תרצה שנמשיך לדבר?
-live check, extension 3, 2026-11-25T17:34:24.578Z
-Q1: מה השיעורים האחרונים של הרב אילן גוזל ביוטיוב
-  (8521ms, by Groq openai/gpt-oss-120b) אלה ההעלאות האחרונות בערוץ הרב אילן גוזל העמוד הרשמי, מהחדש לישן, למשה ליאון ראש עיריית ירושלים והנער החרדי היתום בן ה 15…, 12 דקות הקש 1, להצדיק רבי דוד אבוחצירא הגיע מעולמות עליונים בכדי לפגוש את…, 7 דקות הקש 2, למלווה בריבית מקפיד על אחרים מחניף שונא אחרים נוקם ונוטר אז…, שעה ו 7 דקות הקש 3, ללכבוד הילולת הצדיק פועל הישועות ה בת עין בני ברק י ב כסלו…, 9 דקות הקש 4, להזקן הציע לנהג מונית קח 500 ש ח וסגור את המונית בשבת שיעור…, 11 דקות הקש 5, לכגודל הקושי הניסיונות והצער שעוברים כך גודל השכר שמקבלים…, 19 דקות הקש 6, אפשר גם להוריד כמה יחד, אמור תוריד את כולם, או למשל את אחת ושלוש
-Q2: תוריד לי את כולם
-  (3097ms, by Groq2 openai/gpt-oss-120b) לפני שאני מורידה, רק לוודא שאלה הקבצים הנכונים, 6 יחד, 1, משה ליאון ראש עיריית ירושלים והנער החרדי היתום בן ה 15 בסיפור מרגש…, 12 דקות, 2, הצדיק רבי דוד אבוחצירא הגיע מעולמות עליונים בכדי לפגוש את אחיו הצדיק…, 7 דקות, 3, מלווה בריבית מקפיד על אחרים מחניף שונא אחרים נוקם ונוטר אז סימן שאין…, שעה ו 7 דקות, 4, לכבוד הילולת הצדיק פועל הישועות ה בת עין בני ברק י ב כסלו תשפ ז, 9 דקות, 5, הזקן הציע לנהג מונית קח 500 ש ח וסגור את המונית בשבת שיעור כזה לא…, 11 דקות, 6, כגודל הקושי הניסיונות והצער שעוברים כך גודל השכר שמקבלים , 19 דקות, להורדת כולם כקובצי שמע הקש 1, כווידאו עם אפשרות לכתובית הקש 2, לביטול הקש 3
-  [confirm {"batch":[{"videoId":"7iMXVnmw4vA","title":"משה ליאון ראש עיריית ירושלים והנער החרדי היתום בן ה-15 בסיפור מרגש שלא תשאיר עין אחת יבשה 👑👑👑","channelTitle":"הרב אילן גוזל - העמוד הרשמי","durationSec":737,"language":"iw"},{"videoId":"_njysBkq_8I","title":"הצדיק רבי דוד אבוחצירא הגיע מעולמות עליונים ]
-Q3: 3
-  (6ms) ביטלתי, ולא הורדתי כלום, על מה תרצה שנמשיך לדבר?
+status 200 len 21043
+urls 31
+https://fonts.googleapis.com/css2?family=Assistant:wght@200;400;600;700&display=swap
+http://www.w3.org/2000/svg
+https://yedid-nefesh.chatfree.app/
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/20/d8/20d8c22e886213c914c0f366cf8f3bd54f2f2182f19fb12858ddc68aaf111e99
+https://schema.org
+https://yedid-nefesh.chatfree.app/post/1414
+https://hel1.your-objectstorage.com/chatfree-yedid-…
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/2e/09/2e09c2f28b0b5133e9d5f8a417a693a8ece4095bbeceab65e59145e265417522)
+https://yedid-nefesh.chatfree.app/post/1413
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/95/dc/95dcbadd2ef4f1fbc02117d0fde0f8096404a514a10025a714cb8479a7a8bc…
+https://yedid-nefesh.chatfree.app/post/1412
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/54/bc/54bc9888e867766b071e3334554b1d65bd077223d80f143341aca09004a657f9)
+https://yedid-nefesh.chatfree.app/post/1411
+https://hel1.yo…
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/cf/09/cf097dff095e139ebdd2e05462dbc96bdbb8942392bdb81ab68a9e2722e7c4fb)
+https://yedid-nefesh.chatfree.app/post/1410
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/bf/7b/bf7bac5d8870032a17027bb909f59577b1e9e6c32cacf2eadb20996f1ed93f30)
+https://yedid-nefesh.chatfree.app/post/1409
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/d9/dd/d9ddf9a37319d1f502dedbfb120e471bb0e6f5c74b20252a190f4bc925192075…
+https://yedid-nefesh.chatfree.app/post/1408
+https://hel1.your-objectsto…
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/27/e9/27e9dd428555e7edfb2d70acb1bc9e87ffd75917b7a2fd986dde864642c5571a)
+https://yedid-nefesh.chatfree.app/post/1407
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/a1/01/a101517b1b21718de304a09c2c8c65287592ff4fee7b62ccad3a1a9acd9f3d49)
+https://yedid-nefesh.chatfree.app/post/1406
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/98/14/9814e6adaab2891a4e1ee2f58097c0a2fa411c7018b89f0588eb82…
+https://yedid-nefesh.chatfree.app/post/1405
+https://yedid-nefesh.chatfree.app/post/1404
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/fe/3c/fe3c75346be14fca49ca3aa1dd399eb6fc658f754c90a6f526d87cdd26b8b8f1)
+https://yedid-nefesh.chatfree.app/post/1403
+https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/3c/3d/3c3d83dc1d3430f62d7faa5a2f894dda4413421b6e4033abcfc43e6220253ff2)
+video-ish [
+ "objectstorage.com/chatfree-yedid-nefsh/20/d8/20d8c22e886213c914c0f366cf8f3bd54f2f2182f19fb12858ddc68aaf111e99",
+ "objectstorage.com/chatfree-yedid-nefsh/20/d8/20d8c22e886213c914c0f366cf8f3bd54f2f2182f19fb12858ddc68aaf111e99",
+ "objectstorage.com/chatfree-yedid-…",
+ "objectstorage.com/chatfree-yedid-nefsh/2e/09/2e09c2f28b0b5133e9d5f8a417a693a8ece4095bbeceab65e59145e265417522) **📍ארה&#34;ב: ארבעים ",
+ "video-embedd…",
+ "video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/95/dc/95dcbadd2ef4f1fbc02117d0fde0f8096404a514a1002",
+ "objectstorage.com/chatfree-yedid-…",
+ "objectstorage.com/chatfree-yedid-nefsh/54/bc/54bc9888e867766b071e3334554b1d65bd077223d80f143341aca09004a657f9) ##### **תעודת האחריות ",
+ "objectstorage.com/chatfree-yedid-nefsh/cf/09/cf097dff095e139ebdd2e05462dbc96bdbb8942392bdb81ab68a9e2722e7c4fb) --- &lt;div style=&#34",
+ "objectstorage.com/chatfree-yedid-…",
+ "objectstorage.com/chatfree-yedid-nefsh/bf/7b/bf7bac5d8870032a17027bb909f59577b1e9e6c32cacf2eadb20996f1ed93f30) ##### **תבחרו את הקשה ",
+ "video-embedded…",
+ "video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/d9/dd/d9ddf9a37319d1f502dedbfb120e471bb0e6f5c74b202",
+ "objectstorage.com/chatfree-yedid-nefsh/27/e9/27e9dd428555e7edfb2d70acb1bc9e87ffd75917b7a2fd986dde864642c5571a) --- &lt;div style=&#34",
+ "objectstorage.com/chatfree-yedid-…",
+ "objectstorage.com/chatfree-yedid-nefsh/a1/01/a101517b1b21718de304a09c2c8c65287592ff4fee7b62ccad3a1a9acd9f3d49) ##### **איך מפסיקים לה",
+ "video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/98/14/9814e6adaab2891a4e1ee2f58097c0a2fa411c7018b89",
+ "objectstorage.com/chatfree-yedid-nefsh/fe/3c/fe3c75346be14fca49ca3aa1dd399eb6fc658f754c90a6f526d87cdd26b8b8f1) --- &lt;div style=&#34",
+ "video-embedded#](ht…",
+ "video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/3c/3d/3c3d83dc1d3430f62d7faa5a2f894dda4413421b6e403"
+]
+next -1 
+apis []
+/api/channel 401 User not authenticated 
+/api/posts 401 User not authenticated 
+/api/messages 401 User not authenticated 
+/robots.txt 200 User-agent: * Allow: / Disallow: /api/ Disallow: /admin/ Sitemap: https://yedid-nefesh.chatfree.app/sitemap.xml 
+/sitemap.xml 200 <?xml version="1.0" encoding="UTF-8"?> <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"> <url> <loc>https://yedid-nefesh.chatfree.app/</loc> </url> <url> <loc>https://yedid-nefesh.chatfree.app/post/1414</loc> </url> <url> <loc>https://yedid-nefesh.chatfree.app/post/1
 exit=0
