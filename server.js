@@ -5439,11 +5439,15 @@ async function mediaDetails(videoId, title, dub, hint = {}) {
   const h = await import('./youtube-title-hebrew.js');
   const v = { videoId, title: facts?.title || title || '', channelTitle: facts?.channel || hint.channel || '' };
   await h.hebrewizeResults([v]).catch(() => {});
-  const lines = ['שם הקובץ: ' + h.spokenTitle(v) + (dub ? ', מדובב לעברית' : '')];
+  // 25.11: Yemot's voice skips English letters ("C14" was heard as nothing),
+  // so English parts are said in Hebrew letters.
+  const { speakable, groqTranslit } = await import('./speak-latin.js');
+  const say = t => speakable(t, { translit: groqTranslit }).catch(() => t);
+  const lines = ['שם הקובץ: ' + await say(h.spokenTitle(v)) + (dub ? ', מדובב לעברית' : '')];
   // A Hebrew channel name is said exactly as YouTube shows it; a foreign one
   // in Hebrew letters when the translation came, otherwise as it is.
   const HEB = /[\u05d0-\u05ea]/;
-  if (v.channelTitle) lines.push('הערוץ ביוטיוב: ' + (HEB.test(v.channelTitle) ? v.channelTitle : h.spokenChannel(v)));
+  if (v.channelTitle) lines.push('הערוץ ביוטיוב: ' + await say(HEB.test(v.channelTitle) ? v.channelTitle : h.spokenChannel(v)));
   console.info('[KEY8] details', { videoId, channel: v.channelTitle || null, sources: facts?.sources || [] });
   const len = formatAudioLengthHebrew(facts?.durationSeconds);
   if (len) lines.push('אורך: ' + len);
@@ -5472,7 +5476,7 @@ async function mediaDetails(videoId, title, dub, hint = {}) {
       const t = await groqChat([{ role: 'system', content: 'תרגם לעברית קצרה וטבעית את תיאור הסרטון הבא, עד שני משפטים. החזר רק את התרגום.' }, { role: 'user', content: desc }], { maxTokens: 200, timeoutMs: 4000 }).catch(() => null);
       desc = /[\u05d0-\u05ea]/.test(String(t || '')) ? String(t) : '';
     }
-    if (desc) lines.push('תיאור: ' + desc.slice(0, 260));
+    if (desc) lines.push('תיאור: ' + await say(desc.slice(0, 260)));
   }
   return lines;
 }

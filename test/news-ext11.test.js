@@ -162,3 +162,15 @@ test('a new topic starts with the newest few of each channel; news keeps first p
   assert.ok(queued.length >= 1 && queued.every(q => ['ש1', 'ש2', 'ש3'].includes(q.title)));
   assert.equal(N.serverBusy(5, 2000), true); assert.equal(N.serverBusy(1, 2000), false); assert.equal(N.serverBusy(1, 100), true);
 });
+
+test('English parts of a name are said in Hebrew letters (Yemot skips English)', async () => {
+  const S = await import('../speak-latin.js');
+  assert.equal(await S.speakable('C14'), 'סי 14');
+  assert.equal(await S.speakable('i24NEWS עברית'), 'איי 24 ניוז עברית');
+  assert.equal(await S.speakable('כאן | חדשות - תאגיד השידור הישראלי'), 'כאן | חדשות - תאגיד השידור הישראלי');
+  assert.equal(await S.speakable('CNN בעברית'), 'סי אן אן בעברית');
+  assert.equal(await S.speakable('Hidabroot TV'), 'הידברות טי וי');
+  // Unknown word: transliteration; when that fails, letter by letter (never dropped).
+  assert.equal(await S.speakable('Shalom Studio', { translit: async w => ({ Shalom: 'שלום' }) }), 'שלום סטודיו');
+  assert.equal(await S.speakable('Zubi', { translit: async () => null }), 'זי יו בי איי');
+});
