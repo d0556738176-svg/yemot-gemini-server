@@ -140,4 +140,7 @@ systemctl enable --now yemot-builder >/dev/null 2>&1
 [ $changed_main = 1 ] && systemctl restart yemot-main yemot-builder
 [ $changed_ext2 = 1 ] && systemctl restart yemot-ext2
 echo "addresses: main_changed=$changed_main ext2_changed=$changed_ext2"
+# 25.11 (owner approved): our own search engine (SearXNG, local only, low
+# priority), set up or kept up to date in the background.
+nohup setsid bash /opt/yemot/main/deploy/vps/searxng-setup.sh >/dev/null 2>&1 < /dev/null &
 echo MAINTAIN-OK

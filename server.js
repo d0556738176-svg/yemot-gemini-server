@@ -14,6 +14,8 @@ import { startLinkGuard } from './yemot-link-guard.js';
 import { getSongProviderHealth, createSong, cloudJobStatus } from './song-generator.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { searchSerper, searchLangSearch } from './web-providers.js';
+import { googleNewsRss } from './news-feed.js';
+import { createTierGate } from './tier-gate.js';
 import { keySlots, keysFor, withKeys, keyReport, isDeadKey, markDeadKey } from './key-slots.js';
 import { currentThread, appendTurn, newThread, selectThread, listThreads, threadContext, spokenWhen, titleOf } from './conversation-threads.js';
 import { ext3Turn, parseKeyOptions, spokenDuration, toMaleSelf, confirmFor, cleanTitle, ytdlpSearch } from './ext3-brain.js';
@@ -414,7 +416,7 @@ function geminiModelRestOn(model, status, key, fastPhone=false) {
     const keys = (geminiModel429.get(model) || []).filter(x => now - x.at < 10 * 60000 && x.key !== key);
     keys.push({ key, at: now }); geminiModel429.set(model, keys);
     if (keys.length >= 2) { geminiModelRest.set(model, now + 15 * 60000); console.warn('[Gemini] model quota used up on several keys; resting the model', { model, minutes: 15 }); }
-  } else if (status === 503) geminiModelRest.set(model, now + 45000);
+  } else if (status === 503) geminiModelRest.set(model, now + Number(process.env.GEMINI_503_REST_MS || 120000));
   else if (status === 408 && fastPhone) geminiModelRest.set(model, now + 60000);
 }
 function geminiModelOrder(n) {
@@ -469,6 +471,7 @@ async function generateWithRetry(contents, useWebSearch=false, fastPhone=false, 
             } : {})
           };
           const attemptTimeoutMs = fastPhone ? Math.max(500, Math.min(timeoutMs, phoneDeadline - Date.now())) : timeoutMs;
+          countUse('gemini '+MODEL_NAMES[mi]+' key'+(ki+1));
           const out = await withTimeout(
             groups[mi][ki].generateContent(request),
             attemptTimeoutMs,
@@ -1431,7 +1434,7 @@ async function answerWeatherDirect(transcript) {
   if(askDay>0&&Array.isArray(daily.time)&&daily.time[askDay]) {
     const k=askDay, lo=Math.round(Number(daily.temperature_2m_min?.[k])), hi=Math.round(Number(daily.temperature_2m_max?.[k])), rain=Number(daily.precipitation_probability_max?.[k]);
     const dn=new Intl.DateTimeFormat('he-IL',{timeZone:'Asia/Jerusalem',weekday:'long',day:'numeric',month:'long'}).format(new Date(daily.time[k]+'T12:00:00'));
-    return (k===1?'מחר, ':k===2?'מחרתיים, ':'')+dn+', ב'+sanitizeForYemot(place.name||location)+': '+(codes[daily.weather_code?.[k]]||'')+', בין '+lo+' ל־'+hi+' מעלות'+(Number.isFinite(rain)?', וסיכוי לגשם של כ'+rain+' אחוזים':'')+'.'+(Number.isFinite(rain)&&rain>=50?' כדאי לקחת מטרייה.':'');
+    return (k===1?'מחר, ':k===2?'מחרתיים, ':'')+dn+', ב'+sanitizeForYemot(place.name||location)+': '+(codes[daily.weather_code?.[k]]||'')+', בין '+lo+' ל־'+hi+' מעלות'+(Number.isFinite(rain)?(rain<10?', בלי גשם צפוי':', וסיכוי לגשם של כ־'+rain+' אחוזים'):'')+'.'+(Number.isFinite(rain)&&rain>=50?' כדאי לקחת מטרייה.':'');
   }
   let answer='ב'+sanitizeForYemot(place.name||location)+' כרגע '+condition+', הטמפרטורה '+temp+' מעלות ומרגיש כמו '+feels+' מעלות, עם רוח של כ'+wind+' קילומטר לשעה.';
   const max=Number(daily.temperature_2m_max?.[0]), min=Number(daily.temperature_2m_min?.[0]), rainChance=Number(daily.precipitation_probability_max?.[0]);
@@ -2604,7 +2607,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
   // Extension 3: the strong models start at once, the small fast model is only a
   // reserve, and the answer gets enough time and length (not for tiny helpers).
   if(brainQ() && maxTokens>=700) {
-    quality=true; budgetMs=Math.max(budgetMs,EXT3_SYNTH_MS); maxTokens=Math.max(maxTokens,1500);
+    quality=true; budgetMs=Math.max(budgetMs,EXT3_SYNTH_MS); maxTokens=Math.max(maxTokens,Number(process.env.EXT3_MIN_TOKENS||1100));
     geminiBudgetMs=Math.max(Number(geminiBudgetMs||0),EXT3_GEMINI_MS);
   }
   // Gemini-only racer (not generateBranch1WithFallback, which would call Groq/OpenRouter a
@@ -2615,7 +2618,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
   const othersConfigured=Boolean((process.env.GROQ_API_KEY||'').trim()||(process.env.OPENROUTER_API_KEY||'').trim()||extraFastProviders(true).length);
   const racers=gemini?[(async()=>{
     if(othersConfigured) {
-      await new Promise(r=>setTimeout(r,Number(brainQ()?(process.env.EXT3_GEMINI_HEDGE_MS||(quality?0:2500)):quality?(process.env.BRANCH1_QUALITY_GEMINI_HEDGE_MS||700):(process.env.BRANCH1_GEMINI_HEDGE_MS||1800))));
+      await new Promise(r=>setTimeout(r,Number(brainQ()?(process.env.EXT3_GEMINI_HEDGE_MS||0):quality?(process.env.BRANCH1_QUALITY_GEMINI_HEDGE_MS||700):(process.env.BRANCH1_GEMINI_HEDGE_MS||1800))));
       if(raceDone) throw Object.assign(new Error('Gemini not needed'),{status:499});
     }
     if(branch1PrimaryCooldown.isCoolingDown('primary')) { console.info('[BRANCH1_WEB_SYNTH] Gemini resting after a failure; skipped'); throw Object.assign(new Error('Gemini cooling down'),{status:503}); }
@@ -2638,7 +2641,19 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
       throw err;
     }
   })()]:[];
-  for(const provider of [
+  // 25.11 (owner: true answers, no "busy"): in extensions 1 and 3 the models no
+  // longer race all at once. Gemini answers first; the next group starts only
+  // when every model of the group before it failed, or after that group had its
+  // fair time: Gemini, then gpt-oss-120b (keys in turn), then the other strong
+  // free models, and the small models last. The live check showed 4 models
+  // called for "שלום" and the weak ones winning (wrong Hebrew, Groq's per-minute
+  // quota spent on every turn).
+  const tiered=brainQ();
+  const tierOf=p=>/gpt-oss-120b/i.test(String(p.model||''))?1:(/^Groq:/.test(String(p.name||''))||/^(?:Mistral|ZAI|Cerebras)/.test(String(p.name||'')))?2:3;
+  const patience=[quality?Number(process.env.EXT3_GEMINI_PATIENCE_MS||6500):Number(process.env.EXT3_PLANNER_GEMINI_PATIENCE_MS||2000),Number(process.env.EXT3_TIER1_PATIENCE_MS||3500),Number(process.env.EXT3_TIER2_PATIENCE_MS||3000),0];
+  const gate=createTierGate(patience,{isDone:()=>raceDone});
+  if(tiered&&racers.length) { gate.add(0); racers[0].catch(()=>gate.fail(0)); }
+  const providers=[
     // In quality mode the small fast model is a reserve: it joins only if the
     // strong models have not answered after a short wait (they hit free-tier
     // rate limits under load, and the caller must never get raw excerpts).
@@ -2664,14 +2679,21 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     const group=all.filter(x=>keyFamily(x)===fam&&!synthCooling(x));
     if(!group.includes(p)) return {...p,skip:true};
     const start=(keyTurn.get(fam)||0)%group.length, idx=(group.indexOf(p)-start+group.length)%group.length;
-    return {...p,delayMs:Math.max(Number(p.delayMs)||0,idx*Number(process.env.KEY_ROTATE_MS||2000))};
-  })) {
+    return {...p,rot:idx*Number(process.env.KEY_ROTATE_MS||2000),delayMs:Math.max(Number(p.delayMs)||0,idx*Number(process.env.KEY_ROTATE_MS||2000))};
+  });
+  if(tiered) { for(const p of providers) if(!p.skip) gate.add(tierOf(p)); gate.start(); }
+  for(const provider of providers) {
     if(provider.skip) continue;
-    racers.push((provider.delayMs?new Promise(r=>setTimeout(r,provider.delayMs)).then(()=>{ if(raceDone) throw Object.assign(new Error('not needed'),{status:499}); }):Promise.resolve()).then(()=>callCompatibleChatCompletion({
+    const tier=tiered?tierOf(provider):0;
+    const notNeeded=()=>{ if(raceDone) throw Object.assign(new Error('not needed'),{status:499}); };
+    const startGate=tiered
+      ? gate.ready(tier).then(()=>provider.rot?new Promise(r=>setTimeout(r,provider.rot)):null).then(notNeeded)
+      : (provider.delayMs?new Promise(r=>setTimeout(r,provider.delayMs)).then(notNeeded):Promise.resolve());
+    racers.push(startGate.then(()=>{ countUse(provider.name+' '+provider.model); return callCompatibleChatCompletion({
       provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
       messages:[{role:'user',content:prompt}],timeoutMs:Math.max(1200,budgetMs-300),
       maxTokens,cooldowns:provider.big?branch1SynthCooldownsBig:branch1SynthCooldowns,cooldownMs:15000
-    })).then(text=>{ text=String(text||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim(); if(!text) throw new Error('empty');
+    }); }).then(text=>{ text=String(text||'').replace(/<think>[\s\S]*?<\/think>/gi,'').trim(); if(!text) throw new Error('empty');
       // 12.11: a weak free model answered with a loop of the same sentence and
       // with Arabic words; such an answer loses the race instead of being spoken.
       const broken=brokenAnswer(text);
@@ -2679,7 +2701,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
       console.info('[BRANCH1_WEB_SYNTH] answered by',{provider:provider.name,model:provider.model,chars:text.length});
       synthWinners.push({at:Date.now(),by:provider.name+' '+provider.model}); if(synthWinners.length>200) synthWinners.splice(0,100);
       return text; })
-      .catch(err=>{ if([401,402,403].includes(Number(err?.status))) markDeadKey(provider.apiKey); console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
+      .catch(err=>{ if(tiered) gate.fail(tier); if([401,402,403].includes(Number(err?.status))&&!err?.exhausted) markDeadKey(provider.apiKey); if(Number(err?.status)!==499) console.warn('[BRANCH1_WEB_SYNTH] racer failed',{provider:provider.name,status:err?.status||0,cooling:!!err?.coolingDown}); throw err; }));
   }
   for(const fam of ['groq','openrouter']) keyTurn.set(fam,(keyTurn.get(fam)||0)+1);
   const checked=validate?racers.map(r=>r.then(text=>{
@@ -4529,22 +4551,55 @@ async function serperPlaces(q,{timeoutMs=4500}={}) {
   }
   return [];
 }
-async function ext3WebSearch(q,{timeoutMs=4500}={}) {
-  // Each engine gets the same short window; a slow one is simply left out.
-  const capped=p=>Promise.race([p,new Promise(r=>setTimeout(()=>r([]),timeoutMs).unref?.())]);
-  const settled=await Promise.allSettled([
-    capped(searchWebDirect(q,{timeoutMs:Math.min(timeoutMs,3500)})),
-    keysFor('SERPER_API_KEY').length?capped(searchSerper(q,{timeoutMs,count:8})):Promise.resolve([]),
-    keysFor('LANGSEARCH_API_KEY').length?capped(searchLangSearch(q,{timeoutMs,count:6})):Promise.resolve([]),
-    capped(searchSearxng(q,{timeoutMs}).catch(()=>[])),
-    keysFor('EXA_API_KEY').length?capped(searchExa(q,{timeoutMs})):Promise.resolve([])
-  ]);
+// 25.11 (owner: up to date, reliable and as economical as possible): one web
+// search used to call every engine at once (Tavily, Serper twice, LangSearch
+// twice, SearXNG, Exa), spending 5-7 search credits per question. Now: the same
+// question within the hour comes from memory; Google (Serper) and the free
+// engines (SearXNG on this server, DuckDuckGo-style direct readers) go first;
+// the other keyed engines are asked only when those found too little. An empty
+// answer counts as a failure, so the next engine is always tried.
+const webSearchCache=new Map();
+// 25.11 (owner): how many requests each model and search engine got today
+// (Israel date), for /health/usage. Names and counts only, never a key.
+const usageToday=new Map();
+function countUse(name){ const d=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Jerusalem'}); const k=d+'|'+name; usageToday.set(k,(usageToday.get(k)||0)+1); if(usageToday.size>600) usageToday.delete(usageToday.keys().next().value); }
+function countSearch(engine){ countUse('search '+engine); }
+function searchCacheKey(q){ return String(q||'').toLowerCase().replace(/[\s"'?!.,:;]+/g,' ').trim(); }
+function searchTtlMs(q){ return /(?:חדשות|מבזק|עכשיו|כרגע|היום|הבוקר|הערב|שער|מחיר|בורסה|מניה|מזג|תחזית|פתוח|פתוחה|עומס|פקק|תוצאות|live|today|now)/iu.test(String(q||''))?10*60000:60*60000; }
+function mergeResults(lists,limit=12){
   const seen=new Set(), out=[];
-  for(const s of settled) for(const r of (s.status==='fulfilled'&&Array.isArray(s.value)?s.value:[])) {
-    const url=normalizeSearchHref(String(r.url||'').trim()); const key=url.replace(/[#?].*$/,'');
+  for(const list of lists) for(const r of (Array.isArray(list)?list:[])) {
+    const url=normalizeSearchHref(String(r?.url||'').trim()); const key=url.replace(/[#?].*$/,'');
     if(!url||!r.title||seen.has(key)) continue; seen.add(key); out.push({title:String(r.title),url,snippet:String(r.snippet||r.content||'')});
   }
-  return out.slice(0,12);
+  return out.slice(0,limit);
+}
+async function ext3WebSearch(q,{timeoutMs=4500}={}) {
+  const key=searchCacheKey(q);
+  const hit=webSearchCache.get(key);
+  if(hit&&Date.now()-hit.at<searchTtlMs(q)&&hit.results.length) { countSearch('cache'); console.info('[EXT3_SEARCH] from memory',{results:hit.results.length}); return hit.results; }
+  const capped=(name,p)=>Promise.race([Promise.resolve(p).then(v=>{ const n=Array.isArray(v)?v.length:0; countSearch(name+(n?'':' empty')); return Array.isArray(v)?v:[]; }).catch(()=>{ countSearch(name+' failed'); return []; }),new Promise(r=>setTimeout(()=>r([]),timeoutMs).unref?.())]);
+  const t0=Date.now();
+  // Stage 1: Google through Serper (the most accurate) and the free engines.
+  const first=await Promise.all([
+    keysFor('SERPER_API_KEY').length?capped('serper',searchSerper(q,{timeoutMs,count:8})):Promise.resolve([]),
+    capped('searxng',searchSearxng(q,{timeoutMs}))
+  ]);
+  let results=mergeResults(first);
+  let stage=1;
+  // Stage 2, only when stage 1 found too little: the other engines with keys.
+  if(results.length<4) {
+    stage=2;
+    const more=await Promise.all([
+      capped('direct',searchWebDirect(q,{timeoutMs:Math.min(timeoutMs,3500)})),
+      keysFor('EXA_API_KEY').length?capped('exa',searchExa(q,{timeoutMs})):Promise.resolve([]),
+      keysFor('LANGSEARCH_API_KEY').length&&!keysFor('SERPER_API_KEY').length?capped('langsearch',searchLangSearch(q,{timeoutMs,count:6})):Promise.resolve([])
+    ]);
+    results=mergeResults([...first,...more]);
+  }
+  console.info('[EXT3_SEARCH] searched',{stage,results:results.length,ms:Date.now()-t0});
+  if(results.length) { webSearchCache.set(key,{at:Date.now(),results}); if(webSearchCache.size>300) webSearchCache.delete(webSearchCache.keys().next().value); }
+  return results;
 }
 // Page readers first; when all of them are busy or cooling down, the page is
 // fetched directly and its text taken from the HTML.
@@ -4609,17 +4664,30 @@ async function ext3Library() {
     return items;
   } catch(e) { console.warn('[EXT3_LIBRARY] not readable',String(e?.message||e).slice(0,100)); return ext3LibCache.items; }
 }
-// Today's headlines (Google News through Serper), newest first.
+// Today's headlines, newest first. 25.11: Google News' own RSS feed in Hebrew
+// for Israel first (free, no key, no quota), Serper's news search only when the
+// feed gave too little; the same question within 10 minutes comes from memory.
+const newsCache=new Map();
 async function ext3NewsSearch(q,{timeoutMs=4000}={}) {
-  if(!keysFor('SERPER_API_KEY').length) return [];
-  const query=String(q||'').replace(/(?:מה|תגידי|תגיד|לי|את|ה?חדשות|היום|עכשיו|בבקשה|מבזק|מבזקים|כותרות|קורה|קרה|בארץ)\s*/gu,' ').trim();
-  const j=await withKeys('SERPER_API_KEY',async key=>{
-    const r=await fetch('https://google.serper.dev/news',{method:'POST',signal:AbortSignal.timeout(timeoutMs),headers:{'x-api-key':key,'content-type':'application/json'},
-      body:JSON.stringify({q:query||'חדשות ישראל',gl:'il',hl:'iw',num:15,tbs:'qdr:d'})});
-    if(!r.ok) throw Object.assign(new Error('Serper news HTTP '+r.status+' '+(await r.text().catch(()=>'')).slice(0,100)),{status:r.status});
-    return r.json();
-  },{label:'Serper news'});
-  return (j?.news||[]).map(x=>({title:String(x.title||''),snippet:String(x.snippet||''),source:String(x.source||''),date:String(x.date||''),url:String(x.link||'')})).filter(x=>x.title);
+  const query=String(q||'').replace(/(?:מה|תגידי|תגיד|לי|את|ה?חדשות|היום|עכשיו|בבקשה|מבזק|מבזקים|כותרות|קורה|קרה|בארץ|ה?חשובות|ה?אחרונות)\s*/gu,' ').replace(/\s+/g,' ').trim();
+  const key=query||'(top)';
+  const hit=newsCache.get(key);
+  if(hit&&Date.now()-hit.at<10*60000) { countSearch('news cache'); return hit.items; }
+  let items=await googleNewsRss(query,{timeoutMs}).catch(e=>{ console.warn('[EXT3_NEWS] Google News feed not available',{status:e?.status||0}); return []; });
+  countSearch('google news rss'+(items.length?'':' empty'));
+  if(items.length<3&&keysFor('SERPER_API_KEY').length) {
+    const j=await withKeys('SERPER_API_KEY',async k=>{
+      const r=await fetch('https://google.serper.dev/news',{method:'POST',signal:AbortSignal.timeout(timeoutMs),headers:{'x-api-key':k,'content-type':'application/json'},
+        body:JSON.stringify({q:query||'חדשות ישראל',gl:'il',hl:'iw',num:15,tbs:'qdr:d'})});
+      if(!r.ok) throw Object.assign(new Error('Serper news HTTP '+r.status+' '+(await r.text().catch(()=>'')).slice(0,100)),{status:r.status});
+      return r.json();
+    },{label:'Serper news'}).catch(()=>null);
+    countSearch('serper news');
+    const more=(j?.news||[]).map(x=>({title:String(x.title||''),snippet:String(x.snippet||''),source:String(x.source||''),date:String(x.date||''),url:String(x.link||'')})).filter(x=>x.title);
+    if(more.length>items.length) items=more;
+  }
+  if(items.length) newsCache.set(key,{at:Date.now(),items});
+  return items;
 }
 // "שיחה חדשה" / "היסטוריה" said in extensions 1 and 3.
 function conversationCommand(text) {
@@ -5267,6 +5335,12 @@ async function callHandler(call) {
         // 24.11: "thank you" / "goodbye" is answered at once (it waited 30 s for busy models).
         if(!fixed&&!ext3Done&&/^(?:תודה|תודה רבה|תודה לך|תודה רבה לך|יישר כח|יישר כוח|ישר כח|שכוייח|כל הכבוד|מעולה תודה|להתראות|ביי|יום טוב|לילה טוב|שבוע טוב|שבת שלום)[.!, ]*(?:תודה|להתראות|ביי)?[.!, ]*$/u.test(userTranscript.trim()))
           fixed=/להתראות|ביי|לילה טוב|יום טוב|שבוע טוב|שבת שלום/u.test(userTranscript)?'בשמחה רבה. '+(/שבת שלום/u.test(userTranscript)?'שבת שלום ומבורכת!':/שבוע טוב/u.test(userTranscript)?'שבוע טוב ומבורך!':'להתראות, ותמיד אפשר לחזור אליי.'):'בשמחה רבה! אם יש עוד משהו, אני כאן.';
+        // 25.11: a plain greeting is answered at once (the live check sent "שלום"
+        // to four models at the same time).
+        if(!fixed&&!ext3Done&&/^(?:שלום|היי|הי|הלו|אהלן|שלום שלום|שלום לך|בוקר טוב|ערב טוב|צהריים טובים|מה נשמע|מה שלומך|מה שלומך היום|מה קורה|מה המצב|מה העניינים)[.!?, ]*(?:שלום)?[.!?, ]*$/u.test(userTranscript.trim())) {
+          const t=userTranscript.trim();
+          fixed=(/בוקר טוב/u.test(t)?'בוקר טוב ומבורך! ':/ערב טוב/u.test(t)?'ערב טוב! ':/צהריים טובים/u.test(t)?'צהריים טובים! ':/מה נשמע|מה שלומך|מה קורה|מה המצב|מה העניינים/u.test(t)?'ברוך השם, הכל טוב, תודה ששאלת. ':'שלום וברכה! ')+'במה אפשר לעזור לך?';
+        }
         // 24.11: the weather from the forecast service itself (Celsius, the right day),
         // not from web pages (the live check read Fahrenheit and named the wrong weekday).
         // "and the weather there on Shabbat?": the town said earlier in the call.
@@ -5788,7 +5862,9 @@ async function callHandler(call) {
     if(userTranscript) {
       turnHistory.push({user:(typeof originalSpokenTranscript==='string' && originalSpokenTranscript ? originalSpokenTranscript : userTranscript),assistant:replyText,resolvedQuestion:userTranscript,
         ...(turnContext.ext3Ref?{ref:turnContext.ext3Ref}:{})});
-      if(turnHistory.length>12) turnHistory.shift();
+      // 25.11: the first questions of the call are kept when older turns drop out,
+      // so "what did I ask at the start?" is still answered right (20-question check).
+      if(turnHistory.length>12) { const gone=turnHistory.shift(); if(!turnHistory.firstUser) turnHistory.firstUser=[]; if(gone?.user&&turnHistory.firstUser.length<2) turnHistory.firstUser.push(String(gone.user)); }
     }
     // Extension 3 -> extension 2: the chosen video waits there for this caller.
     if(turnContext.ext3Handoff && !call.selfTest) {
@@ -6580,6 +6656,20 @@ async function sendOwnerTzintuk(phones) {
 // Shows whether each web key works (never the keys themselves). The result is
 // cached for hours, so opening this page costs at most one tiny call per provider.
 // Owner, 24.11: answer models, alive or not, and (with ?q=) how each answers. Names and codes only.
+app.get('/health/search-local', rateLimit(6, 60 * 1000, 'search-local'), async (req,res)=>{
+  const q=String(req.query.q||'ירושלים').slice(0,80);
+  const t0=Date.now();
+  try {
+    const u=new URL(String(process.env.SEARXNG_LOCAL_URL||'http://127.0.0.1:8888')+'/search'); u.searchParams.set('q',q); u.searchParams.set('format','json'); u.searchParams.set('language','he');
+    const r=await fetch(u,{signal:AbortSignal.timeout(8000)}); const j=r.ok?await r.json():{};
+    res.json({ok:r.ok,status:r.status,ms:Date.now()-t0,results:(j.results||[]).length,engines:[...new Set((j.results||[]).flatMap(x=>x.engines||[]))],unresponsive:(j.unresponsive_engines||[]).map(x=>Array.isArray(x)?x.join(': '):String(x)),first:(j.results||[]).slice(0,3).map(x=>String(x.title||'').slice(0,80))});
+  } catch(e) { res.json({ok:false,ms:Date.now()-t0,error:String(e?.cause?.code||e?.message||e).slice(0,80)}); }
+});
+app.get('/health/usage',(req,res)=>{
+  const days={};
+  for(const [k,n] of usageToday) { const [d,name]=k.split('|'); (days[d]=days[d]||{})[name]=n; }
+  res.json({at:new Date().toISOString(),days,winners:synthWinners.slice(-40).map(w=>({at:new Date(w.at).toISOString(),by:w.by}))});
+});
 app.get('/health/models', rateLimit(3, 60 * 1000, 'model-health'), async (req,res)=>{
   try { const { modelHealth } = await import('./model-health.js'); res.set('cache-control','no-store').json(await modelHealth({ q: String(req.query.q||'').slice(0,300) })); }
   catch(e) { res.status(500).json({ok:false,error:String(e?.message||e).slice(0,160)}); }

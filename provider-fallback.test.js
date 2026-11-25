@@ -95,6 +95,23 @@ test('402 credit exhaustion sets a quota cooldown without exposing body', async 
       ok: false, status: 402,
       text: async () => 'sensitive account details'
     })
-  }), error => error.status === 402 && !error.message.includes('sensitive'));
-  assert.equal(cooldowns.get('Groq'), 91000);
+  }), error => error.status === 402 && error.exhausted === true && !error.message.includes('sensitive'));
+  // 25.11: a provider that now needs a payment method rests for 6 hours.
+  assert.equal(cooldowns.get('Groq'), 1000 + 6 * 3600_000);
+});
+
+test('a trial key that used its monthly calls rests for 6 hours, a plain 429 briefly', async () => {
+  const cooldowns = new Map();
+  await assert.rejects(callCompatibleChatCompletion({
+    ...base, cooldowns, now: () => 1000,
+    fetchImpl: async () => ({ ok: false, status: 429, headers: { get: () => null },
+      text: async () => 'You are using a Trial key, which is limited to 1000 API calls / month.' })
+  }), error => error.status === 429 && error.exhausted === true && !/Trial key/.test(error.message));
+  assert.equal(cooldowns.get('Groq'), 1000 + 6 * 3600_000);
+  const short = new Map();
+  await assert.rejects(callCompatibleChatCompletion({
+    ...base, cooldowns: short, now: () => 1000,
+    fetchImpl: async () => ({ ok: false, status: 429, headers: { get: () => null }, text: async () => 'Rate limit reached for tokens per minute' })
+  }), error => error.status === 429 && !error.exhausted);
+  assert.equal(short.get('Groq'), 91000);
 });

@@ -246,7 +246,7 @@ export function heuristicPlan(utterance, { video = null } = {}) {
   if (PLAY_WORD.test(u) && !/^(?:לא|אל)(?=$|[\s,.!?])/u.test(u)) return { ...base, intent: 'video_play', ytHe: video && POINT_WORD.test(u) ? '' : u.replace(PLAY_WORD_G, ' ').replace(/(?:הלו|נו|כן|בבקשה|אני רוצה|ש?תשמיעי|לי|את|השיר|הסרטון|הפרק|ה?ו?וידי?או|קובץ שמע|ביוטיוב|יוטיוב)/gu, ' ').replace(/\s+/g, ' ').trim() };
   if (video && /(?:השם|איך קוראים|איך נקרא|כמה זמן|אורך|ארוך|הערוץ|באנגלית|בעברית|תתרגם|תתרגמי|על מה הוא|מה יש ב)/u.test(u) && (VIDEO_WORD.test(u) || /(?:אותו|שלו|זה)/u.test(u))) return { ...base, intent: 'video_about' };
   if ((YT_WORD.test(u) || VIDEO_WORD.test(u) || SONG_WORD.test(u) || (NEWEST.test(u) && /(?:שיעור|הרצאה|קליפ|פרק)/u.test(u))) && (NEWEST.test(u) || /(?:תמליצ|ממליצ|מומלץ|תמצא|תמצאי|תחפש|תחפשי|אני מחפש|יש סרטון|איזה סרטון|איזה שיר|מה השיר|תביא|תביאי|הכי חדש|חדש של|שיצא|שיצאו|יצא|יצאו|העלה|העלו|לאחרונה)/u.test(u))) return { ...base, intent: 'video_find', ...(NEWEST.test(u) || /לאחרונה/u.test(u) ? { order: 'date' } : {}) };
-  if (/(?:תחפש|תחפשי|חפש|חפשי|באינטרנט|ברשת|בגוגל|עדכני|היום|עכשיו|חדשות|מחיר|כמה עולה|שער|מזג האוויר|מי ראש|מי שר|מי נשיא|מתי פתוח|שעות פתיחה|טלפון של|המספר של|מספר של|איפה מוכרים|איפה קונים|איפה אפשר לקנות|איפה משיגים|פתוח|פתוחה)/u.test(u)) return { ...base, intent: 'web' };
+  if (/(?:תחפש|תחפשי|חפש|חפשי|באינטרנט|ברשת|בגוגל|עדכני|היום|עכשיו|חדשות|מחיר|כמה עולה|שער|מזג האוויר|מי ראש|מי שר|מי נשיא|מי ה(?:נשיא|ראש|שר|מנכ"ל|יו"ר|רמטכ"ל|נגיד)|מי מכהן|מתי פתוח|שעות פתיחה|טלפון של|המספר של|מספר של|איפה מוכרים|איפה קונים|איפה אפשר לקנות|איפה משיגים|פתוח|פתוחה)/u.test(u)) return { ...base, intent: 'web' };
   return { ...base, intent: 'chat' };
 }
 
@@ -812,6 +812,16 @@ function readableArticle(text) {
  *       findVideos(queries, opts) (defaults to the real one above)
  *       log
  */
+// 25.11 (owner: as economical as possible): the same factual question answered
+// from the web within a few hours ("מי היה החזון איש") is said again from
+// memory, with no new search and no model. Questions about now (news, prices,
+// weather, opening hours, "today") are never kept.
+const answerCache = new Map();
+const NOW_WORDS = /(?:חדשות|מבזק|עכשיו|כרגע|היום|הבוקר|הערב|מחר|אתמול|השבוע|החודש|השנה|שער|מחיר|עולה|בורסה|מניה|מזג|תחזית|פתוח|פתוחה|סגור|שעות|עומס|פקק|תוצאות|ניצח|זכה|נבחר|מכהן|ראש הממשלה|נשיא|שר ה|כמה זמן|מתי|עדיין|חדש|אחרון|אחרונה|הכי חדש)/u;
+export function answerCacheKey(q) { return String(q || '').replace(/[\s"'?!.,:;״׳]+/g, ' ').trim(); }
+export function cacheableQuestion(q) { const t = answerCacheKey(q); return t.length >= 6 && t.split(' ').length <= 14 && !NOW_WORDS.test(t); }
+export function cachedAnswer(q, ttlMs = 6 * 3600e3) { const h = answerCache.get(answerCacheKey(q)); return h && Date.now() - h.at < ttlMs ? h.reply : ''; }
+export function keepAnswer(q, reply) { if (!cacheableQuestion(q) || !reply || reply.length < 40 || /עמוסים|לא הצלחתי|לא מצאתי/u.test(reply)) return; answerCache.set(answerCacheKey(q), { at: Date.now(), reply }); while (answerCache.size > 300) answerCache.delete(answerCache.keys().next().value); }
 export async function ext3Turn(input, deps) {
   const r = await ext3TurnInner(input, deps);
   // 24.11: a model sometimes starts with the JSON field's name ("answer, ...").
@@ -1255,6 +1265,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
 
   if (plan.intent === 'web') {
     const q1 = plan.search || plan.standalone || utterance;
+    const reuse = cacheableQuestion(q1) && cacheableQuestion(utterance) && !(plan.searches || []).length ? cachedAnswer(q1 + (brief ? ' קצר' : '')) : '';
+    if (reuse) { log.info?.('[EXT3_BRAIN] same question answered before; said again from memory'); return out({ reply: reuse }); }
     const hours = /(?:פתוח|פתוחה|סגור|סגורה|שעות|עד מתי|מתי נפתח|מתי נסגר)/u.test(utterance + ' ' + plan.standalone);
     const route = ROUTE.test(utterance + ' ' + plan.standalone);
     // News: today's real headlines (with time and outlet) instead of news-site home pages.
@@ -1323,14 +1335,16 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       pages = await Promise.race([deps.readPages(urls, { timeoutMs: 4000 }).catch(() => []), new Promise(r => setTimeout(() => r([]), 4200).unref?.())]);
     }
     const byUrl = new Map(pages.map(p => [String(p.url || '').replace(/[#?].*$/, ''), p]));
-    let budget = 5200;
+    // 25.11: shorter sources (were up to 6,500 characters): faster answers and
+    // far fewer tokens per answer, so the free per-minute quotas last.
+    let budget = 3800;
     const label = u => sourceRank(u) === 0 ? ' [אתר רשמי]' : sourceRank(u) === 1 ? ' [אתר חדשות]' : sourceRank(u) === 3 ? ' [רשת חברתית, פחות אמין]' : '';
     const sourceText = results.slice(0, 8).map((r, i) => {
       const page = byUrl.get(String(r.url).replace(/[#?].*$/, ''));
-      const body = page?.content ? clip(page.content, Math.min(2200, Math.max(300, budget))) : clip(r.snippet, r.url === 'https://maps.google.com/' ? 1100 : 420);
+      const body = page?.content ? clip(page.content, Math.min(1600, Math.max(300, budget))) : clip(r.snippet, r.url === 'https://maps.google.com/' ? 1100 : 420);
       budget -= body.length;
       return 'מקור ' + (i + 1) + label(r.url) + ': ' + clip(r.title, 120) + ' (' + hostOf(r.url).slice(0, 50) + ')\n' + body;
-    }).join('\n\n').slice(0, 6500);
+    }).join('\n\n').slice(0, 4500);
     const mapSource = mapText && !results.some(r => r.url === 'https://www.openstreetmap.org/') ? 'מקור מהמפה (שעות מחושבות לרגע זה):\n' + mapText + '\n\n' : '';
     log.info?.('[EXT3_BRAIN] web research', { queries, results: results.length, pagesRead: pages.length, official: results.filter(r => sourceRank(r.url) === 0).length, sourceChars: sourceText.length });
     const verify = 'כלל ברזל: כל עובדה בתשובה חייבת להופיע במקורות שלמטה. אל תוסיפי מהזיכרון שום פרט על אנשים: לא קשרים זוגיים, משפחה, רכילות, מחלות או פרשיות, גם אם נדמה לך שאת יודעת, אלא אם זה כתוב במפורש במקור, וגם אז רק אם זה מה ששאל. פרט שלא מופיע במקורות, השמיטי. ' + 'בדיקת אמינות לפני שאת עונה: השווי בין המקורות. כשהם סותרים, העדיפי את האתר הרשמי, אחריו את המקור העדכני ביותר, ואמרי במפורש על איזה מקור את מתבססת ("לפי האתר הרשמי של כללית"). אל תצטטי שני מקורות סותרים בלי להכריע או להסביר. ' +
@@ -1339,7 +1353,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       (hours ? 'כשיש מקור מהמפה, המצב פתוח או סגור שבו כבר חושב לשעה הזאת לפי שעות המפה; אם אתר רשמי או מקור עדכני אחר נותן שעות אחרות, העדיפי אותם, חשבי לפיהם ואמרי שבמפה רשום אחרת. זו שאלה על שעות פתיחה, ולכן כאן עני ממוקד וקצר יחסית (5 עד 8 משפטים) גם אם בדרך כלל את מרחיבה: האם פתוח עכשיו ועד מתי, השעות של היום ושל מחר, הכתובת והטלפון. בלי עצות שלא נשאלו. כתבי שעות תמיד מהמוקדמת למאוחרת, למשל משמונה בבוקר עד אחת בצהריים. אם אין לך התאמה ודאית למקום שביקש, אמרי זאת בשני משפטים ושאלי באיזו עיר הוא נמצא, בלי לפרט נתונים לא ודאיים. אם הסניף שמופיע במקורות נמצא בעיר או בשכונה אחרת ממה שהמתקשר אמר, אמרי איזה סניף מצאת ושאלי אם לזה התכוון. זו שאלה על שעות פתיחה: מצאי את שעות היום הנוכחי (' + now + '), חשבי בעצמך לפי השעה עכשיו האם המקום פתוח או סגור ברגע זה ועד מתי, ואמרי את זה בתחילת התשובה בבירור. אם אין שעות מפורשות ליום הזה, אמרי שאין לך שעות מאומתות להיום והציעי להתקשר למקום, עם מספר הטלפון אם מופיע. ' : '');
     const reply = await ask('המתקשר צריך מידע עדכני ומדויק. לפניך מקורות אמיתיים מהאינטרנט שנאספו ונקראו עכשיו לשאלה הזאת בלבד. אל תערבבי בתשובה מידע מתשובות קודמות שאינו קשור לשאלה הזאת. ' + verify +
       (multi ? 'הוא שאל כמה דברים: ' + parts.join('; ') + '. עני על כל אחד מהם בנפרד ולפי הסדר, ואם לאחד מהם אין תשובה במקורות, אמרי זאת. ' : '') +
-      'כשמדובר בתחזית או בנתון יומי, השתמשי רק בנתון של היום (' + now + ') ואל תקריאי ימים שכבר עברו. ' + (hours ? 'ענה ממוקד ובבהירות, רק לפי המקורות:' : 'ענה בהרחבה ובפירוט רק לפי המקורות:') + ' עובדות, מספרים, שמות ותאריכים בדיוק כפי שכתובים בהם. כשהמקורות לא עונים על חלק מהשאלה, אמרי שלא מצאת את החלק הזה. אל תקריאי כתובות אתרים ואל תאמרי "מקור 1".', 'מקורות:\n' + mapSource + sourceText, { maxTokens: hours ? 700 : 1800, budgetMs: 14000, ctx: smallContext })
+      'כשמדובר בתחזית או בנתון יומי, השתמשי רק בנתון של היום (' + now + ') ואל תקריאי ימים שכבר עברו. ' + (hours ? 'ענה ממוקד ובבהירות, רק לפי המקורות:' : 'ענה בהרחבה ובפירוט רק לפי המקורות:') + ' עובדות, מספרים, שמות ותאריכים בדיוק כפי שכתובים בהם. כשהמקורות לא עונים על חלק מהשאלה, אמרי שלא מצאת את החלק הזה. אל תקריאי כתובות אתרים ואל תאמרי "מקור 1".', 'מקורות:\n' + mapSource + sourceText, { maxTokens: hours ? 700 : 1200, budgetMs: 14000, ctx: smallContext })
       .catch(e => {
         log.warn?.('[EXT3_BRAIN] web answer not written; saying what was found', { status: e?.status || 0 });
         const seenHost = new Set();
@@ -1348,6 +1362,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
         return bits.length ? 'לפי מה שמצאתי עכשיו באינטרנט. ' + bits.join(' ') + ' זה בקצרה, כי מנועי הניסוח עמוסים ברגע זה. אם תשאל שוב בעוד דקה, אפרט יותר.' : '';
       });
     if (!reply) throw Object.assign(new Error('nothing to say'), { status: 503 });
+    if (!multi && !hours && !route && !mapText && cacheableQuestion(utterance)) keepAnswer(q1 + (brief ? ' קצר' : ''), reply);
     return out({ reply });
   }
 
@@ -1359,7 +1374,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       return out({ reply: 'ביקשת ממני: ' + list.slice(-5).map(x => x.replace(/[.!]+$/, '')).join('. וגם: ') + '. ואני מקפיד על זה.' });
     // 24.11: "what did I ask at the start / just now?" straight from this call's
     // own turns (a model listed the wrong questions in the live check).
-    const mine = (current || []).map(t => String(t.user || '').trim()).filter(Boolean);
+    const mine = [...((current && current.firstUser) || []), ...(current || []).map(t => String(t.user || '').trim())].filter(Boolean);
     if (mine.length && /(?:שאלתי|ביקשתי|אמרתי)/u.test(utterance) && /(?:בתחילת|בהתחלה|ראשונ|הראשון|קודם כל)/u.test(utterance))
       return out({ reply: 'בתחילת השיחה שאלת: ' + clip(mine[0], 160) + (mine[1] ? '. ואחר כך: ' + clip(mine[1], 160) : '') + '.' });
     if (mine.length && /(?:שאלתי|ביקשתי|אמרתי)/u.test(utterance) && /(?:לפני רגע|עכשיו|קודם|האחרונ|בפעם הקודמת בשיחה)/u.test(utterance) && !/(?:בשיחה הקודמת|בפעם הקודמת שהתקשרתי)/u.test(utterance))
@@ -1418,7 +1433,7 @@ const LYRICS_ASKED = /(?:נכתוב|תכתוב|תכתבי|לכתוב|תחבר|ת
 const TIPS_ASKED = /(?:טיפ|טיפים|עצה|עצות|המלצות מעשיות|תן לי רעיונות|תני לי רעיונות)/u;
 
 const GREETING = /^(?:שלום|היי|הי|הלו|אהלן|בוקר טוב|ערב טוב|לילה טוב|צהריים טובים|מה נשמע|מה שלומך|מה שלומך היום|מה קורה|מה המצב|מה העניינים|מה איתך|תודה|תודה רבה|יופי|מעולה|אחלה)(?:\s+(?:כפרה|אחי|חביבי|מותק|יקירתי|יקירי|גבר|נשמה|לך|רבה|לך רבה|בבקשה|עליך))*[\s?!.,]*$/u;
-const FACTUAL = /(?:איפה מוכרים|איפה קונים|איפה אפשר לקנות|איפה משיגים|איפה להשיג|איפה יש לקנות|מי מוכר|המספר של|מספר של|מספר טלפון|הטלפון של|טלפון ל|איך מתקשרים|איך משיגים את|פתוח עכשיו|פתוחה עכשיו|עד מתי פתוח|שעות פתיחה|איך נקרא|איך קוראים ל|איך הם נקראים|מי שר|מי שרה|מי שרים|מי הזמר|מי הזמרת|מי המלחין|מי כתב את השיר|צמד|להקת|אלבום|אלבומים|שירים של|שיר של|דיסקוגרפיה|איך מגיעים|איך אני מגיע|איך להגיע|באיזה קו|איזה קו|קו אוטובוס|קווי אוטובוס|תחבורה ציבורית|מסלול נסיעה|כמה זמן נסיעה|מספר הטלפון|מה הטלפון|טלפון של|כתובת של|מה הכתובת|כמה עולה|מה המחיר|מחיר של|באיזו איכות|איזה פורמט|מי המנהל|מי הבעלים|מי ראש|מי שר ה|מי נשיא|מתי נולד|מתי נפטר|בן כמה|בת כמה|מי חיבר|מי כתב|מי היה|מי הייתה|מי היו|מיהו|מיהי|איזה ספרים|אילו ספרים|ספרים של|ספר לי על|ספרי לי על|תספר לי על|תספרי לי על|מה ידוע על|מתי היה|מתי הייתה|מתי קרה|מתי נוסד|מתי נוסדה|באיזו שנה|באיזה שנה|כמה תושבים|מה האוכלוסייה|מה הבירה|מי המציא|מי גילה|מה הגובה|כמה גבוה|מה האורך|כמה ארוך|מה השטח|מי ייסד|מי הקים|מה פירוש השם|מאיפה מגיע)/u;
+const FACTUAL = /(?:איפה מוכרים|איפה קונים|איפה אפשר לקנות|איפה משיגים|איפה להשיג|איפה יש לקנות|מי מוכר|המספר של|מספר של|מספר טלפון|הטלפון של|טלפון ל|איך מתקשרים|איך משיגים את|פתוח עכשיו|פתוחה עכשיו|עד מתי פתוח|שעות פתיחה|איך נקרא|איך קוראים ל|איך הם נקראים|מי שר|מי שרה|מי שרים|מי הזמר|מי הזמרת|מי המלחין|מי כתב את השיר|צמד|להקת|אלבום|אלבומים|שירים של|שיר של|דיסקוגרפיה|איך מגיעים|איך אני מגיע|איך להגיע|באיזה קו|איזה קו|קו אוטובוס|קווי אוטובוס|תחבורה ציבורית|מסלול נסיעה|כמה זמן נסיעה|מספר הטלפון|מה הטלפון|טלפון של|כתובת של|מה הכתובת|כמה עולה|מה המחיר|מחיר של|באיזו איכות|איזה פורמט|מי המנהל|מי הבעלים|מי ראש|מי שר ה|מי נשיא|מי ה(?:נשיא|ראש|שר|שרה|מנכ"ל|מנכל|יו"ר|יור|רמטכ"ל|רמטכל|מפכ"ל|מפכל|נגיד|ראש עיר)|מי מכהן|מי עומד בראש|מי מנהל את|מי שולט|מי ניצח|מי זכה|מי נבחר|כמה תושבים|כמה אנשים גרים|מה הגובה|מה האורך|מה השטח|מה המרחק|כמה זמן לוקח|מה האוכלוסייה|מתי נולד|מתי נפטר|בן כמה|בת כמה|מי חיבר|מי כתב|מי היה|מי הייתה|מי היו|מיהו|מיהי|איזה ספרים|אילו ספרים|ספרים של|ספר לי על|ספרי לי על|תספר לי על|תספרי לי על|מה ידוע על|מתי היה|מתי הייתה|מתי קרה|מתי נוסד|מתי נוסדה|באיזו שנה|באיזה שנה|כמה תושבים|מה האוכלוסייה|מה הבירה|מי המציא|מי גילה|מה הגובה|כמה גבוה|מה האורך|כמה ארוך|מה השטח|מי ייסד|מי הקים|מה פירוש השם|מאיפה מגיע)/u;
 const ROUTE = /(?:איך מגיעים|איך אני מגיע|איך להגיע|להגיע ל|באיזה קו|איזה קו|קו אוטובוס|קווי אוטובוס|תחבורה ציבורית|אוטובוס ל|רכבת ל|מסלול נסיעה|הדרך הכי מהירה|הכי מהר ל|נסיעה ל)/u;
 
 // A map or calendar service that hangs must not keep the caller waiting.

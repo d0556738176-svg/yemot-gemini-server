@@ -1,6 +1,7 @@
 const DEFAULT_COOLDOWN_MS = 60_000;
 const AUTH_COOLDOWN_MS = 10 * 60_000;
 const QUOTA_COOLDOWN_MS = 90_000;
+const EXHAUSTED_COOLDOWN_MS = 6 * 3600_000;
 
 function retryAfterMs(response, now) {
   let value;
@@ -89,7 +90,17 @@ export async function callCompatibleChatCompletion({
     if (!response?.ok) {
       const status = Number(response?.status) || 502;
       // Drain the response body for connection reuse, but never log its contents.
-      try { await response.text(); } catch {}
+      let body = '';
+      try { body = String(await response.text() || '').slice(0, 2000); } catch {}
+      // 25.11: a trial key that used its monthly calls (Cohere 429 "Trial key ...
+      // limited to 1000 API calls") or an account that now needs a payment method
+      // (SambaNova 402) will not work again today: rest it for 6 hours instead of
+      // trying it on every phone turn. Only this yes/no is kept, never the text.
+      const exhausted = status === 402 || /trial key|limited to \d+ api calls|payment method|monthly limit|billing/i.test(body);
+      if (exhausted) {
+        cooldowns.set(provider, now() + EXHAUSTED_COOLDOWN_MS);
+        throw makeProviderError(provider + ' HTTP ' + status + ' (quota or plan used up)', status, provider, { exhausted: true });
+      }
       if ([408, 500, 502, 503, 504].includes(status)) {
         cooldowns.set(provider, now() + cooldownMs);
       } else if ([402, 429].includes(status)) {
