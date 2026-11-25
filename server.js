@@ -6685,7 +6685,7 @@ app.get('/health/search-local', rateLimit(6, 60 * 1000, 'search-local'), async (
     const r=await fetch(u,{signal:AbortSignal.timeout(8000)}); const j=r.ok?await r.json():{};
     res.json({ok:r.ok,status:r.status,ms:Date.now()-t0,results:(j.results||[]).length,engines:[...new Set((j.results||[]).flatMap(x=>x.engines||[]))],unresponsive:(j.unresponsive_engines||[]).map(x=>Array.isArray(x)?x.join(': '):String(x)),first:(j.results||[]).slice(0,3).map(x=>String(x.title||'').slice(0,80))});
   } catch(e) {
-    let setup=''; try { setup=String(readFileSync('/var/log/yemot-searxng-setup.log','utf8')).split('\n').filter(Boolean).slice(-15).join('\n').slice(-2500); } catch {}
+    let setup=''; try { setup=String(readFileSync('/var/log/yemot-searxng-setup.log','utf8')).split('\n').filter(Boolean).slice(-30).join('\n').slice(-3500); } catch {}
     res.json({ok:false,ms:Date.now()-t0,error:String(e?.cause?.code||e?.message||e).slice(0,80),setup});
   }
 });

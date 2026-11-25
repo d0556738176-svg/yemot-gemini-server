@@ -106,3 +106,5 @@ systemctl enable -q yemot-searxng
 if [ "$changed" = 1 ] || ! systemctl is-active -q yemot-searxng; then systemctl restart yemot-searxng; fi
 for i in $(seq 1 30); do curl -fsS -m 10 'http://127.0.0.1:8888/search?q=%D7%99%D7%A8%D7%95%D7%A9%D7%9C%D7%99%D7%9D&format=json' >/dev/null 2>&1 && { echo "up"; exit 0; }; sleep 4; done
 echo "not answering yet"
+systemctl is-active yemot-searxng || true
+journalctl -u yemot-searxng -n 25 --no-pager -o cat 2>/dev/null | grep -vi "secret" | tail -25
