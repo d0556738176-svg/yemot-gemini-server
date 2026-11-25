@@ -4628,6 +4628,30 @@ async function youtubeCallHandler(call) {
     return call.go_to_folder('/');
   }
 
+  // Extension 11 (owner, 25.11): the news menu. 1 = the latest news; the
+  // archive folders (2-9) are offered once they exist.
+  const newsPart=String(call?.values?.news ?? call?.req?.query?.news ?? '').trim();
+  if(newsPart==='menu') {
+    try {
+      const N=await import('./news-ext11.js');
+      const idx=(await (await newsIo()).readJson(N.INDEX).catch(()=>null))||{};
+      const arch=Array.from({length:Math.min(8,idx.archives||0)},(_,i)=>String(i+N.FIRST_ARCHIVE));
+      const tap=async text=>String(await call.read([{type:'text',data:sanitizeForYemot(text)}],'tap',
+        {max_digits:1,min_digits:1,sec_wait:7,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'n11'+(++tapNo),timeout:10*60*1000,digits_allowed:['1',...arch,'0']})||'None').trim();
+      const text='חדשות. לחדשות המעודכנות הקישו 1. '+(arch.length?arch.map(a=>'לארכיון '+(Number(a)-1)+' הקישו '+a).join('. ')+'. ':'')+'לתפריט הראשי הקישו אפס.';
+      for(let i=0;i<3;i++) {
+        const k=await tap(text);
+        branch2KeyLog('news11',k,0,0);
+        if(k==='None'||k==='0') return call.go_to_folder('/');
+        if(k==='1'||arch.includes(k)) return call.go_to_folder(N.NEWS_ROOT+'/'+k);
+      }
+      return call.go_to_folder('/');
+    } catch(e) {
+      if(e instanceof ExitError) throw e;
+      console.warn('[NEWS11] menu failed',{message:String(e?.message||e).slice(0,200)});
+      return call.go_to_folder('/11/1');
+    }
+  }
   const tvPart=String(call?.values?.tv ?? call?.req?.query?.tv ?? '').trim();
   if(tvPart) {
     try { return await ext5Call(tvPart); }
@@ -5550,11 +5574,16 @@ app.get('/api/ext3/media', rateLimit(240, 60 * 1000, 'ext3-media'), async (req, 
 app.get('/yemot-media', async (req, res) => {
   try {
     const { handleMediaKey } = await import('./branch2-media-keys.js');
+    const N = await import('./news-ext11.js');
+    const io = await newsIo();
     const out = await handleMediaKey(req.query || {}, {
-      lookup: ext7Lookup, details: mediaDetails, dubStatus: dubStatusOf, startDub: startDubJob,
+      lookup: (dir, file) => String(dir).startsWith(N.NEWS_ROOT + '/') ? N.lookupNews(dir, file, io) : ext7Lookup(dir, file),
+      canDelete: dir => new RegExp('^' + N.NEWS_ROOT + '/[1-9]$').test(String(dir).replace(/\/$/, '')),
+      deleteFile: (dir, file) => N.deleteNews(dir, file, io),
+      details: mediaDetails, dubStatus: dubStatusOf, startDub: startDubJob,
       language: async (vid, title) => (await import('./youtube-video-facts.js')).videoLanguage(await fetchVideoFacts(vid, process.env).catch(() => null), title),
     });
-    console.info('[MEDIA KEYS]', { key: req.query?.PressKey, what: req.query?.what, answer: req.query?.dub_ok, reply: out.slice(0, 140) });
+    console.info('[MEDIA KEYS]', { key: req.query?.PressKey, what: req.query?.what, answer: req.query?.dub_ok ?? req.query?.del_ok, reply: out.slice(0, 140) });
     res.type('text/plain').send(out);
   } catch (e) {
     console.warn('[MEDIA KEYS] failed', { message: String(e?.message || e).slice(0, 200) });
@@ -5833,6 +5862,62 @@ async function replayIo() {
     log:console,
   };
 }
+// Extension 11 (owner, 25.11): Yemot access for the news folders.
+async function newsIo() {
+  const p=(await import('./youtube-authorized-playback.js'))._pipeline;
+  const r=await replayIo();
+  const norm=t=>String(t||'').replace(/\r/g,'').split('\n').map(l=>l.trim()).filter(Boolean).join('\n');
+  return {
+    publicUrl:(process.env.PUBLIC_BASE_URL||'').replace(/\/$/,''),
+    readJson:x=>p.readCacheJson(x), writeJson:(x,d)=>p.writeCacheJson(x,d),
+    upload:(f,rr)=>p.uploadToYemot(f,rr,undefined,{convertAudio:true}),
+    del:async what=>{ const u=new URL(p.YEMOT_API_BASE+'/FileAction'); for(const [k,v] of Object.entries({token:p.yemotApiKey(),action:'delete',what})) u.searchParams.set(k,v); const j=await (await fetch(u,{signal:AbortSignal.timeout(20000)})).json().catch(()=>null); if(j?.responseStatus!=='OK') throw new Error('delete: '+String(j?.message||'failed').slice(0,80)); },
+    move:async(what,target)=>{ const u=new URL(p.YEMOT_API_BASE+'/FileAction'); for(const [k,v] of Object.entries({token:p.yemotApiKey(),action:'move',what,target})) u.searchParams.set(k,v); const j=await (await fetch(u,{signal:AbortSignal.timeout(30000)})).json().catch(()=>null); if(j?.responseStatus!=='OK') throw new Error('move: '+String(j?.message||'failed').slice(0,80)); },
+    // Settings are written only when they differ; a folder Yemot does not
+    // have yet is created by writing its settings (as for 5/9).
+    saveSettings:async(dir,want)=>{
+      const path='ivr2:'+dir;
+      if(norm(await r.getText(path+'/ext.ini').catch(()=>null))===norm(want)) return;
+      for(let a=1;a<=3;a++){
+        try { await r.putText(path+'/ext.ini',want); } catch { const settings=Object.fromEntries(want.trim().split('\n').map(l=>{const i=l.indexOf('=');return [l.slice(0,i),l.slice(i+1)];})); await r.update(path,settings).catch(()=>{}); }
+        if(norm(await r.getText(path+'/ext.ini').catch(()=>null))===norm(want)) return;
+        await new Promise(x=>setTimeout(x,1500*a));
+      }
+      throw new Error('settings of '+dir+' not saved in Yemot');
+    },
+  };
+}
+async function newsDeps() {
+  const p=(await import('./youtube-authorized-playback.js'))._pipeline;
+  const N=await import('./news-ext11.js'); const { ytdlpPath }=await import('./youtube-direct.js');
+  const io=await newsIo();
+  return {
+    fetch, log:console,
+    probe:v=>N.probeVideo(v, ytdlpPath()),
+    // The free path only (our own server); never the paid engine.
+    download:(v,out)=>p.downloadApifySource(v,out,undefined,()=>{},false),
+    master:async(src,out,title)=>p.preparePhoneAudio(src,out,{sampleRate:await p.phoneRate(),title,kind:'lesson'}),
+    publish:(v,wav,meta)=>N.publishNews(v,wav,meta,io),
+  };
+}
+if (String(process.env.NEWS11 || 'on').toLowerCase() !== 'off') setTimeout(()=>{
+  let polling=false;
+  const poll=async()=>{ if(polling) return; polling=true; try { const N=await import('./news-ext11.js'); await N.pollOnce(await newsDeps()); } catch(e) { console.warn('[NEWS11] feed round skipped',{message:String(e?.message||e).slice(0,160)}); } finally { polling=false; } };
+  const work=async()=>{ try { const N=await import('./news-ext11.js'); N.status.started ||= new Date().toISOString(); await N.workOnce(await newsDeps()); } catch(e) { console.warn('[NEWS11] work round skipped',{message:String(e?.message||e).slice(0,160)}); } };
+  poll(); setInterval(poll, 2*60*1000).unref?.(); setInterval(work, 20*1000).unref?.();
+}, 90*1000).unref?.();
+app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)=>{
+  try {
+    const N=await import('./news-ext11.js'); const { statfsSync }=await import('node:fs');
+    const idx=(await (await newsIo()).readJson(N.INDEX).catch(()=>null))||{};
+    const items=Object.entries(idx.items||{}).map(([v,e])=>({videoId:v,...e})).sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+    let disk=null; try { const s=statfsSync('/'); disk={ totalGB:Math.round(s.blocks*s.bsize/1e8)/10, freeGB:Math.round(s.bavail*s.bsize/1e8)/10 }; } catch {}
+    const { diskInfo, REC_DIR }=await import('./tv-recorder.js');
+    const { readdirSync, statSync }=await import('node:fs'); const pth=await import('node:path');
+    const sizeOf=d=>{ let n=0; try { for(const e of readdirSync(d,{withFileTypes:true})){ const f=pth.join(d,e.name); try { n+=e.isDirectory()?sizeOf(f):statSync(f).size; } catch {} } } catch {} return n; };
+    res.json({ status:N.status, inYemot:{ next:idx.next||0, archives:idx.archives||0, files:items.length, newest:items.slice(0,15) }, disk, tvRecordingsGB:Math.round(sizeOf(REC_DIR)/1e8)/10, tvDisk:diskInfo() });
+  } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
+});
 // Replays (owner, 19.11): every finished hour of every channel is uploaded to
 // Yemot by itself and kept for good; checked every 5 minutes.
 setTimeout(()=>{ const run=async()=>{ try {
@@ -6137,6 +6222,23 @@ async function configureYemotStructure() {
         // Extension 10 (radio) needs the main menu to take two digits.
         await (await import('./tv-ext5.js')).setupMainMenu10({ getText, putText }, console);
       } catch (e) { console.warn('[EXT5 TV] not configured', { message: String(e?.message || e).slice(0, 200) }); }
+    }
+    // Extension 11: the news (owner, 25.11).
+    if (String(process.env.NEWS11 || 'on').toLowerCase() !== 'off') {
+      try {
+        const N = await import('./news-ext11.js'); const io = await newsIo();
+        // Whatever /11 held before is kept once, so going back is one copy.
+        const rio = await replayIo();
+        for (const d of [N.NEWS_ROOT, N.NEWS_DIR]) {
+          const before = await rio.getText('ivr2:' + d + '/ext.ini').catch(() => null);
+          if (before && before.trim() && !before.includes(N.NEWS_MARK) && !(await rio.getText('ivr2:' + d + '/ext_before_news.ini').catch(() => null))) await rio.putText('ivr2:' + d + '/ext_before_news.ini', before).catch(() => {});
+        }
+        await io.saveSettings(N.NEWS_ROOT, N.menuIni(publicUrl));
+        await io.saveSettings(N.NEWS_DIR, N.playIni(publicUrl, N.NEWS_DIR, 'חדשות מעודכנות'));
+        const idx = (await io.readJson(N.INDEX).catch(() => null)) || {};
+        for (let a = 0; a < (idx.archives || 0); a++) { const d = N.archiveDir(a + N.FIRST_ARCHIVE); await io.saveSettings(d, N.playIni(publicUrl, d, 'ארכיון חדשות ' + (a + 1))); }
+        console.log('[NEWS11] Yemot extension 11 set');
+      } catch (e) { console.warn('[NEWS11] extension 11 not configured', { message: String(e?.message || e).slice(0, 200) }); }
     }
     // Playback extensions: * = Yemot star menu, 0 = main menu (owner, 12.11).
     try { await (await import('./branch2-star-keys.js')).applyMainMenuKey({ base, token }); }
