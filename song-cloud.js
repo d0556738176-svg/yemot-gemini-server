@@ -24,7 +24,9 @@ const log = (event, details = {}) => console.info('[SONG_CLOUD]', event, details
 // stage needs survives a restart of this service. Songs already delivered (so
 // a late second runner never makes a second copy) and songs still being made
 // (so their watcher starts again after the restart) are kept on disk.
-const STATE_DIR = process.env.SONG_STATE_DIR || '/var/lib/yemot-data';
+// Under the test runner the real server's files are never touched.
+const TEST_DIR = process.env.NODE_TEST_CONTEXT ? '/tmp/yemot-song-test-' + process.pid : '';
+const STATE_DIR = process.env.SONG_STATE_DIR || TEST_DIR || '/var/lib/yemot-data';
 const DELIVERED_FILE = STATE_DIR + '/song-delivered.json';
 const ACTIVE_FILE = STATE_DIR + '/song-cloud-jobs.json';
 function readJson(file, fallback) { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return fallback; } }
@@ -33,10 +35,27 @@ function writeJson(file, data) {
 }
 // Songs whose audio already arrived (the watcher then stops).
 const delivered = new Set(readJson(DELIVERED_FILE, []).slice(-300));
-function markDelivered(jobId) {
+function markDelivered(jobId, { cancelLate = true } = {}) {
   delivered.add(jobId);
   writeJson(DELIVERED_FILE, [...delivered].slice(-300));
+  const titles = active[jobId]?.titles || [];
+  const since = Number(active[jobId]?.since) || Date.now() - 3 * 3600000;
   forgetActive(jobId);
+  // 25.11: the other runner of the song is told to stop by its next sign of
+  // life; one that is too starved to send it is cancelled a few minutes after
+  // delivery (the delivering run has ended by then), so no runner hangs on.
+  if (cancelLate && isCloudWorkerConfigured()) {
+    const t = setTimeout(async () => {
+      try {
+        const runs = await listRuns(new Set(['song ' + jobId, ...titles.map(x => 'song ' + x)]), since);
+        for (const r of (runs || []).filter(x => x.status !== 'completed')) {
+          const ok = await cancelRun(r.id).catch(() => false);
+          log('SECOND_RUNNER_CANCELLED', { jobId, run: r.id, ok });
+        }
+      } catch (e) { log('SECOND_RUNNER_CANCEL_ERROR', { jobId, message: String(e?.message || e).slice(0, 120) }); }
+    }, 3 * 60000);
+    t.unref?.();
+  }
 }
 const active = readJson(ACTIVE_FILE, {}) || {};
 function rememberActive(jobId, entry) { active[jobId] = { ...entry, at: Date.now() }; writeJson(ACTIVE_FILE, active); }
@@ -44,6 +63,7 @@ function forgetActive(jobId) { if (active[jobId]) { delete active[jobId]; writeJ
 export function isCloudJobActive(jobId) { return !!active[jobId] && !delivered.has(jobId); }
 // Last sign of life from any runner of a song (status pings, every minute).
 const beats = new Map();
+const aliveLogged = new Map();
 const STALL_MS = Math.max(3 * 60000, Number(process.env.SONG_STALL_MS || 8 * 60000));
 const FIRST_BEAT_MS = Math.max(10 * 60000, Number(process.env.SONG_FIRST_BEAT_MS || 30 * 60000));
 
@@ -310,8 +330,10 @@ export async function handleWorkerCallback(req, res) {
     if (waiter && stage !== 'alive') waiter.stage = stage;
     beats.set(jobId, Date.now());
     const done = delivered.has(jobId);
-    // Heartbeats every minute are not logged; stage changes are.
+    // Heartbeats every minute are logged once in 10 minutes; stage changes always.
     if (stage !== 'alive') log('WORKER_STATUS', { jobId, stage, waiting: !!waiter, done });
+    else if (done) log('SECOND_RUNNER_TOLD_TO_STOP', { jobId });
+    else if (Date.now() - (aliveLogged.get(jobId) || 0) > 10 * 60000) { aliveLogged.set(jobId, Date.now()); log('WORKER_ALIVE', { jobId }); }
     // done: the other runner already delivered this song, so this one stops
     // at once and frees its runner (before, it ran on for about 50 minutes).
     return res.json({ ok: true, waiting: !!waiter, done });

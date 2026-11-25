@@ -919,7 +919,7 @@ function pumpQueue() {
 // the server restarted it and lost the songs still at the lyrics or queue
 // stage. Each request is now written down until it ends; after a restart the
 // unfinished ones are made again on their own and land in extensions 4 and 7.
-const JOURNAL_FILE = process.env.SONG_JOURNAL_FILE || '/var/lib/yemot-data/song-journal.json';
+const JOURNAL_FILE = process.env.SONG_JOURNAL_FILE || (process.env.NODE_TEST_CONTEXT ? '/tmp/yemot-song-test-' + process.pid + '/song-journal.json' : '/var/lib/yemot-data/song-journal.json');
 const JOURNAL_MAX_AGE_MS = 4 * 3600000;
 function readJournal() { try { const j = JSON.parse(readFileSync(JOURNAL_FILE, 'utf8')); return j && typeof j === 'object' ? j : {}; } catch { return {}; } }
 function writeJournal(j) {
