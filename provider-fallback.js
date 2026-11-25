@@ -33,7 +33,8 @@ export async function callCompatibleChatCompletion({
   fetchImpl = globalThis.fetch,
   cooldowns = new Map(),
   now = Date.now,
-  cooldownMs = DEFAULT_COOLDOWN_MS
+  cooldownMs = DEFAULT_COOLDOWN_MS,
+  onAttempt = null
 }) {
   if (!apiKey || !model || !baseUrl || !Array.isArray(messages) || !messages.length) {
     throw makeProviderError(provider + ' fallback is not configured', 400, provider);
@@ -47,6 +48,8 @@ export async function callCompatibleChatCompletion({
     });
   }
 
+  // Counted only when a request really goes out (not while cooling down).
+  try { onAttempt?.(); } catch {}
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(250, Number(timeoutMs) || 4500));
   const endpoint = String(baseUrl).replace(/\/+$/, '') + '/chat/completions';

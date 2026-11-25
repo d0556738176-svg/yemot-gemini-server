@@ -417,7 +417,9 @@ function geminiModelRestOn(model, status, key, fastPhone=false) {
     keys.push({ key, at: now }); geminiModel429.set(model, keys);
     if (keys.length >= 2) { geminiModelRest.set(model, now + 15 * 60000); console.warn('[Gemini] model quota used up on several keys; resting the model', { model, minutes: 15 }); }
   } else if (status === 503) geminiModelRest.set(model, now + Number(process.env.GEMINI_503_REST_MS || 120000));
-  else if (status === 408 && fastPhone) geminiModelRest.set(model, now + 60000);
+  // 25.11: a timeout is our own short time limit (the planner gives Gemini 2.5 s),
+  // not a Gemini failure: resting the model for it locked Gemini out of most
+  // turns of the live check (13 tries in 20 questions, none answered).
 }
 function geminiModelOrder(n) {
   const idx = Array.from({ length: n }, (_, i) => i);
@@ -2689,7 +2691,7 @@ async function raceSynthesis(prompt,budgetMs,{gemini=true,maxTokens=700,validate
     const startGate=tiered
       ? gate.ready(tier).then(()=>provider.rot?new Promise(r=>setTimeout(r,provider.rot)):null).then(notNeeded)
       : (provider.delayMs?new Promise(r=>setTimeout(r,provider.delayMs)).then(notNeeded):Promise.resolve());
-    racers.push(startGate.then(()=>{ countUse(provider.name+' '+provider.model); return callCompatibleChatCompletion({
+    racers.push(startGate.then(()=>{ return callCompatibleChatCompletion({ onAttempt:()=>countUse(provider.name+' '+provider.model),
       provider:provider.name,baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:provider.model,
       messages:[{role:'user',content:prompt}],timeoutMs:Math.max(1200,budgetMs-300),
       maxTokens,cooldowns:provider.big?branch1SynthCooldownsBig:branch1SynthCooldowns,cooldownMs:15000
@@ -6663,7 +6665,10 @@ app.get('/health/search-local', rateLimit(6, 60 * 1000, 'search-local'), async (
     const u=new URL(String(process.env.SEARXNG_LOCAL_URL||'http://127.0.0.1:8888')+'/search'); u.searchParams.set('q',q); u.searchParams.set('format','json'); u.searchParams.set('language','he');
     const r=await fetch(u,{signal:AbortSignal.timeout(8000)}); const j=r.ok?await r.json():{};
     res.json({ok:r.ok,status:r.status,ms:Date.now()-t0,results:(j.results||[]).length,engines:[...new Set((j.results||[]).flatMap(x=>x.engines||[]))],unresponsive:(j.unresponsive_engines||[]).map(x=>Array.isArray(x)?x.join(': '):String(x)),first:(j.results||[]).slice(0,3).map(x=>String(x.title||'').slice(0,80))});
-  } catch(e) { res.json({ok:false,ms:Date.now()-t0,error:String(e?.cause?.code||e?.message||e).slice(0,80)}); }
+  } catch(e) {
+    let setup=''; try { setup=String(readFileSync('/var/log/yemot-searxng-setup.log','utf8')).split('\n').filter(Boolean).slice(-15).join('\n').slice(-2500); } catch {}
+    res.json({ok:false,ms:Date.now()-t0,error:String(e?.cause?.code||e?.message||e).slice(0,80),setup});
+  }
 });
 app.get('/health/usage',(req,res)=>{
   const days={};
