@@ -1,4 +1,3 @@
 const M='https://main.176-97-205-41.sslip.io';
-const j=await fetch(M+'/health/usage',{signal:AbortSignal.timeout(60000)}).then(r=>r.json());
-console.log(JSON.stringify(j.days));
-for(const x of j.gemini.slice(-40)) console.log(JSON.stringify(x));
+for(let i=0;i<30;i++){ const r=await fetch(M+'/owner-report/71628fdb348ac272b4ef0460').catch(()=>null); if(r&&r.ok){ console.log(await r.text()); process.exit(0);} await new Promise(x=>setTimeout(x,20000)); }
+console.log('no extract');
