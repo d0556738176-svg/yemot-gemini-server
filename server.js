@@ -411,7 +411,9 @@ function promptWithPersona(prompt) {
 
 const geminiModelRest = new Map(), geminiModelOk = new Map(), geminiModel429 = new Map();
 // 25.11: the last Gemini tries (model, key number, status, time), for /health/usage.
-const geminiTraceLog=[]; let geminiTraceTry=null;
+const geminiTraceLog=[]; let geminiTraceTry=null; const geminiModel503=new Map();
+// True when at least one Gemini model is not resting (for the brain's choices).
+function geminiAvailable(){ const now=Date.now(); return MODEL_NAMES.some(m=>(geminiModelRest.get(m)||0)<=now); }
 function geminiTrace(x){ geminiTraceLog.push({at:new Date().toISOString().slice(11,19),...x}); if(geminiTraceLog.length>80) geminiTraceLog.splice(0,40); }
 function geminiModelRestOn(model, status, key, fastPhone=false) {
   const now = Date.now();
@@ -419,7 +421,14 @@ function geminiModelRestOn(model, status, key, fastPhone=false) {
     const keys = (geminiModel429.get(model) || []).filter(x => now - x.at < 10 * 60000 && x.key !== key);
     keys.push({ key, at: now }); geminiModel429.set(model, keys);
     if (keys.length >= 2) { geminiModelRest.set(model, now + 15 * 60000); console.warn('[Gemini] model quota used up on several keys; resting the model', { model, minutes: 15 }); }
-  } else if (status === 503) geminiModelRest.set(model, now + Number(process.env.GEMINI_503_REST_MS || 120000));
+  } else if (status === 503) {
+    // 25.11: "high demand" on one key is usually a passing spike: the next keys
+    // (other projects) are tried at once, and the model rests only briefly after
+    // several overloads in a minute (one 503 rested it for 2 minutes and the
+    // other 6 keys were never tried).
+    const hits = (geminiModel503.get(model) || []).filter(t => now - t < 60000); hits.push(now); geminiModel503.set(model, hits);
+    if (hits.length >= 3) geminiModelRest.set(model, now + Number(process.env.GEMINI_503_REST_MS || 30000));
+  }
   // 25.11: a timeout is our own short time limit (the planner gives Gemini 2.5 s),
   // not a Gemini failure: resting the model for it locked Gemini out of most
   // turns of the live check (13 tries in 20 questions, none answered).
@@ -4768,6 +4777,7 @@ async function runExt3Brain(utterance, phone, callId, turnHistory, now, media=''
       ? raceSynthesis(prompt,budgetMs,{maxTokens:Math.min(maxTokens,600),gemini:true,geminiBudgetMs:2500})
       : raceSynthesis(prompt,budgetMs,{maxTokens,quality:true}),
     webSearch:(q,o)=>ext3WebSearch(q,{timeoutMs:Math.min(o?.timeoutMs||3500,3500)}),
+    geminiReady:()=>geminiAvailable(),
     placesSearch:(q,o)=>serperPlaces(q,{timeoutMs:Math.min(o?.timeoutMs||4500,4500)}),
     youtubeProxy:async(kind,params)=>{
       const secret=String(process.env.EXT3_MEDIA_SECRET||'').trim(); if(!secret) throw Object.assign(new Error('no proxy'),{status:503});

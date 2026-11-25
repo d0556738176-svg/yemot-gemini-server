@@ -873,6 +873,14 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   if (isCapabilityQuestion(utterance)) { plan = { ...plan, intent: 'chat', about: true }; log.info?.('[EXT3_BRAIN] question about the system'); }
   // 18.11 "מה נשמע כפרה" was searched on the web and explained like a dictionary.
   if (GREETING.test(utterance.trim()) && ['web', 'read_page', 'recall'].includes(plan.intent)) plan = { ...plan, intent: 'chat' };
+  // 25.11 (owner: true answers): when Gemini is overloaded or out of quota, a
+  // knowledge question is answered from web sources rather than from a small
+  // free model's memory (live check: a challah recipe "with hummus").
+  if (plan.intent === 'chat' && deps.geminiReady && !deps.geminiReady() && !plan.about && !plan.continueOffer && !lessonRef && !stuck && !GREETING.test(utterance.trim())
+      && utterance.trim().split(/\s+/).length >= 3 && /(?:^|\s)(?:מה|מי|איך|למה|מדוע|מתי|כמה|איפה|היכן|האם|תסביר|תסבירי|הסבר|ספר לי|ספרי לי|מהו|מהי|מה זה|מה ההבדל)(?=\s|$)/u.test(utterance)) {
+    plan = { ...plan, intent: 'web', search: plan.search || plan.standalone || utterance };
+    log.info?.('[EXT3_BRAIN] Gemini not available; knowledge question answered from web sources');
+  }
   // Facts about real people, songs and routes come from the web, never from a
   // small model's memory (17.11: an invented duo "אישואשה", invented albums,
   // invented bus lines through Ramat Gan).
