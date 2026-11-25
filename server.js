@@ -1,3 +1,4 @@
+import { mountOwnerBrowser } from './owner-browser.js';
 import { createVoiceRecorder } from './branch2-voice-recording.js';
 import { geminiKeysFrom } from './gemini-keys.js';
 import { progressAnnouncement } from './youtube-playback-progress.js';
@@ -52,6 +53,8 @@ app.use((req, res, next) => {
   next();
 });
 
+// Owner, 25.11: his work browser at /browser (password, work sites only).
+mountOwnerBrowser(app, rateLimit);
 const rateBuckets = new Map();
 function rateLimit(maxRequests, windowMs, label) {
   return (req, res, next) => {
