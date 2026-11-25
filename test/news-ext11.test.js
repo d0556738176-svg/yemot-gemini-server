@@ -72,14 +72,15 @@ test('full folder: the older half goes to the archive, the newer half moves down
   await io.writeJson(N.INDEX, { version: 1, next: 1000, items, archives: 0 });
   const e = await N.publishNews('newvideo123', '/tmp/x.wav', { title: 'newest' }, io);
   assert.equal(e.file, '500');
-  assert.equal(io.files.get('ivr2:/11/2/000.wav'), 'f0');
-  assert.equal(io.files.get('ivr2:/11/2/499.wav'), 'f499');
+  assert.equal(io.files.get('ivr2:/11/1/1/000.wav'), 'f0');
+  assert.equal(io.files.get('ivr2:/11/1/1/499.wav'), 'f499');
   assert.equal(io.files.get('ivr2:/11/1/000.wav'), 'f500');
   assert.equal(io.files.get('ivr2:/11/1/499.wav'), 'f999');
   const idx = await io.readJson(N.INDEX);
   assert.equal(idx.archives, 1); assert.equal(idx.next, 501);
   assert.deepEqual(await N.lookupNews('/11/1', '000', io), { videoId: 'v0000000500', title: 't500', dub: false, channel: '' });
-  assert.equal((await N.lookupNews('/11/2', '499', io)).videoId, 'v0000000499');
+  assert.equal((await N.lookupNews('/11/1/1', '499', io)).videoId, 'v0000000499');
+  assert.match(io.ini.get('/11/1/1'), /type=playfile/);
 });
 
 test('key 2: asks 1/2; 1 deletes and plays the next older file; 2 cancels', async () => {
@@ -124,4 +125,40 @@ test('key 8 details: the channel comes from the next source when one fails', asy
   const g = await M.videoMeta('abcdefghij2', { env: {}, fetchImpl: async () => { throw new Error('down'); }, ytdlp: async () => null, hintChannel: 'ערוץ כנסת 99', log: {} });
   assert.equal(g.channel, 'ערוץ כנסת 99');
   assert.deepEqual(M.parseYtdlp('C14\u0001125\u000120261125\u0001340\u0001שם'), { channel: 'C14', durationSeconds: 125, viewCount: 340, publishedAt: '2026-11-25T12:00:00Z', title: 'שם', dateOnly: true });
+});
+
+test('topics: each topic files into its own extension and its own index', async () => {
+  N._resetForTests();
+  const io = fakeYemot();
+  await N.publishNews('torahvideo1', '/tmp/x.wav', { topic: '2', title: 'שיעור' }, io);
+  await N.publishNews('musicvideo1', '/tmp/x.wav', { topic: '3', title: 'שיר' }, io);
+  await N.publishNews('yedid1413', '/tmp/x.wav', { topic: '2', title: 'קטע', url: 'https://hel1.your-objectstorage.com/x/y/z' }, io);
+  assert.ok(io.files.has('ivr2:/11/2/000.wav')); assert.ok(io.files.has('ivr2:/11/2/001.wav')); assert.ok(io.files.has('ivr2:/11/3/000.wav'));
+  assert.ok(!io.files.has('ivr2:/11/1/000.wav'));
+  assert.equal((await N.lookupNews('/11/2', '000', io)).videoId, 'torahvideo1');
+  const site = await N.lookupNews('/11/2', '001', io);
+  assert.equal(site.videoId, null); assert.match(site.url, /objectstorage/);
+  assert.deepEqual(N.topicOfDir('/11/3/2'), { t: '3', a: 2 }); assert.equal(N.topicOfDir('/11/7'), null);
+  assert.match(io.ini.get('/11/3'), /title=מוזיקה/);
+});
+
+test('channel site: post list and a post page with its video file', () => {
+  assert.deepEqual(N.parseSitemapPosts('<url><loc>https://x/</loc></url><url><loc>https://x/post/1412</loc></url><url><loc>https://x/post/1414</loc></url>'), [1414, 1412]);
+  const p = N.parsePostPage('<meta property="og:title" content="##### **לא לחשוב היום על מחר🤚** 💥קטע חזק מהרב רפאל רובין [video-embedd… | ידיד נפש⚡"><time datetime="2026-11-25T19:45:10Z">x</time><p>[video-embedded#](https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/95/dc/95dcbadd25)</p>');
+  assert.equal(p.video, 'https://hel1.your-objectstorage.com/chatfree-yedid-nefsh/95/dc/95dcbadd25');
+  assert.equal(p.title, 'לא לחשוב היום על מחר🤚 💥קטע חזק מהרב רפאל רובין');
+  assert.equal(p.published, '2026-11-25T19:45:10Z');
+});
+
+test('a new topic starts with the newest few of each channel; news keeps first place in the work', async () => {
+  N._resetForTests();
+  const now = Date.parse('2026-11-25T16:00:00Z');
+  const items = [1, 2, 3, 4, 5].map(i => ({ id: 'torahvid00' + i, t: 'ש' + i, p: new Date(now - i * 3600e3).toISOString() }));
+  const fetch = async u => /results\?search_query/.test(String(u)) ? { ok: true, text: async () => '"channelRenderer":{"channelId":"UCyyyyyyyyyyyyyyyyyyyyyy"' } : /sitemap/.test(String(u)) ? { ok: true, text: async () => '' } : { ok: true, text: async () => feed('ch', items) };
+  const st0 = N.loadState(); delete st0.topicStarted?.['2']; delete st0.topicPolled?.['2']; N.saveState(st0);
+  await N.pollOnce({ fetch, topics: ['2'] }, now);
+  const st = N.loadState();
+  const queued = Object.values(st.queue).filter(q => q.topic === '2');
+  assert.ok(queued.length >= 1 && queued.every(q => ['ש1', 'ש2', 'ש3'].includes(q.title)));
+  assert.equal(N.serverBusy(5, 2000), true); assert.equal(N.serverBusy(1, 2000), false); assert.equal(N.serverBusy(1, 100), true);
 });

@@ -4633,17 +4633,26 @@ async function youtubeCallHandler(call) {
   const newsPart=String(call?.values?.news ?? call?.req?.query?.news ?? '').trim();
   if(newsPart==='menu') {
     try {
-      const N=await import('./news-ext11.js');
-      const idx=(await (await newsIo()).readJson(N.INDEX).catch(()=>null))||{};
-      const arch=Array.from({length:Math.min(8,idx.archives||0)},(_,i)=>String(i+N.FIRST_ARCHIVE));
-      const tap=async text=>String(await call.read([{type:'text',data:sanitizeForYemot(text)}],'tap',
-        {max_digits:1,min_digits:1,sec_wait:7,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'n11'+(++tapNo),timeout:10*60*1000,digits_allowed:['1',...arch,'0']})||'None').trim();
-      const text='חדשות. לחדשות המעודכנות הקישו 1. '+(arch.length?arch.map(a=>'לארכיון '+(Number(a)-1)+' הקישו '+a).join('. ')+'. ':'')+'לתפריט הראשי הקישו אפס.';
+      // 25.11 (owner): 11 = topics: 1 news, 2 Torah lessons, 3 music, 4 technology.
+      // A topic with archive folders asks which one; otherwise straight in.
+      const N=await import('./news-ext11.js'); const io=await newsIo();
+      const topics=Object.keys(N.TOPICS);
+      const tap=async (text,allowed)=>String(await call.read([{type:'text',data:sanitizeForYemot(text)}],'tap',
+        {max_digits:1,min_digits:1,sec_wait:7,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'n11'+(++tapNo),timeout:10*60*1000,digits_allowed:[...allowed,'0']})||'None').trim();
+      const text='ערוצים אונליין. '+topics.map(k=>'ל'+N.TOPICS[k].title+' הקישו '+k).join('. ')+'. לתפריט הראשי הקישו אפס.';
       for(let i=0;i<3;i++) {
-        const k=await tap(text);
+        const k=await tap(text,topics);
         branch2KeyLog('news11',k,0,0);
         if(k==='None'||k==='0') return call.go_to_folder('/');
-        if(k==='1'||arch.includes(k)) return call.go_to_folder(N.NEWS_ROOT+'/'+k);
+        if(!N.TOPICS[k]) continue;
+        const idx=await N.readIndex(io,k).catch(()=>({}));
+        const arch=Array.from({length:Math.min(8,idx.archives||0)},(_,j)=>String(j+1));
+        if(!arch.length) return call.go_to_folder(N.topicDir(k));
+        // 1 = the newest; 2.. = archive 1..
+        const opts=['1',...arch.map(a=>String(Number(a)+1))];
+        const k2=await tap(N.TOPICS[k].title+'. לחדשים הקישו 1. '+arch.map(a=>'לארכיון '+a+' הקישו '+(Number(a)+1)).join('. ')+'. לחזרה הקישו אפס.',opts);
+        if(k2==='1'||k2==='None') return call.go_to_folder(N.topicDir(k));
+        if(k2!=='0'&&opts.includes(k2)) return call.go_to_folder(N.archiveDir(k,Number(k2)-1));
       }
       return call.go_to_folder('/');
     } catch(e) {
@@ -5590,7 +5599,7 @@ app.get('/yemot-media', async (req, res) => {
     const io = await newsIo();
     const out = await handleMediaKey(req.query || {}, {
       lookup: (dir, file) => String(dir).startsWith(N.NEWS_ROOT + '/') ? N.lookupNews(dir, file, io) : ext7Lookup(dir, file),
-      canDelete: dir => new RegExp('^' + N.NEWS_ROOT + '/[1-9]$').test(String(dir).replace(/\/$/, '')),
+      canDelete: dir => !!N.topicOfDir(String(dir).replace(/\/$/, '')),
       deleteFile: (dir, file) => N.deleteNews(dir, file, io),
       details: mediaDetails, dubStatus: dubStatusOf, startDub: startDubJob,
       language: async (vid, title) => (await import('./youtube-video-facts.js')).videoLanguage(await fetchVideoFacts(vid, process.env).catch(() => null), title),
@@ -5908,7 +5917,17 @@ async function newsDeps() {
     probe:v=>N.probeVideo(v, ytdlpPath()),
     // The free path only (our own server); never the paid engine.
     download:(v,out)=>p.downloadApifySource(v,out,undefined,()=>{},false),
-    master:async(src,out,title)=>p.preparePhoneAudio(src,out,{sampleRate:await p.phoneRate(),title,kind:'lesson'}),
+    // Speech (news, lessons, technology) or music (kind 'song': no low cut or
+    // noise reduction, peak -3 dB), at the owner's phone spec.
+    master:async(src,out,title,kind)=>p.preparePhoneAudio(src,out,{sampleRate:await p.phoneRate(),title,kind:kind==='song'?'song':'lesson'}),
+    // A channel site's own video file (Yedid Nefesh), at most 2 GB.
+    downloadUrl:async(url,out)=>{
+      const { createWriteStream }=await import('node:fs'); const { pipeline }=await import('node:stream/promises'); const { Readable }=await import('node:stream');
+      const r=await fetch(url,{headers:{'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0 Safari/537.36'},signal:AbortSignal.timeout(30*60*1000)});
+      if(!r.ok||!r.body) throw new Error('site file HTTP '+r.status);
+      if(Number(r.headers.get('content-length')||0)>2e9) throw new Error('site file too big');
+      await pipeline(Readable.fromWeb(r.body),createWriteStream(out));
+    },
     publish:(v,wav,meta)=>N.publishNews(v,wav,meta,io),
   };
 }
@@ -5931,9 +5950,11 @@ app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)
     // digit lines (11 needs two digits). No keys or passwords are in them.
     const rio=await replayIo(); const lines=t=>t==null?null:String(t).replace(/\r/g,'').split('\n').filter(Boolean);
     const settings={ '/11':lines(await rio.getText('ivr2:/11/ext.ini').catch(()=>null)), '/11/1':lines(await rio.getText('ivr2:/11/1/ext.ini').catch(()=>null)),
+      ...Object.fromEntries(await Promise.all(Object.keys(N.TOPICS).filter(k=>k!=='1').map(async k=>[N.topicDir(k),(lines(await rio.getText('ivr2:'+N.topicDir(k)+'/ext.ini').catch(()=>null))||[]).filter(l=>/^(type|title)=/.test(l))]))),
       mainMenu:(lines(await rio.getText('ivr2:/ext.ini').catch(()=>null))||[]).filter(l=>/^(type|digits|timeout|text_extensions)=/.test(l)) };
     const { metaLog }=await import('./video-meta.js');
-    res.json({ settings, key8:metaLog, status:N.status, inYemot:{ next:idx.next||0, archives:idx.archives||0, files:items.length, newest:items.slice(0,15) }, disk, tvRecordingsGB:Math.round(sizeOf(REC_DIR)/1e8)/10, tvDisk:diskInfo() });
+    const topics={}; for(const k of Object.keys(N.TOPICS)) { const ti=await N.readIndex(await newsIo(),k).catch(()=>({})); const it=Object.entries(ti.items||{}).map(([v,e])=>({id:v,...e})).sort((a,b)=>String(b.at).localeCompare(String(a.at))); topics[k]={title:N.TOPICS[k].title,next:ti.next||0,archives:ti.archives||0,files:it.length,newest:it.slice(0,6).map(e=>({file:e.dir+'/'+e.file,title:String(e.title||'').slice(0,70),ch:e.chTitle,yt:e.ytChannel}))}; }
+    res.json({ settings, topics, key8:metaLog.slice(0,5), status:N.status, inYemot:{ next:idx.next||0, archives:idx.archives||0, files:items.length, newest:items.slice(0,15) }, disk, tvRecordingsGB:Math.round(sizeOf(REC_DIR)/1e8)/10, tvDisk:diskInfo() });
   } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
 });
 // Replays (owner, 19.11): every finished hour of every channel is uploaded to
@@ -6247,14 +6268,17 @@ async function configureYemotStructure() {
         const N = await import('./news-ext11.js'); const io = await newsIo();
         // Whatever /11 held before is kept once, so going back is one copy.
         const rio = await replayIo();
-        for (const d of [N.NEWS_ROOT, N.NEWS_DIR]) {
+        const dirs = [N.NEWS_ROOT, ...Object.keys(N.TOPICS).map(N.topicDir)];
+        for (const d of dirs) {
           const before = await rio.getText('ivr2:' + d + '/ext.ini').catch(() => null);
           if (before && before.trim() && !before.includes(N.NEWS_MARK) && !(await rio.getText('ivr2:' + d + '/ext_before_news.ini').catch(() => null))) await rio.putText('ivr2:' + d + '/ext_before_news.ini', before).catch(() => {});
         }
         await io.saveSettings(N.NEWS_ROOT, N.menuIni(publicUrl));
-        await io.saveSettings(N.NEWS_DIR, N.playIni(publicUrl, N.NEWS_DIR, 'חדשות מעודכנות'));
-        const idx = (await io.readJson(N.INDEX).catch(() => null)) || {};
-        for (let a = 0; a < (idx.archives || 0); a++) { const d = N.archiveDir(a + N.FIRST_ARCHIVE); await io.saveSettings(d, N.playIni(publicUrl, d, 'ארכיון חדשות ' + (a + 1))); }
+        for (const k of Object.keys(N.TOPICS)) {
+          await io.saveSettings(N.topicDir(k), N.playIni(publicUrl, N.topicDir(k), N.TOPICS[k].title));
+          const idx = await N.readIndex(io, k).catch(() => ({}));
+          for (let a = 1; a <= (idx.archives || 0); a++) { const d = N.archiveDir(k, a); await io.saveSettings(d, N.playIni(publicUrl, d, 'ארכיון ' + N.TOPICS[k].title + ' ' + a)); }
+        }
         console.log('[NEWS11] Yemot extension 11 set');
       } catch (e) { console.warn('[NEWS11] extension 11 not configured', { message: String(e?.message || e).slice(0, 200) }); }
     }

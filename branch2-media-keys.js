@@ -69,7 +69,8 @@ export async function handleMediaKey(q, deps, log = console) {
   }
 
   if (key === '8') {
-    if (!item?.videoId) return say('אין לי פרטים על הקובץ הזה') + '&' + back;
+    // 25.11: a file from a channel site (not YouTube) has its title and channel.
+    if (!item?.videoId) return say(item?.title ? 'זה ' + item.title + (item.channel ? ', מהערוץ ' + item.channel : '') : 'אין לי פרטים על הקובץ הזה') + '&' + back;
     const lines = await deps.details(item.videoId, item.title, item.dub, { channel: item.channel || '' }).catch(() => null);
     return skippable(lines?.length ? lines : ['אין לי פרטים נוספים על הקובץ הזה']);
   }
