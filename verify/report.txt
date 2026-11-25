@@ -1,15 +1,22 @@
-main version 0f26df072f29 2026-11-25T20:57:55.386Z
-started: one song in extension 4. Read /owner-report/d7c33ddf68afd4e1253e13b6 (it grows as the song is made).
-song check, extension 4, 2026-11-25T21:09:04.755Z
-request: שיר שמח וקצר על שבת קודש, בסגנון חסידי
-+0s status {"status":"queued","jobId":"775e37d3-ea16-424b-bc91-db362a646805"}
-+0s status {"status":"generating_lyrics","jobId":"775e37d3-ea16-424b-bc91-db362a646805"}
-+9s status {"status":"generating_music","songId":"b667408e-70a5-4ed8-ab25-187bd2e77115","title":"שבת של אור וניגון","durationSeconds":60}
-+120s cloud {"waiting":true,"seconds":111,"stage":"queued"}
-+240s cloud {"waiting":true,"seconds":231,"stage":"generating"}
-+360s cloud {"waiting":true,"seconds":351,"stage":"generating"}
-+480s cloud {"waiting":true,"seconds":471,"stage":"generating"}
-+600s cloud {"waiting":true,"seconds":591,"stage":"generating"}
-+664s done {"ready":true,"keys":["id","spec","provider","model","playbackPaths","ext7","record"]}
-songs health {"ok":true,"cloudWorker":true,"warmRunners":{"idle":0,"total":0},"aceMusic":{"status":"available","cooldownUntil":0},"aceStep":{"status":"available","cooldownUntil":0},"githubCpu":{"status":"available","cooldownUntil":1795641600578},"huggingFaceSpace":{"status":"available","cooldownUntil":0},"backup":{"status":"available","cooldownUntil":0},"activeJobs":0,"recent":[{"at":"at createError (/opt/yemot/main/node_modules/yemot-api/node_modules/axios/lib/core/createError.js:16:15)","event":"ivr_crash","message":"Request failed with status code 500"},{"at":"at createError (/opt/yemot/main/node_modules/yemot-api/node_modules/axios/lib/core/createError.js:16:15)","event":"ivr_crash","message":"Request failed with status code 500"},{"at":"at createError (/opt/yemot/main/node_modules/yemot-api/node_modules/axios/lib/core/createError.js:16:15)","event":"ivr_crash","message":"Request failed with status code 500"},{"at":"at createError (/opt/yemot/main/node_modules/yemot-api/node_modules/axios/lib/core/createError.js:16:15)","event":"ivr_crash","message":"Request failed with status code 500"},{"event":"SONG_REQUEST","jobId":"5c4c4237-8dbf-43f3-9f44-3703ff287bb9","durationSeconds":60,"at":"2026-11-23T23:59:52.029Z"},{"event":"LYRICS_READY","id":"2fb479bc-c8b2-4482-abb0-d8bde205806a","chars":459,"at":"2026-11-23T23:59:53.971Z"},{"event":"MUSIC_PROVIDER_SELECTED","provider":"github-cpu","at":"2026-11-23T23:59:53.973Z"},{"event":"SONG_READY","id":"2fb479bc-c8b2-4482-abb0-d8bde205806a","provider":"github-cpu","durationSeconds":180,"chunks":3,"ext7":"168","download":"ivr2:/אודיו/שיר AI - תפילת הלב - 2fb479.mp3","aiFolder":"ivr2:/שירי AI/תפילת הלב - 2fb479.flac","at":"2026-11-24T00:25:37.951Z"},{"event":"SONG_REQUEST","jobId":"8e74b20b-c4fe-4a89-9a90-c621cd73f943","durationSeconds":60,"at":"2026-11-24T09:15:19.645Z"},{"event":"LYRICS_READY","id":"175d0b7a-e2c3-4900-90dc-8a5e0201d5a4","chars":716,"at":"2026-11-24T09:15:25.030Z"},{"event":"MUSIC_PROVIDER_SELECTED","provider":"github-cpu","at":"2026-11-24T09:15:25.032Z"},{"event":"MUSIC_GENERATION_READY","id":"175d0b7a-e2c3-4900-90dc-8a5e0201d5a4","provider":"github-cpu","bytes":11669132,"at":"2026-11-24T09:22:04.177Z"},{"event":"SONG_READY","id":"175d0b7a-e2c3-4900-90dc-8a5e0201d5a4","provider":"github-cpu","durationSeconds":60,"chunks":1,"ext7":"170","download":"ivr2:/אודיו/שיר AI - בוקר טוב על הרחוב - 175d0b.mp3","aiFolder":"ivr2:/שירי AI/בוקר טוב על הרחוב - 175d0b.flac","at":"2026-11-24T09:22:13.179Z"},{"event":"SONG_REQUEST"
+log extract, last 1 h, units main, pattern b667408e|SONG_RESUM|WATCHERS
+
+==== yemot-main: 17 entries ====
+2026-11-25T21:09:13+00:00 EM-208 node[907692]: [SONG] LYRICS_READY { id: 'b667…', chars: 330 }
+2026-11-25T21:09:13+00:00 EM-208 node[907692]: [SONG] MUSIC_GENERATION_STARTED { id: 'b667…', durationSeconds: 60 }
+2026-11-25T21:09:13+00:00 EM-208 node[907692]: [SONG_CLOUD] SONG_RUNNERS { jobId: 'b667…', warm: 0, cold: 2 }
+2026-11-25T21:09:15+00:00 EM-208 node[907692]: [SONG_CLOUD] DISPATCHED { jobId: 'b667…', workflow: 'song-worker.yml', ref: 'main' }
+2026-11-25T21:09:16+00:00 EM-208 node[907692]: [SONG_CLOUD] DISPATCHED { jobId: 'b667…', workflow: 'song-worker.yml', ref: 'main' }
+2026-11-25T21:11:16+00:00 EM-208 node[907692]: [SONG_CLOUD] WORKER_STATUS { jobId: 'b667…', stage: 'starting', waiting: true, done: false }
+2026-11-25T21:11:37+00:00 EM-208 node[907692]: [SONG_CLOUD] WORKER_STATUS { jobId: 'b667…', stage: 'generating', waiting: true, done: false }
+2026-11-25T21:13:11+00:00 EM-208 node[907692]: [SONG_CLOUD] WORKER_STATUS { jobId: 'b667…', stage: 'starting', waiting: true, done: false }
+2026-11-25T21:13:33+00:00 EM-208 node[907692]: [SONG_CLOUD] WORKER_STATUS { jobId: 'b667…', stage: 'generating', waiting: true, done: false }
+2026-11-25T21:20:00+00:00 EM-208 node[907692]: [SONG_CLOUD] AUDIO_RECEIVED { jobId: 'b667…', bytes: 11986694, waiting: true }
+2026-11-25T21:20:00+00:00 EM-208 node[907692]: [SONG] MUSIC_GENERATION_READY { id: 'b667…', provider: 'github-cpu', bytes: 11986694 }
+2026-11-25T21:20:00+00:00 EM-208 node[907692]: [SONG] AUDIO_DOWNLOADED { id: 'b667…', bytes: 11986694, provider: 'github-cpu' }
+2026-11-25T21:20:01+00:00 EM-208 node[907692]: [SONG] AUDIO_CONVERTED { id: 'b667…', chunks: 1 }
+2026-11-25T21:20:02+00:00 EM-208 node[907692]: [SONG] EXT7_ADDED { key: '***', file: '186' }
+2026-11-25T21:20:06+00:00 EM-208 node[907692]: [SONG] DOWNLOAD_COPY_SAVED { id: 'b667…', remote: 'ivr2:/אודיו/שיר AI - שבת של אור וניגון - b66740.mp3', bytes: 2403237 }
+2026-11-25T21:20:08+00:00 EM-208 node[907692]: [SONG] AI_FOLDER_SAVED { id: 'b667…', remote: 'ivr2:/שירי AI/שבת של אור וניגון - b66740.flac', bytes: 11988202, format: 'flac' }
+2026-11-25T21:20:08+00:00 EM-208 node[907692]: [SONG] SONG_READY { id: 'b667…', provider: 'github-cpu', durationSeconds: 60, chunks: 1, ext7: '186', download: 'ivr2:/אודיו/שיר AI - שבת של אור וניגון - b66740.mp3', aiFolder: 'ivr2:/שירי AI/שבת של אור וניגון - b66740.flac' }
+
 exit=0
