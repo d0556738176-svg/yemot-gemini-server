@@ -4521,7 +4521,7 @@ async function searchSearxng(q,{timeoutMs=4000}={}) {
   const local=String(process.env.SEARXNG_LOCAL_URL||'http://127.0.0.1:8888');
   if(Date.now()>localSearxDownUntil) {
     try {
-      const u=new URL(local+'/search'); u.searchParams.set('q',q); u.searchParams.set('format','json'); u.searchParams.set('language','he'); u.searchParams.set('safesearch','2');
+      const u=new URL(local+'/search'); u.searchParams.set('q',q); u.searchParams.set('format','json'); u.searchParams.set('language','auto'); u.searchParams.set('safesearch','2');
       const r=await fetch(u,{signal:AbortSignal.timeout(timeoutMs),headers:{'Accept':'application/json'}});
       if(r.ok) { const j=await r.json(); const out=(j.results||[]).slice(0,12).map(x=>({title:String(x.title||''),url:String(x.url||''),snippet:String(x.content||''),engines:x.engines})); console.info('[SEARXNG] local results',{count:out.length}); if(out.length) return out; }
     } catch(e) { if(/ECONNREFUSED|fetch failed/i.test(String(e?.cause?.code||e?.message||''))) localSearxDownUntil=Date.now()+5*60000; }
@@ -6681,7 +6681,7 @@ app.get('/health/search-local', rateLimit(6, 60 * 1000, 'search-local'), async (
   const q=String(req.query.q||'ירושלים').slice(0,80);
   const t0=Date.now();
   try {
-    const u=new URL(String(process.env.SEARXNG_LOCAL_URL||'http://127.0.0.1:8888')+'/search'); u.searchParams.set('q',q); u.searchParams.set('format','json'); u.searchParams.set('language','he');
+    const u=new URL(String(process.env.SEARXNG_LOCAL_URL||'http://127.0.0.1:8888')+'/search'); u.searchParams.set('q',q); u.searchParams.set('format','json'); u.searchParams.set('language','auto');
     const r=await fetch(u,{signal:AbortSignal.timeout(8000)}); const j=r.ok?await r.json():{};
     res.json({ok:r.ok,status:r.status,ms:Date.now()-t0,results:(j.results||[]).length,engines:[...new Set((j.results||[]).flatMap(x=>x.engines||[]))],unresponsive:(j.unresponsive_engines||[]).map(x=>Array.isArray(x)?x.join(': '):String(x)),first:(j.results||[]).slice(0,3).map(x=>String(x.title||'').slice(0,80))});
   } catch(e) {

@@ -46,7 +46,7 @@ general:
   instance_name: "yemot"
 search:
   safe_search: 2
-  default_lang: "he"
+  default_lang: "auto"
   formats: [html, json]
   suspended_times:
     SearxEngineAccessDenied: 3600
