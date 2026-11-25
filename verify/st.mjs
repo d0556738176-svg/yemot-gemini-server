@@ -1,4 +1,6 @@
-const r=await fetch('https://www.hebcal.com/hebcal?v=1&cfg=json&s=on&i=on&leyning=on&F=on&o=on&nx=on&lg=he&start=2026-11-24&end=2026-12-06');
-const j=await r.json(); console.log(r.status);
-for(const x of (j.items||[])) console.log(x.date, x.category, x.title, '|', x.hebrew, '|', JSON.stringify(x.leyning||{}).slice(0,300));
-const s=await fetch('https://searx.be/search?q=test&format=json').then(r=>r.status).catch(e=>String(e)); console.log('public searx',s);
+// Read-only health snapshot of the main server (no secrets are returned by these endpoints).
+const M='https://main.176-97-205-41.sslip.io';
+for (const p of ['/version','/health/models','/web-search-status','/health/search-local','/server-resources']) {
+  const t=await fetch(M+p,{signal:AbortSignal.timeout(90000)}).then(async r=>r.status+' '+await r.text()).catch(e=>'ERR '+e);
+  console.log('=== '+p+'\n'+t.slice(0,6000));
+}
