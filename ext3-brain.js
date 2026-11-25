@@ -507,6 +507,8 @@ export async function channelUploads(channelId, { count = 6, timeoutMs = 15000, 
 /** The full title first, then 1 audio / 2 video / 3 cancel; nothing is downloaded before a choice. */
 // "את כולם", "את שלושתם", "את 1 ו-3", "את השני והרביעי": which of the offered videos.
 const ORD = [[/(?:^|\s|ו|-)(?:1|אחת|אחד|הראשון|הראשונה|ראשון)(?=$|[\s,.!?ו])/u, 1], [/(?:^|\s|ו|-)(?:2|שתיים|שתים|שניים|השני|השנייה|שני)(?=$|[\s,.!?ו])/u, 2], [/(?:^|\s|ו|-)(?:3|שלוש|שלושה|השלישי|השלישית|שלישי)(?=$|[\s,.!?ו])/u, 3], [/(?:^|\s|ו|-)(?:4|ארבע|ארבעה|הרביעי|הרביעית|רביעי)(?=$|[\s,.!?ו])/u, 4], [/(?:^|\s|ו|-)(?:5|חמש|חמישה|החמישי|החמישית|חמישי)(?=$|[\s,.!?ו])/u, 5], [/(?:^|\s|ו|-)(?:6|שש|שישה|השישי|השישית|שישי)(?=$|[\s,.!?ו])/u, 6]];
+// "All the latest lessons", "the last few songs of X": several videos at once.
+const MANY = /(?:את כל|כל ה(?:שיעורים|שירים|סרטונים|הרצאות|פרקים|קליפים)|כולם|ה(?:שיעורים|שירים|סרטונים|הרצאות|פרקים) האחרונ(?:ים|ות)|כמה (?:שיעורים|שירים|סרטונים|הרצאות|פרקים)|הרבה (?:שיעורים|שירים|סרטונים))/u;
 export function pickMany(text, options = []) {
   const t = String(text || '');
   const opts = (options || []).filter(v => v?.videoId);
@@ -563,6 +565,8 @@ export const PHONE_STYLE = [
   'המתקשר הוא גבר: פני אליו תמיד בלשון זכר (אתה, תרצה, תגיד). את עצמך מדברת בלשון נקבה.',
   'ענה בהרחבה ובפירוט מלא, כמו מומחית שמסבירה לחבר בכיף ובזרימה: קודם תשובה ישירה, אחר כך הסבר עשיר ומסודר עם הפרטים החשובים, דוגמאות מהחיים ותובנות מעניינות, ובסוף משפט סיכום או שאלת המשך אחת שמקדמת את השיחה. תשובה רגילה: כ-10 משפטים מלאים כשיש באמת מה להסביר. כשמבקשים "בהרחבה" או "בפירוט": 15 עד 25 משפטים. כשהמתקשר מבקש לקצר, או כשהתשובה קצרה מטבעה (שעה, שם, מספר, כן או לא, ברכה), ענה קצר. האורך לעולם לא בא על חשבון האמת: אסור להוסיף פרטים שאינך בטוחה בהם רק כדי להאריך. עדיף תשובה קצרה ונכונה מאשר ארוכה עם המצאות.',
   'עני על כל חלקי השאלה. כשאת לא יודעת פרט, אמרי זאת במפורש ("את שמך עוד לא אמרת לי") והמשיכי לשאר השאלה.',
+  // 25.11: a model said "I assigned the file to key 3" and "I fixed the setting" (it cannot).
+  'לעולם אל תגידי שתיקנת, שינית, הגדרת או הקצית משהו במערכת, במקשים או בהגדרות: אין לך יכולת כזאת. כשהוא מתלונן שמקש לא עבד, אמרי בפשטות שתקריאי שוב את הרשימה, ושאפשר גם לומר את המספר בקול.',
   'אל תאמרי "המקורות שסופקו" או "לפי ההקשר": דברי בטבעיות, למשל "לפי מה שמצאתי עכשיו".',
   'כשאת מציעה למתקשר לבחור בין כמה אפשרויות, קודם הסבירי במשפט או שניים מה כל אפשרות, ואז אמרי אותן בפורמט קבוע עם השם האמיתי של כל אפשרות לפני המקש, למשל: "למשתנים ונתונים הקש 1, לתנאים והחלטות הקש 2, ללולאות הקש 3", עד 6 אפשרויות, ואמרי שאפשר גם לומר את המספר. אסור לכתוב "הנושא הראשון" במקום שם אמיתי. המקשים האלה באמת עובדים בשיחה. כשהמתקשר בחר אפשרות, התחילי מיד את מה שבחר, בפירוט, בלי לחזור על הרשימה.',
   'אל תמציאי שום עובדה: שמות של אנשים, זמרים, צמדים ולהקות, שמות שירים ואלבומים, קווי אוטובוס ומסלולים, כתובות, טלפונים, מחירים, תאריכים, סרטונים, ערוצים או ציטוטים. כשאינך בטוחה בפרט, אמרי זאת בפשטות והציעי לחפש באינטרנט (הוא יכול לומר "תחפשי באינטרנט"). אל תסתירי אי ודאות מאחורי תשובה ארוכה.',
@@ -1096,6 +1100,19 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
       (plan.order === 'date' ? 'הוא ביקש את החדש ביותר: הרשימה ממוינת מהחדש לישן, אז עדיף את הראשון שמתאים לנושא, ואמרי מתי פורסם. ' : '') +
       'סיימי בכך שאפשר לומר "תשמיעי לי אותו" כדי לשמוע או להוריד אותו. ' +
       'החזר JSON בלבד בצורה {"pick":מספר i של הסרטון הנבחר,"answer":"התשובה למתקשר"}.';
+    // 25.11 (owner: "all of Ilan Gozal's latest lessons" was never offered as a
+    // group): several asked for at once are offered together, newest first.
+    // With a download word: one confirmation for all of them (1 audio, 2 video,
+    // 3 cancel). Without it: up to 6 options on keys, each asked before download.
+    if (MANY.test(utterance) && found.length >= 2) {
+      const list = found.slice(0, 6);
+      const ref = { ...videoRef(list[0]), options: list.map(videoRef) };
+      log.info?.('[EXT3_BRAIN] several videos offered together', { count: list.length, download: PLAY_WORD.test(utterance) });
+      if (PLAY_WORD.test(utterance)) { const c = confirmBatch(list); return out({ ref, confirm: c.confirm, reply: c.reply + ' אפשר גם לומר רק חלק, למשל את אחת ושלוש.' }); }
+      const choices = {}; list.forEach((x, i) => { choices[String(i + 1)] = { type: 'video', video: videoRef(x) }; });
+      return out({ ref, choices, reply: (channelLatest ? 'אלה ההעלאות האחרונות בערוץ ' + channelLatest.title + ', מהחדש לישן. ' : 'מצאתי ' + list.length + ' סרטונים. ') +
+        list.map((x, i) => 'ל' + clip(cleanTitle(x.title), 60) + (x.durationSec ? ', ' + spokenDuration(x.durationSec) : '') + ' הקש ' + (i + 1)).join(', ') + '. אפשר גם להוריד כמה יחד: אמור תוריד את כולם, או למשל את אחת ושלוש.' });
+    }
     let pick = 0, reply = '';
     try {
       const raw = await deps.llm(answerPrompt({ context: smallContext, utterance, plan, now, instruction, prefs, voice, brief, extra: 'סרטונים שנמצאו:\n' + candidatesText(found.slice(0, plan.order === 'date' ? 3 : 8)) }), { budgetMs: 12000, maxTokens: 1400 });

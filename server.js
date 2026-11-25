@@ -4973,11 +4973,24 @@ function ext3PlayItNow(text) {
   return /(?:אותו|אותה|את זה|הזה|הזאת|הקובץ|השיר|עכשיו)/u.test(t) || t.split(' ').length<=3;
 }
 // The digit of a structured list: a pressed key ("בחרתי באפשרות 2: ...") or the number said aloud.
+function ext3AllowedKeys(prompt, choices, confirm) {
+  const out={...(parseKeyOptions(prompt)||{})};
+  if(choices) for(const [d,c] of Object.entries(choices)) if(/^[1-9]$/.test(d)) out[d]=String(c?.item?.title||c?.video?.title||c?.query||c?.label||out[d]||('אפשרות '+d)).slice(0,90);
+  if(confirm) { out['1'] ||= 'הורדת קובץ שמע'; out['2'] ||= 'הורדת וידאו'; out['3'] ||= 'ביטול'; }
+  return Object.keys(out).length?out:null;
+}
 function ext3KeyChoice(text, choices) {
   const t=String(text||'').trim();
   let d=(t.match(/^בחרתי באפשרות\s*([1-9])/u)||[])[1];
   if(!d) { const w={'אחת':'1','אחד':'1','שתיים':'2','שניים':'2','שלוש':'3','שלושה':'3','ארבע':'4','ארבעה':'4','חמש':'5','חמישה':'5','שש':'6','שישה':'6'};
     const m=t.match(/^(?:מספר\s*|אפשרות\s*|את\s*)?([1-9]|אחת|אחד|שתיים|שניים|שלוש|שלושה|ארבע|ארבעה|חמש|חמישה|שש|שישה)[.!?\s]*$/u); if(m) d=w[m[1]]||m[1]; }
+  // 25.11: "אני רוצה את מספר השלוש", "תשמיעי את השלישי", "תן לי את אפשרות 2".
+  if(!d && t.split(/\s+/).length<=7) {
+    const ord={'הראשון':'1','הראשונה':'1','השני':'2','השנייה':'2','השלישי':'3','השלישית':'3','הרביעי':'4','הרביעית':'4','החמישי':'5','החמישית':'5','השישי':'6','השישית':'6'};
+    const w={'אחת':'1','אחד':'1','האחת':'1','שתיים':'2','שניים':'2','השתיים':'2','שלוש':'3','שלושה':'3','השלוש':'3','ארבע':'4','ארבעה':'4','הארבע':'4','חמש':'5','חמישה':'5','החמש':'5','שש':'6','שישה':'6','השש':'6'};
+    const m=t.match(/(?:מספר|אפשרות|מקש|קובץ|תוצאה)\s*([1-9]|[א-ת]+)(?=$|[\s.!?,])/u)||t.match(/(?:^|\s)(ה(?:ראשון|ראשונה|שני|שנייה|שלישי|שלישית|רביעי|רביעית|חמישי|חמישית|שישי|שישית))(?=$|[\s.!?,])/u);
+    if(m) d=/^[1-9]$/.test(m[1])?m[1]:(w[m[1]]||ord[m[1]]||'');
+  }
   return d&&choices&&choices[d]?d:'';
 }
 
@@ -5015,12 +5028,16 @@ function ext3SongStage(job) {
 async function ext3StartBatch(items, mode, media, subs) {
   const lib=await ext3Library().catch(()=>[]);
   const started=[], saved=[], waiting=[];
+  // 25.11: all of them are started together (one after another, 12 s each,
+  // kept the caller in silence for over a minute with six files).
+  const todo=[];
   for(const v of items) {
     if(mode!=='video'&&lib.some(x=>x.videoId===v.videoId)) { saved.push(v.title); continue; }
-    const m=await ext3StartOrPlay({...v,mode,...(typeof subs==='boolean'?{subtitles:subs}:{})},media).catch(()=>null);
-    if(m?.handoff||!m) continue;
-    (/מעירה אותו|במנוחה/.test(m.reply)?waiting:started).push(v.title);
+    todo.push(v);
   }
+  const res=await Promise.all(todo.map(v=>ext3StartOrPlay({...v,mode,...(typeof subs==='boolean'?{subtitles:subs}:{})},media).catch(()=>null)));
+  res.forEach((m,i)=>{ if(m?.handoff||!m) return; (/מעירה אותו|במנוחה/.test(m.reply)?waiting:started).push(todo[i].title); });
+  console.info('[EXT3_MEDIA] several started together',{asked:items.length,started:started.length,waiting:waiting.length,saved:saved.length});
   const t=x=>cleanTitle(x);
   return [started.length?'התחלתי להוריד '+(mode==='video'?'כווידאו, ומאותה הורדה גם קובץ שמע לטלפון, ':'כקובצי שמע ')+started.length+' קבצים: '+started.map(t).join(', ')+'.':'',
     waiting.length?'שירות ההורדות מתעורר, ומיד יתחילו גם: '+waiting.map(t).join(', ')+'.':'',
@@ -5211,7 +5228,10 @@ async function callHandler(call) {
       // Owner, 10.11: "ללימוד קוד הקש 1, ללימוד פריסה הקש 2" - the call now
       // really waits for that key (while the answer is read and a few seconds
       // after), and the key becomes the caller's choice. No key = speak.
-      const keyOptions=!recordPath&&(typeof brainBranch==='function'&&brainBranch())&&!call.selfTest&&!pendingPlay?parseKeyOptions(prompt):null;
+      // 25.11 (owner: keys 1 and 3 of a list were refused as "invalid"): a list the
+      // brain built allows exactly its own keys; the spoken text is parsed only
+      // for anything else (a title with "?" or "!" broke the parsing).
+      const keyOptions=!recordPath&&(typeof brainBranch==='function'&&brainBranch())&&!call.selfTest&&!pendingPlay?ext3AllowedKeys(prompt,pendingChoices,pendingConfirm):null;
       if(keyOptions) {
         let pressed='';
         try {
@@ -5320,7 +5340,8 @@ async function callHandler(call) {
       // Typed text is exactly what the caller meant: full confidence.
       turnContext.asrConfidence=typedText?1:(asrMeta.confidence===undefined||asrMeta.confidence===null||(asrMeta.weakWords||[]).length)?null:asrMeta.confidence;
       console.info('[CALL_FLOW] dedicated_transcript_ready',{callId:activeKey,transcriptChars:userTranscript.length,elapsedMs:Date.now()-turnStartedAt});
-      if(!userTranscript || userTranscript.length<2) throw Object.assign(new Error('Empty phone transcription'),{status:400});
+      // 25.11: a single digit said aloud ("3") is an answer, not silence.
+      if(!userTranscript || (userTranscript.length<2 && !/^[0-9]$/.test(userTranscript))) throw Object.assign(new Error('Empty phone transcription'),{status:400});
       originalSpokenTranscript=userTranscript;
       // Extension 3 (owner, 10.11): one grounded turn pipeline (ext3-brain.js).
       // On any failure the older routing below still answers.
