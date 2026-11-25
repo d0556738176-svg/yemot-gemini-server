@@ -4600,13 +4600,14 @@ async function ext3WebSearch(q,{timeoutMs=4500}={}) {
   if(hit&&Date.now()-hit.at<searchTtlMs(q)&&hit.results.length) { countSearch('cache'); console.info('[EXT3_SEARCH] from memory',{results:hit.results.length}); return hit.results; }
   const capped=(name,p)=>Promise.race([Promise.resolve(p).then(v=>{ const n=Array.isArray(v)?v.length:0; countSearch(name+(n?'':' empty')); return Array.isArray(v)?v:[]; }).catch(()=>{ countSearch(name+' failed'); return []; }),new Promise(r=>setTimeout(()=>r([]),timeoutMs).unref?.())]);
   const t0=Date.now();
-  // Stage 1: Google through Serper (the most accurate) and the free engines.
-  const first=await Promise.all([
-    keysFor('SERPER_API_KEY').length?capped('serper',searchSerper(q,{timeoutMs,count:8})):Promise.resolve([]),
-    capped('searxng',searchSearxng(q,{timeoutMs}))
-  ]);
+  // Stage 1: Google through Serper (the most accurate). Our own SearXNG joins
+  // only when Google found too little or its quota is out (mixed in always, its
+  // Bing results pushed Google's relevant ones out: "who is the prime minister"
+  // got "not found" in the live check).
+  const first=[keysFor('SERPER_API_KEY').length?await capped('serper',searchSerper(q,{timeoutMs,count:8})):[]];
   let results=mergeResults(first);
   let stage=1;
+  if(results.length<4) { first.push(await capped('searxng',searchSearxng(q,{timeoutMs}))); results=mergeResults(first); stage=1.5; }
   // Stage 2, only when stage 1 found too little: the other engines with keys.
   if(results.length<4) {
     stage=2;
