@@ -1346,7 +1346,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     // 25.11: shorter sources (were up to 6,500 characters): faster answers and
     // far fewer tokens per answer, so the free per-minute quotas last.
     let budget = 3800;
-    const label = u => sourceRank(u) === 0 ? ' [אתר רשמי]' : sourceRank(u) === 1 ? ' [אתר חדשות]' : sourceRank(u) === 3 ? ' [רשת חברתית, פחות אמין]' : '';
+    // 25.11: Wikipedia ranks with the official sites but is not called "the official site".
+    const label = u => /wikipedia\.org/i.test(String(u)) ? ' [ויקיפדיה]' : sourceRank(u) === 0 ? ' [אתר רשמי]' : sourceRank(u) === 1 ? ' [אתר חדשות]' : sourceRank(u) === 3 ? ' [רשת חברתית, פחות אמין]' : '';
     const sourceText = results.slice(0, 8).map((r, i) => {
       const page = byUrl.get(String(r.url).replace(/[#?].*$/, ''));
       const body = page?.content ? clip(page.content, Math.min(1600, Math.max(300, budget))) : clip(r.snippet, r.url === 'https://maps.google.com/' ? 1100 : 420);
