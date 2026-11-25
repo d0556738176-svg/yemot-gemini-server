@@ -19,7 +19,14 @@ test('the playing file and position are parsed and playback resumes there', () =
 
 test('key 8 speaks the details and returns to the same place', async () => {
   const r = await handleMediaKey({ what: 'ivr2:/7/005.wav', PlayStop: '1000', PressKey: '8' }, deps(), {});
-  assert.match(r, /^id_list_message=t-שם הקובץ: איך זה עובד\.t-אורך: 3 דקות\.t-ממשיכים בהשמעה&go_to_folder_and_play=\/7,005,1000$/);
+  // Owner, 25.11: read as a question that takes any key, so a press stops it.
+  assert.match(r, /^read=t-שם הקובץ: איך זה עובד\.t-אורך: 3 דקות\.t-ממשיכים בהשמעה=skip8,no,1,1,1,No,no,no,,,1,Ok,None,$/);
+  // The answer (any key, or none) returns to the same place, even though
+  // Yemot sends PressKey=8 again with it.
+  for (const skip8 of ['5', '*', 'None']) {
+    const back = await handleMediaKey({ what: 'ivr2:/7/005.wav', PlayStop: '1000', PressKey: '8', skip8 }, deps(), {});
+    assert.equal(back, 'go_to_folder_and_play=/7,005,1000');
+  }
 });
 
 test('key 9 asks 1/2 first; 1 starts the dubbing, 2 cancels', async () => {

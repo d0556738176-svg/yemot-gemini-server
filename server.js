@@ -5422,18 +5422,25 @@ async function ext7Lookup(dir, file) {
   }
   return null;
 }
-async function mediaDetails(videoId, title, dub) {
-  const facts = await fetchVideoFacts(videoId, process.env).catch(() => null);
+// Owner, 25.11: the real channel always (every source in turn, video-meta.js),
+// fresh from YouTube; hint = the channel saved when the file was made.
+async function mediaDetails(videoId, title, dub, hint = {}) {
+  const { videoMeta } = await import('./video-meta.js');
+  const facts = await videoMeta(videoId, { hintChannel: hint.channel || '', hintTitle: title || '' }).catch(() => null);
   const h = await import('./youtube-title-hebrew.js');
-  const v = { videoId, title: facts?.title || title || '', channelTitle: facts?.channel || '' };
+  const v = { videoId, title: facts?.title || title || '', channelTitle: facts?.channel || hint.channel || '' };
   await h.hebrewizeResults([v]).catch(() => {});
   const lines = ['שם הקובץ: ' + h.spokenTitle(v) + (dub ? ', מדובב לעברית' : '')];
-  if (v.channelTitle) lines.push('הערוץ ביוטיוב: ' + h.spokenChannel(v));
+  // A Hebrew channel name is said exactly as YouTube shows it; a foreign one
+  // in Hebrew letters when the translation came, otherwise as it is.
+  const HEB = /[\u05d0-\u05ea]/;
+  if (v.channelTitle) lines.push('הערוץ ביוטיוב: ' + (HEB.test(v.channelTitle) ? v.channelTitle : h.spokenChannel(v)));
+  console.info('[KEY8] details', { videoId, channel: v.channelTitle || null, sources: facts?.sources || [] });
   const len = formatAudioLengthHebrew(facts?.durationSeconds);
   if (len) lines.push('אורך: ' + len);
   if (facts?.publishedAt) {
     const d = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(facts.publishedAt));
-    const ago = publishedAgoHebrew(facts.publishedAt);
+    const ago = facts.dateOnly ? '' : publishedAgoHebrew(facts.publishedAt);
     lines.push('עלה ליוטיוב ב' + d + (ago ? ', ' + ago : ''));
   }
   const views = viewsHebrew(facts?.viewCount);
@@ -5920,7 +5927,8 @@ app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)
     const rio=await replayIo(); const lines=t=>t==null?null:String(t).replace(/\r/g,'').split('\n').filter(Boolean);
     const settings={ '/11':lines(await rio.getText('ivr2:/11/ext.ini').catch(()=>null)), '/11/1':lines(await rio.getText('ivr2:/11/1/ext.ini').catch(()=>null)),
       mainMenu:(lines(await rio.getText('ivr2:/ext.ini').catch(()=>null))||[]).filter(l=>/^(type|digits|timeout|text_extensions)=/.test(l)) };
-    res.json({ settings, status:N.status, inYemot:{ next:idx.next||0, archives:idx.archives||0, files:items.length, newest:items.slice(0,15) }, disk, tvRecordingsGB:Math.round(sizeOf(REC_DIR)/1e8)/10, tvDisk:diskInfo() });
+    const { metaLog }=await import('./video-meta.js');
+    res.json({ settings, key8:metaLog, status:N.status, inYemot:{ next:idx.next||0, archives:idx.archives||0, files:items.length, newest:items.slice(0,15) }, disk, tvRecordingsGB:Math.round(sizeOf(REC_DIR)/1e8)/10, tvDisk:diskInfo() });
   } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
 });
 // Replays (owner, 19.11): every finished hour of every channel is uploaded to

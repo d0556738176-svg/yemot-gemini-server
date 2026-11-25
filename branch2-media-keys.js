@@ -20,6 +20,11 @@ export function backTo(what, playStop) {
   return 'go_to_folder_and_play=' + p.dir + ',' + p.file + ',' + pos;
 }
 
+// Owner, 25.11: the details are read as a question that takes ANY key, so a
+// press in the middle stops them and playback goes on; with no press, playback
+// goes on one second after the last word. (read: 1 digit, 1 s wait, every key
+// incl. * and #, one try, empty allowed.)
+export const skippable = lines => 'read=' + [...lines, 'ממשיכים בהשמעה'].filter(Boolean).map(t => 't-' + clean(t)).join('.') + '=skip8,no,1,1,1,No,no,no,,,1,Ok,None,';
 const say = (...parts) => 'id_list_message=' + parts.filter(Boolean).map(t => 't-' + clean(t)).join('.');
 
 // deps: lookup(dir, file) -> { videoId, title, dub } | null;
@@ -32,6 +37,9 @@ export async function handleMediaKey(q, deps, log = console) {
   const key = String(q.PressKey || '').split('-').pop();
   const p = parseWhat(what);
   const item = p ? await deps.lookup(p.dir, p.file).catch(() => null) : null;
+
+  // The details were heard (or cut short by any key): back to the same place.
+  if (q.skip8 !== undefined) return back;
 
   // Key 2 in extension 11 (owner, 25.11): delete this file, after 1 = yes.
   if (q.del_ok !== undefined && q.del_ok !== '') {
@@ -61,8 +69,8 @@ export async function handleMediaKey(q, deps, log = console) {
 
   if (key === '8') {
     if (!item?.videoId) return say('אין לי פרטים על הקובץ הזה') + '&' + back;
-    const lines = await deps.details(item.videoId, item.title, item.dub).catch(() => null);
-    return say(...(lines?.length ? lines : ['אין לי פרטים נוספים על הקובץ הזה']), 'ממשיכים בהשמעה') + '&' + back;
+    const lines = await deps.details(item.videoId, item.title, item.dub, { channel: item.channel || '' }).catch(() => null);
+    return skippable(lines?.length ? lines : ['אין לי פרטים נוספים על הקובץ הזה']);
   }
 
   if (key === '9') {

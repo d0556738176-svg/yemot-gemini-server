@@ -111,3 +111,17 @@ test('a broadcast that has not started is waited for, not given up', async () =>
   writeFileSync(bin, '#!/bin/sh\necho "ERROR: [youtube] x: This live event will begin in a few moments." >&2\nexit 1\n', { mode: 0o755 });
   assert.equal((await N.probeVideo('mLJTlNR1BIQ', bin)).live, 'is_upcoming');
 });
+
+test('key 8 details: the channel comes from the next source when one fails', async () => {
+  const M = await import('../video-meta.js');
+  M._clearMetaCache();
+  // API: no keys answer; oEmbed answers with the channel.
+  const fetchImpl = async u => String(u).includes('oembed') ? { ok: true, json: async () => ({ author_name: 'C14', title: 'כותרת' }) } : { ok: false, json: async () => ({}) };
+  const f = await M.videoMeta('abcdefghijk', { env: { YOUTUBE_API_KEY: 'k1', YOUTUBE_API_KEY_2: 'k2' }, fetchImpl, ytdlp: async () => ({ channel: 'C14', durationSeconds: 125, publishedAt: '2026-11-25T12:00:00Z', viewCount: 9, dateOnly: true }), log: {} });
+  assert.equal(f.channel, 'C14'); assert.equal(f.durationSeconds, 125); assert.deepEqual(f.sources, ['oembed', 'yt-dlp']);
+  // Every online source down: the channel saved with the file.
+  M._clearMetaCache();
+  const g = await M.videoMeta('abcdefghij2', { env: {}, fetchImpl: async () => { throw new Error('down'); }, ytdlp: async () => null, hintChannel: 'ערוץ כנסת 99', log: {} });
+  assert.equal(g.channel, 'ערוץ כנסת 99');
+  assert.deepEqual(M.parseYtdlp('C14\u0001125\u000120261125\u0001340\u0001שם'), { channel: 'C14', durationSeconds: 125, viewCount: 340, publishedAt: '2026-11-25T12:00:00Z', title: 'שם', dateOnly: true });
+});

@@ -121,7 +121,7 @@ export async function pollOnce(deps, now = Date.now()) {
           const age = now - (Date.parse(it.published) || now);
           if (firstRun && age > 2 * 3600e3) { st.seen[it.videoId] = 'before-start'; continue; }
           if (age > 7 * 86400e3) { st.seen[it.videoId] = 'old'; continue; }
-          st.queue[it.videoId] = { ch: ch.key, chTitle: ch.title, title: it.title, published: it.published, short: it.short, tries: 0, nextAt: 0, added: new Date(now).toISOString() };
+          st.queue[it.videoId] = { ch: ch.key, chTitle: ch.title, ytChannel: feed.channelTitle || null, title: it.title, published: it.published, short: it.short, tries: 0, nextAt: 0, added: new Date(now).toISOString() };
           note({ queued: it.videoId, ch: ch.key, title: it.title.slice(0, 80) });
         }
       } catch (e) { row.error = String(e?.message || e).slice(0, 120); }
@@ -146,7 +146,7 @@ export async function lookupNews(dir, file, io) {
   dir = String(dir || '').replace(/\/$/, '');
   if (!dir.startsWith(NEWS_ROOT + '/')) return null;
   const idx = await readIndex(io);
-  for (const [videoId, e] of Object.entries(idx.items || {})) if (e.dir === dir && e.file === String(file)) return { videoId, title: e.title || '', dub: false, channel: e.chTitle || '' };
+  for (const [videoId, e] of Object.entries(idx.items || {})) if (e.dir === dir && e.file === String(file)) return { videoId, title: e.title || '', dub: false, channel: e.ytChannel || e.chTitle || '' };
   return null;
 }
 
@@ -215,7 +215,7 @@ export function publishNews(videoId, wav, meta, io) {
     if (last) throw last;
     const fresh = await readIndex(io);
     fresh.next = Math.max(fresh.next || 0, n + 1);
-    fresh.items = { ...(fresh.items || {}), [videoId]: { dir: NEWS_DIR, file, title: String(meta.title || '').slice(0, 160), ch: meta.ch, chTitle: meta.chTitle, published: meta.published, at: new Date().toISOString(), minutes: meta.minutes } };
+    fresh.items = { ...(fresh.items || {}), [videoId]: { dir: NEWS_DIR, file, title: String(meta.title || '').slice(0, 160), ch: meta.ch, chTitle: meta.chTitle, ytChannel: meta.ytChannel || null, published: meta.published, at: new Date().toISOString(), minutes: meta.minutes } };
     await io.writeJson(INDEX, fresh);
     return fresh.items[videoId];
   });
@@ -288,7 +288,7 @@ async function runOne(videoId, q, lane, deps) {
     const wav = path.join(tmp, 'phone.wav');
     const m = await deps.master(src, wav, q.title);
     await fs.rm(src, { force: true }).catch(() => {});
-    const entry = await deps.publish(videoId, wav, { title: q.title, ch: q.ch, chTitle: q.chTitle, published: q.published, minutes: Math.round((m?.durationSec || pr.durationSec || 0) / 60) });
+    const entry = await deps.publish(videoId, wav, { title: q.title, ch: q.ch, chTitle: q.chTitle, ytChannel: q.ytChannel, published: q.published, minutes: Math.round((m?.durationSec || pr.durationSec || 0) / 60) });
     update(videoId, st => { delete st.queue[videoId]; st.seen[videoId] = 'done'; });
     note({ done: videoId, ch: q.ch, file: entry?.file, title: q.title?.slice(0, 80), seconds: Math.round((Date.now() - t0) / 1000), lateMin: Math.round((Date.now() - (Date.parse(q.published) || Date.now())) / 60000) });
     log.info?.('[NEWS11] published', { videoId, ch: q.ch, file: entry?.file });
