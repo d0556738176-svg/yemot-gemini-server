@@ -174,3 +174,28 @@ test('English parts of a name are said in Hebrew letters (Yemot skips English)',
   assert.equal(await S.speakable('Shalom Studio', { translit: async w => ({ Shalom: 'שלום' }) }), 'שלום סטודיו');
   assert.equal(await S.speakable('Zubi', { translit: async () => null }), 'זי יו בי איי');
 });
+
+test('channel search never takes an automatic Topic channel and prefers the singer by name', async () => {
+  const N = await import('../news-ext11.js');
+  const h = '"channelRenderer":{"channelId":"UC5rKMtdamiGoJUq4fsKn-pg","title":{"simpleText":"Zusha - Topic"}} "channelRenderer":{"channelId":"UCbbbbbbbbbbbbbbbbbbbbbb","title":{"simpleText":"Other"}} "channelRenderer":{"channelId":"UCaaaaaaaaaaaaaaaaaaaaaa","title":{"simpleText":"Akiva Turgeman"}}';
+  assert.equal(N.pickChannel(h, ['Turgeman']), 'UCaaaaaaaaaaaaaaaaaaaaaa');
+  assert.equal(N.pickChannel(h, []), 'UCbbbbbbbbbbbbbbbbbbbbbb');
+  assert.equal(N.pickChannel('"channelRenderer":{"channelId":"UCcccccccccccccccccccccc"', []), 'UCcccccccccccccccccccccc');
+});
+
+test('a topic whose first round is made again looks once more at songs it skipped as old', async () => {
+  N._resetForTests();
+  const now = Date.parse('2026-11-26T10:00:00Z');
+  const st0 = N.loadState();
+  st0.topicStarted = { '3': '2026-11-25T20:00:00Z' }; st0.seen = { bbbbbbbbbb1: 'old', bbbbbbbbbb2: 'old' }; st0.queue = {};
+  N.saveState(st0);
+  const items = [{ id: 'bbbbbbbbbb1', t: 'song 1', p: '2026-10-01T10:00:00Z' }, { id: 'bbbbbbbbbb2', t: 'song 2', p: '2026-09-01T10:00:00Z' }];
+  const fetch = async u => String(u).includes('results?') ? { ok: true, text: async () => '"channelRenderer":{"channelId":"UCxxxxxxxxxxxxxxxxxxxxxx","title":{"simpleText":"Singer"}}' } : { ok: true, text: async () => feed('Singer', items) };
+  await N.pollOnce({ fetch, topics: ['3'], force: true }, now);
+  const st = N.loadState();
+  assert.ok(st.queue.bbbbbbbbbb1 && st.queue.bbbbbbbbbb2, 'the skipped songs are queued now');
+  // Not again on the next round.
+  delete st.queue.bbbbbbbbbb1; st.seen.bbbbbbbbbb1 = 'old'; N.saveState(st);
+  await N.pollOnce({ fetch, topics: ['3'], force: true }, now + 3600e3);
+  assert.ok(!N.loadState().queue.bbbbbbbbbb1);
+});

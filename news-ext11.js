@@ -45,7 +45,7 @@ export const MUSIC_CHANNELS = [
   { key: 'steinmetz', title: 'מוטי שטיינמץ', query: 'מוטי שטיינמץ' },
   { key: 'fried', title: 'אברהם פריד', query: 'Avraham Fried' },
   { key: 'benari', title: 'חנן בן ארי', query: 'חנן בן ארי' },
-  { key: 'turgeman', title: "עקיבא תורג'מן", query: "עקיבא תורג'מן" },
+  { key: 'turgeman', title: "עקיבא תורג'מן", query: "עקיבא תורג'מן", names: ["תורג'מן", 'Turgeman', 'עקיבא', 'Akiva'] },
   { key: 'herzlich', title: 'אלי הרצליך', query: 'אלי הרצליך' },
   { key: 'weber', title: 'בערי וובר', query: 'Beri Weber' },
   { key: 'shapiro', title: 'מרדכי שפירא', query: 'Mordechai Shapiro' },
@@ -70,7 +70,10 @@ export const NEWS_MARK = 'news11=yes';
 export const TOPICS = {
   '1': { title: 'חדשות אונליין', kind: 'lesson', index: INDEX, priority: 0, firstHours: 2, maxAgeDays: 7, everyMin: 2, channels: NEWS_CHANNELS },
   '2': { title: 'שיעורי תורה', kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t2_index.json', priority: 1, firstPerChannel: 3, maxAgeDays: 14, everyMin: 10, channels: TORAH_CHANNELS },
-  '3': { title: 'מוזיקה', kind: 'song', index: 'ivr2:/2/youtubeaudio/news11_t3_index.json', priority: 2, firstPerChannel: 2, maxAgeDays: 14, everyMin: 15, channels: MUSIC_CHANNELS },
+  // 26.11: singers upload seldom, so a 14-day limit left most of them empty;
+  // the newest songs of each are taken even if months old (firstKey: their
+  // first round is made again once with the new limit).
+  '3': { title: 'מוזיקה', kind: 'song', index: 'ivr2:/2/youtubeaudio/news11_t3_index.json', priority: 2, firstPerChannel: 3, maxAgeDays: 365, firstKey: 'v2', everyMin: 15, channels: MUSIC_CHANNELS },
   '4': { title: 'טכנולוגיה', kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t4_index.json', priority: 2, firstPerChannel: 2, maxAgeDays: 14, everyMin: 15, channels: TECH_CHANNELS },
 };
 const STATE_DIR = process.env.NEWS_STATE_DIR || path.join(os.homedir(), 'yemot-news');
@@ -128,11 +131,23 @@ export async function resolveHandle(handle, fetchImpl = fetch) {
   return id || null;
 }
 
-// The channel YouTube's own channel search puts first for a name.
-export async function resolveQuery(q, fetchImpl = fetch) {
+// The channel YouTube's own channel search puts first for a name. 26.11: an
+// automatic "- Topic" channel is never taken (עקיבא תורג'מן came out as
+// "Zusha - Topic"), and a channel whose title carries one of the singer's
+// names goes before the others.
+export function pickChannel(html, names = []) {
+  const found = [...String(html || '').matchAll(/"channelRenderer":\{"channelId":"(UC[A-Za-z0-9_-]{22})","title":\{"simpleText":"((?:[^"\\]|\\.)*)"/g)]
+    .map(m => ({ id: m[1], title: m[2] }));
+  if (!found.length) return (/"channelRenderer":\{"channelId":"(UC[A-Za-z0-9_-]{22})"/.exec(String(html || '')) || [])[1] || null;
+  const ok = found.filter(c => !/\s-\s*Topic$|- נושא$/i.test(c.title));
+  const low = names.map(n => String(n).toLowerCase()).filter(n => n.length >= 3);
+  const named = ok.find(c => low.some(n => c.title.toLowerCase().includes(n)));
+  if (named || low.length) return named?.id || null;
+  return ok[0]?.id || (/"channelRenderer":\{"channelId":"(UC[A-Za-z0-9_-]{22})"/.exec(String(html || '')) || [])[1] || null;
+}
+export async function resolveQuery(q, fetchImpl = fetch, names = []) {
   const r = await fetchImpl('https://www.youtube.com/results?search_query=' + encodeURIComponent(q) + '&sp=EgIQAg%253D%253D', { headers: { 'user-agent': UA, 'accept-language': 'he,en;q=0.8', cookie: 'CONSENT=YES+1' }, signal: AbortSignal.timeout(20000) });
-  const html = await r.text();
-  return (/"channelRenderer":\{"channelId":"(UC[A-Za-z0-9_-]{22})"/.exec(html) || [])[1] || null;
+  return pickChannel(await r.text(), names);
 }
 
 // ---- A channel site (chatfree, e.g. Yedid Nefesh): its public post list
@@ -161,15 +176,19 @@ const note = x => { status.log.unshift({ at: new Date().toISOString(), ...x }); 
 // newest few of each channel (the other topics), never a channel's history.
 async function channelIds(ch, st, row, deps, now) {
   let ids = st.ids[ch.key];
-  if (!ids || !ids.length || (st.idsAt?.[ch.key] || 0) < now - 24 * 3600e3) {
+  const sig = JSON.stringify([ch.id || '', ch.handle || '', ch.query || '', ch.names || []]);
+  if (!ids || !ids.length || (st.idsAt?.[ch.key] || 0) < now - 24 * 3600e3 || (st.idsSig?.[ch.key] || '') !== sig) {
     const set = new Set(ch.id ? [ch.id] : []);
     if (ch.handle) { const r = await resolveHandle(ch.handle, deps.fetch).catch(e => { row.resolveError = String(e?.message || e).slice(0, 100); return null; }); if (r) set.add(r); }
-    if (!set.size && ch.query) { const r = await resolveQuery(ch.query, deps.fetch).catch(e => { row.resolveError = String(e?.message || e).slice(0, 100); return null; }); if (r) set.add(r); }
-    if (set.size) { ids = [...set]; st.ids[ch.key] = ids; (st.idsAt ||= {})[ch.key] = now; }
+    if (!set.size && ch.query) { const r = await resolveQuery(ch.query, deps.fetch, ch.names || []).catch(e => { row.resolveError = String(e?.message || e).slice(0, 100); return null; }); if (r) set.add(r); }
+    if (set.size) { ids = [...set]; st.ids[ch.key] = ids; (st.idsAt ||= {})[ch.key] = now; (st.idsSig ||= {})[ch.key] = sig; }
   }
   return ids || [];
 }
 function consider(st, t, topic, ch, it, now, firstRun, rank) {
+  // A channel's first round made again (new limits): what it skipped before
+  // as too old or before the start is looked at once more.
+  if (firstRun === 'again' && (st.seen[it.id] === 'old' || st.seen[it.id] === 'before-start')) delete st.seen[it.id];
   if (st.seen[it.id] || st.queue[it.id]) return;
   const age = now - (Date.parse(it.published) || now);
   if (firstRun && topic.firstHours && age > topic.firstHours * 3600e3) { st.seen[it.id] = 'before-start'; return; }
@@ -192,6 +211,11 @@ export async function pollOnce(deps, now = Date.now()) {
     const firstRun = !st.topicStarted[t];
     for (const ch of topic.channels) {
       const row = status.channels[ch.key] ||= { title: ch.title, topic: t };
+      // A channel new to its topic, or one whose search changed (it came out
+      // as the wrong channel before), gets its own first round.
+      const chMark = t + ':' + ch.key + ':' + (topic.firstKey || '') + ':' + (ch.names ? 'n' : '');
+      st.chStarted ||= {};
+      const chFirst = firstRun || ((st.topicStarted[t] && !st.chStarted[chMark] && (topic.firstKey || ch.names)) ? 'again' : false);
       try {
         if (ch.type === 'chatfree') {
           const sm = await deps.fetch(ch.base + '/sitemap.xml', { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(20000) });
@@ -205,7 +229,7 @@ export async function pollOnce(deps, now = Date.now()) {
             if (!r.ok) continue;
             const post = parsePostPage(await r.text());
             if (!post.video) { st.seen[id] = 'no-video'; continue; }
-            consider(st, t, topic, ch, { id, title: post.title || ch.title, published: post.published, url: post.video, channel: ch.title }, now, firstRun, rank++);
+            consider(st, t, topic, ch, { id, title: post.title || ch.title, published: post.published, url: post.video, channel: ch.title }, now, chFirst, rank++);
           }
           row.lastOk = new Date(now).toISOString(); row.error = null; row.latest = posts.length ? 'post ' + posts[0] : null;
           continue;
@@ -220,8 +244,9 @@ export async function pollOnce(deps, now = Date.now()) {
           (row.feedTitles ||= {})[id] = feed.channelTitle;
           row.lastOk = new Date(now).toISOString(); row.error = null; row.latest = feed.items[0]?.title || null;
           const items = [...feed.items].sort((x, y) => (Date.parse(y.published) || 0) - (Date.parse(x.published) || 0));
-          items.forEach((it, rank) => consider(st, t, topic, ch, { id: it.videoId, title: it.title, published: it.published, short: it.short, channel: feed.channelTitle }, now, firstRun, rank));
+          items.forEach((it, rank) => consider(st, t, topic, ch, { id: it.videoId, title: it.title, published: it.published, short: it.short, channel: feed.channelTitle }, now, chFirst, rank));
         }
+        if (ids.length) st.chStarted[chMark] = new Date(now).toISOString();
       } catch (e) { row.error = String(e?.message || e).slice(0, 120); }
     }
     if (firstRun) st.topicStarted[t] = new Date(now).toISOString();
