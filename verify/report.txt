@@ -1,143 +1,123 @@
-log extract, last 96 h, units main, pattern \[SONG|\[EXT3_SONG|SONG_CLOUD|song-cloud|acemusic|branch=4|\/4\/
+log extract, last 96 h, units main, pattern 920a|837f|2026-11-24T09:1[5-7]|2026-11-24T14:1[89]|2026-11-24T14:20
 
-==== yemot-main: 138 entries ====
-2026-11-23T17:32:30+00:00 EM-208 node[657482]: [SONG] VOICE_INPUT { callId: '4580…', chars: 143 }
-2026-11-23T17:32:30+00:00 EM-208 node[657482]: [SONG] SONG_REQUEST { jobId: '9273…', promptChars: 143, durationSeconds: 60 }
-2026-11-23T17:32:30+00:00 EM-208 node[657482]: [SONG] JOB_STATUS { callId: '4580…', status: 'queued' }
-2026-11-23T17:32:30+00:00 EM-208 node[657482]: [SONG] LYRICS_STARTED { jobId: '9273…' }
-2026-11-23T17:32:30+00:00 EM-208 node[657482]: [SONG] JOB_STATUS { callId: '4580…', status: 'generating_lyrics' }
-2026-11-23T17:33:23+00:00 EM-208 node[657482]: [SONG] VOICE_INPUT { callId: '4580…', chars: 229 }
-2026-11-23T17:33:23+00:00 EM-208 node[657482]: [SONG] SONG_REQUEST { jobId: '90bb…', promptChars: 229, durationSeconds: 60 }
-2026-11-23T17:33:23+00:00 EM-208 node[657482]: [SONG] JOB_STATUS { callId: '4580…', status: 'queued' }
-2026-11-23T17:33:23+00:00 EM-208 node[657482]: [SONG] LYRICS_STARTED { jobId: '90bb…' }
-2026-11-23T17:33:23+00:00 EM-208 node[657482]: [SONG] JOB_STATUS { callId: '4580…', status: 'generating_lyrics' }
-2026-11-23T17:33:51+00:00 EM-208 node[657482]: [Song IVR] message 'לא הצלחתי להבין את הסגנון המבוקש. אפשר להתחיל שוב עם תיאור קצר יותר.' has invalid characters for yemot: ., .
-2026-11-23T17:58:47+00:00 EM-208 node[661428]: [SONG] VOICE_INPUT { callId: 'a659…', chars: 144 }
-2026-11-23T17:58:47+00:00 EM-208 node[661428]: [SONG] SONG_REQUEST { jobId: 'afb4…', promptChars: 144, durationSeconds: 60 }
-2026-11-23T17:58:47+00:00 EM-208 node[661428]: [SONG] JOB_STATUS { callId: 'a659…', status: 'queued' }
-2026-11-23T17:58:47+00:00 EM-208 node[661428]: [SONG] LYRICS_STARTED { jobId: 'afb4…' }
-2026-11-23T17:58:47+00:00 EM-208 node[661428]: [SONG] JOB_STATUS { callId: 'a659…', status: 'generating_lyrics' }
-2026-11-23T17:59:37+00:00 EM-208 node[661428]: [SONG] VOICE_INPUT { callId: 'a659…', chars: 177 }
-2026-11-23T17:59:37+00:00 EM-208 node[661428]: [SONG] SONG_REQUEST { jobId: 'aec3…', promptChars: 177, durationSeconds: 60 }
-2026-11-23T17:59:37+00:00 EM-208 node[661428]: [SONG] JOB_STATUS { callId: 'a659…', status: 'queued' }
-2026-11-23T17:59:37+00:00 EM-208 node[661428]: [SONG] LYRICS_STARTED { jobId: 'aec3…' }
-2026-11-23T17:59:37+00:00 EM-208 node[661428]: [SONG] JOB_STATUS { callId: 'a659…', status: 'generating_lyrics' }
-2026-11-23T17:59:38+00:00 EM-208 node[661428]: [SONG] LYRICS_READY { id: '0e13…', chars: 288 }
-2026-11-23T17:59:38+00:00 EM-208 node[661428]: [SONG] JOB_STATUS { callId: 'a659…', status: 'generating_music' }
-2026-11-23T17:59:38+00:00 EM-208 node[661428]: [SONG] MUSIC_GENERATION_STARTED { id: '0e13…', durationSeconds: 60 }
-2026-11-23T17:59:38+00:00 EM-208 node[661428]: [SONG] MUSIC_PROVIDER_SELECTED { provider: 'github-cpu' }
-2026-11-23T17:59:40+00:00 EM-208 node[661428]: [SONG_CLOUD] DISPATCHED { jobId: '0e13…', workflow: 'song-worker.yml', ref: 'main' }
-2026-11-23T18:01:27+00:00 EM-208 node[661428]: [SONG] CALLER_LEFT_WHILE_WAITING { callId: 'a659…', songId: '0e13…' }
-2026-11-23T18:21:02+00:00 EM-208 node[661428]: [SONG_CLOUD] WORKER_STATUS { jobId: '0e13…', stage: 'starting', waiting: true }
-2026-11-23T18:21:23+00:00 EM-208 node[661428]: [SONG_CLOUD] WORKER_STATUS { jobId: '0e13…', stage: 'generating', waiting: true }
-2026-11-23T18:44:38+00:00 EM-208 node[661428]: [SONG] PROVIDER_HEALTH { provider: 'github-cpu', status: 'temporary_error' }
-2026-11-23T18:44:38+00:00 EM-208 node[661428]: [SONG] MUSIC_PROVIDER_FAILED { provider: 'github-cpu', status: 408, message: 'Cloud song worker timed out' }
-2026-11-23T18:44:38+00:00 EM-208 node[661428]: [SONG] SONG_FAILED { id: '0e13…', status: 408, message: 'Cloud song worker timed out' }
-2026-11-23T19:09:41+00:00 EM-208 node[661428]: [SONG_CLOUD] WORKER_RUN_FAILED_RETRYING { jobId: '0e13…', conclusion: 'failure', retry: 1 }
-2026-11-23T19:09:42+00:00 EM-208 node[661428]: [SONG_CLOUD] DISPATCHED { jobId: '0e13…', workflow: 'song-worker.yml', ref: 'main' }
-2026-11-23T19:21:56+00:00 EM-208 node[661428]: [SONG_CLOUD] WORKER_STATUS { jobId: '0e13…', stage: 'starting', waiting: false }
-2026-11-23T19:22:17+00:00 EM-208 node[661428]: [SONG_CLOUD] WORKER_STATUS { jobId: '0e13…', stage: 'generating', waiting: false }
-2026-11-23T20:01:51+00:00 EM-208 node[661428]: [Song IVR] Request failed with status code 500
-2026-11-23T20:02:06+00:00 EM-208 node[661428]: [Song IVR] Request failed with status code 500
-2026-11-23T20:02:26+00:00 EM-208 node[661428]: [Song IVR] Request failed with status code 500
-2026-11-23T20:09:41+00:00 EM-208 node[661428]: [SONG_CLOUD] WORKER_RUN_FAILED_RETRYING { jobId: '0e13…', conclusion: 'failure', retry: 2 }
-2026-11-23T20:09:43+00:00 EM-208 node[661428]: [SONG_CLOUD] DISPATCHED { jobId: '0e13…', workflow: 'song-worker.yml', ref: 'main' }
-2026-11-23T20:33:25+00:00 EM-208 node[661428]: [Song IVR] Request failed with status code 500
-2026-11-23T20:38:54+00:00 EM-208 node[661428]: [SONG_CLOUD] WORKER_STATUS { jobId: '0e13…', stage: 'starting', waiting: false }
-2026-11-23T20:39:15+00:00 EM-208 node[661428]: [SONG_CLOUD] WORKER_STATUS { jobId: '0e13…', stage: 'generating', waiting: false }
-2026-11-23T23:06:40+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:06:56+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:07:26+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:08:12+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:09:13+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:10:29+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:11:59+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:12:15+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:12:46+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:13:31+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:14:32+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:15:48+00:00 EM-208 node[685829]: [SONG_CLOUD] CALLBACK_REJECTED { jobId: 'speedtest-17' }
-2026-11-23T23:59:52+00:00 EM-208 node[696232]: [SONG] VOICE_INPUT { callId: '862c…', chars: 252 }
-2026-11-23T23:59:52+00:00 EM-208 node[696232]: [SONG] SONG_REQUEST { jobId: '5c4c…', promptChars: 252, durationSeconds: 60 }
-2026-11-23T23:59:52+00:00 EM-208 node[696232]: [SONG] JOB_STATUS { callId: '862c…', status: 'queued' }
-2026-11-23T23:59:52+00:00 EM-208 node[696232]: [SONG] LYRICS_STARTED { jobId: '5c4c…' }
-2026-11-23T23:59:52+00:00 EM-208 node[696232]: [SONG] JOB_STATUS { callId: '862c…', status: 'generating_lyrics' }
-2026-11-23T23:59:53+00:00 EM-208 node[696232]: [SONG] LYRICS_READY { id: '2fb4…', chars: 459 }
-2026-11-23T23:59:53+00:00 EM-208 node[696232]: [SONG] JOB_STATUS { callId: '862c…', status: 'generating_music' }
-2026-11-23T23:59:53+00:00 EM-208 node[696232]: [SONG] MUSIC_GENERATION_STARTED { id: '2fb4…', durationSeconds: 180 }
-2026-11-23T23:59:53+00:00 EM-208 node[696232]: [SONG] MUSIC_PROVIDER_SELECTED { provider: 'github-cpu' }
-2026-11-23T23:59:55+00:00 EM-208 node[696232]: [SONG_CLOUD] DISPATCHED { jobId: '2fb4…', workflow: 'song-worker.yml', ref: 'main' }
-2026-11-24T00:01:17+00:00 EM-208 node[696232]: [SONG] CALLER_LEFT_TO_MENU { callId: '862c…', songId: '2fb4…' }
-2026-11-24T00:02:15+00:00 EM-208 node[696232]: [SONG_CLOUD] WORKER_STATUS { jobId: '2fb4…', stage: 'starting', waiting: true }
-2026-11-24T00:02:36+00:00 EM-208 node[696232]: [SONG_CLOUD] WORKER_STATUS { jobId: '2fb4…', stage: 'generating', waiting: true }
-2026-11-24T00:25:23+00:00 EM-208 node[700521]: [SONG_CLOUD] AUDIO_RECEIVED { jobId: '2fb4…', bytes: 33818142, waiting: false }
-2026-11-24T00:25:23+00:00 EM-208 node[700521]: [SONG] ORPHAN_SONG_DELIVERY { id: '2fb4…', title: 'תפילת הלב' }
-2026-11-24T00:25:23+00:00 EM-208 node[700521]: [SONG] AUDIO_DOWNLOADED { id: '2fb4…', bytes: 33818142, provider: 'github-cpu' }
-2026-11-24T00:25:24+00:00 EM-208 node[700521]: [SONG] AUDIO_CONVERTED { id: '2fb4…', chunks: 3 }
-2026-11-24T00:25:26+00:00 EM-208 node[700521]: [SONG] EXT7_ADDED { key: '***', file: '168' }
-2026-11-24T00:25:32+00:00 EM-208 node[700521]: [SONG] DOWNLOAD_COPY_SAVED { id: '2fb4…', remote: 'ivr2:/אודיו/שיר AI - תפילת הלב - 2fb479.mp3', bytes: 7203443 }
-2026-11-24T00:25:37+00:00 EM-208 node[700521]: [SONG] AI_FOLDER_SAVED { id: '2fb4…', remote: 'ivr2:/שירי AI/תפילת הלב - 2fb479.flac', bytes: 33819646, format: 'flac' }
-2026-11-24T00:25:37+00:00 EM-208 node[700521]: [SONG] SONG_READY { id: '2fb4…', provider: 'github-cpu', durationSeconds: 180, chunks: 3, ext7: '168', download: 'ivr2:/אודיו/שיר AI - תפילת הלב - 2fb479.mp3', aiFolder: 'ivr2:/שירי AI/תפילת הלב - 2fb479.flac' }
-2026-11-24T01:11:34+00:00 EM-208 node[707024]: [SONG_CLOUD] DISPATCHED { jobId: 'warm…', workflow: 'song-worker.yml', ref: 'main' }
-2026-11-24T01:11:36+00:00 EM-208 node[707024]: [SONG_CLOUD] DISPATCHED { jobId: 'warm…', workflow: 'song-worker.yml', ref: 'main' }
-2026-11-24T01:11:36+00:00 EM-208 node[707024]: [SONG_CLOUD] WARM_STARTED { started: 2, idle: 0 }
-2026-11-24T09:14:09+00:00 EM-208 node[707024]: [SONG_CLOUD] DISPATCHED { jobId: 'warm…', workflow: 'song-worker.yml', ref: 'main' }
-2026-11-24T09:14:10+00:00 EM-208 node[707024]: [SONG_CLOUD] DISPATCHED { jobId: 'warm…', workflow: 'song-worker.yml', ref: 'main' }
-2026-11-24T09:14:10+00:00 EM-208 node[707024]: [SONG_CLOUD] WARM_STARTED { started: 2, idle: 0 }
+==== yemot-main: 118 entries ====
+2026-11-24T09:14:07+00:00 EM-208 node[707024]: [920a…]: 📞 new call - from 0556738176
+2026-11-24T09:14:07+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T09:14:08+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
+2026-11-24T09:14:08+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T09:14:12+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
+2026-11-24T09:14:14+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T09:14:18+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
+2026-11-24T09:14:18+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T09:14:30+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
+2026-11-24T09:14:30+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T09:14:35+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
+2026-11-24T09:14:35+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T09:14:59+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
+2026-11-24T09:14:59+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T09:15:04+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
+2026-11-24T09:15:04+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T09:15:08+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
+2026-11-24T09:15:08+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T09:15:11+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
+2026-11-24T09:15:11+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T09:15:19+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
 2026-11-24T09:15:19+00:00 EM-208 node[707024]: [SONG] VOICE_INPUT { callId: '920a…', chars: 244 }
 2026-11-24T09:15:19+00:00 EM-208 node[707024]: [SONG] SONG_REQUEST { jobId: '8e74…', promptChars: 244, durationSeconds: 60 }
 2026-11-24T09:15:19+00:00 EM-208 node[707024]: [SONG] JOB_STATUS { callId: '920a…', status: 'queued' }
 2026-11-24T09:15:19+00:00 EM-208 node[707024]: [SONG] LYRICS_STARTED { jobId: '8e74…' }
 2026-11-24T09:15:19+00:00 EM-208 node[707024]: [SONG] JOB_STATUS { callId: '920a…', status: 'generating_lyrics' }
+2026-11-24T09:15:19+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 900000 is defined)
+2026-11-24T09:15:21+00:00 EM-208 node[707024]: [Gemini] transient error; trying next configured model/key *** model: 'gemini-3.8-flash', key: ***, status: 503, fastPhone: true }
+2026-11-24T09:15:23+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] broken answer rejected { provider: 'Gemini', why: 'arabic' }
+2026-11-24T09:15:23+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'Cohere', status: 429, cooling: false }
+2026-11-24T09:15:25+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] answered by { provider: 'Groq3', model: 'openai/gpt-oss-120b', chars: 1084 }
 2026-11-24T09:15:25+00:00 EM-208 node[707024]: [SONG] LYRICS_READY { id: '175d…', chars: 716 }
 2026-11-24T09:15:25+00:00 EM-208 node[707024]: [SONG] JOB_STATUS { callId: '920a…', status: 'generating_music' }
 2026-11-24T09:15:25+00:00 EM-208 node[707024]: [SONG] MUSIC_GENERATION_STARTED { id: '175d…', durationSeconds: 60 }
 2026-11-24T09:15:25+00:00 EM-208 node[707024]: [SONG] MUSIC_PROVIDER_SELECTED { provider: 'github-cpu' }
 2026-11-24T09:15:25+00:00 EM-208 node[707024]: [SONG_CLOUD] SONG_RUNNERS { jobId: '175d…', warm: 2, cold: 0 }
+2026-11-24T09:15:25+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] answered by { provider: 'Groq4', model: 'openai/gpt-oss-120b', chars: 882 }
+2026-11-24T09:15:25+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'Groq2', status: 499, cooling: false }
+2026-11-24T09:15:25+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] answered by { provider: 'Groq', model: 'openai/gpt-oss-120b', chars: 1116 }
+2026-11-24T09:15:26+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'Groq', status: 499, cooling: false }
+2026-11-24T09:15:26+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'Groq:qwen3.8-27b', status: 499, cooling: false }
+2026-11-24T09:15:44+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] answered by { provider: 'OpenRouter2', model: 'openrouter/free', chars: 1691 }
+2026-11-24T09:15:47+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
+2026-11-24T09:15:47+00:00 EM-208 node[707024]: [920a…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 900000 is defined)
+2026-11-24T09:15:49+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'OpenRouter3', status: 502, cooling: false }
+2026-11-24T09:15:50+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] answered by { provider: 'OpenRouter', model: 'openrouter/free', chars: 873 }
+2026-11-24T09:16:05+00:00 EM-208 node[707024]: [920a…]: 🔓 fn running unblocked
 2026-11-24T09:16:05+00:00 EM-208 node[707024]: [SONG] CALLER_LEFT_WHILE_WAITING { callId: '920a…', songId: '175d…' }
+2026-11-24T09:16:05+00:00 EM-208 node[707024]: [920a…]: 🆗 the function is done
 2026-11-24T09:17:29+00:00 EM-208 node[707024]: [SONG_CLOUD] WARM_CLAIMED { warmId: 'warm-b528f520', jobId: '175d…' }
 2026-11-24T09:17:30+00:00 EM-208 node[707024]: [SONG_CLOUD] WORKER_STATUS { jobId: '175d…', stage: 'starting', waiting: true }
 2026-11-24T09:17:30+00:00 EM-208 node[707024]: [SONG_CLOUD] WORKER_STATUS { jobId: '175d…', stage: 'generating', waiting: true }
-2026-11-24T09:18:50+00:00 EM-208 node[707024]: [SONG_CLOUD] WARM_CLAIMED { warmId: 'warm-2df0dcb4', jobId: '175d…' }
-2026-11-24T09:18:51+00:00 EM-208 node[707024]: [SONG_CLOUD] WORKER_STATUS { jobId: '175d…', stage: 'starting', waiting: true }
-2026-11-24T09:18:51+00:00 EM-208 node[707024]: [SONG_CLOUD] WORKER_STATUS { jobId: '175d…', stage: 'generating', waiting: true }
-2026-11-24T09:22:04+00:00 EM-208 node[707024]: [SONG_CLOUD] AUDIO_RECEIVED { jobId: '175d…', bytes: 11669132, waiting: true }
-2026-11-24T09:22:04+00:00 EM-208 node[707024]: [SONG] PROVIDER_HEALTH { provider: 'github-cpu', status: 'available' }
-2026-11-24T09:22:04+00:00 EM-208 node[707024]: [SONG] MUSIC_GENERATION_READY { id: '175d…', provider: 'github-cpu', bytes: 11669132 }
-2026-11-24T09:22:04+00:00 EM-208 node[707024]: [SONG] AUDIO_DOWNLOADED { id: '175d…', bytes: 11669132, provider: 'github-cpu' }
-2026-11-24T09:22:04+00:00 EM-208 node[707024]: [SONG] AUDIO_CONVERTED { id: '175d…', chunks: 1 }
-2026-11-24T09:22:06+00:00 EM-208 node[707024]: [SONG] EXT7_ADDED { key: '***', file: '170' }
-2026-11-24T09:22:10+00:00 EM-208 node[707024]: [SONG] DOWNLOAD_COPY_SAVED { id: '175d…', remote: 'ivr2:/אודיו/שיר AI - בוקר טוב על הרחוב - 175d0b.mp3', bytes: 2403984 }
-2026-11-24T09:22:13+00:00 EM-208 node[707024]: [SONG] AI_FOLDER_SAVED { id: '175d…', remote: 'ivr2:/שירי AI/בוקר טוב על הרחוב - 175d0b.flac', bytes: 11671855, format: 'flac' }
-2026-11-24T09:22:13+00:00 EM-208 node[707024]: [SONG] SONG_READY { id: '175d…', provider: 'github-cpu', durationSeconds: 60, chunks: 1, ext7: '170', download: 'ivr2:/אודיו/שיר AI - בוקר טוב על הרחוב - 175d0b.mp3', aiFolder: 'ivr2:/שירי AI/בוקר טוב על הרחוב - 175d0b.flac' }
-2026-11-24T14:16:25+00:00 EM-208 node[707024]: [SONG_CLOUD] DISPATCHED { jobId: 'warm…', workflow: 'song-worker.yml', ref: 'main' }
-2026-11-24T14:16:26+00:00 EM-208 node[707024]: [SONG_CLOUD] DISPATCHED { jobId: 'warm…', workflow: 'song-worker.yml', ref: 'main' }
-2026-11-24T14:16:26+00:00 EM-208 node[707024]: [SONG_CLOUD] WARM_STARTED { started: 2, idle: 0 }
+2026-11-24T14:16:23+00:00 EM-208 node[707024]: [837f…]: 📞 new call - from 0556738176
+2026-11-24T14:16:23+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:16:33+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:16:33+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:16:41+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:16:43+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:16:47+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:16:47+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:17:03+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:17:03+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:17:33+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:17:36+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:17:40+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:17:40+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:17:49+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:17:50+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:17:54+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:17:54+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:18:18+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:18:18+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:18:23+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:18:23+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:18:25+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:18:25+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:18:28+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:18:28+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 600000 is defined)
+2026-11-24T14:18:42+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
 2026-11-24T14:18:42+00:00 EM-208 node[707024]: [SONG] VOICE_INPUT { callId: '837f…', chars: 227 }
 2026-11-24T14:18:42+00:00 EM-208 node[707024]: [SONG] SONG_REQUEST { jobId: '2ab1…', promptChars: 227, durationSeconds: 60 }
 2026-11-24T14:18:42+00:00 EM-208 node[707024]: [SONG] JOB_STATUS { callId: '837f…', status: 'queued' }
 2026-11-24T14:18:42+00:00 EM-208 node[707024]: [SONG] LYRICS_STARTED { jobId: '2ab1…' }
 2026-11-24T14:18:42+00:00 EM-208 node[707024]: [SONG] JOB_STATUS { callId: '837f…', status: 'generating_lyrics' }
+2026-11-24T14:18:42+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 900000 is defined)
+2026-11-24T14:18:43+00:00 EM-208 node[707024]: [Gemini] transient error; trying next configured model/key *** model: 'gemini-3.8-flash', key: ***, status: 503, fastPhone: true }
+2026-11-24T14:18:46+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'Cohere', status: 429, cooling: false }
+2026-11-24T14:18:46+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'OpenRouter3', status: 429, cooling: false }
+2026-11-24T14:18:47+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] answered by { provider: 'Groq3', model: 'openai/gpt-oss-120b', chars: 827 }
 2026-11-24T14:18:47+00:00 EM-208 node[707024]: [SONG] LYRICS_READY { id: '329d…', chars: 470 }
 2026-11-24T14:18:47+00:00 EM-208 node[707024]: [SONG] JOB_STATUS { callId: '837f…', status: 'generating_music' }
 2026-11-24T14:18:47+00:00 EM-208 node[707024]: [SONG] MUSIC_GENERATION_STARTED { id: '329d…', durationSeconds: 60 }
 2026-11-24T14:18:47+00:00 EM-208 node[707024]: [SONG] MUSIC_PROVIDER_SELECTED { provider: 'github-cpu' }
 2026-11-24T14:18:47+00:00 EM-208 node[707024]: [SONG_CLOUD] SONG_RUNNERS { jobId: '329d…', warm: 2, cold: 0 }
+2026-11-24T14:18:47+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] answered by { provider: 'Groq4', model: 'openai/gpt-oss-120b', chars: 712 }
+2026-11-24T14:18:48+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] answered by { provider: 'Groq', model: 'openai/gpt-oss-120b', chars: 902 }
+2026-11-24T14:18:48+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'Groq2', status: 499, cooling: false }
+2026-11-24T14:18:49+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'Groq', status: 499, cooling: false }
+2026-11-24T14:18:49+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'Groq:qwen3.8-27b', status: 499, cooling: false }
+2026-11-24T14:18:50+00:00 EM-208 node[707024]: [Gemini] transient error; trying next configured model/key *** model: 'gemini-3.5-flash-lite', key: ***, status: 408, fastPhone: true }
+2026-11-24T14:18:50+00:00 EM-208 node[707024]: [Gemini] transient error; trying next configured model/key *** model: 'gemini-3.1-flash-lite', key: ***, status: 503, fastPhone: true }
 2026-11-24T14:18:50+00:00 EM-208 node[707024]: [SONG_CLOUD] WARM_CLAIMED { warmId: 'warm-17bb07ef', jobId: '329d…' }
 2026-11-24T14:18:51+00:00 EM-208 node[707024]: [SONG_CLOUD] WORKER_STATUS { jobId: '329d…', stage: 'starting', waiting: true }
+2026-11-24T14:18:51+00:00 EM-208 node[707024]: [Gemini] transient error; trying next configured model/key *** model: 'gemini-3.6-flash', key: ***, status: 408, fastPhone: true }
+2026-11-24T14:18:51+00:00 EM-208 node[707024]: [Gemini] phone generation budget exhausted; stopping sequential retries { budgetMs: 8500 }
 2026-11-24T14:18:51+00:00 EM-208 node[707024]: [SONG_CLOUD] WORKER_STATUS { jobId: '329d…', stage: 'generating', waiting: true }
+2026-11-24T14:19:05+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'OpenRouter2', status: 502, cooling: false }
+2026-11-24T14:19:10+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:19:10+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 900000 is defined)
+2026-11-24T14:19:17+00:00 EM-208 node[707024]: [BRANCH1_WEB_SYNTH] racer failed { provider: 'OpenRouter', status: 502, cooling: false }
 2026-11-24T14:19:29+00:00 EM-208 node[707024]: [SONG_CLOUD] WARM_CLAIMED { warmId: 'warm-3585356e', jobId: '329d…' }
 2026-11-24T14:19:29+00:00 EM-208 node[707024]: [SONG_CLOUD] WORKER_STATUS { jobId: '329d…', stage: 'starting', waiting: true }
 2026-11-24T14:19:30+00:00 EM-208 node[707024]: [SONG_CLOUD] WORKER_STATUS { jobId: '329d…', stage: 'generating', waiting: true }
+2026-11-24T14:19:54+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
+2026-11-24T14:19:54+00:00 EM-208 node[707024]: [837f…]: 🔒 fn running blocked - waiting to next request from yemot (timeout 900000 is defined)
+2026-11-24T14:20:00+00:00 EM-208 node[707024]: [837f…]: 🔓 fn running unblocked
 2026-11-24T14:20:00+00:00 EM-208 node[707024]: [SONG] CALLER_LEFT_WHILE_WAITING { callId: '837f…', songId: '329d…' }
-2026-11-24T14:26:44+00:00 EM-208 node[707024]: [SONG_CLOUD] AUDIO_RECEIVED { jobId: '329d…', bytes: 11665986, waiting: true }
-2026-11-24T14:26:44+00:00 EM-208 node[707024]: [SONG] PROVIDER_HEALTH { provider: 'github-cpu', status: 'available' }
-2026-11-24T14:26:44+00:00 EM-208 node[707024]: [SONG] MUSIC_GENERATION_READY { id: '329d…', provider: 'github-cpu', bytes: 11665986 }
-2026-11-24T14:26:44+00:00 EM-208 node[707024]: [SONG] AUDIO_DOWNLOADED { id: '329d…', bytes: 11665986, provider: 'github-cpu' }
-2026-11-24T14:26:44+00:00 EM-208 node[707024]: [SONG] AUDIO_CONVERTED { id: '329d…', chunks: 1 }
-2026-11-24T14:26:46+00:00 EM-208 node[707024]: [SONG] EXT7_ADDED { key: '***', file: '175' }
-2026-11-24T14:26:48+00:00 EM-208 node[707024]: [SONG] DOWNLOAD_COPY_SAVED { id: '329d…', remote: 'ivr2:/אודיו/שיר AI - שיר התורה הקטן - 329d03.mp3', bytes: 2403487 }
-2026-11-24T14:26:50+00:00 EM-208 node[707024]: [SONG] AI_FOLDER_SAVED { id: '329d…', remote: 'ivr2:/שירי AI/שיר התורה הקטן - 329d03.flac', bytes: 11668197, format: 'flac' }
-2026-11-24T14:26:50+00:00 EM-208 node[707024]: [SONG] SONG_READY { id: '329d…', provider: 'github-cpu', durationSeconds: 60, chunks: 1, ext7: '175', download: 'ivr2:/אודיו/שיר AI - שיר התורה הקטן - 329d03.mp3', aiFolder: 'ivr2:/שירי AI/שיר התורה הקטן - 329d03.flac' }
+2026-11-24T14:20:00+00:00 EM-208 node[707024]: [837f…]: 🆗 the function is done
 
 exit=0
