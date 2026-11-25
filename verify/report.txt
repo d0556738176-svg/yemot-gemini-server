@@ -1,12 +1,2 @@
-log extract, last 1 h, units main,ext2, pattern SONG_RESUM|WATCHERS_RESUMED|Started|commit|4d642ad|NEWS11.*(resolv|channel|fail|tech|topic 4|t4)|news11.*(fail|error)
-
-==== yemot-main: 1 entries ====
-2026-11-25T20:47:27+00:00 EM-208 systemd[1]: Started yemot-main.service - Yemot main.
-
-==== yemot-ext2: 4 entries ====
-2026-11-25T20:27:44+00:00 EM-208 node[882143]: [YouTube IVR] preparation keep-awake started
-2026-11-25T20:39:18+00:00 EM-208 node[882143]: [NEWS11] menu failed { message: 'the call was hangup by the caller' }
-2026-11-25T20:41:23+00:00 EM-208 systemd[1]: Started yemot-ext2.service - Yemot ext2.
-2026-11-25T20:54:23+00:00 EM-208 node[904366]: [NEWS11] menu failed { message: 'the call was hangup by the caller' }
-
+main version 0f26df072f29 2026-11-25T20:57:55.387Z
 exit=0
