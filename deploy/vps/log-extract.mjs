@@ -19,9 +19,19 @@ const mask = s => String(s)
 const out = ['log extract, last ' + hours + ' h, units ' + units.join(',') + (re ? ', pattern ' + re.source : ''), ''];
 for (const u of units) {
   const j = spawnSync('journalctl', ['-u', 'yemot-' + u, '--since', hours + ' hours ago', '-o', 'short-iso', '--no-pager', '-q'], { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
-  const lines = String(j.stdout || '').split('\n').filter(l => l && (!re || re.test(l)));
-  out.push('==== yemot-' + u + ': ' + lines.length + ' lines ====');
-  for (const l of lines.slice(-Number(req.max || 1500))) out.push(mask(l).slice(0, 900));
+  // A logged object spans several journal lines: they are joined into one
+  // block (a line whose message starts with a space or a closing bracket
+  // continues the one before), and the pattern is matched on whole blocks.
+  const blocks = [];
+  for (const l of String(j.stdout || '').split('\n')) {
+    if (!l) continue;
+    const msg = l.replace(/^\S+\s+\S+\s+\S+?:\s?/, '');
+    if (blocks.length && /^(?:\s|[}\]])/.test(msg)) blocks[blocks.length - 1] += ' ' + msg.trim();
+    else blocks.push(l);
+  }
+  const hit = blocks.filter(b => !re || re.test(b));
+  out.push('==== yemot-' + u + ': ' + hit.length + ' entries ====');
+  for (const l of hit.slice(-Number(req.max || 1500))) out.push(mask(l).slice(0, Number(req.width || 1200)));
   out.push('');
 }
 mkdirSync('/var/lib/yemot-report', { recursive: true, mode: 0o700 });
