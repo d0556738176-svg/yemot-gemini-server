@@ -6498,8 +6498,28 @@ app.get('/owner-check/:name', rateLimit(10, 60 * 1000, 'owner-check'), async (re
   if(!st || Date.now()-st.mtimeMs>2*3600*1000) return res.status(404).end();
   const ask=JSON.parse(await readFile(file,'utf8').catch(()=>'{}'));
   await unlink(file).catch(()=>{});
-  const branch=ask.branch==='1'?'1':'3';
   const questions=(ask.questions||[]).map(String).filter(Boolean).slice(0,20);
+  // Owner, 25.11: a whole song made the way a caller's song is (lyrics, cloud
+  // runners, extensions 4 and 7), each stage written to the private report.
+  if(ask.branch==='4'){
+    const prompt=questions[0]||'';
+    if(!prompt) return res.status(400).end();
+    res.type('text/plain; charset=utf-8').send('started: one song in extension 4. Read /owner-report/'+name+' (it grows as the song is made).');
+    const t0=Date.now(), lines=['song check, extension 4, '+new Date().toISOString(),'request: '+prompt];
+    const save=()=>writeFile('/var/lib/yemot-report/'+name+'.txt',lines.join('\n'),{mode:0o600}).catch(()=>{});
+    const note=x=>{ lines.push('+'+Math.round((Date.now()-t0)/1000)+'s '+x); void save(); };
+    await save();
+    let songId='';
+    const tick=setInterval(()=>{ if(songId){ const c=cloudJobStatus(songId); note('cloud '+JSON.stringify(c)); } },120000); tick.unref?.();
+    try {
+      const r=await createSong({ prompt, callId:'owner-song-'+Date.now(), userKey:'owner-check', generateText:songGenerateText, onStatus:st=>{ if(st.songId) songId=st.songId; note('status '+JSON.stringify(st).slice(0,300)); } });
+      note('done '+JSON.stringify({ title:r?.title, ready:!!(r?.playbackPaths||r?.audio_url||r?.ok), keys:Object.keys(r||{}).slice(0,12) }).slice(0,500));
+    } catch(e){ note('FAILED '+String(e?.message||e).slice(0,300)); }
+    finally { clearInterval(tick); }
+    console.info('[OWNER_CHECK] song finished',{seconds:Math.round((Date.now()-t0)/1000)});
+    return;
+  }
+  const branch=ask.branch==='1'?'1':'3';
   res.type('text/plain; charset=utf-8').send('started: '+questions.length+' questions in extension '+branch+'. Read /owner-report/'+name+' in a few minutes.');
   const lines=['live check, extension '+branch+', '+new Date().toISOString()];
   let index=0, askedAt=Date.now();

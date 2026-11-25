@@ -39,7 +39,7 @@ if [ -n "$ask_sha" ] && [ "$ask_sha" != "$(cat $ROOT/.ask-seen 2>/dev/null)" ]; 
         const q=(j.questions||[]).map(String).map(x=>x.slice(0,400)).filter(Boolean).slice(0,20);
         if(!q.length) return;
         fs.mkdirSync("/var/lib/yemot-report",{recursive:true,mode:0o700});
-        fs.writeFileSync("/var/lib/yemot-report/"+j.name+".ask",JSON.stringify({branch:j.branch==="1"?"1":"3",questions:q}),{mode:0o600});
+        fs.writeFileSync("/var/lib/yemot-report/"+j.name+".ask",JSON.stringify({branch:j.branch==="1"?"1":j.branch==="4"?"4":"3",questions:q}),{mode:0o600});
       }catch{}});' && logger -t yemot-update "conversation check queued"
   fi
 fi
