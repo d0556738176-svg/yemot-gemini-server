@@ -6458,6 +6458,10 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
   serverTime:new Date().toISOString()
 }));
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
+// Owner, 27.11: a file deleted with key 2 in extension 7 leaves the AI
+// extensions' list of saved songs at once (not after the 5-minute cache).
+// It only empties the cache; nothing is read or changed.
+app.post('/library-refresh',rateLimit(30,60*1000,'library-refresh'),(req,res)=>{ ext3LibCache={at:0,items:[]}; console.info('[EXT3_LIBRARY] list refreshed after a deletion'); res.json({ok:true}); });
 // Which code is running and whether the local map is built (no secrets), so a
 // deploy can be verified from outside (19.11).
 app.get('/version',rateLimit(30,60*1000,'version'),async (req,res)=>{
