@@ -3,19 +3,18 @@ shwekey 3 {"UC-iTQfrv8pVLjlErZquyJ6Q":"Yaakov Shwekey יעקב שוואקי"}  W
 steinmetz 3 {"UCjh-noHUsafx_CSiieHNXFg":"מוטי שטיינמץ | Motty Steinmetz"}  גענוג שוין צרות מוטי שטיינמץ ומקהלת מלכות בחופה
 fried 3 {"UCYCWdJniUxe41JbVwO0_SLA":"Avraham Fried אברהם פריד"}  Be Happy! | Avraham Fried & Ari Stern
 benari 3 {"UCVOwOs8Cn4Uv0Hc2foG9YCQ":"Hanan Ben Ari Official חנן בן ארי הערוץ הרשמי"}  חנן בן ארי - השיבנו (לייב הינדיקים 360) Hanan Ben 
-turgeman 3 {"UC5rKMtdamiGoJUq4fsKn-pg":"Zusha - Topic"}  
+turgeman 3 {"UCb2w826w2GmMdZBqh8T0wQw":"עקיבא - Akiva"}  עקיבא - תפילות וצעקות | Akiva - Tfilot VeTzaakot
 herzlich 3 {"UCOCt1faxauheh_C-XY2eG7Q":"אלי הרצליך Eli Herzlich"}  אלי הרצליך - תזכה אותי | Eli Herzlich - Tezakeh Ot
 weber 3 {"UClpw0oWNakQBOm152wgB9FQ":"Beri Weber"}  Beri Weber – B'har Hakodesh | M'chadash Trailer
 shapiro 3 {"UCTVRe7FcTlGJ3fbTpdVLpTQ":"Mordechai Shapiro"}  Mordechai Shapiro - Ad D'lo Yada (MUSIC VIDEO) עד 
 dadya 3 {"UCSpqaah4ia10xmBvTfh05RA":"איציק דדיה - הערוץ הרשמי - Itzik Dadya - Official"}  איציק דדיה - יצר טוב ווקאלי | Itzik Dadya - Yetzer
 ziongolan 3 {"UC_1FwTxmP2tzatEK2FM9pdg":"TzionGolanOfficial"}  ציון גולן - ג'ית מן צנעא
-y4pc 4 {"UCpfZeluDB5MJyfxEWLG4ETQ":"YOUTH FOR PEACE COUNCIL (Y4PC)"}  When we joined the Canadian Embassy's Entrepreneur
 gadgety 4 {"UCGSY-0vDmQw4KvgGg1fQPTw":"גאדג'טי | Gadgety"}  ה-XPENG L03 מגיע לישראל: קרוסאובר עם מאריך טווח וג
-hwzone 4 {"UCefSI_WW4xVJ_tUxyyoUdPg":"HWzone"}  וואטסאפ תשלח גם כשהטלפון כבוי - אבל יש מגבלות #Sho
+hwzone 4 {"UCefSI_WW4xVJ_tUxyyoUdPg":"HWzone"}  שבב המוח של מאסק מתקדם - אבל המבחן עוד לפניו #Shor
 geektime 4 {"UCUOQyNcs_Kqont5qT7ZZNrw":"Geektime"}  טסלה רודסטר החדשה יכולה לעופף באוויר ולנסוע הפוך
-topic 1 חדשות אונליין files 93
-topic 2 שיעורי תורה files 33
-topic 3 מוזיקה files 4
-topic 4 טכנולוגיה files 15
-queue by topic {"1":1} working {}
+topic 1 חדשות אונליין files 210
+topic 2 שיעורי תורה files 68
+topic 3 מוזיקה files 28
+topic 4 טכנולוגיה files 21
+queue by topic {"1":1,"2":1} working {}
 exit=0
