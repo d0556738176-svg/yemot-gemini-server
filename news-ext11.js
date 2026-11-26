@@ -53,10 +53,11 @@ export const MUSIC_CHANNELS = [
   { key: 'ziongolan', title: 'ציון גולן', query: 'ציון גולן' },
 ];
 export const TECH_CHANNELS = [
-  { key: 'y4pc', title: 'Y4PC', query: 'Y4PC' },
-  { key: 'gadgety', title: "גאדג'טי", query: "גאדג'טי gadgety" },
-  { key: 'hwzone', title: 'HWzone', query: 'HWzone' },
-  { key: 'geektime', title: 'גיקטיים', query: 'Geektime גיקטיים' },
+  // 27.11: Y4PC has no findable YouTube channel any more (the search gave an
+  // unrelated English one), so it is left out.
+  { key: 'gadgety', title: "גאדג'טי", query: "גאדג'טי gadgety", names: ["גאדג'טי", 'Gadgety'] },
+  { key: 'hwzone', title: 'HWzone', query: 'HWzone', names: ['HWzone'] },
+  { key: 'geektime', title: 'גיקטיים', query: 'Geektime גיקטיים', names: ['Geektime', 'גיקטיים'] },
 ];
 
 export const NEWS_ROOT = '/11';
@@ -197,8 +198,27 @@ function consider(st, t, topic, ch, it, now, firstRun, rank) {
   st.queue[it.id] = { topic: t, ch: ch.key, chTitle: ch.title, ytChannel: it.channel || null, title: it.title, published: it.published, short: !!it.short, src: it.url ? 'url' : 'yt', url: it.url || null, tries: 0, nextAt: 0, added: new Date(now).toISOString() };
   note({ queued: it.id, topic: t, ch: ch.key, title: String(it.title || '').slice(0, 80) });
 }
+// 27.11: a channel taken out of a topic's list (it came out as the wrong
+// channel) has its files and queued videos removed, once per start.
+let droppedChecked = false;
+export async function removeDroppedChannels(io, st) {
+  let removed = 0;
+  for (const t of Object.keys(TOPICS)) {
+    if (t === '1') continue;
+    const keys = new Set(TOPICS[t].channels.map(c => c.key));
+    for (const [v, q] of Object.entries(st.queue || {})) if (topicOf(q) === t && q.ch && !keys.has(q.ch)) { delete st.queue[v]; st.seen[v] = 'dropped-channel'; }
+    const idx = await readIndex(io, t);
+    for (const e of Object.values(idx.items || {})) {
+      if (!e.ch || keys.has(e.ch)) continue;
+      await deleteNews(e.dir, e.file, io).then(() => removed++).catch(() => {});
+    }
+  }
+  if (removed) note({ droppedChannelFiles: removed });
+  return removed;
+}
 export async function pollOnce(deps, now = Date.now()) {
   const st = loadState();
+  if (deps.io && !droppedChecked) { droppedChecked = true; st.seen ||= {}; await removeDroppedChannels(deps.io, st).catch(() => 0); }
   st.seen ||= {}; st.queue ||= {}; st.ids ||= {}; st.topicStarted ||= {}; st.topicPolled ||= {};
   if (!st.started) st.started = new Date(now).toISOString();
   // The news ran alone before topics existed: its first round was then.

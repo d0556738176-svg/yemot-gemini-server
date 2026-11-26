@@ -199,3 +199,14 @@ test('a topic whose first round is made again looks once more at songs it skippe
   await N.pollOnce({ fetch, topics: ['3'], force: true }, now + 3600e3);
   assert.ok(!N.loadState().queue.bbbbbbbbbb1);
 });
+
+test('files of a channel taken out of a topic are removed once', async () => {
+  const N = await import('../news-ext11.js');
+  const io = fakeYemot();
+  io.json.set('ivr2:/2/youtubeaudio/news11_t4_index.json', { version: 1, next: 2, archives: 0, items: { v1: { dir: '/11/4', file: '000', ch: 'y4pc' }, v2: { dir: '/11/4', file: '001', ch: 'hwzone' } } });
+  io.files.set('ivr2:/11/4/000.wav', 'a'); io.files.set('ivr2:/11/4/001.wav', 'b');
+  const st = { queue: { v3: { topic: '4', ch: 'y4pc' } }, seen: {} };
+  assert.equal(await N.removeDroppedChannels(io, st), 1);
+  assert.ok(!io.files.has('ivr2:/11/4/000.wav') && io.files.has('ivr2:/11/4/001.wav'));
+  assert.ok(!st.queue.v3);
+});

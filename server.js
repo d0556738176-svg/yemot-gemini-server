@@ -5933,6 +5933,7 @@ async function newsDeps() {
       await pipeline(Readable.fromWeb(r.body),createWriteStream(out));
     },
     publish:(v,wav,meta)=>N.publishNews(v,wav,meta,io),
+    io,
   };
 }
 if (String(process.env.NEWS11 || 'on').toLowerCase() !== 'off') setTimeout(()=>{
