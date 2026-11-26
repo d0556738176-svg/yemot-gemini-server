@@ -39,6 +39,8 @@ export const EXT7_SETTINGS = {
   title: 'השירים החדשים',
   start: 'max',
   ...PLAY_KEYS,
+  // Owner, 27.11: 2 = delete this file from the whole system (asks 1 / 2).
+  control_play2: 'send_api',
   // Remember where the caller stopped, so extension 8 can return there.
   save_last_play: 'yes',
 };

@@ -48,7 +48,7 @@ test('keys match the requested layout', () => {
   assert.equal(EXT7_SETTINGS.control_play0, 'go_to_folder');
   assert.equal(EXT7_SETTINGS.playfile_control_play_0_goto, '/');
   assert.equal(EXT8_SETTINGS.control_play0, 'go_to_folder');
-  assert.equal(EXT7_SETTINGS.control_play2, undefined);
+  assert.equal(EXT7_SETTINGS.control_play2, 'send_api'); // 27.11: delete from the whole system
 });
 
 import { backfillExt7 } from './branch2-ext7.js';
@@ -79,7 +79,7 @@ test('extension 8 returns to the last place; extension 7 saves that place', () =
 
 import { stripUnusedKeys } from './branch2-ext7.js';
 test('a key the layout no longer uses is removed from ext.ini', () => {
-  const out = stripUnusedKeys('type=playfile\ncontrol_play2=seconds_minus\ncontrol_play1=seconds_plus\ntitle=x', EXT7_SETTINGS);
+  const out = stripUnusedKeys('type=playfile\ncontrol_play2=seconds_minus\ncontrol_play1=seconds_plus\ntitle=x', EXT8_SETTINGS);
   assert.equal(out, 'type=playfile\ncontrol_play1=seconds_plus\ntitle=x');
 });
 

@@ -5603,8 +5603,16 @@ app.get('/yemot-media', async (req, res) => {
     const io = await newsIo();
     const out = await handleMediaKey(req.query || {}, {
       lookup: (dir, file) => String(dir).startsWith(N.NEWS_ROOT + '/') ? N.lookupNews(dir, file, io) : ext7Lookup(dir, file),
-      canDelete: dir => !!N.topicOfDir(String(dir).replace(/\/$/, '')),
-      deleteFile: (dir, file) => N.deleteNews(dir, file, io),
+      // Key 2: the extension 11 folders, and extension 7 (owner, 27.11: from
+      // the whole system: 7, the AI's list, the saved copy, the downloads).
+      canDelete: dir => { const d = String(dir).replace(/\/$/, ''); return d === '/7' || !!N.topicOfDir(d); },
+      deleteQuestion: dir => String(dir).replace(/\/$/, '') === '/7' ? ['האם למחוק את הקובץ מכל המערכת', 'משלוחה 7, מהזיכרון של הבינה המלאכותית ומתיקיות ההורדות'] : null,
+      deleteFile: async (dir, file) => {
+        if (String(dir).replace(/\/$/, '') !== '/7') return N.deleteNews(dir, file, io);
+        const D = await import('./ext7-delete.js');
+        const r = await D.deleteFromAll(dir, file, await ext7DeleteIo(), console);
+        return { ...r, spoken: 'הקובץ נמחק מכל המערכת' };
+      },
       details: mediaDetails, dubStatus: dubStatusOf, startDub: startDubJob,
       language: async (vid, title) => (await import('./youtube-video-facts.js')).videoLanguage(await fetchVideoFacts(vid, process.env).catch(() => null), title),
     });
@@ -5885,6 +5893,30 @@ async function replayIo() {
     upload:(f,r)=>p.uploadToYemot(f,r,undefined,{convertAudio:true}),
     del:async remote=>{ await fetch(api('FileAction',{action:'delete',what:remote}),{signal:AbortSignal.timeout(8000)}).catch(()=>{}); },
     log:console,
+  };
+}
+// Extension 7 key 2 (owner, 27.11): Yemot access for deleting a file and all
+// its copies. Folder listings are read page by page (folders hold up to 3000).
+async function ext7DeleteIo() {
+  const p=(await import('./youtube-authorized-playback.js'))._pipeline;
+  const call=async(fn,params,ms=20000)=>{ const u=new URL(p.YEMOT_API_BASE+'/'+fn); for(const [k,v] of Object.entries({token:p.yemotApiKey(),...params})) u.searchParams.set(k,v); return (await fetch(u,{signal:AbortSignal.timeout(ms)})).json().catch(()=>null); };
+  const del=async what=>{ const j=await call('FileAction',{action:'delete',what}); if(j?.responseStatus!=='OK') throw new Error('delete: '+String(j?.message||'failed').slice(0,80)); };
+  return {
+    readJson:x=>p.readCacheJson(x), writeJson:(x,d)=>p.writeCacheJson(x,d), del, delDir:del,
+    list:async dir=>{
+      const names=new Set();
+      for(let from=0;from<20000;from+=1000){
+        let j=await call('GetIVR2Dir',{path:dir,filesFrom:String(from),filesLimit:'1000'});
+        // Paging not accepted: the plain listing (all files at once).
+        if(j?.responseStatus!=='OK'&&from===0) { j=await call('GetIVR2Dir',{path:dir}); if(j?.responseStatus!=='OK') return null; for(const f of j.files||[]) { const n=String(f?.name||f?.fileName||''); if(n) names.add(n); } break; }
+        if(j?.responseStatus!=='OK') break;
+        const before=names.size;
+        for(const f of j.files||[]) { const n=String(f?.name||f?.fileName||''); if(n) names.add(n); }
+        if(names.size===before||(j.files||[]).length<1000) break;
+      }
+      return [...names];
+    },
+    refreshAi:async()=>{ const main=String(process.env.MAIN_BASE_URL||'https://main.'+(process.env.PUBLIC_BASE_URL||'').replace(/^https?:\/\/ext2\./,'').replace(/\/$/,'')); if(!/^https:\/\/main\./.test(main)) return; await fetch(main+'/library-refresh',{method:'POST',signal:AbortSignal.timeout(5000)}).catch(()=>{}); },
   };
 }
 // Extension 11 (owner, 25.11): Yemot access for the news folders.

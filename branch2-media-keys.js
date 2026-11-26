@@ -48,14 +48,14 @@ export async function handleMediaKey(q, deps, log = console) {
     try {
       const r = await deps.deleteFile(p.dir, p.file);
       log.info?.('[NEWS11] file deleted by caller', { dir: p.dir, file: p.file, videoId: r?.videoId || null });
-      return say('הקובץ נמחק') + '&' + (r?.next ? 'go_to_folder_and_play=' + p.dir + ',' + r.next + ',0' : 'go_to_folder=' + p.dir.replace(/\/[^/]+$/, '') );
+      return say(r?.spoken || 'הקובץ נמחק') + '&' + (r?.next ? 'go_to_folder_and_play=' + p.dir + ',' + r.next + ',0' : 'go_to_folder=' + p.dir.replace(/\/[^/]+$/, '') );
     } catch (e) {
       log.warn?.('[NEWS11] delete failed', { what, message: String(e?.message || e).slice(0, 120) });
       return say('המחיקה לא הצליחה כרגע. ממשיכים בהשמעה') + '&' + back;
     }
   }
   if (key === '2' && p && deps.canDelete?.(p.dir)) {
-    const question = ['האם למחוק את הקובץ', 'למחיקה הקש 1', 'לביטול הקש 2'].map(t => 't-' + clean(t)).join('.');
+    const question = [...(deps.deleteQuestion?.(p.dir) || ['האם למחוק את הקובץ']), 'למחיקה הקש 1', 'לביטול הקש 2'].map(t => 't-' + clean(t)).join('.');
     return 'read=' + question + '=del_ok,no,1,1,10,No,yes,no,,1.2,1,Ok,2,';
   }
 
