@@ -5986,7 +5986,7 @@ app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)
     // The settings Yemot really holds for 11 and 11/1, and the main menu's
     // digit lines (11 needs two digits). No keys or passwords are in them.
     const rio=await replayIo(); const lines=t=>t==null?null:String(t).replace(/\r/g,'').split('\n').filter(Boolean);
-    const settings={ '/11':lines(await rio.getText('ivr2:/11/ext.ini').catch(()=>null)), '/11/1':lines(await rio.getText('ivr2:/11/1/ext.ini').catch(()=>null)),
+    const settings={ '/11':lines(await rio.getText('ivr2:/11/ext.ini').catch(()=>null)), '/11/1':lines(await rio.getText('ivr2:/11/1/ext.ini').catch(()=>null)), '/7':lines(await rio.getText('ivr2:/7/ext.ini').catch(()=>null)),
       ...Object.fromEntries(await Promise.all(Object.keys(N.TOPICS).filter(k=>k!=='1').map(async k=>[N.topicDir(k),(lines(await rio.getText('ivr2:'+N.topicDir(k)+'/ext.ini').catch(()=>null))||[]).filter(l=>/^(type|title)=/.test(l))]))),
       mainMenu:(lines(await rio.getText('ivr2:/ext.ini').catch(()=>null))||[]).filter(l=>/^(type|digits|timeout|text_extensions)=/.test(l)) };
     const { metaLog }=await import('./video-meta.js');
