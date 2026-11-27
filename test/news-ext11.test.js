@@ -273,3 +273,18 @@ test('a later import of one LobbyTube topic keeps every folder number', async ()
   for (const [t, d] of Object.entries(before)) assert.equal(after[t], d, t);
   assert.equal(after['נושא חדש'], '/11/37');
 });
+
+test('channels moved from 11/1/1 to 11/1/2 take their files, once', async () => {
+  N._resetForTests();
+  const io = fakeYemot();
+  io.files.set('ivr2:/11/1/1/000.wav', 'a'); io.files.set('ivr2:/11/1/1/001.wav', 'b');
+  await io.writeJson(N.INDEX, { next: 2, layout: 'main-part', items: { r000000000a: { dir: '/11/1/1', file: '000', ch: 'reshet13' }, k000000000b: { dir: '/11/1/1', file: '001', ch: 'kan' } } });
+  await io.writeJson('ivr2:/2/youtubeaudio/news11_t5_index.json', { next: 7, items: {} });
+  const st = { queue: { q000000000c: { topic: '1', ch: 'ch24' } } };
+  assert.equal(await N.moveChannelFiles(io, st), 1);
+  assert.equal(io.files.get('ivr2:/11/1/2/007.wav'), 'a');
+  assert.ok(io.files.has('ivr2:/11/1/1/001.wav'));
+  assert.equal(st.queue.q000000000c.topic, '5');
+  assert.equal((await N.lookupNews('/11/1/2', '007', io)).videoId, 'r000000000a');
+  assert.equal(await N.moveChannelFiles(io, st), 0);
+});

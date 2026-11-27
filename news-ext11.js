@@ -30,17 +30,18 @@ const q = (key, title, query, names, extra = {}) => ({ key, title, query, names,
 export const NEWS_CHANNELS = [
   { key: 'kikar', title: 'כיכר השבת', handle: 'kikarhashabat' },
   { key: '14', title: 'עכשיו 14', id: 'UCKEImtWikw9usC1pl_9m1nQ', handle: 'c14news' },
-  q('ch24', 'ערוץ 24', 'ערוץ 24 חדשות', ['ערוץ 24', 'Channel 24']),
-  q('reshet13', 'רשת 13', 'רשת 13', ['רשת 13', 'Reshet 13']),
   q('arutz7', 'ערוץ 7', 'ערוץ 7 חדשות', ['ערוץ 7', 'Arutz Sheva', 'Arutz 7']),
   { key: '12', title: 'חדשות 12', handle: 'israelnews' },
   { key: 'i24', title: 'i24NEWS בעברית', id: 'UCisowXt5wZkp2sR3rFh9lnQ' },
   { key: 'kan', title: 'כאן חדשות', id: 'UC_HwfTAcjBESKZRJq6BTCpg', handle: 'KAN11NEWS' },
-  q('kandigital', 'כאן דיגיטל', 'כאן דיגיטל תאגיד השידור הישראלי', ['כאן | דיגיטל', 'כאן דיגיטל']),
   { key: '13', title: 'חדשות 13', id: 'UCvQmPpU20hw1Trss_CVwaew' },
   q('ch16', 'ערוץ 16', 'ערוץ 16', ['ערוץ 16', 'Channel 16', 'ch16']),
 ];
 export const OTHER_NEWS_CHANNELS = [
+  // Owner, 27.11: from the main channels (11/1/1) to here, with their files.
+  q('ch24', 'ערוץ 24', 'ערוץ 24 חדשות', ['ערוץ 24', 'Channel 24']),
+  q('reshet13', 'רשת 13', 'רשת 13', ['רשת 13', 'Reshet 13']),
+  q('kandigital', 'כאן דיגיטל', 'כאן דיגיטל תאגיד השידור הישראלי', ['כאן | דיגיטל', 'כאן דיגיטל']),
   { key: 'knesset', title: 'ערוץ כנסת', handle: 'KnessetTV' },
   q('leumanut', 'ערוץ לאומנות', 'ערוץ לאומנות', ['לאומנות']),
   q('mechadesh', 'חדשות המחדש', 'חדשות המחדש', ['המחדש']),
@@ -374,6 +375,37 @@ export function moveNewsToMainPart(io) {
     return moved;
   });
 }
+// Owner, 27.11: channels moved from one news part to the other take their
+// files with them (the next free numbers there), once per move.
+export const CHANNEL_MOVES = [{ id: 'main-to-other-27.11', from: '1', to: '5', ch: ['ch24', 'reshet13', 'kandigital'] }];
+export function moveChannelFiles(io, st) {
+  return serial(async () => {
+    let moved = 0;
+    for (const mv of CHANNEL_MOVES) {
+      const from = await readIndex(io, mv.from);
+      if ((from.moves || []).includes(mv.id)) continue;
+      const to = await readIndex(io, mv.to);
+      const toDir = topicDir(mv.to);
+      for (const [v, e] of Object.entries(from.items || {})) {
+        if (!mv.ch.includes(e.ch)) continue;
+        if ((to.next || 0) >= MAX_FILES) break;
+        const file = file3(to.next || 0);
+        try { await io.move('ivr2:' + e.dir + '/' + e.file + '.wav', 'ivr2:' + toDir + '/' + file + '.wav'); }
+        catch { continue; }
+        to.next = (to.next || 0) + 1;
+        to.items = { ...(to.items || {}), [v]: { ...e, dir: toDir, file } };
+        delete from.items[v];
+        moved++;
+      }
+      from.moves = [...(from.moves || []), mv.id];
+      await io.writeJson(indexOf(mv.to), to);
+      await io.writeJson(indexOf(mv.from), from);
+      for (const q of Object.values(st?.queue || {})) if (q.topic === mv.from && mv.ch.includes(q.ch)) q.topic = mv.to;
+    }
+    if (moved) note({ channelFilesMoved: moved });
+    return moved;
+  });
+}
 // 27.11: a channel taken out of a topic's list (it came out as the wrong
 // channel) has its files and queued videos removed, once per start.
 let droppedChecked = false;
@@ -406,7 +438,7 @@ function channelsThisRound(t, topic, st) {
 export async function pollOnce(deps, now = Date.now()) {
   const st = loadState();
   searchBudget.left = deps.searchesPerRound ?? 6;
-  if (deps.io && !droppedChecked) { droppedChecked = true; st.seen ||= {}; await moveNewsToMainPart(deps.io).catch(() => 0); await removeDroppedChannels(deps.io, st).catch(() => 0); }
+  if (deps.io && !droppedChecked) { droppedChecked = true; st.seen ||= {}; await moveNewsToMainPart(deps.io).catch(() => 0); await moveChannelFiles(deps.io, st).catch(() => 0); await removeDroppedChannels(deps.io, st).catch(() => 0); }
   st.seen ||= {}; st.queue ||= {}; st.ids ||= {}; st.topicStarted ||= {}; st.topicPolled ||= {};
   if (!st.started) st.started = new Date(now).toISOString();
   // The news ran alone before topics existed: its first round was then.
