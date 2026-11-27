@@ -1,49 +1,8 @@
-{
- "chunks": 15,
- "apis": [
-  "/api/auth/signin?",
-  "/api/videos/search?q=",
-  "/api/site-banner",
-  "/api/site-banner/click",
-  "/api/referrals/status",
-  "/api/referrals/generate",
-  "/api/user/subscriptions",
-  "F:/api/videos/search?q=",
-  "F:/api/site-banner",
-  "F:/api/site-banner/click",
-  "F:/api/referrals/status",
-  "F:/api/referrals/generate",
-  "F:/api/user/subscriptions",
-  "/api/user/playlists",
-  "/api/user/favorites",
-  "/api/user/playlists/",
-  "F:/api/user/playlists",
-  "F:/api/user/favorites",
-  "F:/api/user/playlists/",
-  "/api/ad-config?placement=",
-  "F:/api/ad-config?placement=",
-  "/api/videos?",
-  "/api/channels",
-  "F:/api/videos?",
-  "F:/api/channels"
- ],
- "hosts": [
-  "https://api.whatsapp.com/send?text=",
-  "https://ui-avatars.com/api/?name=",
-  "https://www.transparenttextures.com/patterns/carbon-fibre.png"
- ],
- "rscSample": "<!DOCTYPE html><html lang=\"he\" dir=\"rtl\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"stylesheet\" href=\"/_next/static/css/236bd30a85aaec40.css?dpl=dpl_27A3v8bpvMEUifTmU7J1DKSehWrZ\" data-precedence=\"next\"/><link rel=\"stylesheet\" href=\"/_next/static/css/12ff49e1cc158b50.css?dpl=dpl_27A3v8bpvMEUifTmU7J1DKSehWrZ\" data-precedence=\"next\"/><link rel=\"preload\" as=\"script\" fetchPriority=\"low\" href=\"/_next/static/chunks/webpack-162e319663e1991f.js?dpl=dpl_27A3v8bpvMEUifTmU7J1DKSehWrZ\"/><script src=\"/_next/static/chunks/4bd1b696-bacbe61400ec8d7f.js?dpl=dpl_27A3v8bpvMEUifTmU7J1DKSehWrZ\" async=\"\"></script><script src=\"/_next/static/chunks/1",
- "/sitemap.xml?page=static": {
-  "status": 200,
-  "len": 518074,
-  "sample": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><url><loc>https://lobbytube.co.il</loc><lastmod>2026-11-27T00:42:49.543Z</lastmod><changefreq>daily</changefreq><priority>1.0</priority></url><url><loc>https://lobbytube.co.il/categories</loc><lastmod>2026-11-27T00:42:49.543Z</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url><url><loc>https://lobbytube.co.il/channels</loc><lastmod>2026-11-27T00:42:49.543Z</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url><url><loc>https://lobbytube.co.il/search</loc><lastmod>2026-11-27T00:42:49.543Z</lastmod><changefreq>daily</changefreq><priority>0.7</priority></url><url><loc>https://lobbytube.co.il/about</loc><lastmod>2026-11-27T00:42:49.543Z</lastmod><changefreq>monthly</changefreq><priority>0.5</priority></url><url><loc>https://lobbytube.co.il/accessibility</loc><lastmod>2026-11-27T00:42:49.543Z</lastmod><changefreq>monthly</changefreq><priority>0.3</priority></url><url><loc>https://lobbytube.co.il/privacy</loc><lastmod>2026-11-27T00:42:49.543Z</lastmod><changefreq>monthly</changefreq><priority>0.3</priority></url><url><loc>https://lobbytube.co.il/terms</loc><lastmod>2026-11-27T00:42:49.543Z</lastmod><changefreq>monthly</changefreq><priority>0.3</priority></url><url><loc>https://lobbytube.co.il/categories/%D7%9E%D7%95%D7%96%D7%99%D7%A7%D7%94</loc><lastmod>2026-11-27T00:42:49.543Z</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url><url>",
-  "locs": 2920
- },
- "/sitemap.xml?page=0": {
-  "status": 200,
-  "len": 8050108,
-  "sample": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><url><loc>https://lobbytube.co.il/watch/MLkjpCtpai0</loc><lastmod>2026-11-02T20:48:47.711Z</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url><url><loc>https://lobbytube.co.il/watch/1u6GQqn3pfc</loc><lastmod>2026-11-02T20:48:47.711Z</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url><url><loc>https://lobbytube.co.il/watch/hQuzpKifyFI</loc><lastmod>2026-11-02T20:48:47.711Z</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url><url><loc>https://lobbytube.co.il/watch/EVvv7wtIYWY</loc><lastmod>2026-11-02T20:48:47.711Z</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url><url><loc>https://lobbytube.co.il/watch/cuR2dhMt2TE</loc><lastmod>2026-11-02T20:48:47.711Z</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url><url><loc>https://lobbytube.co.il/watch/LE1cu9yS0h4</loc><lastmod>2026-11-02T20:48:47.711Z</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url><url><loc>https://lobbytube.co.il/watch/DVE1n_f8z30</loc><lastmod>2026-11-02T20:48:47.711Z</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url><url><loc>https://lobbytube.co.il/watch/LJFvA0FM-iA</loc><lastmod>2026-11-02T20:48:47.711Z</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url><url><loc>https://lobbytube.co.il/watch/zpLwpGebFi8</loc><lastmod>2026-11-02T20:48:47.711Z</lastmod><changefreq>w",
-  "locs": 50000
- }
-}
+topic 1 חדשות מהערוצים המרכזיים files 210 /11/1/214,/11/1/213
+topic 2 שיעורי תורה files 68 /11/2/067,/11/2/066
+topic 3 מוזיקה files 28 /11/3/027,/11/3/026
+topic 4 טכנולוגיה files 21 /11/4/020,/11/4/019
+topic 5 חדשות שונות files 0 
+settings {"/11":["type=api","api_link=https://ext2.176-97-205-41.sslip.io/yemot-youtube","api_add_0=news=menu","title=ערוצים אונליין","news11=yes"],"/11/1":["type=api","api_link=https://ext2.176-97-205-41.sslip.io/yemot-youtube","api_add_0=news=menu","api_add_1=news_parent=1","title=חדשות אונליין","news11=yes"],"/7":["type=playfile","control_play6=plus","start=max","control_play4=minus","control_play5=wait","title=השירים החדשים","control_play1=seconds_plus","save_last_play=yes","control_play7=minut_plus_amount1","control_play3=seconds_minus","minut_plus_amount1=180000","api_hangup_send=no","control_play8=send_api","control_play9=send_api","api_link=https://ext2.176-97-205-41.sslip.io/yemot-media","control_play2=send_api","control_play0=go_to_folder","playfile_control_play_0_goto=/"],"/11/1/1":["type=playfile","title=חדשות מהערוצים המרכזיים"],"/11/2":["type=playfile","title=שיעורי תורה"],"/11/3":["type=playfile","title=מוזיקה"],"/11/4":["type=playfile","title=טכנולוגיה"],"/11/1/2":["type=playfile","title=חדשות שונות"],"mainMenu":["type=menu","digits=2","timeout=2","text_extensions=yes"]}
+log []
 exit=0
