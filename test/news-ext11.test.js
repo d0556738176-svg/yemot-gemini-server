@@ -68,17 +68,17 @@ test('full folder (not news): the older half goes to the archive, the newer half
   N._resetForTests();
   const io = fakeYemot();
   const items = {};
-  for (let n = 0; n < 1000; n++) { io.files.set('ivr2:/11/2/' + N.file3(n) + '.wav', 'f' + n); items['v' + String(n).padStart(10, '0')] = { dir: '/11/2', file: N.file3(n), title: 't' + n }; }
+  for (let n = 0; n < 1000; n++) { io.files.set('ivr2:/11/2/1/' + N.file3(n) + '.wav', 'f' + n); items['v' + String(n).padStart(10, '0')] = { dir: '/11/2/1', file: N.file3(n), title: 't' + n }; }
   const IX = 'ivr2:/2/youtubeaudio/news11_t2_index.json';
   await io.writeJson(IX, { version: 1, next: 1000, items, archives: 0 });
   const e = await N.publishNews('newvideo123', '/tmp/x.wav', { title: 'newest', topic: '2' }, io);
   assert.equal(e.file, '500');
-  assert.equal(io.files.get('ivr2:/11/2/1/000.wav'), 'f0');
-  assert.equal(io.files.get('ivr2:/11/2/1/499.wav'), 'f499');
-  assert.equal(io.files.get('ivr2:/11/2/000.wav'), 'f500');
+  assert.equal(io.files.get('ivr2:/11/2/1/1/000.wav'), 'f0');
+  assert.equal(io.files.get('ivr2:/11/2/1/1/499.wav'), 'f499');
+  assert.equal(io.files.get('ivr2:/11/2/1/000.wav'), 'f500');
   const idx = await io.readJson(IX);
   assert.equal(idx.archives, 1); assert.equal(idx.next, 501);
-  assert.match(io.ini.get('/11/2/1'), /type=playfile/);
+  assert.match(io.ini.get('/11/2/1/1'), /type=playfile/);
 });
 
 test('full news folder: the oldest half is deleted, nothing archived', async () => {
@@ -156,10 +156,10 @@ test('topics: each topic files into its own extension and its own index', async 
   await N.publishNews('torahvideo1', '/tmp/x.wav', { topic: '2', title: 'שיעור' }, io);
   await N.publishNews('musicvideo1', '/tmp/x.wav', { topic: '3', title: 'שיר' }, io);
   await N.publishNews('yedid1413', '/tmp/x.wav', { topic: '2', title: 'קטע', url: 'https://hel1.your-objectstorage.com/x/y/z' }, io);
-  assert.ok(io.files.has('ivr2:/11/2/000.wav')); assert.ok(io.files.has('ivr2:/11/2/001.wav')); assert.ok(io.files.has('ivr2:/11/3/000.wav'));
+  assert.ok(io.files.has('ivr2:/11/2/1/000.wav')); assert.ok(io.files.has('ivr2:/11/2/1/001.wav')); assert.ok(io.files.has('ivr2:/11/3/000.wav'));
   assert.ok(!io.files.has('ivr2:/11/1/000.wav'));
-  assert.equal((await N.lookupNews('/11/2', '000', io)).videoId, 'torahvideo1');
-  const site = await N.lookupNews('/11/2', '001', io);
+  assert.equal((await N.lookupNews('/11/2/1', '000', io)).videoId, 'torahvideo1');
+  const site = await N.lookupNews('/11/2/1', '001', io);
   assert.equal(site.videoId, null); assert.match(site.url, /objectstorage/);
   assert.deepEqual(N.topicOfDir('/11/3/2'), { t: '3', a: 2 }); assert.equal(N.topicOfDir('/11/97'), null);
   assert.match(io.ini.get('/11/3'), /title=מוזיקה/);
@@ -256,7 +256,8 @@ test('LobbyTube topics: the shipped lists make 11/5 on, Torah joins 11/2, its ne
   const byTitle = t => Object.keys(N.TOPICS).find(k => N.TOPICS[k].title === t);
   assert.equal(N.topicDir(byTitle('חדשות מוזיקה')), '/11/5');
   assert.equal(N.topicDir(byTitle('כללי')), '/11/36');
-  assert.ok(N.TOPICS['2'].channels.some(c => c.lobby) && N.TOPICS['2'].channels.some(c => c.key === 'yedid'));
+  assert.ok(N.TOPICS.T2.channels.some(c => c.lobby) && N.TOPICS['2'].channels.some(c => c.key === 'yedid') && !N.TOPICS['2'].channels.some(c => c.lobby));
+  assert.equal(N.topicDir('T2'), '/11/2/2');
   assert.ok(!byTitle('חדשות ואקטואליה'));
   assert.deepEqual(N.topicOfDir('/11/6'), { t: byTitle('מעניין'), a: 0 });
   const id = n => 'UC' + String(n).padStart(22, 'x');
@@ -287,4 +288,17 @@ test('channels moved from 11/1/1 to 11/1/2 take their files, once', async () => 
   assert.equal(st.queue.q000000000c.topic, '5');
   assert.equal((await N.lookupNews('/11/1/2', '007', io)).videoId, 'r000000000a');
   assert.equal(await N.moveChannelFiles(io, st), 0);
+});
+
+test('11/2 splits: its files go to 11/2/1, the LobbyTube channels\' files to 11/2/2', async () => {
+  N._resetForTests();
+  const io = fakeYemot();
+  io.files.set('ivr2:/11/2/000.wav', 'mine'); io.files.set('ivr2:/11/2/001.wav', 'lobby');
+  await io.writeJson('ivr2:/2/youtubeaudio/news11_t2_index.json', { next: 2, items: { y000000000a: { dir: '/11/2', file: '000', ch: 'yedid' }, l000000000b: { dir: '/11/2', file: '001', ch: 'lb_UCabc' } } });
+  await N.moveNewsToMainPart(io, '2', '/11/2');
+  await N.moveChannelFiles(io, { queue: {} });
+  assert.equal(io.files.get('ivr2:/11/2/1/000.wav'), 'mine');
+  assert.equal(io.files.get('ivr2:/11/2/2/000.wav'), 'lobby');
+  assert.equal((await N.lookupNews('/11/2/2', '000', io)).videoId, 'l000000000b');
+  assert.deepEqual(N.topicOfDir('/11/2/2'), { t: 'T2', a: 0 });
 });

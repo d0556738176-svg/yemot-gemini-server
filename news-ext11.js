@@ -123,7 +123,10 @@ export const NEWS_MARK = 'news11=yes';
 export const TOPICS = {
   '1': { title: 'חדשות מהערוצים המרכזיים', menuTitle: 'חדשות אונליין', dir: '/11/1/1', news: true, kind: 'lesson', index: INDEX, priority: 0, firstHours: 2, maxAgeDays: 7, everyMin: 2, channels: NEWS_CHANNELS },
   '5': { title: 'חדשות שונות', dir: '/11/1/2', parent: '1', news: true, kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t5_index.json', priority: 0, firstHours: 2, maxAgeDays: 7, everyMin: 6, channels: OTHER_NEWS_CHANNELS },
-  '2': { title: 'שיעורי תורה', kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t2_index.json', priority: 1, firstPerChannel: 3, maxAgeDays: 14, everyMin: 10, channels: TORAH_CHANNELS },
+  // Owner, 27.11: 11/2 in two parts - 11/2/1 the channels he chose,
+  // 11/2/2 every Torah channel of LobbyTube.
+  '2': { title: 'הערוצים הנבחרים', menuTitle: 'שיעורי תורה', dir: '/11/2/1', kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t2_index.json', priority: 1, firstPerChannel: 3, maxAgeDays: 14, everyMin: 10, channels: TORAH_CHANNELS },
+  'T2': { title: 'כל ערוצי שיעורי התורה', dir: '/11/2/2', parent: '2', kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_T2_index.json', priority: 1, maxAgeDays: 3, everyMin: 10, perDay: 15, channels: [] },
   // 26.11: singers upload seldom, so a 14-day limit left most of them empty;
   // the newest songs of each are taken even if months old (firstKey: their
   // first round is made again once with the new limit).
@@ -142,7 +145,7 @@ const STATE_DIR = process.env.NEWS_STATE_DIR || path.join(os.homedir(), 'yemot-n
 // of the last 3 days, and each topic gets at most LOBBY_PER_DAY files a day.
 export const LOBBY_FILE = path.join(STATE_DIR, 'lobby.json');
 export const LOBBY_SKIP = ['חדשות ואקטואליה'];
-const LOBBY_JOIN = { 'שיעורי תורה': '2', 'מוזיקה': '3', "טכנולוגיה וגאדג'טים": '4' };
+const LOBBY_JOIN = { 'שיעורי תורה': 'T2', 'מוזיקה': '3', "טכנולוגיה וגאדג'טים": '4' };
 const LOBBY_SONGS = ['מוזיקה', 'חדשות מוזיקה'];
 export const LOBBY_PER_DAY = Number(process.env.LOBBY_PER_DAY || 15);
 const LOBBY_SLICE = Number(process.env.LOBBY_SLICE || 15);
@@ -358,26 +361,31 @@ function consider(st, t, topic, ch, it, now, firstRun, rank) {
 }
 // 27.11: 11/1 became two parts; the files that were in 11/1 move to 11/1/1
 // (same numbers), once.
-export function moveNewsToMainPart(io) {
+export function moveNewsToMainPart(io, t = '1', oldDir = NEWS_DIR) {
   return serial(async () => {
-    const idx = await readIndex(io, '1');
+    const idx = await readIndex(io, t);
     if (idx.layout === 'main-part') return 0;
-    const to = topicDir('1');
+    const to = topicDir(t);
     let moved = 0;
     for (const e of Object.values(idx.items || {})) {
-      if (e.dir !== NEWS_DIR) continue;
-      await io.move('ivr2:' + NEWS_DIR + '/' + e.file + '.wav', 'ivr2:' + to + '/' + e.file + '.wav').then(() => moved++).catch(() => {});
+      if (e.dir !== oldDir) continue;
+      await io.move('ivr2:' + oldDir + '/' + e.file + '.wav', 'ivr2:' + to + '/' + e.file + '.wav').then(() => moved++).catch(() => {});
       e.dir = to;
     }
     idx.layout = 'main-part';
-    await io.writeJson(indexOf('1'), idx);
-    note({ movedToMainPart: moved });
+    await io.writeJson(indexOf(t), idx);
+    note({ movedToMainPart: moved, topic: t });
     return moved;
   });
 }
 // Owner, 27.11: channels moved from one news part to the other take their
 // files with them (the next free numbers there), once per move.
-export const CHANNEL_MOVES = [{ id: 'main-to-other-27.11', from: '1', to: '5', ch: ['ch24', 'reshet13', 'kandigital'] }];
+export const CHANNEL_MOVES = [
+  { id: 'main-to-other-27.11', from: '1', to: '5', ch: ['ch24', 'reshet13', 'kandigital'] },
+  // The LobbyTube Torah channels' files: from 11/2/1 to 11/2/2.
+  { id: 'torah-lobby-27.11', from: '2', to: 'T2', ch: c => String(c || '').startsWith('lb_') },
+];
+const movesChannel = (mv, c) => typeof mv.ch === 'function' ? mv.ch(c) : mv.ch.includes(c);
 export function moveChannelFiles(io, st) {
   return serial(async () => {
     let moved = 0;
@@ -387,7 +395,7 @@ export function moveChannelFiles(io, st) {
       const to = await readIndex(io, mv.to);
       const toDir = topicDir(mv.to);
       for (const [v, e] of Object.entries(from.items || {})) {
-        if (!mv.ch.includes(e.ch)) continue;
+        if (!movesChannel(mv, e.ch)) continue;
         if ((to.next || 0) >= MAX_FILES) break;
         const file = file3(to.next || 0);
         try { await io.move('ivr2:' + e.dir + '/' + e.file + '.wav', 'ivr2:' + toDir + '/' + file + '.wav'); }
@@ -400,7 +408,7 @@ export function moveChannelFiles(io, st) {
       from.moves = [...(from.moves || []), mv.id];
       await io.writeJson(indexOf(mv.to), to);
       await io.writeJson(indexOf(mv.from), from);
-      for (const q of Object.values(st?.queue || {})) if (q.topic === mv.from && mv.ch.includes(q.ch)) q.topic = mv.to;
+      for (const q of Object.values(st?.queue || {})) if (q.topic === mv.from && movesChannel(mv, q.ch)) q.topic = mv.to;
     }
     if (moved) note({ channelFilesMoved: moved });
     return moved;
@@ -413,7 +421,9 @@ export async function removeDroppedChannels(io, st) {
   let removed = 0;
   for (const t of Object.keys(TOPICS)) {
     if (TOPICS[t].news) continue;
-    const keys = new Set(TOPICS[t].channels.map(c => c.key));
+    // Only a channel that is in no topic at all (a channel moved to another
+    // topic keeps its files there).
+    const keys = new Set(Object.values(TOPICS).flatMap(x => x.channels.map(c => c.key)));
     for (const [v, q] of Object.entries(st.queue || {})) if (topicOf(q) === t && q.ch && !keys.has(q.ch)) { delete st.queue[v]; st.seen[v] = 'dropped-channel'; }
     const idx = await readIndex(io, t);
     for (const e of Object.values(idx.items || {})) {
@@ -438,7 +448,7 @@ function channelsThisRound(t, topic, st) {
 export async function pollOnce(deps, now = Date.now()) {
   const st = loadState();
   searchBudget.left = deps.searchesPerRound ?? 6;
-  if (deps.io && !droppedChecked) { droppedChecked = true; st.seen ||= {}; await moveNewsToMainPart(deps.io).catch(() => 0); await moveChannelFiles(deps.io, st).catch(() => 0); await removeDroppedChannels(deps.io, st).catch(() => 0); }
+  if (deps.io && !droppedChecked) { droppedChecked = true; st.seen ||= {}; await moveNewsToMainPart(deps.io).catch(() => 0); await moveNewsToMainPart(deps.io, '2', NEWS_ROOT + '/2').catch(() => 0); await moveChannelFiles(deps.io, st).catch(() => 0); await removeDroppedChannels(deps.io, st).catch(() => 0); }
   st.seen ||= {}; st.queue ||= {}; st.ids ||= {}; st.topicStarted ||= {}; st.topicPolled ||= {};
   if (!st.started) st.started = new Date(now).toISOString();
   // The news ran alone before topics existed: its first round was then.
