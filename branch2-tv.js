@@ -22,11 +22,13 @@ export const TV_CHANNELS = Object.freeze([
   { key: '4', title: 'ערוץ 14', pages: ['https://www.c14.co.il/live', 'https://r.il.cdn-redge.media/livehls/oil/ch14/live/ch14/live.livx/playlist.m3u8'], yt: 'ערוץ 14 שידור חי', owner: /\bC14\b|ערוץ 14|עכשיו 14|now ?14/i },
   { key: '5', title: 'איי 24 ניוז', pages: ['https://www.i24news.co.il/live', 'https://www.i24news.tv/he/live', 'https://i24newshebrew-cdn.encoders.immergo.tv/master.m3u8'], yt: 'i24NEWS עברית שידור חי', owner: /i24/i },
   { key: '6', title: 'ערוץ הכנסת', pages: ['https://www.knesset.tv/live/', 'https://contact.gostreaming.tv/Knesset/myStream/playlist.m3u8'], yt: 'ערוץ הכנסת שידור חי', owner: /כנסת|knesset/i, alt: ['ערוץ כנסת שידור חי', 'Knesset live'] },
-  { key: '7', title: 'רדיו איי 24 ניוז', pages: ['https://www.i24news.co.il/live-radio'] },
+  // 27.11: the i24 page timed out and the station was left without a source;
+  // its own CDN address (found from that page) is the fallback.
+  { key: '7', title: 'רדיו איי 24 ניוז', pages: ['https://www.i24news.co.il/live-radio', 'https://i24newshebrewradio-cdn.encoders.immergo.tv/master.m3u8'] },
   // Owner, 27.11: channel 16 (live + replays) takes key 8, which was
   // Channel 14 radio - it never had a source (c14.co.il blocks automated
   // access) and had no replays.
-  { key: '8', title: 'ערוץ 16', pages: ['https://ch16.co.il/', 'https://www.ch16.co.il/live'], yt: 'ערוץ 16 שידור חי', owner: /ערוץ 16|channel 16|ch16/i, alt: ['ערוץ 16 ישראל live', 'channel 16 israel live'] },
+  { key: '8', title: 'ערוץ 16', pages: ['https://ch16.co.il/', 'https://ch16israel-cdn.encoders.immergo.tv/master.m3u8'], yt: 'ערוץ 16 שידור חי', owner: /ערוץ 16|channel 16|ch16/i, alt: ['ערוץ 16 ישראל live', 'channel 16 israel live'] },
 ]);
 
 // Owner, 21.11: main-menu extension 10 = live radio, the same phone sound as
