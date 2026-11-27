@@ -161,7 +161,7 @@ test('topics: each topic files into its own extension and its own index', async 
   assert.equal((await N.lookupNews('/11/2', '000', io)).videoId, 'torahvideo1');
   const site = await N.lookupNews('/11/2', '001', io);
   assert.equal(site.videoId, null); assert.match(site.url, /objectstorage/);
-  assert.deepEqual(N.topicOfDir('/11/3/2'), { t: '3', a: 2 }); assert.equal(N.topicOfDir('/11/7'), null);
+  assert.deepEqual(N.topicOfDir('/11/3/2'), { t: '3', a: 2 }); assert.equal(N.topicOfDir('/11/97'), null);
   assert.match(io.ini.get('/11/3'), /title=מוזיקה/);
 });
 
@@ -251,14 +251,15 @@ test('an English channel is published in spoken Hebrew; an already-Hebrew one as
   assert.ok(io.files.has('ivr2:/11/1/2/000.wav'));
 });
 
-test('LobbyTube topics: new folders from 11/5, Torah joins 11/2, its news topic is left out, channels polled a slice at a time', async () => {
+test('LobbyTube topics: the shipped lists make 11/5 on, Torah joins 11/2, its news topic is left out', async () => {
   const N = await import('../news-ext11.js');
+  const byTitle = t => Object.keys(N.TOPICS).find(k => N.TOPICS[k].title === t);
+  assert.equal(N.topicDir(byTitle('חדשות מוזיקה')), '/11/5');
+  assert.equal(N.topicDir(byTitle('כללי')), '/11/36');
+  assert.ok(N.TOPICS['2'].channels.some(c => c.lobby) && N.TOPICS['2'].channels.some(c => c.key === 'yedid'));
+  assert.ok(!byTitle('חדשות ואקטואליה'));
+  assert.deepEqual(N.topicOfDir('/11/6'), { t: byTitle('מעניין'), a: 0 });
   const id = n => 'UC' + String(n).padStart(22, 'x');
-  const r = N.importLobby({ order: ['מוזיקה', 'שיעורי תורה', 'חדשות ואקטואליה', 'מעניין', 'ילדים'], cats: { 'מוזיקה': [id(1)], 'שיעורי תורה': [id(2), id(3)], 'חדשות ואקטואליה': [id(4)], 'מעניין': Array.from({ length: 40 }, (_, i) => id(100 + i)), 'ילדים': [id(5), 'bad'] } });
-  assert.equal(r.added, 44);
-  assert.equal(N.topicDir('L5'), '/11/5'); assert.equal(N.TOPICS.L5.title, 'מעניין');
-  assert.equal(N.topicDir('L6'), '/11/6'); assert.equal(N.TOPICS.L6.channels.length, 1);
-  assert.ok(N.TOPICS['2'].channels.some(c => c.id === id(2)) && N.TOPICS['2'].channels.some(c => c.key === 'yedid'));
-  assert.ok(!Object.values(N.TOPICS).some(t => t.channels.some(c => c.id === id(4))));
-  assert.deepEqual(N.topicOfDir('/11/6'), { t: 'L6', a: 0 });
+  const r = N.importLobby({ order: ['ילדים'], cats: { 'ילדים': [id(5), 'bad'] } });
+  assert.equal(r.channels, 1);
 });
