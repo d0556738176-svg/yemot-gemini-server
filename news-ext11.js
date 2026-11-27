@@ -39,7 +39,7 @@ export const NEWS_CHANNELS = [
   q('kandigital', 'כאן דיגיטל', 'כאן דיגיטל תאגיד השידור הישראלי', ['כאן | דיגיטל', 'כאן דיגיטל']),
   { key: '13', title: 'חדשות 13', id: 'UCvQmPpU20hw1Trss_CVwaew' },
   q('n12', 'N12', 'N12 - אתר החדשות של ישראל', ['N12']),
-  q('ch16', 'ערוץ 16', 'ערוץ 16', ['ערוץ 16']),
+  q('ch16', 'ערוץ 16', 'ערוץ 16', ['ערוץ 16', 'Channel 16', 'ch16']),
 ];
 export const OTHER_NEWS_CHANNELS = [
   { key: 'knesset', title: 'ערוץ כנסת', handle: 'KnessetTV' },
