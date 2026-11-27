@@ -4641,12 +4641,15 @@ async function youtubeCallHandler(call) {
       const parentPart=String(call?.values?.news_parent ?? call?.req?.query?.news_parent ?? '').trim();
       const isPart=!!(parentPart&&N.TOPICS[parentPart]&&N.childTopics(parentPart).length>1);
       const list=isPart?N.childTopics(parentPart):N.menuTopics();
-      const digits=list.map((k,i)=>isPart?String(i+1):k);
+      // 27.11: the LobbyTube topics are folders 11/5 and on: the number of
+      // a topic is its folder, two digits once there are more than 9.
+      const digits=list.map((k,i)=>isPart?String(i+1):N.topicDir(k).split('/')[2]);
+      const two=digits.some(d=>d.length>1);
       const topicOfDigit=d=>list[digits.indexOf(d)];
       const titleOf=k=>isPart?N.TOPICS[k].title:(N.TOPICS[k].menuTitle||N.TOPICS[k].title);
       const tap=async (text,allowed)=>String(await call.read([{type:'text',data:sanitizeForYemot(text)}],'tap',
-        {max_digits:1,min_digits:1,sec_wait:7,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'n11'+(++tapNo),timeout:10*60*1000,digits_allowed:[...allowed,'0']})||'None').trim();
-      const text=(isPart?N.TOPICS[parentPart].menuTitle:'ערוצים אונליין')+'. '+list.map((k,i)=>'ל'+titleOf(k)+' הקישו '+digits[i]).join('. ')+'. '+(isPart?'לחזרה הקישו אפס.':'לתפריט הראשי הקישו אפס.');
+        {max_digits:two?2:1,min_digits:1,sec_wait:two?10:7,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'n11'+(++tapNo),timeout:10*60*1000,digits_allowed:[...allowed,'0']})||'None').trim();
+      const text=(isPart?N.TOPICS[parentPart].menuTitle:'ערוצים אונליין')+'. '+list.map((k,i)=>'ל'+titleOf(k)+' הקישו '+digits[i]).join('. ')+'. '+(isPart?'לחזרה הקישו אפס.':'לתפריט הראשי הקישו אפס.')+(two?' אחרי המספר הקישו סולמית.':'');
       for(let i=0;i<3;i++) {
         const d=await tap(text,digits);
         branch2KeyLog('news11',d,0,0);
@@ -5990,6 +5993,25 @@ if (String(process.env.NEWS11 || 'on').toLowerCase() !== 'off') setTimeout(()=>{
   const work=async()=>{ try { const N=await import('./news-ext11.js'); N.status.started ||= new Date().toISOString(); await N.workOnce(await newsDeps()); } catch(e) { console.warn('[NEWS11] work round skipped',{message:String(e?.message||e).slice(0,160)}); } };
   poll(); setInterval(poll, 2*60*1000).unref?.(); setInterval(work, 20*1000).unref?.();
 }, 90*1000).unref?.();
+// 27.11 (owner): the channel lists of the LobbyTube topics, read in the
+// owner's own browser on lobbytube.co.il and sent from that page. Open for
+// 6 hours after each start of the service; only channel ids are kept.
+const LOBBY_IMPORT_UNTIL = Date.now() + 6 * 3600e3;
+const lobbyCors = (res) => { res.set('access-control-allow-origin', 'https://lobbytube.co.il'); res.set('access-control-allow-methods', 'POST, OPTIONS'); res.set('access-control-allow-headers', 'content-type'); };
+app.options('/lobby-import', (req, res) => { lobbyCors(res); res.status(204).end(); });
+app.post('/lobby-import', rateLimit(10, 60 * 1000, 'lobby-import'), express.json({ limit: '3mb' }), async (req, res) => {
+  lobbyCors(res);
+  if (Date.now() > LOBBY_IMPORT_UNTIL) return res.status(403).json({ ok: false, error: 'closed' });
+  try {
+    const N = await import('./news-ext11.js');
+    const r = N.importLobby(req.body || {});
+    console.info('[NEWS11] LobbyTube topics imported', r);
+    res.json({ ok: true, ...r });
+    // The new folders get their Yemot settings now.
+    const io = await newsIo();
+    for (const k of Object.keys(N.TOPICS)) if (N.TOPICS[k].lobby) await io.saveSettings(N.topicDir(k), N.playIni(io.publicUrl || (process.env.PUBLIC_BASE_URL || ''), N.topicDir(k), N.TOPICS[k].title)).catch(() => {});
+  } catch (e) { if (!res.headersSent) res.status(400).json({ ok: false, error: String(e?.message || e).slice(0, 120) }); }
+});
 app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)=>{
   try {
     const N=await import('./news-ext11.js'); const { statfsSync }=await import('node:fs');

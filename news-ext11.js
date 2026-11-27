@@ -130,6 +130,58 @@ export const TOPICS = {
   '4': { title: 'טכנולוגיה', kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t4_index.json', priority: 2, firstPerChannel: 2, maxAgeDays: 14, everyMin: 15, channels: TECH_CHANNELS },
 };
 const STATE_DIR = process.env.NEWS_STATE_DIR || path.join(os.homedir(), 'yemot-news');
+
+// ---- LobbyTube topics (owner, 27.11) ----
+// The owner opened lobbytube.co.il in his own browser; the channel lists of
+// its topics (every channel each topic shows) came from there into
+// lobby.json. Each topic of the site is a folder of 11 (11/5 on), except
+// its news topic; Torah lessons, music and technology join 11/2, 11/3, 11/4.
+// Thousands of channels: each round looks at a slice of them (the feeds are
+// spread over hours), a channel's first round takes only its newest video
+// of the last 3 days, and each topic gets at most LOBBY_PER_DAY files a day.
+export const LOBBY_FILE = path.join(STATE_DIR, 'lobby.json');
+export const LOBBY_SKIP = ['חדשות ואקטואליה'];
+const LOBBY_JOIN = { 'שיעורי תורה': '2', 'מוזיקה': '3', "טכנולוגיה וגאדג'טים": '4' };
+const LOBBY_SONGS = ['מוזיקה', 'חדשות מוזיקה'];
+export const LOBBY_PER_DAY = Number(process.env.LOBBY_PER_DAY || 15);
+const LOBBY_SLICE = Number(process.env.LOBBY_SLICE || 15);
+export function applyLobby(data) {
+  const cats = data?.cats || {};
+  let folder = 5, added = 0;
+  for (const name of data?.order || Object.keys(cats)) {
+    if (LOBBY_SKIP.includes(name) || !Array.isArray(cats[name])) continue;
+    const ids = [...new Set(cats[name].filter(id => /^UC[A-Za-z0-9_-]{22}$/.test(id)))];
+    let t = LOBBY_JOIN[name];
+    if (!t) {
+      t = 'L' + folder;
+      TOPICS[t] ||= { title: name, dir: NEWS_ROOT + '/' + folder, lobby: true, kind: LOBBY_SONGS.includes(name) ? 'song' : 'lesson',
+        index: 'ivr2:/2/youtubeaudio/news11_' + t + '_index.json', priority: 3, maxAgeDays: 3, everyMin: 30, perDay: LOBBY_PER_DAY, channels: [] };
+      folder++;
+    }
+    const topic = TOPICS[t];
+    const have = new Set(topic.channels.map(c => c.id).filter(Boolean));
+    topic.channels = topic.channels.filter(c => !c.lobby);
+    for (const id of ids) {
+      if (have.has(id)) continue;
+      topic.channels.push({ key: 'lb_' + id, title: '', id, lobby: true, firstPerChannel: 1, maxAgeDays: 3 });
+      added++;
+    }
+  }
+  return added;
+}
+export function loadLobby() { try { return applyLobby(JSON.parse(readFileSync(LOBBY_FILE, 'utf8'))); } catch { return 0; } }
+export function importLobby(data) {
+  const clean = { at: new Date().toISOString(), order: [], cats: {} };
+  for (const [name, ids] of Object.entries(data?.cats || {})) {
+    if (typeof name !== 'string' || name.length > 60 || !Array.isArray(ids)) continue;
+    clean.order.push(name);
+    clean.cats[name] = ids.filter(id => /^UC[A-Za-z0-9_-]{22}$/.test(String(id))).slice(0, 3000);
+  }
+  if (Array.isArray(data?.order)) clean.order = data.order.filter(n => clean.cats[n]);
+  mkdirSync(STATE_DIR, { recursive: true });
+  writeFileSync(LOBBY_FILE, JSON.stringify(clean));
+  return { topics: clean.order.length, channels: Object.values(clean.cats).reduce((a, b) => a + b.length, 0), added: applyLobby(clean) };
+}
 const STATE_FILE = path.join(STATE_DIR, 'state.json');
 
 export const file3 = n => String(n).padStart(3, '0');
@@ -285,9 +337,11 @@ function consider(st, t, topic, ch, it, now, firstRun, rank) {
   if (st.seen[it.id] || st.queue[it.id]) return;
   const age = now - (Date.parse(it.published) || now);
   if (firstRun && topic.firstHours && age > topic.firstHours * 3600e3) { st.seen[it.id] = 'before-start'; return; }
-  if (firstRun && topic.firstPerChannel && rank >= topic.firstPerChannel) { st.seen[it.id] = 'before-start'; return; }
-  if (age > (topic.maxAgeDays || 7) * 86400e3) { st.seen[it.id] = 'old'; return; }
-  st.queue[it.id] = { topic: t, ch: ch.key, chTitle: ch.title, ...(ch.dub ? { dub: true } : {}), ytChannel: it.channel || null, title: it.title, published: it.published, short: !!it.short, src: it.url ? 'url' : 'yt', url: it.url || null, tries: 0, nextAt: 0, added: new Date(now).toISOString() };
+  const perChannel = ch.firstPerChannel ?? topic.firstPerChannel;
+  if (firstRun && perChannel != null && rank >= perChannel) { st.seen[it.id] = 'before-start'; return; }
+  const maxAgeDays = ch.maxAgeDays || topic.maxAgeDays || 7;
+  if (age > maxAgeDays * 86400e3) { st.seen[it.id] = 'old'; return; }
+  st.queue[it.id] = { topic: t, ch: ch.key, chTitle: ch.title, ...(ch.dub ? { dub: true } : {}), ...(ch.lobby ? { lobby: true, maxAgeDays } : {}), ytChannel: it.channel || null, title: it.title, published: it.published, short: !!it.short, src: it.url ? 'url' : 'yt', url: it.url || null, tries: 0, nextAt: 0, added: new Date(now).toISOString() };
   note({ queued: it.id, topic: t, ch: ch.key, title: String(it.title || '').slice(0, 80) });
 }
 // 27.11: 11/1 became two parts; the files that were in 11/1 move to 11/1/1
@@ -327,6 +381,17 @@ export async function removeDroppedChannels(io, st) {
   if (removed) note({ droppedChannelFiles: removed });
   return removed;
 }
+// The owner's own channels every round; the LobbyTube channels a slice at a
+// time (the next slice each round), so their feeds are spread out.
+function channelsThisRound(t, topic, st) {
+  const fixed = topic.channels.filter(c => !c.lobby), lobby = topic.channels.filter(c => c.lobby);
+  if (!lobby.length) return fixed;
+  st.lobbyCursor ||= {};
+  const from = (st.lobbyCursor[t] || 0) % lobby.length;
+  const part = lobby.slice(from, from + LOBBY_SLICE);
+  st.lobbyCursor[t] = from + part.length >= lobby.length ? 0 : from + part.length;
+  return [...fixed, ...part];
+}
 export async function pollOnce(deps, now = Date.now()) {
   const st = loadState();
   searchBudget.left = deps.searchesPerRound ?? 6;
@@ -341,13 +406,13 @@ export async function pollOnce(deps, now = Date.now()) {
     if (!deps.force && (st.topicPolled[t] || 0) > now - (topic.everyMin || 2) * 60000 + 20000) continue;
     st.topicPolled[t] = now;
     const firstRun = !st.topicStarted[t];
-    for (const ch of topic.channels) {
+    for (const ch of channelsThisRound(t, topic, st)) {
       const row = status.channels[ch.key] ||= { title: ch.title, topic: t };
       // A channel new to its topic, or one whose search changed (it came out
       // as the wrong channel before), gets its own first round.
       const chMark = t + ':' + ch.key + ':' + (topic.firstKey || '') + ':' + (ch.names ? 'n' : '');
       st.chStarted ||= {};
-      const chFirst = firstRun || ((st.topicStarted[t] && !st.chStarted[chMark] && (topic.firstKey || ch.names)) ? 'again' : false);
+      const chFirst = ch.lobby ? !st.chStarted[chMark] : firstRun || ((st.topicStarted[t] && !st.chStarted[chMark] && (topic.firstKey || ch.names)) ? 'again' : false);
       try {
         if (ch.type === 'chatfree') {
           const sm = await deps.fetch(ch.base + '/sitemap.xml', { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(20000) });
@@ -534,9 +599,14 @@ export async function workOnce(deps, now = Date.now()) {
     .sort((a, b) => (TOPICS[topicOf(a[1])].priority - TOPICS[topicOf(b[1])].priority) || ((Date.parse(a[1].published) || 0) - (Date.parse(b[1].published) || 0)));
   const started = [];
   const tooBusy = (deps.busy || serverBusy)();
+  const day = new Date(now).toISOString().slice(0, 10);
   for (const [videoId, q] of due) {
     if (status.working[videoId]) continue;
     const t = topicOf(q);
+    // LobbyTube: a video still waiting after its age limit is let go, and a
+    // topic takes at most its daily number of files.
+    if (q.lobby && now - (Date.parse(q.published) || now) > (q.maxAgeDays || 3) * 2 * 86400e3) { update(videoId, s2 => { delete s2.queue[videoId]; s2.seen[videoId] = 'old'; }); continue; }
+    if (q.lobby && ((st.perDay || {})[day + ':' + t] || 0) >= (TOPICS[t].perDay || LOBBY_PER_DAY)) continue;
     const lane = !TOPICS[t].news || q.dub ? 'other' : q.durationSec && q.durationSec > LONG_SEC ? 'long' : 'short';
     if (busy[lane] || (lane === 'other' && tooBusy)) continue;
     busy[lane] = true; status.working[videoId] = { lane, topic: t, since: new Date().toISOString(), title: q.title?.slice(0, 80) };
@@ -584,7 +654,7 @@ async function runOne(videoId, q, lane, deps) {
     const m = await deps.master(sound, wav, title, TOPICS[t].kind);
     await fs.rm(src, { force: true }).catch(() => {});
     const entry = await deps.publish(videoId, wav, { topic: t, title, ch: q.ch, chTitle: q.chTitle, ytChannel: q.ytChannel, published: q.published, url: fromSite ? q.url : null, minutes: Math.round((m?.durationSec || pr.durationSec || 0) / 60) });
-    update(videoId, st => { delete st.queue[videoId]; st.seen[videoId] = 'done'; });
+    update(videoId, st => { delete st.queue[videoId]; st.seen[videoId] = 'done'; if (q.lobby) { st.perDay ||= {}; const k = new Date().toISOString().slice(0, 10) + ':' + t; st.perDay[k] = (st.perDay[k] || 0) + 1; for (const d of Object.keys(st.perDay)) if (d < new Date(Date.now() - 3 * 86400e3).toISOString().slice(0, 10)) delete st.perDay[d]; } });
     note({ done: videoId, topic: t, ch: q.ch, file: entry?.file, title: q.title?.slice(0, 80), seconds: Math.round((Date.now() - t0) / 1000), lateMin: Math.round((Date.now() - (Date.parse(q.published) || Date.now())) / 60000) });
     log.info?.('[NEWS11] published', { videoId, topic: t, ch: q.ch, file: entry?.file });
   } catch (e) {
@@ -597,3 +667,6 @@ async function runOne(videoId, q, lane, deps) {
 }
 
 export function _resetForTests() { busy.short = busy.long = busy.other = false; status.working = {}; status.log.length = 0; chain = Promise.resolve(); }
+
+// The LobbyTube topics, as saved last time.
+loadLobby();
