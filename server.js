@@ -5623,6 +5623,11 @@ app.get('/yemot-media', async (req, res) => {
         return { ...r, spoken: 'הקובץ נמחק מכל המערכת' };
       },
       details: mediaDetails, dubStatus: dubStatusOf, startDub: startDubJob,
+      // 8 and 8 again (owner, 27.11): the video to the video folder, in every
+      // folder of extension 11, by the same download as extension 2.
+      canVideo: dir => !!N.topicOfDir(String(dir).replace(/\/$/, '')),
+      videoGate: v => videoStartGate(v),
+      startVideo: v => startYouTubeVideoJob(v),
       language: async (vid, title) => (await import('./youtube-video-facts.js')).videoLanguage(await fetchVideoFacts(vid, process.env).catch(() => null), title),
     });
     console.info('[MEDIA KEYS]', { key: req.query?.PressKey, what: req.query?.what, answer: req.query?.dub_ok ?? req.query?.del_ok, reply: out.slice(0, 140) });
