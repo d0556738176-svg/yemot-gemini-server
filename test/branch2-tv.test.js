@@ -4,7 +4,7 @@ import { TV_CHANNELS, parseOverrides, candidatesFor, pickOfficialLive, findChann
 
 test('eight channels on keys 1-8 in the owner\'s order', () => {
   assert.deepEqual(TV_CHANNELS.map(c => c.key), ['1', '2', '3', '4', '5', '6', '7', '8']);
-  assert.equal(TV_CHANNELS[7].title, 'רדיו ערוץ 14');
+  assert.equal(TV_CHANNELS[7].title, 'ערוץ 16');
   assert.equal(TV_CHANNELS[5].title, 'ערוץ הכנסת');
   assert.match(menuText(), /^ברוכים הבאים לשידורים החיים\. לכאן 11 הקישו 1, /);
   assert.match(menuText(), /לחזרה הקישו כוכבית\.$/);
