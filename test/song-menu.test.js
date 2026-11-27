@@ -101,3 +101,26 @@ test('9 = say it yourself, 0 = more styles / let the system choose', async () =>
   assert.match(all, /לסיכום: שיר על שבת, חזן, בסגנון בחירה של המערכת, באורך דקה אחת/);
   assert.match(prompt, /בקול: חזן/);
 });
+
+// Owner, 27.11: 4 / 5 / 6 = topic / lyrics / YouTube cover, typed on the keypad.
+test('typed choices 4-6: the text is typed (Hebrew keyboard), not recorded', async () => {
+  for (const [key, typed, expect] of [['4', 'שבת קודש', /לסיכום: שיר על שבת קודש/], ['5', 'לכה דודי', /לסיכום: שיר עם המילים שלך/]]) {
+    const said = []; const modes = []; let records = 0;
+    const taps = [key, typed, '1', /*confirm*/ '1', '1', /*voice*/ '1', '1', /*style*/ '1', '1', /*length*/ '1'];
+    const call = { callId: 'song-type-' + key, values: {},
+      read: async (items, mode, opts) => { said.push(items.map(x => x.data).join(' ')); modes.push(opts?.typing_playback_mode || mode);
+        if (mode === 'record') { records++; return '/rec.wav'; } const k = taps.shift(); if (k === undefined) throw new Error('call was disconnected'); return k; },
+      id_list_message: async () => {}, go_to_folder: async () => {} };
+    const handler = createSongCallHandler({
+      yemotApi: { download_file: async () => ({ data: Buffer.from('x') }) }, transcribePhoneAudio: async () => 'לא',
+      generateText: async () => { throw Object.assign(new Error('stop'), { code: 'TEST' }); },
+      sanitizeForYemot: x => x, withTimeout: p => p, getCallerNumber: () => '0500000002', logDetailedError: () => {} });
+    await handler(call).catch(() => {});
+    const joined = said.join('\n');
+    assert.match(joined, /נושא הקש 4, מילות השיר הקש 5, גרסה חדשה לשיר מיוטיוב הקש 6/);
+    assert.equal(records, 0, 'nothing recorded for ' + key);
+    assert.ok(modes.includes('HebrewKeyboard'));
+    assert.match(joined, /הקלד/);
+    assert.match(joined, expect);
+  }
+});
