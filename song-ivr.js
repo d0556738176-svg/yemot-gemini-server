@@ -30,6 +30,11 @@ export function waitMessage({ title, elapsedSec, stage, first }) {
 // said back with 1 = confirm / 2 = again. The engine itself is unchanged: the
 // choices become the request it already understands.
 export const SONG_KINDS = { '1': 'לפי נושא', '2': 'לפי מילים שלך', '3': 'גרסה חדשה לשיר מיוטיוב' };
+// Owner, 27.11: under each spoken choice, the same by typing on the keypad
+// (Hebrew keyboard): 4 = topic, 5 = lyrics, 6 = new version of a YouTube song.
+export const TYPED_KINDS = { '4': '1', '5': '2', '6': '3' };
+export const KIND_MENU_TEXT = 'ברוכים הבאים ליוצר השירים. ליצירת שיר לפי נושא הקש 1. לשיר לפי מילים שלך הקש 2. לגרסה חדשה לשיר מיוטיוב הקש 3. ' +
+  'להקלדה במקום דיבור: נושא הקש 4, מילות השיר הקש 5, גרסה חדשה לשיר מיוטיוב הקש 6.';
 export const SONG_VOICES = [
   { key: '1', name: 'זמר גבר', ask: 'בקול של זמר גבר' },
   { key: '2', name: 'ילד', ask: 'בקול של ילד' },
@@ -111,7 +116,16 @@ export function createSongCallHandler({
     const tap = async (text, allowed, wait = 10) => String(await call.read([{ type: 'text', data: say(text) }], 'tap', {
       max_digits: 1, min_digits: 1, sec_wait: wait, allow_empty: true, empty_val: 'None', typing_playback_mode: 'No',
       digits_allowed: [...allowed, '*'], timeout: 10 * 60 * 1000 }) || 'None').trim();
+    // Typing on the keypad (Hebrew keyboard, # after each letter), as in extension 1.
+    const typeText = async text => {
+      const t = String(await call.read([{ type: 'text', data: say(text + ' הקלד בעברית במקשי הטלפון, והקש סולמית אחרי כל אות.') }], 'tap', {
+        min_digits: 1, max_digits: '', sec_wait: 60, typing_playback_mode: 'HebrewKeyboard', allow_empty: true, empty_val: 'None',
+        timeout: 10 * 60 * 1000 }) || '').trim();
+      return !t || t === 'None' || /^[*#\s]*$/.test(t) ? '' : t;
+    };
+    let typing = false;
     const record = async text => {
+      if (typing) return typeText(text.replace(/ ?בסיום (הדיבור )?הקש סולמית\.?/g, '').replace(/^אמור /, 'הקלד ').replace(/, לאט וברור/, ''));
       const path = await call.read([{ type: 'text', data: say(text) }], 'record', { min_length: 1, max_length: 90, no_confirm_menu: true, timeout: 10 * 60 * 1000 });
       if (!path || path === 'None') return '';
       const r = await withTimeout(yemotApi.download_file('ivr2:' + path), Number(process.env.REQUEST_TIMEOUT_MS || 30000), 'song menu recording download');
@@ -141,7 +155,7 @@ export function createSongCallHandler({
     const recordConfirmed = async (ask, sayBack) => {
       for (let round = 0; round < 5; round++) {
         const t = await record(ask + ' בסיום הדיבור הקש סולמית.');
-        if (t.length < 2) { ask = 'לא שמעתי. ' + ask; continue; }
+        if (t.length < 2) { ask = (typing ? 'לא נקלט. ' : 'לא שמעתי. ') + ask; continue; }
         const c = await tap(sayBack(t) + ' לאישור הקש 1, לביטול והקלטה מחדש הקש 2.', ['1', '2']);
         if (c === '*') return '*';
         if (c === '1') return t;
@@ -149,15 +163,19 @@ export function createSongCallHandler({
       return '';
     };
     async function songMenu() {
+      let typedChoice = false;
       let step = 'kind', kind = '', text = '', ytTitle = '', voice = '', style = '', minutes = '';
       for (let guard = 0; guard < 40; guard++) {
         if (step === 'kind') {
-          const k = await tap('ברוכים הבאים ליוצר השירים. ליצירת שיר לפי נושא הקש 1. לשיר לפי מילים שלך הקש 2. לגרסה חדשה לשיר מיוטיוב הקש 3.', ['1', '2', '3'], 12);
+          const k = await tap(KIND_MENU_TEXT, ['1', '2', '3', '4', '5', '6'], 12);
           if (k === '*') return null;
-          if (!SONG_KINDS[k]) continue;
-          kind = k; step = 'content'; continue;
+          typedChoice = !!TYPED_KINDS[k];
+          const kk = TYPED_KINDS[k] || k;
+          if (!SONG_KINDS[kk]) continue;
+          kind = kk; step = 'content'; continue;
         }
         if (step === 'content') {
+          typing = typedChoice;
           if (kind === '1') {
             const t = await recordConfirmed('אמור על מה יהיה השיר.', t => 'הנושא שבחרת: ' + t + '.');
             if (t === '*' || !t) { step = 'kind'; continue; }
@@ -185,6 +203,7 @@ export function createSongCallHandler({
             const t = await tap('על מה יהיו המילים החדשות? להקלטת נושא הקש 1. להשאיר את אותו נושא כללי הקש 2.', ['1', '2']);
             if (t === '1') { const tt = await recordConfirmed('אמור את הנושא למילים החדשות.', x => 'הנושא שבחרת: ' + x + '.'); if (tt && tt !== '*') text = tt; }
           }
+          typing = false; // voice, style and length are chosen by keys as before
           step = 'voice'; continue;
         }
         if (step === 'voice') { const v = await choose('באיזה קול?', SONG_VOICES); if (v === '*') { step = 'content'; continue; } voice = v; step = 'style'; continue; }
