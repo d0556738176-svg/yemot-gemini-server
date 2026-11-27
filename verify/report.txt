@@ -1,7 +1,8 @@
-1 חדשות מהערוצים המרכזיים files 235 ["/11/1/1/240 ערוץ 16","/11/1/1/238 כאן חדשות","/11/1/1/237 "]
-5 חדשות שונות files 136 ["/11/1/2/135 רשת 13","/11/1/2/130 ינון מגל","/11/1/2/129 כלכליסט"]
-2 הערוצים הנבחרים files 74 ["/11/2/1/073 הידברות","/11/2/1/072 הידברות","/11/2/1/071 הידברות"]
-T2 כל ערוצי שיעורי התורה files 0 []
-settings null ["type=playfile","title=כל ערוצי שיעורי התורה"]
-log []
+topic 1 queued 104 {"is_live":1,"new":103} oldest undefined
+topic 5 queued 197 {"post_live":8,"is_live":6,"failed: dubbing failed: too_long":1,"new":181,"check failed: ] tId9GNXiTHw: Sign in to ":1} oldest undefined
+topic 2 queued 44 {"is_upcoming":1,"new":43} oldest undefined
+working {"Ol8YE6UzL8U":{"lane":"other","topic":"5","since":"2026-11-27T13:34:05.353Z","title":"This Is the Reality of Russian Soldiers' Life #warinukraine"},"fhQzQGq_S0A":{"lane":"long","topic":"5","since":"2026-11-27T13:35:25.376Z","title":"\"אני לא מרגיש תועלת בחיי\": האברך שלמד 30 שנה והגיע לנקודת שבירה"},"X-0LTcCyo7c":{"lane":"short","topic":"5","since":"2026-11-27T13:35:25.387Z","title":"יהודי תורם מליון דולר לקרן עולם התורה"}}
+done last 37 [["5",20,7285],["5",23,7298],["5",17,7400],["5",12,7400],["5",15,7401],["5",20,7582],["5",57,8268],["5",18,8254]]
+fails []
+sample [{"id":"U4LF3xVJdmU","topic":"1","ch":"i24","title":"שידורי הערב של i24NEWS 27-11-26","tries":2,"wait":"is_live"},{"id":"iu2Dt_Hbobk","topic":"1","ch":"kikar","title":"הסבתא, הדוד, והפלאפון: למה במוסדות לא מקבלים ילדים של בעלי תשובה?","tries":0,"wait":null},{"id":"dpymjmTQ6lA","topic":"1","ch":"kikar","title":"טירוף: קפץ והתרסק | חוק גיוס מוסכם מתקרב בצעדי ענק • צפו","tries":0,"wait":null}]
 exit=0
