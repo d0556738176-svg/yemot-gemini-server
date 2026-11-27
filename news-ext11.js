@@ -38,7 +38,6 @@ export const NEWS_CHANNELS = [
   { key: 'kan', title: 'כאן חדשות', id: 'UC_HwfTAcjBESKZRJq6BTCpg', handle: 'KAN11NEWS' },
   q('kandigital', 'כאן דיגיטל', 'כאן דיגיטל תאגיד השידור הישראלי', ['כאן | דיגיטל', 'כאן דיגיטל']),
   { key: '13', title: 'חדשות 13', id: 'UCvQmPpU20hw1Trss_CVwaew' },
-  q('n12', 'N12', 'N12 - אתר החדשות של ישראל', ['N12']),
   q('ch16', 'ערוץ 16', 'ערוץ 16', ['ערוץ 16', 'Channel 16', 'ch16']),
 ];
 export const OTHER_NEWS_CHANNELS = [
@@ -50,7 +49,7 @@ export const OTHER_NEWS_CHANNELS = [
   q('police', 'משטרת ישראל', 'משטרת ישראל', ['משטרת ישראל', 'Israel Police']),
   q('mabat', 'מבט מהשטח', 'מבט מהשטח', ['מבט מהשטח']),
   q('charedi', 'מה שמעניין בציבור החרדי', 'מה שמעניין בציבור החרדי', ['מה שמעניין בציבור החרדי']),
-  q('derech', 'דרך המלך', 'דרך המלך - חדשות הציבור הספרדי', ['דרך המלך']),
+  q('derech', 'דרך המלך', 'דרך המלך חדשות', ['דרך המלך', 'Derech Hamelech'], { handles: ['derechhamelech', 'DerechHamelechNews'] }),
   q('idf', 'צה"ל', 'צה"ל - צבא ההגנה לישראל', ['צבא ההגנה לישראל', 'צה"ל', 'IDF']),
   q('yehezkeli', 'צבי יחזקאלי', 'צבי יחזקאלי', ['יחזקאלי', 'Yehezkeli']),
   q('kolbarama', 'רדיו קול ברמה', 'רדיו קול ברמה', ['קול ברמה']),
@@ -60,7 +59,7 @@ export const OTHER_NEWS_CHANNELS = [
   q('neiess', 'נייעס חמים', 'נייעס חמים', ['נייעס']),
   q('mod', 'משרד הביטחון', 'משרד הביטחון', ['משרד הביטחון', 'Ministry of Defense']),
   q('segal', 'עמית סגל', 'Amit Segal עמית סגל', ['עמית סגל', 'Amit Segal']),
-  q('magal', 'ינון מגל', 'ינון מגל Yinon Magal', ['ינון מגל', 'Yinon Magal']),
+  q('magal', 'ינון מגל', 'ינון מגל', ['ינון מגל', 'Yinon Magal', 'מגל'], { handles: ['yinonmagal', 'YinonMagal1', 'magalyinon'] }),
   q('shibolet', 'סלע מאיר - ספריית שיבולת', 'סלע מאיר - ספריית שיבולת', ['שיבולת', 'סלע מאיר']),
   q('kolchai', 'קול חי', 'קול חי', ['קול חי']),
   q('srugim', 'סרוגים', 'סרוגים', ['סרוגים', 'Srugim']),
@@ -68,17 +67,17 @@ export const OTHER_NEWS_CHANNELS = [
   q('bennett', 'נפתלי בנט', 'Naftali Bennett נפתלי בנט', ['נפתלי בנט', 'Naftali Bennett']),
   q('united24', 'UNITED24', 'UNITED24', ['UNITED24'], { dub: true }),
   q('calcalist', 'כלכליסט', 'Calcalist כלכליסט', ['Calcalist', 'כלכליסט']),
-  q('updates', 'חדשות ועדכונים', 'חדשות ועדכונים', ['חדשות ועדכונים']),
-  q('onedge', 'On Edge News', 'On Edge News', ['On Edge'], { dub: true }),
-  q('taub', 'גדי טאוב: שומר סף', 'גדי טאוב: שומר סף', ['שומר סף', 'גדי טאוב']),
-  q('kolmashekore', 'כל מה שקורה בציבור', 'כל מה שקורה בציבור', ['כל מה שקורה בציבור']),
-  q('shabak', 'שירות הביטחון הכללי', 'שירות הביטחון הכללי Israeli Security Agency', ['שירות הביטחון הכללי', 'Israeli Security Agency']),
-  q('privatenews', 'ThePrivatenews', 'ThePrivatenews', ['ThePrivatenews', 'Private News']),
-  q('pikud', 'פיקוד העורף', 'פיקוד העורף - הערוץ הרשמי', ['פיקוד העורף']),
-  q('gpo', 'לשכת העיתונות הממשלתית', 'Government Press Office', ['Government Press Office', 'לשכת העיתונות']),
-  q('crux', 'CRUX', 'CRUX', ['CRUX'], { dub: true }),
-  q('bluepaw', 'Blue Paw Print', 'Blue Paw Print', ['Blue Paw Print'], { dub: true }),
-  q('keshet12', 'קשת 12', 'קשת 12 - הטלוויזיה של הישראלים', ['קשת 12']),
+  q('updates', 'חדשות ועדכונים', 'חדשות ועדכונים', ['חדשות ועדכונים', 'חדשות ועידכונים']),
+  q('onedge', 'On Edge News', 'On Edge News', ['On Edge', 'OnEdge'], { dub: true, handles: ['OnEdgeNews', 'onedgenews1'] }),
+  q('taub', 'גדי טאוב: שומר סף', 'גדי טאוב שומר סף', ['שומר סף', 'גדי טאוב', 'Gadi Taub'], { handles: ['gaditaub', 'GadiTaub1', 'shomersaf'] }),
+  q('kolmashekore', 'כל מה שקורה בציבור', 'כל מה שקורה בציבור החרדי', ['כל מה שקורה בציבור', 'כל מה שקורה']),
+  q('shabak', 'שירות הביטחון הכללי', 'שב"כ שירות הביטחון הכללי', ['שירות הביטחון הכללי', 'Israeli Security Agency', 'שב"כ', 'Shin Bet'], { handles: ['shinbet', 'ISA_ShinBet', 'shabak'] }),
+  q('privatenews', 'ThePrivatenews', 'ThePrivatenews', ['privatenews', 'private news'], { handles: ['ThePrivatenews', 'theprivatenews'] }),
+  q('pikud', 'פיקוד העורף', 'פיקוד העורף', ['פיקוד העורף', 'Home Front Command'], { handles: ['pikudhaoref', 'PikudHaOref', 'IDFHomeFrontCommand'] }),
+  q('gpo', 'לשכת העיתונות הממשלתית', 'Government Press Office Israel', ['Government Press Office', 'לשכת העיתונות', 'GPO'], { handles: ['GPOIsrael', 'israelgpo', 'GovernmentPressOffice'] }),
+  q('crux', 'CRUX', 'CRUX news', ['CRUX'], { dub: true, handles: ['CRUX', 'cruxnews', 'CRUXnews'] }),
+  q('bluepaw', 'Blue Paw Print', 'Blue Paw Print', ['Blue Paw Print', 'BluePawPrint'], { dub: true, handles: ['BluePawPrint', 'bluepawprint'] }),
+  q('keshet12', 'קשת 12', 'קשת 12', ['קשת 12', 'Keshet 12', 'mako'], { handles: ['keshet12', 'Keshet12Official', 'mako'] }),
 ];
 // Owner, 25.11: Torah lessons. Yedid Nefesh is not on YouTube: its own
 // channel site (chatfree) lists the posts publicly, each video a plain file.
@@ -201,9 +200,12 @@ export async function resolveHandle(handle, fetchImpl = fetch) {
 // automatic "- Topic" channel is never taken (עקיבא תורג'מן came out as
 // "Zusha - Topic"), and a channel whose title carries one of the singer's
 // names goes before the others.
-export function pickChannel(html, names = []) {
+export const searchSeen = {};
+export function pickChannel(html, names = [], seenKey = '') {
   const found = [...String(html || '').matchAll(/"channelRenderer":\{"channelId":"(UC[A-Za-z0-9_-]{22})","title":\{"simpleText":"((?:[^"\\]|\\.)*)"/g)]
     .map(m => ({ id: m[1], title: m[2] }));
+  // What the search showed (status), to see why a channel was not taken.
+  if (seenKey) searchSeen[seenKey] = { at: new Date().toISOString(), htmlLen: String(html || '').length, titles: found.slice(0, 5).map(c => c.title) };
   if (!found.length) return (/"channelRenderer":\{"channelId":"(UC[A-Za-z0-9_-]{22})"/.exec(String(html || '')) || [])[1] || null;
   const ok = found.filter(c => !/\s-\s*Topic$|- נושא$/i.test(c.title));
   const low = names.map(n => String(n).toLowerCase()).filter(n => n.length >= 3);
@@ -211,9 +213,19 @@ export function pickChannel(html, names = []) {
   if (named || low.length) return named?.id || null;
   return ok[0]?.id || (/"channelRenderer":\{"channelId":"(UC[A-Za-z0-9_-]{22})"/.exec(String(html || '')) || [])[1] || null;
 }
-export async function resolveQuery(q, fetchImpl = fetch, names = []) {
+export async function resolveQuery(q, fetchImpl = fetch, names = [], seenKey = '') {
   const r = await fetchImpl('https://www.youtube.com/results?search_query=' + encodeURIComponent(q) + '&sp=EgIQAg%253D%253D', { headers: { 'user-agent': UA, 'accept-language': 'he,en;q=0.8', cookie: 'CONSENT=YES+1' }, signal: AbortSignal.timeout(20000) });
-  return pickChannel(await r.text(), names);
+  return pickChannel(await r.text(), names, seenKey);
+}
+// A channel's own page: its id and its name (27.11: a handle is taken only
+// when the name matches, like a search).
+export async function handleInfo(handle, fetchImpl = fetch) {
+  const r = await fetchImpl('https://www.youtube.com/@' + encodeURIComponent(handle), { headers: { 'user-agent': UA, 'accept-language': 'he,en;q=0.8', cookie: 'CONSENT=YES+1' }, signal: AbortSignal.timeout(20000) });
+  if (!r.ok) return null;
+  const html = await r.text();
+  const id = (/<link rel="canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[A-Za-z0-9_-]{22})"/.exec(html) || /"externalId":"(UC[A-Za-z0-9_-]{22})"/.exec(html) || [])[1];
+  const title = (/<meta property="og:title" content="([^"]*)"/.exec(html) || [])[1] || '';
+  return id ? { id, title } : null;
 }
 
 // ---- A channel site (chatfree, e.g. Yedid Nefesh): its public post list
@@ -243,7 +255,7 @@ const note = x => { status.log.unshift({ at: new Date().toISOString(), ...x }); 
 const searchBudget = { left: 0 };
 async function channelIds(ch, st, row, deps, now) {
   let ids = st.ids[ch.key];
-  const sig = JSON.stringify([ch.id || '', ch.handle || '', ch.query || '', ch.names || []]);
+  const sig = JSON.stringify([ch.id || '', ch.handle || '', ch.query || '', ch.names || [], ch.handles || []]);
   if (!ids || !ids.length || (st.idsAt?.[ch.key] || 0) < now - 24 * 3600e3 || (st.idsSig?.[ch.key] || '') !== sig) {
     const set = new Set(ch.id ? [ch.id] : []);
     if (ch.handle) { const r = await resolveHandle(ch.handle, deps.fetch).catch(e => { row.resolveError = String(e?.message || e).slice(0, 100); return null; }); if (r) set.add(r); }
@@ -252,7 +264,15 @@ async function channelIds(ch, st, row, deps, now) {
     st.searchTried ||= {};
     if (!set.size && ch.query && (searchBudget.left <= 0 || (st.searchTried[ch.key] || 0) > now - 20 * 60000)) return ids || [];
     if (!set.size && ch.query) { searchBudget.left--; st.searchTried[ch.key] = now; if (deps.searchGapMs !== 0) await new Promise(r => setTimeout(r, deps.searchGapMs || 2500)); }
-    if (!set.size && ch.query) { const r = await resolveQuery(ch.query, deps.fetch, ch.names || []).catch(e => { row.resolveError = String(e?.message || e).slice(0, 100); return null; }); if (r) set.add(r); }
+    // Possible handles, each taken only when its name matches.
+    for (const h of ch.handles || []) {
+      if (set.size) break;
+      const info = await handleInfo(h, deps.fetch).catch(() => null);
+      const low = (ch.names || []).map(n => n.toLowerCase());
+      if (info && (!low.length || low.some(n => info.title.toLowerCase().includes(n)))) set.add(info.id);
+      else searchSeen[ch.key + '@' + h] = { title: info?.title || null };
+    }
+    if (!set.size && ch.query) { const r = await resolveQuery(ch.query, deps.fetch, ch.names || [], ch.key).catch(e => { row.resolveError = String(e?.message || e).slice(0, 100); return null; }); if (r) set.add(r); }
     if (set.size) { ids = [...set]; st.ids[ch.key] = ids; (st.idsAt ||= {})[ch.key] = now; (st.idsSig ||= {})[ch.key] = sig; }
   }
   return ids || [];
