@@ -122,10 +122,12 @@ export const NEWS_MARK = 'news11=yes';
 // files (owner, 27.11: the other topics keep every file until he deletes it).
 export const TOPICS = {
   '1': { title: 'חדשות מהערוצים המרכזיים', menuTitle: 'חדשות אונליין', dir: '/11/1/1', news: true, kind: 'lesson', index: INDEX, priority: 0, firstHours: 2, maxAgeDays: 7, everyMin: 2, channels: NEWS_CHANNELS },
-  '5': { title: 'חדשות שונות', dir: '/11/1/2', parent: '1', news: true, kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t5_index.json', priority: 0, firstHours: 2, maxAgeDays: 7, everyMin: 6, channels: OTHER_NEWS_CHANNELS },
+  '5': { title: 'חדשות שונות', dir: '/11/1/2', parent: '1', news: true, kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t5_index.json', priority: 0.5, firstHours: 2, maxAgeDays: 7, everyMin: 6, channels: OTHER_NEWS_CHANNELS },
   // Owner, 27.11: 11/2 in two parts - 11/2/1 the channels he chose,
   // 11/2/2 every Torah channel of LobbyTube.
-  '2': { title: 'הערוצים הנבחרים', menuTitle: 'שיעורי תורה', dir: '/11/2/1', kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t2_index.json', priority: 1, firstPerChannel: 3, maxAgeDays: 14, everyMin: 10, channels: TORAH_CHANNELS },
+  // Owner, 27.11: the chosen channels without a limit - every new lesson,
+  // however old it is when found, checked every 5 minutes, its own lane.
+  '2': { title: 'הערוצים הנבחרים', menuTitle: 'שיעורי תורה', dir: '/11/2/1', kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t2_index.json', priority: 1, firstPerChannel: 3, maxAgeDays: 3650, everyMin: 5, ownLane: true, channels: TORAH_CHANNELS },
   'T2': { title: 'כל ערוצי שיעורי התורה', dir: '/11/2/2', parent: '2', kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_T2_index.json', priority: 1, maxAgeDays: 3, everyMin: 10, perDay: 15, channels: [] },
   // 26.11: singers upload seldom, so a 14-day limit left most of them empty;
   // the newest songs of each are taken even if months old (firstKey: their
@@ -649,7 +651,10 @@ export function serverBusy(load = os.loadavg()[0], freeMB = os.freemem() / 10485
 export async function workOnce(deps, now = Date.now()) {
   const st = loadState(); st.queue ||= {}; st.seen ||= {};
   const due = Object.entries(st.queue).filter(([, q]) => (q.nextAt || 0) <= now)
-    .sort((a, b) => (TOPICS[topicOf(a[1])].priority - TOPICS[topicOf(b[1])].priority) || ((Date.parse(a[1].published) || 0) - (Date.parse(b[1].published) || 0)));
+    // 27.11 (owner: the news always up to date): the newest video first.
+    // Before, the oldest went first, so a week-old backlog of a newly added
+    // channel held back the fresh news for hours.
+    .sort((a, b) => (TOPICS[topicOf(a[1])].priority - TOPICS[topicOf(b[1])].priority) || ((Date.parse(b[1].published) || 0) - (Date.parse(a[1].published) || 0)));
   const started = [];
   const tooBusy = (deps.busy || serverBusy)();
   const day = new Date(now).toISOString().slice(0, 10);
@@ -660,7 +665,9 @@ export async function workOnce(deps, now = Date.now()) {
     // topic takes at most its daily number of files.
     if (q.lobby && now - (Date.parse(q.published) || now) > (q.maxAgeDays || 3) * 2 * 86400e3) { update(videoId, s2 => { delete s2.queue[videoId]; s2.seen[videoId] = 'old'; }); continue; }
     if (q.lobby && ((st.perDay || {})[day + ':' + t] || 0) >= (TOPICS[t].perDay || LOBBY_PER_DAY)) continue;
-    const lane = !TOPICS[t].news || q.dub ? 'other' : q.durationSec && q.durationSec > LONG_SEC ? 'long' : 'short';
+    // The owner's chosen Torah channels (11/2/1) have a lane of their own, so
+    // they never wait behind the LobbyTube topics or a dubbing.
+    const lane = TOPICS[t].ownLane ? 'own' + t : !TOPICS[t].news || q.dub ? 'other' : q.durationSec && q.durationSec > LONG_SEC ? 'long' : 'short';
     if (busy[lane] || (lane === 'other' && tooBusy)) continue;
     busy[lane] = true; status.working[videoId] = { lane, topic: t, since: new Date().toISOString(), title: q.title?.slice(0, 80) };
     started.push(runOne(videoId, q, lane, deps).finally(() => { busy[lane] = false; delete status.working[videoId]; }));

@@ -302,3 +302,19 @@ test('11/2 splits: its files go to 11/2/1, the LobbyTube channels\' files to 11/
   assert.equal((await N.lookupNews('/11/2/2', '000', io)).videoId, 'l000000000b');
   assert.deepEqual(N.topicOfDir('/11/2/2'), { t: 'T2', a: 0 });
 });
+
+test('news: the newest video goes first, main news before other news; chosen Torah has its own lane', async () => {
+  N._resetForTests();
+  const st = N.loadState();
+  st.queue = {
+    old0000000a: { topic: '5', ch: 'srugim', title: 'old other', published: '2026-11-20T10:00:00Z' },
+    new0000000b: { topic: '1', ch: 'kikar', title: 'new main', published: '2026-11-27T10:00:00Z' },
+    mid0000000c: { topic: '1', ch: 'kikar', title: 'older main', published: '2026-11-26T10:00:00Z' },
+    tor0000000d: { topic: '2', ch: 'yedid', title: 'lesson', published: '2026-11-27T09:00:00Z' },
+  };
+  N.saveState(st);
+  const order = [];
+  const deps = { log: { info() {}, warn() {} }, busy: () => true, probe: async v => { order.push(v); return { live: 'is_upcoming' }; } };
+  await (await N.workOnce(deps)).done;
+  assert.deepEqual(order.sort(), ['new0000000b', 'tor0000000d'].sort());
+});
