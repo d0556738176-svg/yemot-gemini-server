@@ -68,7 +68,8 @@ export const OTHER_NEWS_CHANNELS = [
   q('united24', 'UNITED24', 'UNITED24', ['UNITED24'], { dub: true }),
   q('calcalist', 'כלכליסט', 'Calcalist כלכליסט', ['Calcalist', 'כלכליסט']),
   q('updates', 'חדשות ועדכונים', 'חדשות ועדכונים', ['חדשות ועדכונים', 'חדשות ועידכונים']),
-  q('onedge', 'On Edge News', 'On Edge News', ['On Edge', 'OnEdge'], { dub: true, handles: ['OnEdgeNews', 'onedgenews1'] }),
+  // The channel speaks Yiddish (checked 27.11): dubbed to Hebrew as well.
+  { key: 'onedge', title: 'On Edge News', handle: 'OnEdgeNews', dub: true },
   q('taub', 'גדי טאוב: שומר סף', 'גדי טאוב שומר סף', ['שומר סף', 'גדי טאוב', 'Gadi Taub'], { handles: ['gaditaub', 'GadiTaub1', 'shomersaf'] }),
   q('kolmashekore', 'כל מה שקורה בציבור', 'כל מה שקורה בציבור החרדי', ['כל מה שקורה בציבור', 'כל מה שקורה']),
   q('shabak', 'שירות הביטחון הכללי', 'שב"כ שירות הביטחון הכללי', ['שירות הביטחון הכללי', 'Israeli Security Agency', 'שב"כ', 'Shin Bet'], { handles: ['shinbet', 'ISA_ShinBet', 'shabak'] }),
@@ -207,7 +208,7 @@ export function pickChannel(html, names = [], seenKey = '') {
   // What the search showed (status), to see why a channel was not taken.
   if (seenKey) searchSeen[seenKey] = { at: new Date().toISOString(), htmlLen: String(html || '').length, titles: found.slice(0, 5).map(c => c.title) };
   if (!found.length) return (/"channelRenderer":\{"channelId":"(UC[A-Za-z0-9_-]{22})"/.exec(String(html || '')) || [])[1] || null;
-  const ok = found.filter(c => !/\s-\s*Topic$|- נושא$/i.test(c.title));
+  const ok = found.filter(c => !/\s[-–]\s*Topic$|\s[-–]\s*נושא$/i.test(c.title));
   const low = names.map(n => String(n).toLowerCase()).filter(n => n.length >= 3);
   const named = ok.find(c => low.some(n => c.title.toLowerCase().includes(n)));
   if (named || low.length) return named?.id || null;
