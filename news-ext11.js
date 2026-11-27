@@ -147,11 +147,13 @@ export const LOBBY_PER_DAY = Number(process.env.LOBBY_PER_DAY || 15);
 const LOBBY_SLICE = Number(process.env.LOBBY_SLICE || 15);
 export function applyLobby(data) {
   const cats = data?.cats || {};
-  let folder = 5, added = 0;
+  // A topic keeps its folder once it has one (found by its name); a new one
+  // takes the next free folder.
+  let folder = Math.max(4, ...Object.values(TOPICS).filter(x => x.lobby).map(x => Number(x.dir.split('/')[2]) || 0)) + 1, added = 0;
   for (const name of data?.order || Object.keys(cats)) {
     if (LOBBY_SKIP.includes(name) || !Array.isArray(cats[name])) continue;
     const ids = [...new Set(cats[name].filter(id => /^UC[A-Za-z0-9_-]{22}$/.test(id)))];
-    let t = LOBBY_JOIN[name];
+    let t = LOBBY_JOIN[name] || Object.keys(TOPICS).find(k => TOPICS[k].lobby && TOPICS[k].title === name);
     if (!t) {
       t = 'L' + folder;
       TOPICS[t] ||= { title: name, dir: NEWS_ROOT + '/' + folder, lobby: true, kind: LOBBY_SONGS.includes(name) ? 'song' : 'lesson',
@@ -173,8 +175,11 @@ export function applyLobby(data) {
 // a newer import on this server goes before them.
 const LOBBY_SHIPPED = new URL('./lobby-channels.json', import.meta.url);
 export function loadLobby() {
-  for (const f of [LOBBY_FILE, LOBBY_SHIPPED]) { try { return applyLobby(JSON.parse(readFileSync(f, 'utf8'))); } catch {} }
-  return 0;
+  // The shipped lists first (they fix the folder numbers), then what was
+  // imported on this server, topic by topic.
+  let n = 0;
+  for (const f of [LOBBY_SHIPPED, LOBBY_FILE]) { try { n += applyLobby(JSON.parse(readFileSync(f, 'utf8'))); } catch {} }
+  return n;
 }
 export function importLobby(data) {
   const clean = { at: new Date().toISOString(), order: [], cats: {} };

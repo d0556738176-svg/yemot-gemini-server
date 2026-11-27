@@ -263,3 +263,13 @@ test('LobbyTube topics: the shipped lists make 11/5 on, Torah joins 11/2, its ne
   const r = N.importLobby({ order: ['ילדים'], cats: { 'ילדים': [id(5), 'bad'] } });
   assert.equal(r.channels, 1);
 });
+
+test('a later import of one LobbyTube topic keeps every folder number', async () => {
+  const N = await import('../news-ext11.js');
+  const id = n => 'UC' + String(n).padStart(22, 'y');
+  const before = Object.fromEntries(Object.keys(N.TOPICS).map(k => [N.TOPICS[k].title, N.topicDir(k)]));
+  N.importLobby({ order: ['הישרדות', 'נושא חדש'], cats: { 'הישרדות': [id(1)], 'נושא חדש': [id(2)] } });
+  const after = Object.fromEntries(Object.keys(N.TOPICS).map(k => [N.TOPICS[k].title, N.topicDir(k)]));
+  for (const [t, d] of Object.entries(before)) assert.equal(after[t], d, t);
+  assert.equal(after['נושא חדש'], '/11/37');
+});
