@@ -1,9 +1,22 @@
-queue {"2":1} working {}
-[{"id":"MulqqznMAO8","topic":"2","ch":"hidabroot","title":"הרב ברוך רוזנבלום - פרשת וישלח התשפ\"ז - Rabbi Baruch Rozenblum Parashat Vayishla","tries":33,"wait":"post_live"}]
-log []
-topic 1 files 210 /11/1/1/214 הפטריוטים עם אראל סג"ל I 26.11
-topic 2 files 68 /11/2/067 ⚡לחיצה אחת שיכולה לשנות לכם את
-topic 3 files 28 /11/3/027 על כפיו יביא - אברהם פריד | Av
-topic 4 files 21 /11/4/020 שבב המוח של מאסק מתקדם - אבל ה
-topic 5 files 0 
+MISSING onedge channel not found
+ch24 ["ערוץ 24"]
+derech ["דרך המלך - חדשות הציבור הספרדי"]
+magal ["ינון מגל Yinon Magal"]
+updates ["חדשות ועדכונים שוטפים"]
+onedge []
+taub ["גדי טאוב: שומר סף"]
+kolmashekore ["כל מה שקורה בציבור"]
+shabak ["שירות הביטחון הכללי- Israeli Security Agency"]
+privatenews ["ThePrivatenews"]
+pikud ["פיקוד העורף - הערוץ הרשמי"]
+gpo ["Government Press Office"]
+crux ["CRUX"]
+bluepaw ["Blue Paw Print"]
+keshet12 ["קשת 12 - הטלוויזיה של הישראלים"]
+seen {"ch24":{"at":"2026-11-27T08:29:23.117Z","htmlLen":1028827,"titles":["i24NEWS עברית","i24NEWS English","i24NEWS Arabic","ערוץ 24","24 חדשות"]},"reshet13":{"at":"2026-11-27T08:29:26.171Z","htmlLen":1033188,"titles":["רשת 13","חדשות 13","C14","כאן 11 - תאגיד השידור הישראלי","כאן | חדשות - תאגיד השידור הישראלי"]},"arutz7":{"at":"2026-11-27T08:29:29.680Z","htmlLen":1037615,"titles":["ערוץ 7","TV7 Israel News","ערוץ 7 TV","Poker7.Israel","Israel National News - Arutz Sheva"]},"kandigital":{"at":"2026-11-27T08:29:36.941Z","htmlLen":965295,"titles":["כאן | דיגיטל - תאגיד השידור הישראלי","כאן | חדשות - תאגיד השידור הישראלי","כאן 11 - תאגיד השידור הישראלי","Granot Awards"]},"ch16":{"at":"2026-11-27T08:29:40.081Z","htmlLen":1035601,"titles":["ערוץ 16","חדשות 16","C14","ערוץ 16 הרב אריה לוין ","i24NEWS עברית"]},"hidabroot":{"at":"2026-11-27T08:29:43.713Z","htmlLen":1039095,"titles":["הידברות","עולם הילדים – סרטים לילדים, משחקים, חוגים ועוד","just yehudit יהודית יצחק","הידברות ערוץ הHD","הרב זמיר כהן - הערוץ הרשמי"]},"leumanut":{"at":"2026-11-27T08:33:22.931Z","htmlLen":1035661,"titles":["לאומנות","עיריית קריית מוצקין - הערוץ הרשמי","Marcus Aurilius","אוראל כהן orel art king","GOLDNAILS Nailart"]},"mechadesh":{"at":"2026-11-27T08:33:25.804Z","htmlLen":956857,"titles":["חדשות המחדש","Pickspace Israel פיקספייס ישראל"]},"israelhayom":{"at":"2026-11-27T08:33:28.894Z","htmlLen":1033846,"titles":["יצחק הרצוג Isaac Herzog","כאן | חדשות - תאגיד השידור הישראלי","C14","ישראל היום - Israel Hayom","דוברות הרשות השופטת"]},"yediot":{"at":"2026-11-27T08:33:31.880Z","htmlLen":990074,"titles":["ynet","ynet ידיעות אחרונות","Ynet Global","תומר שונם הלוי - צלם חדשות Ynet ידיעות אחרונות","דור פתרונות במה"]},"police":{"at":"2026-11-27T08:33:34.859Z","htmlLen":1172253,"titles":[]},"mabat":{"at":"2026-11-27T08:33:37.742Z","htmlLen":1028854,"titles":["מבט מהשטח ","מקוואות מבט מהשטח","מרים וילנר","אתרים היסטוריים בישראל","עמותת יסוד"]},"ch2000":{"at":"2026-11-27T08:39:23.317Z","htmlLen":1035673,"titles":["יעקב קבילו | הערוץ הרשמי","זיגי","Elbazone","ROBLOXS","מיקה יצחק ערוץ רשמי"]},"gozal":{"at":"2026-11-27T08:39:26.232Z","htmlLen":976433,"titles":[]},"charedi":{"at":"2026-11-27T08:39:29.504Z","htmlLen":959714,"titles":["מה שמעניין בציבור החרדי","השטיבל - כל מה שמעניין בציבור החרדי"]},"derech@derechhamelech":{"title":"Tal"},"derech@DerechHamelechNews":{"title":null},"derech":{"at":"2026-11-27T08:39:32.925Z","htmlLen":1008845,"titles":["דרך המלך - חדשות הציבור הספרדי","דרך המלך חדשות עולם התורה הספרדי","C14","סופרבוק","The Shon Show"]},"idf":{"at":"2026-11-27T08:39:35.846Z","htmlLen":1036326,"titles":["צה״ל - צבא ההגנה לישראל","‏צה״ל ‏צבא הגנה לישראל","צה\\\"ל - צבא ההגנה לישראל רובלוקס","צבא ההגנה לישראל ،","עדכוני צה\\\"ל"]},"yehezkeli":{"at":"2026-11-27T08:39:38.731Z","htmlLen":1025411,"titles":["צבי יחזקאלי","מסע לילי - צבי יחזקאלי","נקודה טובה - צבי יחזקאלי","בסלון של צבי יחזקאלי","צבי יחזקאלי"]},"ribo":{"at":"2026-11-27T08:41:21.911Z","htmlLen":1017144,"titles":["ישי ריבו | Ishay Ribo","Ishay Ribo – נושא","ישי ריבו המעריצים!","mendi 770","זושא – נושא"]},"shwekey":{"at":"2026-11-27T08:41:24.829Z","htmlLen":1015449,"titles":["Yaakov Shwekey יעקב שוואקי","יעקב שוואקי – נושא","Yaakov Shwekey","The Music of Shabbos – נושא","Brittle Steel"]},"steinmetz":{"at":"2026-11-27T08:41:27.752Z","htmlLen":1137725,"titles":[]},"fried":{"at":"2026-11-27T08:41:30.650Z","htmlLen":1011509,"titles":["Avraham Fried אברהם פריד","אברהם פריד – נושא","Jewish Music","Avraham Fried","The All Stars (MBD, Avraham Fried \\u0026 Dov Hoffman) – נושא"]},"benari":{"at":"2026-11-27T08:41:33.598Z","htmlLen":1024557,"titles":["Hanan Ben Ari Official חנן בן ארי הערוץ הרשמי","חנן בן ארי – נושא","חנן בן ארי ","חנן בן ארי","חנן בן ארי - נושא"]},"turgeman":{"at":"2026-11-27T08:41:36.444Z","htmlLen":1018237,"titles":["עקיבא - Akiva","Akiva – נושא","עקיבא שווייצר","שי עקיבא - הערוץ הרשמי","סרטים סדרות ושירים"]}}
+topic 1 files 217
+topic 2 files 74
+topic 3 files 29
+topic 4 files 24
+topic 5 files 19
 exit=0
