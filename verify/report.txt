@@ -1,8 +1,57 @@
-topic 1 חדשות מהערוצים המרכזיים files 210 /11/1/214,/11/1/213
+1 12 ["החדשות"]  שבת בחדשות סוף השבוע: מ' המסתערב נחשף בר
+1 13 ["חדשות 13"]  ״זה כשר?״: הרב מברלין שהפך לכוכב רשת
+1 14 ["C14"]  הפטריוטים עם אראל סג"ל I 26.11.2026 I הת
+1 kikar ["כיכר השבת"]  הסבתא, הדוד, והפלאפון: למה במוסדות לא מק
+1 ch24 ["ערוץ 24"]  רונית יודקביץ חוזרת למסך הגדול - שעתיד ל
+1 reshet13 ["רשת 13"]  על קצה הווארט: סערת השידוך הספרדי😱
+1 arutz7 ["ערוץ 7"]  הרב שמואל אליהו באזהרה לחרדים
+1 i24 ["i24NEWS עברית"]  שידורי הבוקר של i24NEWS 26-11-26
+1 kan ["כאן | חדשות - תאגיד השידור הישראלי"]  החגיגות נדחו: מזג האוויר משבש את חג ההוד
+1 kandigital ["כאן | דיגיטל - תאגיד השידור הישראלי"]  רותם בלחץ מהבלק פריידיי
+1 n12 [] channel not found 
+1 ch16 ["ערוץ 16"]  דרום ירוק | חקלאי העוטף נאבקים על המשך ד
+5 knesset ["ערוץ כנסת 99"]  תיסלם או בנזין? עפרה חזה או ירדנה ארזי? 
+5 leumanut ["לאומנות"]  המלחמה בתימן | 26.11.2026
+5 mechadesh ["חדשות המחדש"]  3,614 ימים של חקירות: בחזרה לרגעים הדרמט
+5 israelhayom [] channel not found 
+5 yediot ["ynet"]  הקהל הטורקי השתולל ביציעים, המשחק מול בא
+5 police [] channel not found 
+5 mabat [] channel not found 
+5 charedi [] channel not found 
+5 derech [] channel not found 
+5 idf [] channel not found 
+5 yehezkeli [] channel not found 
+5 kolbarama [] channel not found 
+5 aitelly [] channel not found 
+5 ihud [] channel not found 
+5 haaretz [] channel not found 
+5 neiess [] channel not found 
+5 mod [] channel not found 
+5 segal [] channel not found 
+5 magal [] channel not found 
+5 shibolet [] channel not found 
+5 kolchai [] channel not found 
+5 srugim [] channel not found 
+5 kolyehudi [] channel not found 
+5 bennett [] channel not found 
+5 united24 [] channel not found 
+5 calcalist [] channel not found 
+5 updates [] channel not found 
+5 onedge [] channel not found 
+5 taub [] channel not found 
+5 kolmashekore [] channel not found 
+5 shabak [] channel not found 
+5 privatenews [] channel not found 
+5 pikud [] channel not found 
+5 gpo [] channel not found 
+5 crux [] channel not found 
+5 bluepaw [] channel not found 
+5 keshet12 [] channel not found 
+topic 1 חדשות מהערוצים המרכזיים files 210 /11/1/1/214,/11/1/1/213
 topic 2 שיעורי תורה files 68 /11/2/067,/11/2/066
 topic 3 מוזיקה files 28 /11/3/027,/11/3/026
 topic 4 טכנולוגיה files 21 /11/4/020,/11/4/019
 topic 5 חדשות שונות files 0 
 settings {"/11":["type=api","api_link=https://ext2.176-97-205-41.sslip.io/yemot-youtube","api_add_0=news=menu","title=ערוצים אונליין","news11=yes"],"/11/1":["type=api","api_link=https://ext2.176-97-205-41.sslip.io/yemot-youtube","api_add_0=news=menu","api_add_1=news_parent=1","title=חדשות אונליין","news11=yes"],"/7":["type=playfile","control_play6=plus","start=max","control_play4=minus","control_play5=wait","title=השירים החדשים","control_play1=seconds_plus","save_last_play=yes","control_play7=minut_plus_amount1","control_play3=seconds_minus","minut_plus_amount1=180000","api_hangup_send=no","control_play8=send_api","control_play9=send_api","api_link=https://ext2.176-97-205-41.sslip.io/yemot-media","control_play2=send_api","control_play0=go_to_folder","playfile_control_play_0_goto=/"],"/11/1/1":["type=playfile","title=חדשות מהערוצים המרכזיים"],"/11/2":["type=playfile","title=שיעורי תורה"],"/11/3":["type=playfile","title=מוזיקה"],"/11/4":["type=playfile","title=טכנולוגיה"],"/11/1/2":["type=playfile","title=חדשות שונות"],"mainMenu":["type=menu","digits=2","timeout=2","text_extensions=yes"]}
-log []
+log [{"at":"2026-11-27T00:58:36.927Z","movedToMainPart":210}]
 exit=0
