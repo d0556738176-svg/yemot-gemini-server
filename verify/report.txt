@@ -5,7 +5,7 @@
 1 ch24 ["ערוץ 24"]  רונית יודקביץ חוזרת למסך הגדול - שעתיד ל
 1 reshet13 ["רשת 13"]  על קצה הווארט: סערת השידוך הספרדי😱
 1 arutz7 ["ערוץ 7"]  הרב שמואל אליהו באזהרה לחרדים
-1 i24 ["i24NEWS עברית"]  שידורי הבוקר של i24NEWS 26-11-26
+1 i24 ["i24NEWS עברית"]  שידורי הערב של i24NEWS 26-11-26
 1 kan ["כאן | חדשות - תאגיד השידור הישראלי"]  החגיגות נדחו: מזג האוויר משבש את חג ההוד
 1 kandigital ["כאן | דיגיטל - תאגיד השידור הישראלי"]  רותם בלחץ מהבלק פריידיי
 1 n12 [] channel not found 
@@ -13,29 +13,29 @@
 5 knesset ["ערוץ כנסת 99"]  תיסלם או בנזין? עפרה חזה או ירדנה ארזי? 
 5 leumanut ["לאומנות"]  המלחמה בתימן | 26.11.2026
 5 mechadesh ["חדשות המחדש"]  3,614 ימים של חקירות: בחזרה לרגעים הדרמט
-5 israelhayom [] channel not found 
+5 israelhayom ["ישראל היום - Israel Hayom"]  "המשחק הראשון הנורמלי של סורקין" - מה את
 5 yediot ["ynet"]  הקהל הטורקי השתולל ביציעים, המשחק מול בא
-5 police [] channel not found 
-5 mabat [] channel not found 
-5 charedi [] channel not found 
+5 police ["Israel Police - משטרת ישראל"]  שב"חים ניסו להסתנן ונעצרו ברגע האחרון
+5 mabat ["מבט מהשטח"]  לוחם הSAS הזה פשוט חיסל את המחבלים האלה 
+5 charedi ["מה שמעניין בציבור החרדי"]  והוא טוב • דרך חוקיך • לך א-לי | רועי בן
 5 derech [] channel not found 
-5 idf [] channel not found 
-5 yehezkeli [] channel not found 
-5 kolbarama [] channel not found 
-5 aitelly [] channel not found 
-5 ihud [] channel not found 
-5 haaretz [] channel not found 
-5 neiess [] channel not found 
-5 mod [] channel not found 
-5 segal [] channel not found 
+5 idf ["צה״ל - צבא ההגנה לישראל"]  האדם שעוזר לנכי צה״ל לחזור לשירות צבאי |
+5 yehezkeli ["צבי יחזקאלי"]  ביקור ראשון של מצלמה בעיר טראפ בצרפת | ה
+5 kolbarama ["רדיו קול ברמה"]  פלפולים בשידור חי רבי שאול אלתר והמטוס ש
+5 aitelly ["AiTelly"]  How Military Laser Weapons Actually Work
+5 ihud ["איחוד הצלה ישראל"]  וונדר וומן, גל גדות, פוגשת את גיבורי-העל
+5 haaretz ["Haaretz הארץ"]  על הסנדק, המאפיה והשקר שמאחורי הסיפור על
+5 neiess ["נייעס חמים"]  מתוקים לחתונה בעזה
+5 mod ["משרד הביטחון"]  Black Sands - קמפיין ניסויים טכנולוגיים 
+5 segal ["Amit Segal עמית סגל"]  להעביר את חוק הנאשם ביום שהתיקים קורסים 
 5 magal [] channel not found 
-5 shibolet [] channel not found 
-5 kolchai [] channel not found 
-5 srugim [] channel not found 
-5 kolyehudi [] channel not found 
-5 bennett [] channel not found 
-5 united24 [] channel not found 
-5 calcalist [] channel not found 
+5 shibolet ["סלע מאיר - ספריית שיבולת"]  מדוע אנחנו כאן? התשובה של הרבי מליובאווי
+5 kolchai ["קול חי"]  גולדקנופף חושף ליברמן ביקש סליחה
+5 srugim ["סרוגים"]  מי ניצחה במבחן הסופגניות הגדול | סורגים 
+5 kolyehudi ["הקול היהודי"]  מה באמת עומד מאחורי הסנקציות נגד ההתיישב
+5 bennett ["נפתלי בנט | Naftali Bennett"]  מגישים את חוק המשרתים. צעד חשוב בתיקון י
+5 united24 ["UNITED24"]  Ukrainian Crew Moving Into a Combat Posi
+5 calcalist ["Calcalist | כלכליסט"]  הינוקא חוגג על כספי תרומות? עמרי קלישר ע
 5 updates [] channel not found 
 5 onedge [] channel not found 
 5 taub [] channel not found 
@@ -53,5 +53,5 @@ topic 3 מוזיקה files 28 /11/3/027,/11/3/026
 topic 4 טכנולוגיה files 21 /11/4/020,/11/4/019
 topic 5 חדשות שונות files 0 
 settings {"/11":["type=api","api_link=https://ext2.176-97-205-41.sslip.io/yemot-youtube","api_add_0=news=menu","title=ערוצים אונליין","news11=yes"],"/11/1":["type=api","api_link=https://ext2.176-97-205-41.sslip.io/yemot-youtube","api_add_0=news=menu","api_add_1=news_parent=1","title=חדשות אונליין","news11=yes"],"/7":["type=playfile","control_play6=plus","start=max","control_play4=minus","control_play5=wait","title=השירים החדשים","control_play1=seconds_plus","save_last_play=yes","control_play7=minut_plus_amount1","control_play3=seconds_minus","minut_plus_amount1=180000","api_hangup_send=no","control_play8=send_api","control_play9=send_api","api_link=https://ext2.176-97-205-41.sslip.io/yemot-media","control_play2=send_api","control_play0=go_to_folder","playfile_control_play_0_goto=/"],"/11/1/1":["type=playfile","title=חדשות מהערוצים המרכזיים"],"/11/2":["type=playfile","title=שיעורי תורה"],"/11/3":["type=playfile","title=מוזיקה"],"/11/4":["type=playfile","title=טכנולוגיה"],"/11/1/2":["type=playfile","title=חדשות שונות"],"mainMenu":["type=menu","digits=2","timeout=2","text_extensions=yes"]}
-log [{"at":"2026-11-27T00:58:36.927Z","movedToMainPart":210}]
+log []
 exit=0
