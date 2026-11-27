@@ -1,13 +1,42 @@
-log extract, last 1 h, units ext2, pattern Started yemot-ext2|extension 11 set|LobbyTube|ext2 updated
-
-==== yemot-ext2: 8 entries ====
-2026-11-27T09:20:38+00:00 EM-208 systemd[1]: Started yemot-ext2.service - Yemot ext2.
-2026-11-27T09:20:41+00:00 EM-208 node[1096625]: [NEWS11] Yemot extension 11 set
-2026-11-27T09:23:37+00:00 EM-208 node[1096625]: [NEWS11] LobbyTube topics imported { topics: 35, channels: 3015, added: 3015 }
-2026-11-27T09:24:05+00:00 EM-208 node[1096625]: [NEWS11] LobbyTube topics imported { topics: 1, channels: 20, added: 20 }
-2026-11-27T09:43:08+00:00 EM-208 systemd[1]: Started yemot-ext2.service - Yemot ext2.
-2026-11-27T09:43:11+00:00 EM-208 node[1100696]: [NEWS11] Yemot extension 11 set
-2026-11-27T10:11:27+00:00 EM-208 systemd[1]: Started yemot-ext2.service - Yemot ext2.
-2026-11-27T10:11:34+00:00 EM-208 node[1107637]: [NEWS11] Yemot extension 11 set
-
+topics 37
+1 חדשות מהערוצים המרכזיים files 235
+2 שיעורי תורה files 74
+3 מוזיקה files 29
+4 טכנולוגיה files 24
+5 חדשות שונות files 34
+L5 חדשות מוזיקה files 0
+L6 מעניין files 0
+L7 הישרדות files 0
+L8 תהליכי יצור files 0
+L9 ישיבות וחצרות files 0
+L10 ספורט וכושר files 0
+L11 כלכלה files 0
+L12 שוק ההון files 0
+L13 ילדים files 0
+L14 טבע files 0
+L15 רכב files 0
+L16 תיירות files 0
+L17 פוליטיקה files 0
+L18 פודקאסטים files 0
+L19 תיעודי files 0
+L20 תכנות files 0
+L21 בניית אתרים files 0
+L22 עיצוב גרפי ומולטימדיה files 0
+L23 בינה מלאכותית (AI) files 0
+L24 מדריכי תוכנה ודיגיטל files 0
+L25 בישול, אפייה וקונדיטוריה files 0
+L26 אמנות files 0
+L27 בנייה, שיפוצים ו-DIY files 0
+L28 אוטומציה files 0
+L29 בריאות files 0
+L30 אדריכלות ועיצוב פנים files 0
+L31 מדריכים files 0
+L32 בעלי מקצוע files 0
+L33 לימודים ומקצוע files 0
+L34 תורני אנגלית files 0
+L35 תורני אידיש files 0
+L36 כללי files 0
+settings dirs 41 ["type=playfile","title=מעניין"] ["type=playfile","title=כללי"]
+channels seen 355 with feed 353 errors 2
+queue {"1":110,"2":3,"4":1,"5":22,"L6":8,"L8":6,"L9":5,"L10":6,"L11":5,"L12":10,"L13":10,"L14":15,"L15":5,"L16":3,"L17":3,"L18":13,"L19":3,"L20":12,"L21":2,"L23":6,"L24":5,"L25":9,"L26":7,"L27":5,"L28":1,"L29":6,"L30":2,"L31":11,"L32":2,"L33":7,"L34":7,"L35":3,"L36":9}
 exit=0
