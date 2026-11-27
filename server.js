@@ -5974,6 +5974,20 @@ if (String(process.env.NEWS11 || 'on').toLowerCase() !== 'off') setTimeout(()=>{
   const work=async()=>{ try { const N=await import('./news-ext11.js'); N.status.started ||= new Date().toISOString(); await N.workOnce(await newsDeps()); } catch(e) { console.warn('[NEWS11] work round skipped',{message:String(e?.message||e).slice(0,160)}); } };
   poll(); setInterval(poll, 2*60*1000).unref?.(); setInterval(work, 20*1000).unref?.();
 }, 90*1000).unref?.();
+// 27.11: read-only probe of the LobbyTube site from this server (fixed site,
+// no caller data): can it be read here, and how are its lists built.
+app.get('/lobby-probe', rateLimit(6, 60 * 1000, 'lobby-probe'), async (req,res)=>{
+  const out={};
+  const UA={'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36','accept-language':'he-IL,he;q=0.9'};
+  const paths=['/categories/'+encodeURIComponent('מוזיקה'),'/categories/'+encodeURIComponent('מוזיקה')+'?page=2','/channels','/sitemap.xml','/robots.txt'];
+  for(const p of paths){
+    try{ const r=await fetch('https://lobbytube.co.il'+p,{headers:UA,signal:AbortSignal.timeout(20000)}); const h=await r.text();
+      const i=h.indexOf('/watch/');
+      out[p]={status:r.status,len:h.length,title:(/<title>([^<]*)/.exec(h)||[])[1]||'',watch:(h.match(/\/watch\/[A-Za-z0-9_-]{11}/g)||[]).length,channels:(h.match(/UC[A-Za-z0-9_-]{22}/g)||[]).length,rsc:h.includes('self.__next_f'),scripts:[...new Set([...h.matchAll(/src="(\/_next\/static\/[^"]+\.js)"/g)].map(m=>m[1]))].slice(0,40),around:i>=0?h.slice(Math.max(0,i-1500),i+600):h.slice(0,1500)};
+    }catch(e){ out[p]={error:String(e?.message||e).slice(0,120)}; }
+  }
+  res.set('cache-control','no-store').json(out);
+});
 app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)=>{
   try {
     const N=await import('./news-ext11.js'); const { statfsSync }=await import('node:fs');
