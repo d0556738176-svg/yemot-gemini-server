@@ -1,4 +1,4 @@
-log extract, last 1 h, units ext2, pattern Started yemot-ext2|extension 11 set
+log extract, last 1 h, units ext2, pattern Started yemot-ext2|movedToMainPart|channelFilesMoved
 
 ==== yemot-ext2: 0 entries ====
 
