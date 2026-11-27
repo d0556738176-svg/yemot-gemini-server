@@ -214,12 +214,12 @@ test('a topic whose first round is made again looks once more at songs it skippe
   N.saveState(st0);
   const items = [{ id: 'bbbbbbbbbb1', t: 'song 1', p: '2026-10-01T10:00:00Z' }, { id: 'bbbbbbbbbb2', t: 'song 2', p: '2026-09-01T10:00:00Z' }];
   const fetch = async u => String(u).includes('results?') ? { ok: true, text: async () => '"channelRenderer":{"channelId":"UCxxxxxxxxxxxxxxxxxxxxxx","title":{"simpleText":"Singer"}}' } : { ok: true, text: async () => feed('Singer', items) };
-  await N.pollOnce({ fetch, topics: ['3'], force: true }, now);
+  await N.pollOnce({ fetch, topics: ['3'], force: true, searchesPerRound: 100, searchGapMs: 0 }, now);
   const st = N.loadState();
   assert.ok(st.queue.bbbbbbbbbb1 && st.queue.bbbbbbbbbb2, 'the skipped songs are queued now');
   // Not again on the next round.
   delete st.queue.bbbbbbbbbb1; st.seen.bbbbbbbbbb1 = 'old'; N.saveState(st);
-  await N.pollOnce({ fetch, topics: ['3'], force: true }, now + 3600e3);
+  await N.pollOnce({ fetch, topics: ['3'], force: true, searchesPerRound: 100, searchGapMs: 0 }, now + 3600e3);
   assert.ok(!N.loadState().queue.bbbbbbbbbb1);
 });
 

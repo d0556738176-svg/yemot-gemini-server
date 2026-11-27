@@ -240,12 +240,18 @@ const note = x => { status.log.unshift({ at: new Date().toISOString(), ...x }); 
 // One round over the channels of every topic that is due. New videos are
 // queued; a topic's first round ever takes only the last 2 hours (news) or the
 // newest few of each channel (the other topics), never a channel's history.
+const searchBudget = { left: 0 };
 async function channelIds(ch, st, row, deps, now) {
   let ids = st.ids[ch.key];
   const sig = JSON.stringify([ch.id || '', ch.handle || '', ch.query || '', ch.names || []]);
   if (!ids || !ids.length || (st.idsAt?.[ch.key] || 0) < now - 24 * 3600e3 || (st.idsSig?.[ch.key] || '') !== sig) {
     const set = new Set(ch.id ? [ch.id] : []);
     if (ch.handle) { const r = await resolveHandle(ch.handle, deps.fetch).catch(e => { row.resolveError = String(e?.message || e).slice(0, 100); return null; }); if (r) set.add(r); }
+    // 27.11: YouTube's search answers nothing when asked many times at once,
+    // so a few searches per round, spaced, and a failed one waits 20 minutes.
+    st.searchTried ||= {};
+    if (!set.size && ch.query && (searchBudget.left <= 0 || (st.searchTried[ch.key] || 0) > now - 20 * 60000)) return ids || [];
+    if (!set.size && ch.query) { searchBudget.left--; st.searchTried[ch.key] = now; if (deps.searchGapMs !== 0) await new Promise(r => setTimeout(r, deps.searchGapMs || 2500)); }
     if (!set.size && ch.query) { const r = await resolveQuery(ch.query, deps.fetch, ch.names || []).catch(e => { row.resolveError = String(e?.message || e).slice(0, 100); return null; }); if (r) set.add(r); }
     if (set.size) { ids = [...set]; st.ids[ch.key] = ids; (st.idsAt ||= {})[ch.key] = now; (st.idsSig ||= {})[ch.key] = sig; }
   }
@@ -302,6 +308,7 @@ export async function removeDroppedChannels(io, st) {
 }
 export async function pollOnce(deps, now = Date.now()) {
   const st = loadState();
+  searchBudget.left = deps.searchesPerRound ?? 6;
   if (deps.io && !droppedChecked) { droppedChecked = true; st.seen ||= {}; await moveNewsToMainPart(deps.io).catch(() => 0); await removeDroppedChannels(deps.io, st).catch(() => 0); }
   st.seen ||= {}; st.queue ||= {}; st.ids ||= {}; st.topicStarted ||= {}; st.topicPolled ||= {};
   if (!st.started) st.started = new Date(now).toISOString();
