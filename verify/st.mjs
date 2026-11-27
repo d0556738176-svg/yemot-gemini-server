@@ -1,3 +1,3 @@
 const M='https://main.176-97-205-41.sslip.io';
-for(let i=0;i<30;i++){ const r=await fetch(M+'/owner-report/4c0f6bf47c2d45da1d5332fc').catch(()=>null); if(r&&r.ok){ console.log(await r.text()); process.exit(0);} await new Promise(x=>setTimeout(x,20000)); }
+for(let i=0;i<30;i++){ const r=await fetch(M+'/owner-report/cad8aef9a6110c848c967a96').catch(()=>null); if(r&&r.ok){ console.log(await r.text()); process.exit(0);} await new Promise(x=>setTimeout(x,20000)); }
 console.log('no extract');
