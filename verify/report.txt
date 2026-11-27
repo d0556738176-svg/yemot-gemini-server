@@ -1,11 +1,170 @@
-topics 6
-1 חדשות מהערוצים המרכזיים files 233
-2 שיעורי תורה files 74
-3 מוזיקה files 29
-4 טכנולוגיה files 24
-5 חדשות שונות files 34
-L5 הישרדות files 0
-settings dirs 10 null null
-channels seen 71 with feed 70 errors 0
-queue {"1":105,"2":3,"4":1,"5":21,"L5":3}
+log extract, last 2 h, units ext2, pattern LobbyTube|Started|update|deploy|ext2.*(commit|version)|Error|SyntaxError|NEWS11\] Yemot extension 11 set
+
+==== yemot-ext2: 165 entries ====
+2026-11-27T08:27:48+00:00 EM-208 systemd[1]: Started yemot-ext2.service - Yemot ext2.
+2026-11-27T08:27:48+00:00 EM-208 node[1082762]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/2
+2026-11-27T08:27:48+00:00 EM-208 node[1082762]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/7
+2026-11-27T08:27:48+00:00 EM-208 node[1082762]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/8
+2026-11-27T08:27:48+00:00 EM-208 node[1082762]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/אודיו
+2026-11-27T08:27:49+00:00 EM-208 node[1082762]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/וידאו
+2026-11-27T08:27:51+00:00 EM-208 node[1082762]: [NEWS11] Yemot extension 11 set
+2026-11-27T08:37:18+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 2887657, language: 'ru', words: 0, error: undefined }
+2026-11-27T08:37:23+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2887657, words: 0, error: undefined }
+2026-11-27T08:37:28+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 2887657, language: 'ru', words: 0, error: undefined }
+2026-11-27T08:37:35+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2887657, words: 0, error: undefined }
+2026-11-27T08:37:41+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 3047341, language: 'en', words: 123, error: undefined }
+2026-11-27T08:37:50+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 3047341, words: 123, error: undefined }
+2026-11-27T08:38:01+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 3047341, language: 'en', words: 124, error: undefined }
+2026-11-27T08:38:08+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 3047341, words: 0, error: undefined }
+2026-11-27T08:38:23+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 7686091, words: 161, error: undefined }
+2026-11-27T08:40:14+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 2107989, language: 'en', words: 560, error: undefined }
+2026-11-27T08:40:18+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 2107989, words: 558, error: undefined }
+2026-11-27T08:40:21+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 2107989, language: 'en', words: 556, error: undefined }
+2026-11-27T08:40:24+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2107989, words: 0, error: undefined }
+2026-11-27T08:40:31+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 3235614, words: 850, error: undefined }
+2026-11-27T08:44:35+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 2107989, language: 'en', words: 560, error: undefined }
+2026-11-27T08:44:37+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 2107989, words: 558, error: undefined }
+2026-11-27T08:44:40+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 2107989, language: 'en', words: 556, error: undefined }
+2026-11-27T08:44:44+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2107989, words: 0, error: undefined }
+2026-11-27T08:44:53+00:00 EM-208 node[1082762]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 3235614, words: 850, error: undefined }
+2026-11-27T08:47:37+00:00 EM-208 systemd[1]: Started yemot-ext2.service - Yemot ext2.
+2026-11-27T08:47:38+00:00 EM-208 node[1087548]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/2
+2026-11-27T08:47:39+00:00 EM-208 node[1087548]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/7
+2026-11-27T08:47:39+00:00 EM-208 node[1087548]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/8
+2026-11-27T08:47:39+00:00 EM-208 node[1087548]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/אודיו
+2026-11-27T08:47:39+00:00 EM-208 node[1087548]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/וידאו
+2026-11-27T08:47:41+00:00 EM-208 node[1087548]: [NEWS11] Yemot extension 11 set
+2026-11-27T08:52:06+00:00 EM-208 node[1087548]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 2107989, language: 'en', words: 560, error: undefined }
+2026-11-27T08:52:14+00:00 EM-208 node[1087548]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 2107989, words: 558, error: undefined }
+2026-11-27T08:52:21+00:00 EM-208 node[1087548]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 2107989, language: 'en', words: 556, error: undefined }
+2026-11-27T08:52:26+00:00 EM-208 node[1087548]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2107989, words: 0, error: undefined }
+2026-11-27T08:52:36+00:00 EM-208 node[1087548]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 3235614, words: 850, error: undefined }
+2026-11-27T08:54:09+00:00 EM-208 node[1087548]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 2283523, language: 'en', words: 258, error: undefined }
+2026-11-27T08:54:14+00:00 EM-208 node[1087548]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 2283523, words: 351, error: undefined }
+2026-11-27T08:54:20+00:00 EM-208 node[1087548]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 2283523, language: 'en', words: 289, error: undefined }
+2026-11-27T08:54:43+00:00 EM-208 node[1087548]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2283523, words: 29, error: undefined }
+2026-11-27T08:56:03+00:00 EM-208 node[1087548]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 36725289, words: 3501, error: undefined }
+2026-11-27T09:00:47+00:00 EM-208 systemd[1]: Started yemot-ext2.service - Yemot ext2.
+2026-11-27T09:00:48+00:00 EM-208 node[1089456]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/2
+2026-11-27T09:00:48+00:00 EM-208 node[1089456]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/7
+2026-11-27T09:00:48+00:00 EM-208 node[1089456]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/8
+2026-11-27T09:00:48+00:00 EM-208 node[1089456]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/אודיו
+2026-11-27T09:00:48+00:00 EM-208 node[1089456]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/וידאו
+2026-11-27T09:00:50+00:00 EM-208 node[1089456]: [NEWS11] Yemot extension 11 set
+2026-11-27T09:02:09+00:00 EM-208 node[1089456]: [YouTube IVR] preparation keep-awake started
+2026-11-27T09:04:03+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 2283523, language: 'en', words: 258, error: undefined }
+2026-11-27T09:04:09+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 2283523, words: 351, error: undefined }
+2026-11-27T09:04:15+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 2283523, language: 'en', words: 297, error: undefined }
+2026-11-27T09:04:21+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2283523, words: 29, error: undefined }
+2026-11-27T09:05:43+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 36725289, words: 3504, error: undefined }
+2026-11-27T09:14:40+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 469450, language: 'en', words: 53, error: undefined }
+2026-11-27T09:14:41+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 469450, words: 33, error: undefined }
+2026-11-27T09:14:41+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 469450, language: 'en', words: 26, error: undefined }
+2026-11-27T09:14:42+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 469450, words: 0, error: undefined }
+2026-11-27T09:14:42+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 469450, words: 56, error: undefined }
+2026-11-27T09:15:39+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 300671, language: 'en', words: 20, error: undefined }
+2026-11-27T09:15:40+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'af', status: 200, bytes: 300671, words: 62, error: undefined }
+2026-11-27T09:15:40+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 300671, language: 'en', words: 35, error: undefined }
+2026-11-27T09:15:43+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 300671, words: 14, error: undefined }
+2026-11-27T09:15:45+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 300671, words: 57, error: undefined }
+2026-11-27T09:16:44+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 415054, language: 'nl', words: 0, error: undefined }
+2026-11-27T09:16:44+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'de', status: 200, bytes: 415054, words: 55, error: undefined }
+2026-11-27T09:16:46+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 415054, language: 'nl', words: 0, error: undefined }
+2026-11-27T09:16:47+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 415054, words: 13, error: undefined }
+2026-11-27T09:16:48+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 415054, words: 0, error: undefined }
+2026-11-27T09:16:50+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 415054, language: 'nl', words: 0, error: undefined }
+2026-11-27T09:16:51+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'de', status: 200, bytes: 415054, words: 55, error: undefined }
+2026-11-27T09:18:19+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 2666972, language: 'en', words: 559, error: undefined }
+2026-11-27T09:18:24+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 2666972, words: 559, error: undefined }
+2026-11-27T09:18:29+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 2666972, language: 'en', words: 554, error: undefined }
+2026-11-27T09:18:35+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2666972, words: 10, error: undefined }
+2026-11-27T09:19:02+00:00 EM-208 node[1089456]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 17053095, words: 3518, error: undefined }
+2026-11-27T09:20:38+00:00 EM-208 systemd[1]: Started yemot-ext2.service - Yemot ext2.
+2026-11-27T09:20:39+00:00 EM-208 node[1096625]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/2
+2026-11-27T09:20:39+00:00 EM-208 node[1096625]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/7
+2026-11-27T09:20:39+00:00 EM-208 node[1096625]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/8
+2026-11-27T09:20:39+00:00 EM-208 node[1096625]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/אודיו
+2026-11-27T09:20:39+00:00 EM-208 node[1096625]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/וידאו
+2026-11-27T09:20:41+00:00 EM-208 node[1096625]: [NEWS11] Yemot extension 11 set
+2026-11-27T09:23:33+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 2666972, language: 'en', words: 564, error: undefined }
+2026-11-27T09:23:36+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 2666972, words: 559, error: undefined }
+2026-11-27T09:23:37+00:00 EM-208 node[1096625]: [NEWS11] LobbyTube topics imported { topics: 35, channels: 3015, added: 3015 }
+2026-11-27T09:23:39+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 2666972, language: 'en', words: 554, error: undefined }
+2026-11-27T09:23:43+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2666972, words: 10, error: undefined }
+2026-11-27T09:24:05+00:00 EM-208 node[1096625]: [NEWS11] LobbyTube topics imported { topics: 1, channels: 20, added: 20 }
+2026-11-27T09:24:41+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 17053095, words: 3516, error: undefined }
+2026-11-27T09:34:27+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 438681, language: 'en', words: 69, error: undefined }
+2026-11-27T09:34:29+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 438681, words: 78, error: undefined }
+2026-11-27T09:34:31+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 438681, words: 0, error: undefined }
+2026-11-27T09:34:32+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 438681, words: 62, error: undefined }
+2026-11-27T09:35:31+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 2710093, language: 'en', words: 614, error: undefined }
+2026-11-27T09:35:36+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 2710093, words: 610, error: undefined }
+2026-11-27T09:35:43+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 2710093, language: 'en', words: 614, error: undefined }
+2026-11-27T09:35:46+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2710093, words: 0, error: undefined }
+2026-11-27T09:36:31+00:00 EM-208 node[1096625]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 20979274, words: 4475, error: undefined }
+2026-11-27T09:36:36+00:00 EM-208 node[1096625]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.6-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T09:36:36+00:00 EM-208 node[1096625]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.6-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T09:37:33+00:00 EM-208 node[1096625]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.5-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T09:37:36+00:00 EM-208 node[1096625]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.5-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T09:43:08+00:00 EM-208 systemd[1]: Started yemot-ext2.service - Yemot ext2.
+2026-11-27T09:43:09+00:00 EM-208 node[1100696]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/2
+2026-11-27T09:43:09+00:00 EM-208 node[1100696]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/7
+2026-11-27T09:43:09+00:00 EM-208 node[1100696]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/8
+2026-11-27T09:43:09+00:00 EM-208 node[1100696]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/אודיו
+2026-11-27T09:43:09+00:00 EM-208 node[1100696]: [Yemot automatic setup] UpdateExtension OK path=ivr2:/וידאו
+2026-11-27T09:43:11+00:00 EM-208 node[1100696]: [NEWS11] Yemot extension 11 set
+2026-11-27T09:46:08+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 2710093, language: 'en', words: 614, error: undefined }
+2026-11-27T09:46:13+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 2710093, words: 610, error: undefined }
+2026-11-27T09:46:22+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 2710093, language: 'en', words: 614, error: undefined }
+2026-11-27T09:46:26+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2710093, words: 0, error: undefined }
+2026-11-27T09:47:12+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 20979274, words: 4475, error: undefined }
+2026-11-27T09:47:15+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.6-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T09:47:16+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.6-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T09:47:18+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.6-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T09:48:16+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.5-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T09:48:16+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.5-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T09:48:18+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.5-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T09:49:02+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.6-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T09:55:22+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 351047, language: 'en', words: 13, error: undefined }
+2026-11-27T09:55:23+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'af', status: 200, bytes: 351047, words: 33, error: undefined }
+2026-11-27T09:55:24+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 351047, language: 'en', words: 25, error: undefined }
+2026-11-27T09:55:24+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 351047, words: 1, error: undefined }
+2026-11-27T09:55:25+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 351047, words: 32, error: undefined }
+2026-11-27T09:56:15+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 779135, language: 'en', words: 150, error: undefined }
+2026-11-27T09:56:16+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 779135, words: 149, error: undefined }
+2026-11-27T09:56:17+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 779135, language: 'en', words: 143, error: undefined }
+2026-11-27T09:56:19+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 779135, words: 0, error: undefined }
+2026-11-27T09:56:21+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 779135, words: 150, error: undefined }
+2026-11-27T09:57:11+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 746621, language: 'en', words: 29, error: undefined }
+2026-11-27T09:57:12+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'af', status: 200, bytes: 746621, words: 131, error: undefined }
+2026-11-27T09:57:14+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 746621, language: 'en', words: 72, error: undefined }
+2026-11-27T09:57:16+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 746621, words: 2, error: undefined }
+2026-11-27T09:57:18+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 746621, words: 123, error: undefined }
+2026-11-27T09:58:13+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 524089, language: 'en', words: 103, error: undefined }
+2026-11-27T09:58:13+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 524089, words: 101, error: undefined }
+2026-11-27T09:58:14+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 524089, language: 'en', words: 99, error: undefined }
+2026-11-27T09:58:17+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 524089, words: 16, error: undefined }
+2026-11-27T09:58:18+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 524089, words: 103, error: undefined }
+2026-11-27T09:59:30+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 636493, language: 'en', words: 98, error: undefined }
+2026-11-27T09:59:35+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 636493, words: 98, error: undefined }
+2026-11-27T09:59:38+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 636493, language: 'en', words: 97, error: undefined }
+2026-11-27T09:59:41+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 636493, words: 25, error: undefined }
+2026-11-27T09:59:44+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 636493, words: 98, error: undefined }
+2026-11-27T09:59:45+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.6-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 7 }
+2026-11-27T10:00:32+00:00 EM-208 node[1100696]: [DIRECT] try failed { videoId: '82tUbL30Vp0', mode: 'audio', client: 'default', message: 'ERROR: [youtube] 82tUbL30Vp0: Sign in to confirm you’re not a bot. This helps protect our community. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-d' }
+2026-11-27T10:00:37+00:00 EM-208 node[1100696]: [DIRECT] try failed { videoId: '82tUbL30Vp0', mode: 'audio', client: 'tv,web_safari', message: 'ERROR: [youtube] 82tUbL30Vp0: The page needs to be reloaded.' }
+2026-11-27T10:00:42+00:00 EM-208 node[1100696]: [DIRECT] try failed { videoId: '82tUbL30Vp0', mode: 'audio', client: 'android_vr', message: 'ERROR: unable to download video data: HTTP Error 403: Forbidden' }
+2026-11-27T10:04:51+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', detect_language: 'true', status: 200, bytes: 2979168, language: 'en', words: 597, error: undefined }
+2026-11-27T10:04:54+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: 'en', status: 200, bytes: 2979168, words: 587, error: undefined }
+2026-11-27T10:04:59+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', detect_language: 'true', status: 200, bytes: 2979168, language: 'en', words: 563, error: undefined }
+2026-11-27T10:05:05+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-3', language: '', status: 200, bytes: 2979168, words: 0, error: undefined }
+2026-11-27T10:05:44+00:00 EM-208 node[1100696]: [4c6e…]: 💥 Uncaught error. applying uncaughtErrorHandler (node:_http_outgoing:700:11)
+2026-11-27T10:05:52+00:00 EM-208 node[1100696]: [SUBTITLES] transcription attempt { model: 'nova-2', language: '', status: 200, bytes: 30254689, words: 5789, error: undefined }
+2026-11-27T10:05:53+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.6-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T10:05:54+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.6-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T10:06:15+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.6-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T10:06:15+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.6-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T10:06:15+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.5-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+2026-11-27T10:06:15+00:00 EM-208 node[1100696]: [SUBTITLES] Gemini answer not usable { model: 'gemini-3.5-flash', status: 429, reason: 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to', lines: 15 }
+
 exit=0
