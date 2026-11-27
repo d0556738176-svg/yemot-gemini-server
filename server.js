@@ -4636,15 +4636,24 @@ async function youtubeCallHandler(call) {
       // 25.11 (owner): 11 = topics: 1 news, 2 Torah lessons, 3 music, 4 technology.
       // A topic with archive folders asks which one; otherwise straight in.
       const N=await import('./news-ext11.js'); const io=await newsIo();
-      const topics=Object.keys(N.TOPICS);
+      // 27.11 (owner): 11/1 holds two parts (1 main channels, 2 other channels);
+      // its own folder asks which (news_parent=1).
+      const parentPart=String(call?.values?.news_parent ?? call?.req?.query?.news_parent ?? '').trim();
+      const isPart=!!(parentPart&&N.TOPICS[parentPart]&&N.childTopics(parentPart).length>1);
+      const list=isPart?N.childTopics(parentPart):N.menuTopics();
+      const digits=list.map((k,i)=>isPart?String(i+1):k);
+      const topicOfDigit=d=>list[digits.indexOf(d)];
+      const titleOf=k=>isPart?N.TOPICS[k].title:(N.TOPICS[k].menuTitle||N.TOPICS[k].title);
       const tap=async (text,allowed)=>String(await call.read([{type:'text',data:sanitizeForYemot(text)}],'tap',
         {max_digits:1,min_digits:1,sec_wait:7,allow_empty:true,empty_val:'None',typing_playback_mode:'No',val_name:'n11'+(++tapNo),timeout:10*60*1000,digits_allowed:[...allowed,'0']})||'None').trim();
-      const text='ערוצים אונליין. '+topics.map(k=>'ל'+N.TOPICS[k].title+' הקישו '+k).join('. ')+'. לתפריט הראשי הקישו אפס.';
+      const text=(isPart?N.TOPICS[parentPart].menuTitle:'ערוצים אונליין')+'. '+list.map((k,i)=>'ל'+titleOf(k)+' הקישו '+digits[i]).join('. ')+'. '+(isPart?'לחזרה הקישו אפס.':'לתפריט הראשי הקישו אפס.');
       for(let i=0;i<3;i++) {
-        const k=await tap(text,topics);
-        branch2KeyLog('news11',k,0,0);
-        if(k==='None'||k==='0') return call.go_to_folder('/');
-        if(!N.TOPICS[k]) continue;
+        const d=await tap(text,digits);
+        branch2KeyLog('news11',d,0,0);
+        if(d==='None'||d==='0') return call.go_to_folder(isPart?N.NEWS_ROOT:'/');
+        const k=topicOfDigit(d);
+        if(!k||!N.TOPICS[k]) continue;
+        if(!isPart&&N.childTopics(k).length>1) return call.go_to_folder(N.NEWS_ROOT+'/'+k);
         const idx=await N.readIndex(io,k).catch(()=>({}));
         const arch=Array.from({length:Math.min(8,idx.archives||0)},(_,j)=>String(j+1));
         if(!arch.length) return call.go_to_folder(N.topicDir(k));
@@ -4658,7 +4667,7 @@ async function youtubeCallHandler(call) {
     } catch(e) {
       if(e instanceof ExitError) throw e;
       console.warn('[NEWS11] menu failed',{message:String(e?.message||e).slice(0,200)});
-      return call.go_to_folder('/11/1');
+      return call.go_to_folder('/11/1/1');
     }
   }
   const tvPart=String(call?.values?.tv ?? call?.req?.query?.tv ?? '').trim();
@@ -5965,6 +5974,8 @@ async function newsDeps() {
       await pipeline(Readable.fromWeb(r.body),createWriteStream(out));
     },
     publish:(v,wav,meta)=>N.publishNews(v,wav,meta,io),
+    // English channels (owner, 27.11): spoken Hebrew over the original sound.
+    dub:async(src,out,title)=>{ const d=await import('./youtube-dub.js'); return d.dubFile(src,out,{ffmpegPath:(await import('ffmpeg-static')).default,title,log:console}); },
     io,
   };
 }
@@ -5974,24 +5985,6 @@ if (String(process.env.NEWS11 || 'on').toLowerCase() !== 'off') setTimeout(()=>{
   const work=async()=>{ try { const N=await import('./news-ext11.js'); N.status.started ||= new Date().toISOString(); await N.workOnce(await newsDeps()); } catch(e) { console.warn('[NEWS11] work round skipped',{message:String(e?.message||e).slice(0,160)}); } };
   poll(); setInterval(poll, 2*60*1000).unref?.(); setInterval(work, 20*1000).unref?.();
 }, 90*1000).unref?.();
-// 27.11: read-only probe of the LobbyTube site from this server (fixed site,
-// no caller data): can it be read here, and how are its lists built.
-app.get('/lobby-probe', rateLimit(6, 60 * 1000, 'lobby-probe'), async (req,res)=>{
-  const out={};
-  const UA={'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36','accept-language':'he-IL,he;q=0.9'};
-  const get=async p=>{ const r=await fetch(p.startsWith('http')?p:'https://lobbytube.co.il'+p,{headers:UA,signal:AbortSignal.timeout(20000)}); return { status:r.status, text:await r.text() }; };
-  try{
-    const page=await get('/categories/'+encodeURIComponent('מוזיקה'));
-    const chunks=[...new Set([...page.text.matchAll(/(\/_next\/static\/chunks\/[^"'\s]+?\.js)/g)].map(m=>m[1]))];
-    out.chunks=chunks.length;
-    const apis=new Set(), hosts=new Set();
-    for(const c of chunks){ const t=(await get(c).catch(()=>({text:''}))).text; for(const m of t.matchAll(/["'`](\/api\/[^"'`\s]{2,80})["'`]/g)) apis.add(m[1]); for(const m of t.matchAll(/https:\/\/[a-z0-9.-]+\.(?:supabase\.co|co\.il|com|app|io)[^"'`\s]{0,60}/g)) if(!/youtube|google|gstatic|w3\.org|schema|reactjs|nextjs|vercel|github/.test(m[0])) hosts.add(m[0]); for(const m of t.matchAll(/(?:fetch|axios\.get)\(\s*[`"']([^`"']{3,120})/g)) apis.add('F:'+m[1]); }
-    out.apis=[...apis].slice(0,150); out.hosts=[...hosts].slice(0,60);
-    const k=page.text.indexOf('videos'); out.rscSample=page.text.slice(Math.max(0,k-300),k+700);
-    for(const sm of ['/sitemap.xml?page=static','/sitemap.xml?page=0']){ const r=await get(sm); out[sm]={status:r.status,len:r.text.length,sample:r.text.slice(0,1500),locs:(r.text.match(/<loc>/g)||[]).length}; }
-  }catch(e){ out.error=String(e?.message||e).slice(0,160); }
-  res.set('cache-control','no-store').json(out);
-});
 app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)=>{
   try {
     const N=await import('./news-ext11.js'); const { statfsSync }=await import('node:fs');
@@ -6005,7 +5998,7 @@ app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)
     // digit lines (11 needs two digits). No keys or passwords are in them.
     const rio=await replayIo(); const lines=t=>t==null?null:String(t).replace(/\r/g,'').split('\n').filter(Boolean);
     const settings={ '/11':lines(await rio.getText('ivr2:/11/ext.ini').catch(()=>null)), '/11/1':lines(await rio.getText('ivr2:/11/1/ext.ini').catch(()=>null)), '/7':lines(await rio.getText('ivr2:/7/ext.ini').catch(()=>null)),
-      ...Object.fromEntries(await Promise.all(Object.keys(N.TOPICS).filter(k=>k!=='1').map(async k=>[N.topicDir(k),(lines(await rio.getText('ivr2:'+N.topicDir(k)+'/ext.ini').catch(()=>null))||[]).filter(l=>/^(type|title)=/.test(l))]))),
+      ...Object.fromEntries(await Promise.all(Object.keys(N.TOPICS).map(async k=>[N.topicDir(k),(lines(await rio.getText('ivr2:'+N.topicDir(k)+'/ext.ini').catch(()=>null))||[]).filter(l=>/^(type|title)=/.test(l))]))),
       mainMenu:(lines(await rio.getText('ivr2:/ext.ini').catch(()=>null))||[]).filter(l=>/^(type|digits|timeout|text_extensions)=/.test(l)) };
     const { metaLog }=await import('./video-meta.js');
     const topics={}; for(const k of Object.keys(N.TOPICS)) { const ti=await N.readIndex(await newsIo(),k).catch(()=>({})); const it=Object.entries(ti.items||{}).map(([v,e])=>({id:v,...e})).sort((a,b)=>String(b.at).localeCompare(String(a.at))); topics[k]={title:N.TOPICS[k].title,next:ti.next||0,archives:ti.archives||0,files:it.length,newest:it.slice(0,6).map(e=>({file:e.dir+'/'+e.file,title:String(e.title||'').slice(0,70),ch:e.chTitle,yt:e.ytChannel}))}; }
@@ -6323,12 +6316,14 @@ async function configureYemotStructure() {
         const N = await import('./news-ext11.js'); const io = await newsIo();
         // Whatever /11 held before is kept once, so going back is one copy.
         const rio = await replayIo();
-        const dirs = [N.NEWS_ROOT, ...Object.keys(N.TOPICS).map(N.topicDir)];
+        const parents = N.menuTopics().filter(k => N.childTopics(k).length > 1);
+        const dirs = [N.NEWS_ROOT, ...parents.map(k => N.NEWS_ROOT + '/' + k), ...Object.keys(N.TOPICS).map(N.topicDir)];
         for (const d of dirs) {
           const before = await rio.getText('ivr2:' + d + '/ext.ini').catch(() => null);
           if (before && before.trim() && !before.includes(N.NEWS_MARK) && !(await rio.getText('ivr2:' + d + '/ext_before_news.ini').catch(() => null))) await rio.putText('ivr2:' + d + '/ext_before_news.ini', before).catch(() => {});
         }
         await io.saveSettings(N.NEWS_ROOT, N.menuIni(publicUrl));
+        for (const k of parents) await io.saveSettings(N.NEWS_ROOT + '/' + k, N.partMenuIni(publicUrl, k));
         for (const k of Object.keys(N.TOPICS)) {
           await io.saveSettings(N.topicDir(k), N.playIni(publicUrl, N.topicDir(k), N.TOPICS[k].title));
           const idx = await N.readIndex(io, k).catch(() => ({}));

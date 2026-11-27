@@ -147,6 +147,45 @@ export async function buildDubMix(source, clips, sentences, total, temp, ffmpegP
 // ---- the whole dubbing -------------------------------------------------------
 // deps: ffmpegPath, fetchSource(videoId, outFile), preparePhone(src, outWav),
 //       publishExt7(id, wav, title), saveDownload(videoId, mixFile, title, tempDir, durationSec, suffix)
+// Owner, 27.11 (extension 11, English channels): the same dubbing for a
+// sound file already on this server. Returns { state, file } - file is the
+// Hebrew mix next to out (its own extension), or no file when the speech is
+// already Hebrew or there is no speech.
+export async function dubFile(source, out, { ffmpegPath, title = '', env = process.env, fetchImpl = fetch, log = console, maxMinutes = 60 } = {}) {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'dubf-'));
+  try {
+    const total = await seconds(ffmpegPath, source);
+    if (total > maxMinutes * 60) return { state: 'too_long' };
+    const tr = await transcribeMedia(source, temp, { ffmpegPath, env, fetchImpl, log, seconds: total });
+    if (!tr || tr.words.length < 5) return { state: 'no_speech' };
+    if (tr.hebrew) return { state: 'already_hebrew' };
+    const sentences = groupSentences(buildCues(tr.words));
+    const { cues: he, translated } = await translateCues(sentences, { env, fetchImpl, log, system: DUB_SYSTEM, batch: 15 });
+    if (!translated) return { state: 'translation_failed' };
+    const clips = new Array(he.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < he.length) {
+        const i = next++;
+        const raw = path.join(temp, 'v' + i + '.mp3');
+        try {
+          await speakHebrew(he[i].text, raw, { env, fetchImpl, log });
+          clips[i] = { file: raw, start: he[i].start, slot: Math.max(0.6, ((he[i + 1]?.start ?? total) - he[i].start) - 0.08), dur: await seconds(ffmpegPath, raw) };
+        } catch (e) { log.warn?.('[DUB] a sentence has no voice', { i, message: String(e?.message || e).slice(0, 100) }); }
+      }
+    };
+    await Promise.all(Array.from({ length: 4 }, worker));
+    if (!clips.filter(Boolean).length) return { state: 'no_voice' };
+    const mix = await buildDubMix(source, clips, sentences, total, temp, ffmpegPath);
+    const file = path.join(path.dirname(out), path.basename(out, path.extname(out)) + path.extname(mix));
+    await fs.copyFile(mix, file);
+    log.info?.('[DUB] file dubbed', { title: String(title).slice(0, 60), language: tr.language, sentences: he.length, minutes: +(total / 60).toFixed(1) });
+    return { state: 'done', file };
+  } finally {
+    await fs.rm(temp, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export async function dubToHebrew({ videoId, title }, deps, { env = process.env, fetchImpl = fetch, log = console } = {}) {
   const { ffmpegPath } = deps;
   const t0 = Date.now();

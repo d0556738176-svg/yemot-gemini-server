@@ -57,45 +57,68 @@ test('worker: live waits; a finished one is downloaded, mastered, uploaded, and 
   const st = N.loadState();
   assert.ok(st.queue.aaaaaaaaaa3, 'live stays queued'); assert.equal(st.queue.aaaaaaaaaa3.wait, 'is_live');
   assert.ok(!st.queue.aaaaaaaaaa1); assert.equal(st.seen.aaaaaaaaaa1, 'done');
-  assert.ok(io.files.has('ivr2:/11/1/000.wav'));
+  assert.ok(io.files.has('ivr2:/11/1/1/000.wav'));
   const { existsSync } = await import('node:fs');
   assert.ok(seenTmp.every(d => !existsSync(d)), 'temporary folder deleted');
-  assert.match(io.ini.get('/11/1'), /control_play2=send_api/);
-  assert.match(io.ini.get('/11/1'), /start=max/);
+  assert.match(io.ini.get('/11/1/1'), /control_play2=send_api/);
+  assert.match(io.ini.get('/11/1/1'), /start=max/);
 });
 
-test('full folder: the older half goes to the archive, the newer half moves down', async () => {
+test('full folder (not news): the older half goes to the archive, the newer half moves down', async () => {
   N._resetForTests();
   const io = fakeYemot();
   const items = {};
-  for (let n = 0; n < 1000; n++) { io.files.set('ivr2:/11/1/' + N.file3(n) + '.wav', 'f' + n); items['v' + String(n).padStart(10, '0')] = { dir: '/11/1', file: N.file3(n), title: 't' + n }; }
-  await io.writeJson(N.INDEX, { version: 1, next: 1000, items, archives: 0 });
-  const e = await N.publishNews('newvideo123', '/tmp/x.wav', { title: 'newest' }, io);
+  for (let n = 0; n < 1000; n++) { io.files.set('ivr2:/11/2/' + N.file3(n) + '.wav', 'f' + n); items['v' + String(n).padStart(10, '0')] = { dir: '/11/2', file: N.file3(n), title: 't' + n }; }
+  const IX = 'ivr2:/2/youtubeaudio/news11_t2_index.json';
+  await io.writeJson(IX, { version: 1, next: 1000, items, archives: 0 });
+  const e = await N.publishNews('newvideo123', '/tmp/x.wav', { title: 'newest', topic: '2' }, io);
   assert.equal(e.file, '500');
-  assert.equal(io.files.get('ivr2:/11/1/1/000.wav'), 'f0');
-  assert.equal(io.files.get('ivr2:/11/1/1/499.wav'), 'f499');
-  assert.equal(io.files.get('ivr2:/11/1/000.wav'), 'f500');
-  assert.equal(io.files.get('ivr2:/11/1/499.wav'), 'f999');
-  const idx = await io.readJson(N.INDEX);
+  assert.equal(io.files.get('ivr2:/11/2/1/000.wav'), 'f0');
+  assert.equal(io.files.get('ivr2:/11/2/1/499.wav'), 'f499');
+  assert.equal(io.files.get('ivr2:/11/2/000.wav'), 'f500');
+  const idx = await io.readJson(IX);
   assert.equal(idx.archives, 1); assert.equal(idx.next, 501);
-  assert.deepEqual(await N.lookupNews('/11/1', '000', io), { videoId: 'v0000000500', title: 't500', dub: false, channel: '' });
-  assert.equal((await N.lookupNews('/11/1/1', '499', io)).videoId, 'v0000000499');
-  assert.match(io.ini.get('/11/1/1'), /type=playfile/);
+  assert.match(io.ini.get('/11/2/1'), /type=playfile/);
+});
+
+test('full news folder: the oldest half is deleted, nothing archived', async () => {
+  N._resetForTests();
+  const io = fakeYemot();
+  const items = {};
+  for (let n = 0; n < 1000; n++) { io.files.set('ivr2:/11/1/1/' + N.file3(n) + '.wav', 'f' + n); items['v' + String(n).padStart(10, '0')] = { dir: '/11/1/1', file: N.file3(n), title: 't' + n }; }
+  await io.writeJson(N.INDEX, { version: 1, next: 1000, items, archives: 0, layout: 'main-part' });
+  const e = await N.publishNews('newvideo123', '/tmp/x.wav', { title: 'newest', topic: '1' }, io);
+  assert.equal(e.file, '500');
+  assert.equal(io.files.get('ivr2:/11/1/1/000.wav'), 'f500');
+  assert.ok(!io.files.has('ivr2:/11/1/1/1/000.wav'));
+  const idx = await io.readJson(N.INDEX);
+  assert.equal(idx.archives, 0); assert.ok(!idx.items.v0000000000); assert.equal(idx.items.v0000000500.file, '000');
+});
+
+test('the files that were in 11/1 move once to 11/1/1', async () => {
+  N._resetForTests();
+  const io = fakeYemot();
+  io.files.set('ivr2:/11/1/000.wav', 'a'); io.files.set('ivr2:/11/1/001.wav', 'b');
+  await io.writeJson(N.INDEX, { next: 2, items: { x0000000000: { dir: '/11/1', file: '000' }, x0000000001: { dir: '/11/1', file: '001' } } });
+  assert.equal(await N.moveNewsToMainPart(io), 2);
+  assert.equal(io.files.get('ivr2:/11/1/1/001.wav'), 'b');
+  assert.equal(await N.moveNewsToMainPart(io), 0);
+  assert.equal((await N.lookupNews('/11/1/1', '000', io)).videoId, 'x0000000000');
 });
 
 test('key 2: asks 1/2; 1 deletes and plays the next older file; 2 cancels', async () => {
   N._resetForTests();
   const io = fakeYemot();
-  for (const n of [0, 1, 2]) io.files.set('ivr2:/11/1/00' + n + '.wav', 'x');
-  await io.writeJson(N.INDEX, { next: 3, items: { a0000000000: { dir: '/11/1', file: '000' }, a0000000001: { dir: '/11/1', file: '001' }, a0000000002: { dir: '/11/1', file: '002' } } });
-  const deps = { lookup: (d, f) => N.lookupNews(d, f, io), canDelete: d => /^\/11\/[1-9]$/.test(d), deleteFile: (d, f) => N.deleteNews(d, f, io) };
-  const ask = await K.handleMediaKey({ what: 'ivr2:/11/1/001.wav', PlayStop: '5000', PressKey: '2' }, deps, { info() {}, warn() {} });
+  for (const n of [0, 1, 2]) io.files.set('ivr2:/11/1/1/00' + n + '.wav', 'x');
+  await io.writeJson(N.INDEX, { next: 3, items: { a0000000000: { dir: '/11/1/1', file: '000' }, a0000000001: { dir: '/11/1/1', file: '001' }, a0000000002: { dir: '/11/1/1', file: '002' } } });
+  const deps = { lookup: (d, f) => N.lookupNews(d, f, io), canDelete: d => !!N.topicOfDir(d), deleteFile: (d, f) => N.deleteNews(d, f, io) };
+  const ask = await K.handleMediaKey({ what: 'ivr2:/11/1/1/001.wav', PlayStop: '5000', PressKey: '2' }, deps, { info() {}, warn() {} });
   assert.match(ask, /^read=.*=del_ok,/);
-  const no = await K.handleMediaKey({ what: 'ivr2:/11/1/001.wav', PlayStop: '5000', del_ok: '2' }, deps, { info() {}, warn() {} });
-  assert.match(no, /go_to_folder_and_play=\/11\/1,001,5000/); assert.ok(io.files.has('ivr2:/11/1/001.wav'));
-  const yes = await K.handleMediaKey({ what: 'ivr2:/11/1/001.wav', PlayStop: '5000', del_ok: '1' }, deps, { info() {}, warn() {} });
-  assert.ok(!io.files.has('ivr2:/11/1/001.wav'));
-  assert.match(yes, /go_to_folder_and_play=\/11\/1,000,0/);
+  const no = await K.handleMediaKey({ what: 'ivr2:/11/1/1/001.wav', PlayStop: '5000', del_ok: '2' }, deps, { info() {}, warn() {} });
+  assert.match(no, /go_to_folder_and_play=\/11\/1\/1,001,5000/); assert.ok(io.files.has('ivr2:/11/1/1/001.wav'));
+  const yes = await K.handleMediaKey({ what: 'ivr2:/11/1/1/001.wav', PlayStop: '5000', del_ok: '1' }, deps, { info() {}, warn() {} });
+  assert.ok(!io.files.has('ivr2:/11/1/1/001.wav'));
+  assert.match(yes, /go_to_folder_and_play=\/11\/1\/1,000,0/);
   // Extension 7 never deletes with 2.
   const seven = await K.handleMediaKey({ what: 'ivr2:/7/005.wav', PlayStop: '0', PressKey: '2' }, { ...deps, lookup: async () => null }, {});
   assert.match(seven, /^go_to_folder_and_play=\/7,005,0$/);
@@ -209,4 +232,21 @@ test('files of a channel taken out of a topic are removed once', async () => {
   assert.equal(await N.removeDroppedChannels(io, st), 1);
   assert.ok(!io.files.has('ivr2:/11/4/000.wav') && io.files.has('ivr2:/11/4/001.wav'));
   assert.ok(!st.queue.v3);
+});
+
+test('an English channel is published in spoken Hebrew; an already-Hebrew one as it is', async () => {
+  N._resetForTests();
+  const io = fakeYemot();
+  const st = N.loadState(); st.queue = { eeeeeeeeee1: { topic: '5', ch: 'united24', chTitle: 'UNITED24', dub: true, title: 'Report', published: new Date().toISOString(), tries: 0, nextAt: 0 } }; N.saveState(st);
+  const mastered = [];
+  const deps = { log: { info() {}, warn() {} }, probe: async () => ({ live: 'not_live', durationSec: 120 }), busy: () => false,
+    download: async (v, out) => { writeFileSync(out, 'src'); },
+    dub: async (src, out) => { const f = out.replace(/\.m4a$/, '.flac'); writeFileSync(f, 'he'); return { state: 'done', file: f }; },
+    master: async (src, out) => { mastered.push(path.basename(src)); writeFileSync(out, 'wav'); return { durationSec: 120 }; },
+    publish: (v, w, m) => N.publishNews(v, w, m, io) };
+  await (await N.workOnce(deps)).done;
+  assert.deepEqual(mastered, ['dub.flac']);
+  const idx = await io.readJson('ivr2:/2/youtubeaudio/news11_t5_index.json');
+  assert.equal(idx.items.eeeeeeeeee1.title, 'Report - מתורגם לעברית');
+  assert.ok(io.files.has('ivr2:/11/1/2/000.wav'));
 });

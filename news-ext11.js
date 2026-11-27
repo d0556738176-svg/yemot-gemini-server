@@ -22,14 +22,63 @@ import { PLAY_KEYS } from './branch2-ext7.js';
 // id: the channel id when known (checked: 25.11); handle: resolved on the
 // server; query: found by YouTube's own channel search (checked in
 // /news-status: the channel title found is shown next to each one).
+// Owner, 27.11: 11/1 has two parts. 11/1/1: the main news channels;
+// 11/1/2: news from many other channels. Channels found by their YouTube
+// search are checked by name (names), so a wrong channel is never taken.
+// dub: the channel speaks English; each video is turned into spoken Hebrew.
+const q = (key, title, query, names, extra = {}) => ({ key, title, query, names, ...extra });
 export const NEWS_CHANNELS = [
-  { key: 'kan', title: 'כאן חדשות', id: 'UC_HwfTAcjBESKZRJq6BTCpg', handle: 'KAN11NEWS' },
-  { key: '13', title: 'חדשות 13', id: 'UCvQmPpU20hw1Trss_CVwaew' },
-  { key: '14', title: 'עכשיו 14', id: 'UCKEImtWikw9usC1pl_9m1nQ', handle: 'c14news' },
-  { key: 'i24', title: 'i24NEWS בעברית', id: 'UCisowXt5wZkp2sR3rFh9lnQ' },
-  { key: '12', title: 'חדשות 12', handle: 'israelnews' },
   { key: 'kikar', title: 'כיכר השבת', handle: 'kikarhashabat' },
+  { key: '14', title: 'עכשיו 14', id: 'UCKEImtWikw9usC1pl_9m1nQ', handle: 'c14news' },
+  q('ch24', 'ערוץ 24', 'ערוץ 24 חדשות', ['ערוץ 24', 'Channel 24']),
+  q('reshet13', 'רשת 13', 'רשת 13', ['רשת 13', 'Reshet 13']),
+  q('arutz7', 'ערוץ 7', 'ערוץ 7 חדשות', ['ערוץ 7', 'Arutz Sheva', 'Arutz 7']),
+  { key: '12', title: 'חדשות 12', handle: 'israelnews' },
+  { key: 'i24', title: 'i24NEWS בעברית', id: 'UCisowXt5wZkp2sR3rFh9lnQ' },
+  { key: 'kan', title: 'כאן חדשות', id: 'UC_HwfTAcjBESKZRJq6BTCpg', handle: 'KAN11NEWS' },
+  q('kandigital', 'כאן דיגיטל', 'כאן דיגיטל תאגיד השידור הישראלי', ['כאן | דיגיטל', 'כאן דיגיטל']),
+  { key: '13', title: 'חדשות 13', id: 'UCvQmPpU20hw1Trss_CVwaew' },
+  q('n12', 'N12', 'N12 - אתר החדשות של ישראל', ['N12']),
+  q('ch16', 'ערוץ 16', 'ערוץ 16', ['ערוץ 16']),
+];
+export const OTHER_NEWS_CHANNELS = [
   { key: 'knesset', title: 'ערוץ כנסת', handle: 'KnessetTV' },
+  q('leumanut', 'ערוץ לאומנות', 'ערוץ לאומנות', ['לאומנות']),
+  q('mechadesh', 'חדשות המחדש', 'חדשות המחדש', ['המחדש']),
+  q('israelhayom', 'ישראל היום', 'ישראל היום', ['ישראל היום', 'Israel Hayom']),
+  q('yediot', 'ידיעות אחרונות', 'ידיעות אחרונות ynet', ['ידיעות אחרונות', 'ynet']),
+  q('police', 'משטרת ישראל', 'משטרת ישראל', ['משטרת ישראל', 'Israel Police']),
+  q('mabat', 'מבט מהשטח', 'מבט מהשטח', ['מבט מהשטח']),
+  q('charedi', 'מה שמעניין בציבור החרדי', 'מה שמעניין בציבור החרדי', ['מה שמעניין בציבור החרדי']),
+  q('derech', 'דרך המלך', 'דרך המלך - חדשות הציבור הספרדי', ['דרך המלך']),
+  q('idf', 'צה"ל', 'צה"ל - צבא ההגנה לישראל', ['צבא ההגנה לישראל', 'צה"ל', 'IDF']),
+  q('yehezkeli', 'צבי יחזקאלי', 'צבי יחזקאלי', ['יחזקאלי', 'Yehezkeli']),
+  q('kolbarama', 'רדיו קול ברמה', 'רדיו קול ברמה', ['קול ברמה']),
+  q('aitelly', 'AiTelly', 'AiTelly', ['AiTelly'], { dub: true }),
+  q('ihud', 'איחוד הצלה', 'איחוד הצלה ישראל', ['איחוד הצלה', 'United Hatzalah']),
+  q('haaretz', 'הארץ', 'Haaretz הארץ', ['Haaretz', 'הארץ']),
+  q('neiess', 'נייעס חמים', 'נייעס חמים', ['נייעס']),
+  q('mod', 'משרד הביטחון', 'משרד הביטחון', ['משרד הביטחון', 'Ministry of Defense']),
+  q('segal', 'עמית סגל', 'Amit Segal עמית סגל', ['עמית סגל', 'Amit Segal']),
+  q('magal', 'ינון מגל', 'ינון מגל Yinon Magal', ['ינון מגל', 'Yinon Magal']),
+  q('shibolet', 'סלע מאיר - ספריית שיבולת', 'סלע מאיר - ספריית שיבולת', ['שיבולת', 'סלע מאיר']),
+  q('kolchai', 'קול חי', 'קול חי', ['קול חי']),
+  q('srugim', 'סרוגים', 'סרוגים', ['סרוגים', 'Srugim']),
+  q('kolyehudi', 'הקול היהודי', 'הקול היהודי', ['הקול היהודי']),
+  q('bennett', 'נפתלי בנט', 'Naftali Bennett נפתלי בנט', ['נפתלי בנט', 'Naftali Bennett']),
+  q('united24', 'UNITED24', 'UNITED24', ['UNITED24'], { dub: true }),
+  q('calcalist', 'כלכליסט', 'Calcalist כלכליסט', ['Calcalist', 'כלכליסט']),
+  q('updates', 'חדשות ועדכונים', 'חדשות ועדכונים', ['חדשות ועדכונים']),
+  q('onedge', 'On Edge News', 'On Edge News', ['On Edge'], { dub: true }),
+  q('taub', 'גדי טאוב: שומר סף', 'גדי טאוב: שומר סף', ['שומר סף', 'גדי טאוב']),
+  q('kolmashekore', 'כל מה שקורה בציבור', 'כל מה שקורה בציבור', ['כל מה שקורה בציבור']),
+  q('shabak', 'שירות הביטחון הכללי', 'שירות הביטחון הכללי Israeli Security Agency', ['שירות הביטחון הכללי', 'Israeli Security Agency']),
+  q('privatenews', 'ThePrivatenews', 'ThePrivatenews', ['ThePrivatenews', 'Private News']),
+  q('pikud', 'פיקוד העורף', 'פיקוד העורף - הערוץ הרשמי', ['פיקוד העורף']),
+  q('gpo', 'לשכת העיתונות הממשלתית', 'Government Press Office', ['Government Press Office', 'לשכת העיתונות']),
+  q('crux', 'CRUX', 'CRUX', ['CRUX'], { dub: true }),
+  q('bluepaw', 'Blue Paw Print', 'Blue Paw Print', ['Blue Paw Print'], { dub: true }),
+  q('keshet12', 'קשת 12', 'קשת 12 - הטלוויזיה של הישראלים', ['קשת 12']),
 ];
 // Owner, 25.11: Torah lessons. Yedid Nefesh is not on YouTube: its own
 // channel site (chatfree) lists the posts publicly, each video a plain file.
@@ -68,8 +117,11 @@ export const FIRST_ARCHIVE = 1, LAST_ARCHIVE = 9;
 export const NEWS_MARK = 'news11=yes';
 // first: what the very first round of a topic takes (news: the last 2 hours;
 // the others: the newest few of each channel, so the topic starts with content).
+// news: the short/long download lanes, and a full folder drops its oldest
+// files (owner, 27.11: the other topics keep every file until he deletes it).
 export const TOPICS = {
-  '1': { title: 'חדשות אונליין', kind: 'lesson', index: INDEX, priority: 0, firstHours: 2, maxAgeDays: 7, everyMin: 2, channels: NEWS_CHANNELS },
+  '1': { title: 'חדשות מהערוצים המרכזיים', menuTitle: 'חדשות אונליין', dir: '/11/1/1', news: true, kind: 'lesson', index: INDEX, priority: 0, firstHours: 2, maxAgeDays: 7, everyMin: 2, channels: NEWS_CHANNELS },
+  '5': { title: 'חדשות שונות', dir: '/11/1/2', parent: '1', news: true, kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t5_index.json', priority: 0, firstHours: 2, maxAgeDays: 7, everyMin: 6, channels: OTHER_NEWS_CHANNELS },
   '2': { title: 'שיעורי תורה', kind: 'lesson', index: 'ivr2:/2/youtubeaudio/news11_t2_index.json', priority: 1, firstPerChannel: 3, maxAgeDays: 14, everyMin: 10, channels: TORAH_CHANNELS },
   // 26.11: singers upload seldom, so a 14-day limit left most of them empty;
   // the newest songs of each are taken even if months old (firstKey: their
@@ -81,12 +133,21 @@ const STATE_DIR = process.env.NEWS_STATE_DIR || path.join(os.homedir(), 'yemot-n
 const STATE_FILE = path.join(STATE_DIR, 'state.json');
 
 export const file3 = n => String(n).padStart(3, '0');
-export const topicDir = t => NEWS_ROOT + '/' + t;
+export const topicDir = t => TOPICS[t]?.dir || NEWS_ROOT + '/' + t;
 export const archiveDir = (t, a) => topicDir(t) + '/' + a;
-// "/11/2" -> { t: '2', a: 0 }; "/11/2/3" -> { t: '2', a: 3 }.
+// The topics on the first menu (11/1 holds two, 11/1/1 and 11/1/2).
+export const menuTopics = () => Object.keys(TOPICS).filter(k => !TOPICS[k].parent);
+export const childTopics = k => [k, ...Object.keys(TOPICS).filter(c => TOPICS[c].parent === k)];
+// "/11/2" -> { t: '2', a: 0 }; "/11/2/3" -> { t: '2', a: 3 }; "/11/1/2/4" -> { t: '5', a: 4 }.
 export function topicOfDir(dir) {
-  const m = /^\/11\/([1-9])(?:\/([1-9]))?\/?$/.exec(String(dir || ''));
-  return m && TOPICS[m[1]] ? { t: m[1], a: Number(m[2] || 0) } : null;
+  const d = String(dir || '').replace(/\/+$/, '');
+  for (const t of Object.keys(TOPICS)) {
+    const base = topicDir(t);
+    if (d === base) return { t, a: 0 };
+    const m = new RegExp('^' + base.replace(/\//g, '\\/') + '\\/([1-9])$').exec(d);
+    if (m) return { t, a: Number(m[1]) };
+  }
+  return null;
 }
 const topicOf = q => TOPICS[q?.topic] ? String(q.topic) : '1';
 
@@ -101,6 +162,10 @@ export function playIni(publicUrl, dir, title) {
   return ['type=playfile', 'title=' + title, 'start=max', 'save_last_play=yes',
     'api_link=' + String(publicUrl || '').replace(/\/$/, '') + '/yemot-media',
     ...Object.entries(keys).map(([k, v]) => k + '=' + v), NEWS_MARK].join('\n') + '\n';
+}
+// 11/1: asks which part (1 main channels, 2 other channels).
+export function partMenuIni(publicUrl, parent) {
+  return ['type=api', 'api_link=' + String(publicUrl || '').replace(/\/$/, '') + '/yemot-youtube', 'api_add_0=news=menu', 'api_add_1=news_parent=' + parent, 'title=' + TOPICS[parent].menuTitle, NEWS_MARK].join('\n') + '\n';
 }
 export function menuIni(publicUrl) {
   return ['type=api', 'api_link=' + String(publicUrl || '').replace(/\/$/, '') + '/yemot-youtube', 'api_add_0=news=menu', 'title=ערוצים אונליין', NEWS_MARK].join('\n') + '\n';
@@ -195,8 +260,27 @@ function consider(st, t, topic, ch, it, now, firstRun, rank) {
   if (firstRun && topic.firstHours && age > topic.firstHours * 3600e3) { st.seen[it.id] = 'before-start'; return; }
   if (firstRun && topic.firstPerChannel && rank >= topic.firstPerChannel) { st.seen[it.id] = 'before-start'; return; }
   if (age > (topic.maxAgeDays || 7) * 86400e3) { st.seen[it.id] = 'old'; return; }
-  st.queue[it.id] = { topic: t, ch: ch.key, chTitle: ch.title, ytChannel: it.channel || null, title: it.title, published: it.published, short: !!it.short, src: it.url ? 'url' : 'yt', url: it.url || null, tries: 0, nextAt: 0, added: new Date(now).toISOString() };
+  st.queue[it.id] = { topic: t, ch: ch.key, chTitle: ch.title, ...(ch.dub ? { dub: true } : {}), ytChannel: it.channel || null, title: it.title, published: it.published, short: !!it.short, src: it.url ? 'url' : 'yt', url: it.url || null, tries: 0, nextAt: 0, added: new Date(now).toISOString() };
   note({ queued: it.id, topic: t, ch: ch.key, title: String(it.title || '').slice(0, 80) });
+}
+// 27.11: 11/1 became two parts; the files that were in 11/1 move to 11/1/1
+// (same numbers), once.
+export function moveNewsToMainPart(io) {
+  return serial(async () => {
+    const idx = await readIndex(io, '1');
+    if (idx.layout === 'main-part') return 0;
+    const to = topicDir('1');
+    let moved = 0;
+    for (const e of Object.values(idx.items || {})) {
+      if (e.dir !== NEWS_DIR) continue;
+      await io.move('ivr2:' + NEWS_DIR + '/' + e.file + '.wav', 'ivr2:' + to + '/' + e.file + '.wav').then(() => moved++).catch(() => {});
+      e.dir = to;
+    }
+    idx.layout = 'main-part';
+    await io.writeJson(indexOf('1'), idx);
+    note({ movedToMainPart: moved });
+    return moved;
+  });
 }
 // 27.11: a channel taken out of a topic's list (it came out as the wrong
 // channel) has its files and queued videos removed, once per start.
@@ -204,7 +288,7 @@ let droppedChecked = false;
 export async function removeDroppedChannels(io, st) {
   let removed = 0;
   for (const t of Object.keys(TOPICS)) {
-    if (t === '1') continue;
+    if (TOPICS[t].news) continue;
     const keys = new Set(TOPICS[t].channels.map(c => c.key));
     for (const [v, q] of Object.entries(st.queue || {})) if (topicOf(q) === t && q.ch && !keys.has(q.ch)) { delete st.queue[v]; st.seen[v] = 'dropped-channel'; }
     const idx = await readIndex(io, t);
@@ -218,7 +302,7 @@ export async function removeDroppedChannels(io, st) {
 }
 export async function pollOnce(deps, now = Date.now()) {
   const st = loadState();
-  if (deps.io && !droppedChecked) { droppedChecked = true; st.seen ||= {}; await removeDroppedChannels(deps.io, st).catch(() => 0); }
+  if (deps.io && !droppedChecked) { droppedChecked = true; st.seen ||= {}; await moveNewsToMainPart(deps.io).catch(() => 0); await removeDroppedChannels(deps.io, st).catch(() => 0); }
   st.seen ||= {}; st.queue ||= {}; st.ids ||= {}; st.topicStarted ||= {}; st.topicPolled ||= {};
   if (!st.started) st.started = new Date(now).toISOString();
   // The news ran alone before topics existed: its first round was then.
@@ -323,6 +407,23 @@ export function deleteNews(dir, file, io) {
 // A topic folder full: files 000-499 go to its next archive folder (same
 // numbers, inside the topic), and 500-999 move down to 000-499.
 export async function rotate(io, idx, t = '1') {
+  // News (owner, 27.11): the oldest half is deleted, nothing is archived.
+  if (TOPICS[t]?.news) {
+    const dir = topicDir(t), half = MAX_FILES / 2;
+    status.rotation = { at: new Date().toISOString(), to: 'deleted', state: 'running' };
+    for (let n = 0; n < half; n++) await io.del('ivr2:' + dir + '/' + file3(n) + '.wav').catch(() => {});
+    for (let n = half; n < MAX_FILES; n++) await io.move('ivr2:' + dir + '/' + file3(n) + '.wav', 'ivr2:' + dir + '/' + file3(n - half) + '.wav').catch(() => {});
+    for (const [v, e] of Object.entries(idx.items || {})) {
+      if (e.dir !== dir) continue;
+      const n = Number(e.file);
+      if (n < half) delete idx.items[v]; else e.file = file3(n - half);
+    }
+    idx.next = Math.max(0, (idx.next || MAX_FILES) - half);
+    await io.writeJson(indexOf(t), idx);
+    status.rotation.state = 'done';
+    note({ rotated: dir, dropped: half });
+    return idx;
+  }
   const a = (idx.archives || 0) + FIRST_ARCHIVE;
   if (a > LAST_ARCHIVE) throw Object.assign(new Error('all archive folders are full'), { code: 'news_full' });
   const dir = topicDir(t), target = archiveDir(t, a);
@@ -408,7 +509,7 @@ export async function workOnce(deps, now = Date.now()) {
   for (const [videoId, q] of due) {
     if (status.working[videoId]) continue;
     const t = topicOf(q);
-    const lane = t !== '1' ? 'other' : q.durationSec && q.durationSec > LONG_SEC ? 'long' : 'short';
+    const lane = !TOPICS[t].news || q.dub ? 'other' : q.durationSec && q.durationSec > LONG_SEC ? 'long' : 'short';
     if (busy[lane] || (lane === 'other' && tooBusy)) continue;
     busy[lane] = true; status.working[videoId] = { lane, topic: t, since: new Date().toISOString(), title: q.title?.slice(0, 80) };
     started.push(runOne(videoId, q, lane, deps).finally(() => { busy[lane] = false; delete status.working[videoId]; }));
@@ -443,10 +544,18 @@ async function runOne(videoId, q, lane, deps) {
   try {
     const src = path.join(tmp, 'source');
     if (fromSite) await deps.downloadUrl(q.url, src); else await deps.download(videoId, src);
+    let title = q.title, sound = src;
+    // Owner, 27.11: an English channel is heard in spoken Hebrew (the
+    // original sound stays low underneath). Already Hebrew: as it is.
+    if (q.dub && deps.dub) {
+      const d = await deps.dub(src, path.join(tmp, 'dub.m4a'), q.title);
+      if (d?.file) { sound = d.file; title = q.title + ' - מתורגם לעברית'; }
+      else if (d?.state !== 'already_hebrew' && d?.state !== 'no_speech') throw new Error('dubbing failed: ' + (d?.state || 'unknown'));
+    }
     const wav = path.join(tmp, 'phone.wav');
-    const m = await deps.master(src, wav, q.title, TOPICS[t].kind);
+    const m = await deps.master(sound, wav, title, TOPICS[t].kind);
     await fs.rm(src, { force: true }).catch(() => {});
-    const entry = await deps.publish(videoId, wav, { topic: t, title: q.title, ch: q.ch, chTitle: q.chTitle, ytChannel: q.ytChannel, published: q.published, url: fromSite ? q.url : null, minutes: Math.round((m?.durationSec || pr.durationSec || 0) / 60) });
+    const entry = await deps.publish(videoId, wav, { topic: t, title, ch: q.ch, chTitle: q.chTitle, ytChannel: q.ytChannel, published: q.published, url: fromSite ? q.url : null, minutes: Math.round((m?.durationSec || pr.durationSec || 0) / 60) });
     update(videoId, st => { delete st.queue[videoId]; st.seen[videoId] = 'done'; });
     note({ done: videoId, topic: t, ch: q.ch, file: entry?.file, title: q.title?.slice(0, 80), seconds: Math.round((Date.now() - t0) / 1000), lateMin: Math.round((Date.now() - (Date.parse(q.published) || Date.now())) / 60000) });
     log.info?.('[NEWS11] published', { videoId, topic: t, ch: q.ch, file: entry?.file });
