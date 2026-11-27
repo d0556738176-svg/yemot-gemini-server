@@ -5979,13 +5979,17 @@ if (String(process.env.NEWS11 || 'on').toLowerCase() !== 'off') setTimeout(()=>{
 app.get('/lobby-probe', rateLimit(6, 60 * 1000, 'lobby-probe'), async (req,res)=>{
   const out={};
   const UA={'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36','accept-language':'he-IL,he;q=0.9'};
-  const paths=['/categories/'+encodeURIComponent('מוזיקה'),'/categories/'+encodeURIComponent('מוזיקה')+'?page=2','/channels','/sitemap.xml','/robots.txt'];
-  for(const p of paths){
-    try{ const r=await fetch('https://lobbytube.co.il'+p,{headers:UA,signal:AbortSignal.timeout(20000)}); const h=await r.text();
-      const i=h.indexOf('/watch/');
-      out[p]={status:r.status,len:h.length,title:(/<title>([^<]*)/.exec(h)||[])[1]||'',watch:(h.match(/\/watch\/[A-Za-z0-9_-]{11}/g)||[]).length,channels:(h.match(/UC[A-Za-z0-9_-]{22}/g)||[]).length,rsc:h.includes('self.__next_f'),scripts:[...new Set([...h.matchAll(/src="(\/_next\/static\/[^"]+\.js)"/g)].map(m=>m[1]))].slice(0,40),around:i>=0?h.slice(Math.max(0,i-1500),i+600):h.slice(0,1500)};
-    }catch(e){ out[p]={error:String(e?.message||e).slice(0,120)}; }
-  }
+  const get=async p=>{ const r=await fetch(p.startsWith('http')?p:'https://lobbytube.co.il'+p,{headers:UA,signal:AbortSignal.timeout(20000)}); return { status:r.status, text:await r.text() }; };
+  try{
+    const page=await get('/categories/'+encodeURIComponent('מוזיקה'));
+    const chunks=[...new Set([...page.text.matchAll(/(\/_next\/static\/chunks\/[^"'\s]+?\.js)/g)].map(m=>m[1]))];
+    out.chunks=chunks.length;
+    const apis=new Set(), hosts=new Set();
+    for(const c of chunks){ const t=(await get(c).catch(()=>({text:''}))).text; for(const m of t.matchAll(/["'`](\/api\/[^"'`\s]{2,80})["'`]/g)) apis.add(m[1]); for(const m of t.matchAll(/https:\/\/[a-z0-9.-]+\.(?:supabase\.co|co\.il|com|app|io)[^"'`\s]{0,60}/g)) if(!/youtube|google|gstatic|w3\.org|schema|reactjs|nextjs|vercel|github/.test(m[0])) hosts.add(m[0]); for(const m of t.matchAll(/(?:fetch|axios\.get)\(\s*[`"']([^`"']{3,120})/g)) apis.add('F:'+m[1]); }
+    out.apis=[...apis].slice(0,150); out.hosts=[...hosts].slice(0,60);
+    const k=page.text.indexOf('videos'); out.rscSample=page.text.slice(Math.max(0,k-300),k+700);
+    for(const sm of ['/sitemap.xml?page=static','/sitemap.xml?page=0']){ const r=await get(sm); out[sm]={status:r.status,len:r.text.length,sample:r.text.slice(0,1500),locs:(r.text.match(/<loc>/g)||[]).length}; }
+  }catch(e){ out.error=String(e?.message||e).slice(0,160); }
   res.set('cache-control','no-store').json(out);
 });
 app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)=>{
