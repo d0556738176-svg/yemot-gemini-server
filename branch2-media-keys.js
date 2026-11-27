@@ -31,6 +31,13 @@ const say = (...parts) => 'id_list_message=' + parts.filter(Boolean).map(t => 't
 // deps: lookup(dir, file) -> { videoId, title, dub } | null;
 //       details(videoId, title) -> [sentences]; dubStatus(videoId) -> {state, file}
 //       startDub(videoId, title); language(title) -> { name, code } | null
+function startVideoSay(v, deps, log) {
+  const st = deps.startVideo(v);
+  log.info?.('[VIDEO88] requested from a playing file', { videoId: v.videoId, subtitles: v.subtitles, status: st?.status || null });
+  if (st?.status === 'ready') return say('הסרטון הזה כבר שמור בתיקיית וידאו', 'ממשיכים בהשמעה');
+  return say('הורדת הסרטון התחילה' + (v.subtitles ? ', עם כתובית בעברית' : ', בלי כתובית'), 'הוא יישמר בתיקיית וידאו באיכות הטובה ביותר, גם אם הוא ארוך', 'אין צורך להמתין', 'ממשיכים בהשמעה');
+}
+
 export async function handleMediaKey(q, deps, log = console) {
   if (q.hangup === 'yes') return 'noop';
   const what = String(q.what || '');
@@ -39,8 +46,33 @@ export async function handleMediaKey(q, deps, log = console) {
   const p = parseWhat(what);
   const item = p ? await deps.lookup(p.dir, p.file).catch(() => null) : null;
 
-  // The details were heard (or cut short by any key): back to the same place.
-  if (q.skip8 !== undefined) return back;
+  // Owner, 27.11 (extension 11, every folder in it): 8 and 8 again = save the
+  // video from YouTube to the video folder, asking first with or without
+  // Hebrew subtitles. The second 8 is the key that cuts the details short.
+  const videoOk = p && item?.videoId && deps.canVideo?.(p.dir) && deps.startVideo;
+  // The subtitles answer: 1 = with, 2 = without. The free download first;
+  // a second download (redo) or the paid engine only after another 1.
+  if (q.vid_sub !== undefined && q.vid_sub !== '' && q.vid_ok === undefined) {
+    if (!['1', '2'].includes(String(q.vid_sub)) || !videoOk) return say('בוטל. ממשיכים בהשמעה') + '&' + back;
+    const v = { videoId: item.videoId, title: item.title, channelTitle: item.channel || '', subtitles: String(q.vid_sub) === '1' };
+    const gate = deps.videoGate ? await deps.videoGate(v).catch(() => null) : null;
+    if (gate) return 'read=' + 't-' + clean(gate.prompt) + '=vid_ok,no,1,1,10,No,no,no,,1.2,1,Ok,2,';
+    return startVideoSay(v, deps, log) + '&' + back;
+  }
+  if (q.vid_ok !== undefined && q.vid_ok !== '') {
+    if (String(q.vid_ok) !== '1' || !videoOk || !['1', '2'].includes(String(q.vid_sub))) return say('בוטל. ממשיכים בהשמעה') + '&' + back;
+    const v = { videoId: item.videoId, title: item.title, channelTitle: item.channel || '', subtitles: String(q.vid_sub) === '1', paidConsent: true, redoConsent: true };
+    return startVideoSay(v, deps, log) + '&' + back;
+  }
+  if (q.skip8 !== undefined) {
+    if (String(q.skip8) === '8' && p && deps.canVideo?.(p.dir)) {
+      if (!item?.videoId) return say('הקובץ הזה לא מיוטיוב, ולכן אי אפשר להוריד אותו כסרטון') + '&' + back;
+      const question = ['להורדת הקובץ כסרטון לתיקיית וידאו', 'עם כתובית בעברית הקש 1', 'בלי כתובית הקש 2'].map(t => 't-' + clean(t)).join('.');
+      // one key, 1 or 2, 10 seconds; no answer = cancel (0).
+      return 'read=' + question + '=vid_sub,no,1,1,10,No,yes,no,,1.2,1,Ok,0,';
+    }
+    return back;
+  }
 
   // Key 2 in extension 11 (owner, 25.11): delete this file, after 1 = yes.
   if (q.del_ok !== undefined && q.del_ok !== '') {
@@ -72,7 +104,8 @@ export async function handleMediaKey(q, deps, log = console) {
     // 25.11: a file from a channel site (not YouTube) has its title and channel.
     if (!item?.videoId) return say(item?.title ? 'זה ' + item.title + (item.channel ? ', מהערוץ ' + item.channel : '') : 'אין לי פרטים על הקובץ הזה') + '&' + back;
     const lines = await deps.details(item.videoId, item.title, item.dub, { channel: item.channel || '' }).catch(() => null);
-    return skippable(lines?.length ? lines : ['אין לי פרטים נוספים על הקובץ הזה']);
+    const more = deps.canVideo?.(p.dir) ? ['להורדת הקובץ כסרטון לתיקיית וידאו הקש 8'] : [];
+    return skippable([...(lines?.length ? lines : ['אין לי פרטים נוספים על הקובץ הזה']), ...more]);
   }
 
   if (key === '9') {
