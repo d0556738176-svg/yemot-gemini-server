@@ -5983,7 +5983,7 @@ async function newsDeps() {
     },
     publish:(v,wav,meta)=>N.publishNews(v,wav,meta,io),
     // English channels (owner, 27.11): spoken Hebrew over the original sound.
-    dub:async(src,out,title)=>{ const d=await import('./youtube-dub.js'); return d.dubFile(src,out,{ffmpegPath:(await import('ffmpeg-static')).default,title,log:console}); },
+    dub:async(src,out,title)=>{ const d=await import('./youtube-dub.js'); return d.dubFile(src,out,{ffmpegPath:(await import('ffmpeg-static')).default,title,log:console,maxMinutes:600}); },
     io,
   };
 }
