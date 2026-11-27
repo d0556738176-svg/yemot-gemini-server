@@ -1,5 +1,11 @@
-onedge {"feed":{"UCWtJzggPSswGi1vq7EB2jJQ":"On Edge News"},"latest":"Is Netanyahu in Iran? | On Edge News | Gershy Schwarcz","error":null}
-queued [{"id":"zu31sJ8sYcc","topic":"5","ch":"onedge","title":"Is Netanyahu in Iran? | On Edge News | Gershy Schwarcz","tries":0,"wait":null},{"id":"pvafOExRsfg","topic":"5","ch":"onedge","title":"The shul where everyone finally knows your name #Shorts","tries":0,"wait":null},{"id":"82tUbL30Vp0","topic":"5","ch":"onedge","title":"Tuck and Run in 2028? Only against Rubio | On Edge News | Gershy Schwarcz","tries":0,"wait":null},{"id":"wdMMbnmbww4","topic":"5","ch":"onedge","title":"A California city is selling its water to China #Shorts","tries":0,"wait":null},{"id":"h1d1OQMnz_o","topic":"5","ch":"onedge","title":"Your pharmacy label, now in Yiddish #Shorts","tries":0,"wait":null},{"id":"Kh-vyrkgc74","topic":"5","ch":"onedge","title":"האט AI געלעזט די גרעסטע רעטעניש אין מאטעמאטיק? #Shorts","tries":0,"wait":null},{"id":"heDrGupXFGo","topic":"5","ch":"onedge","title":"Did AI just crack math's biggest riddle? #Shorts","tries":0,"wait":null},{"id":"6mA7gAvBuRs","topic":"5","ch":"onedge","title":"ווער עס לויפט אין 2028 איז נאריש | אנאליז אן עדזש #Shorts","tries":0,"wait":null},{"id":"2YgUFUcWkVk","topic":"5","ch":"onedge","title":"Iran's top job: short-term position | On Edge News | Gershy Schwarcz","tries":0,"wait":null},{"id":"byDQhseQy8I","topic":"5","ch":"onedge","title":"סארי קענעדע... איטס אווער | אנאליז אן עדזש #Shorts","tries":0,"wait":null},{"id":"j7Rfl0tVMQo","topic":"5","ch":"onedge","title":"ONE DISASTER FEMA CANNOT HANDLE: BEDBUGS | On Edge News | Gershy Schwarcz","tries":0,"wait":null},{"id":"F2rSc3G5_l4","topic":"5","ch":"onedge","title":"ענדיגט די פארטי... בום בום בום | אנאליז אן עדזש #Shorts","tries":0,"wait":null},{"id":"7D5sYMEXTGk","topic":"5","ch":"onedge","title":"נענסי פעלאסי'ס ברום קלאזעט | אנאליז אן עדזש #Shorts","tries":0,"wait":null},{"id":"4C0WpnXVVn8","topic":"5","ch":"onedge","title":"וואס האבן זיי געטון? גארנישט! | אנאליז אן עדזש #Shorts","tries":0,"wait":null},{"id":"8DNYNEMU25c","topic":"5","ch":"onedge","title":"וואס גייט זיין מיט אמעריקע, קאנאדע, איראן, מדנ״י און עס-איי? | אנאליז אן עדזש | ","tries":0,"wait":null}]
-published []
-log []
+topics 6
+1 חדשות מהערוצים המרכזיים files 222
+2 שיעורי תורה files 74
+3 מוזיקה files 29
+4 טכנולוגיה files 24
+5 חדשות שונות files 27
+L5 הישרדות files 0
+settings dirs 10 null null
+channels seen 62 with feed 62 errors 0
+queue {"1":115,"2":3,"4":1,"5":26,"L5":2}
 exit=0
