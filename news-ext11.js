@@ -169,7 +169,13 @@ export function applyLobby(data) {
   }
   return added;
 }
-export function loadLobby() { try { return applyLobby(JSON.parse(readFileSync(LOBBY_FILE, 'utf8'))); } catch { return 0; } }
+// The lists the owner brought from LobbyTube (27.11) ship with the code;
+// a newer import on this server goes before them.
+const LOBBY_SHIPPED = new URL('./lobby-channels.json', import.meta.url);
+export function loadLobby() {
+  for (const f of [LOBBY_FILE, LOBBY_SHIPPED]) { try { return applyLobby(JSON.parse(readFileSync(f, 'utf8'))); } catch {} }
+  return 0;
+}
 export function importLobby(data) {
   const clean = { at: new Date().toISOString(), order: [], cats: {} };
   for (const [name, ids] of Object.entries(data?.cats || {})) {
