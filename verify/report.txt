@@ -1,5 +1,7 @@
-log extract, last 1 h, units ext2, pattern Started yemot-ext2|movedToMainPart|channelFilesMoved
-
-==== yemot-ext2: 0 entries ====
-
+1 חדשות מהערוצים המרכזיים files 240 ["/11/1/1/244 רשת 13","/11/1/1/243 כאן דיגיטל","/11/1/1/242 רשת 13"]
+5 חדשות שונות files 131 ["/11/1/2/130 ינון מגל","/11/1/2/129 כלכליסט","/11/1/2/128 משרד הביטחון"]
+2 שיעורי תורה files 74 ["/11/2/073 הידברות","/11/2/072 הידברות","/11/2/071 הידברות"]
+T2 undefined files undefined []
+settings ["type=playfile","title=שיעורי תורה"] null
+log []
 exit=0
