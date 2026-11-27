@@ -1,3 +1,7 @@
 const E='https://ext2.176-97-205-41.sslip.io';
-for(let i=0;i<30;i++){ const r=await fetch(E+'/lobby-probe').catch(()=>null); if(r&&r.status===200){ const j=await r.json(); if(j.chunks===undefined && !j.error){ await new Promise(x=>setTimeout(x,20000)); continue; } console.log(JSON.stringify(j,null,1).slice(0,12000)); process.exit(0);} await new Promise(x=>setTimeout(x,20000)); }
-console.log('no probe');
+const n=await fetch(E+'/news-status').then(r=>r.json()).catch(e=>({err:String(e)}));
+const ch=n.status?.channels||{};
+for(const [k,v] of Object.entries(ch)) if(v.topic==='1'||v.topic==='5') console.log(v.topic,k, JSON.stringify(Object.values(v.feedTitles||{})), v.error||'', (v.latest||'').slice(0,40));
+for(const [t,v] of Object.entries(n.topics||{})) console.log('topic',t,v.title,'files',v.files,(v.newest||[]).slice(0,2).map(x=>x.file).join(','));
+console.log('settings', JSON.stringify(n.settings||{}).slice(0,1200));
+console.log('log', JSON.stringify((n.status?.log||[]).filter(x=>x.movedToMainPart!==undefined||x.droppedChannelFiles||x.failed).slice(-8)));
