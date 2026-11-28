@@ -1220,6 +1220,15 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
         const items = await deps.newsSearch('עומסי תנועה ' + facts.roads.slice(0, 3).map(r => 'כביש ' + r).join(' '), { timeoutMs: 3500 }).catch(() => []);
         traffic = (items || []).slice(0, 5).map(x => '- ' + clip(x.title, 140) + (x.source ? ' (' + x.source + (x.date ? ', ' + x.date : '') + ')' : '')).join('\n');
       }
+      // A car question with no live traffic: said exactly as measured (a model
+      // invented "55 to 60 minutes with jams" in the live check).
+      if (plan.mode === 'car' && !liveOk && facts.car?.best) {
+        const c = facts.car.best, mins = m => m < 60 ? m + ' דקות' : (Math.floor(m / 60) === 1 ? 'שעה' : Math.floor(m / 60) === 2 ? 'שעתיים' : Math.floor(m / 60) + ' שעות') + (m % 60 ? ' ו' + (m % 60) + ' דקות' : '');
+        const km = x => String(Math.round(x * 10) / 10).replace('.', ' נקודה ');
+        return out({ reply: 'ברכב זה ' + km(c.km) + ' קילומטר, בערך ' + mins(c.minutes) + ' כשאין פקקים. ' + (wantsTraffic ? 'נתוני פקקים חיים אין לי כרגע, אז עם עומס זה יכול לקחת יותר; כדאי לבדוק בווייז לפני היציאה. ' : '') +
+          (c.roads.length ? 'הדרך: ' + c.roads.slice(0, brief ? 4 : 7).map(r => r.label).join(', ') + '.' : '') +
+          (facts.car.other && !brief && Math.abs(facts.car.other.minutes - c.minutes) <= 15 ? ' יש גם דרך אחרת, ' + km(facts.car.other.km) + ' קילומטר, בערך ' + mins(facts.car.other.minutes) + '.' : '') });
+      }
       const reply = await ask('המתקשר שואל איך להגיע ממקום למקום. לפניך נתונים אמיתיים שנבדקו עכשיו: נסיעות אוטובוס מלוח הזמנים הרשמי, ישירות ועם החלפה אחת (עם שעות יציאה והגעה ותחנות), ומסלול ברכב. ' +
         'עני רק לפיהם, בלי להוסיף קו, תחנה, כביש או זמן שלא כתובים. ' + (busOk ? 'באוטובוס: פתחי באפשרות שמגיעה הכי מוקדם (ישירה או עם החלפה, לפי שעת ההגעה), אמרי את מספר הקו, איפה עולים ומתי יוצא, ובהחלפה גם איפה יורדים ומחליפים, לאיזה קו ומתי הוא יוצא, ואיפה יורדים בסוף ומתי מגיעים. אחר כך עוד אפשרות אחת או שתיים. ' : 'אם לא נמצא קו ישיר וגם לא החלפה אחת, אמרי זאת בכנות במשפט אחד, והציעי לבדוק במוקד התחבורה הציבורית בכוכבית 8787. ') +
         (liveOk ? 'ברכב יש לך זמן נסיעה לפי מצב התנועה עכשיו, כולל פקקים: אמרי אותו ואת הדרך המהירה, ואם יש עיכוב בגלל עומס אמרי כמה. אם יש דרך אחרת, אמרי גם אותה בקצרה. ' : carOk ? 'ברכב: אמרי את הכבישים לפי הסדר, המרחק והזמן הרגיל. אין לך נתוני פקקים חיים: אם שאל על פקקים, אמרי זאת בכנות במשפט אחד, ' + (traffic ? 'ספרי רק על דיווח מהחדשות שלמטה שמדבר בבירור על הכבישים האלה ומהיום, ' : '') + 'והציעי לבדוק לפני היציאה בווייז או בגוגל מפות. ' : '') +
