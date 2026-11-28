@@ -17,6 +17,7 @@ concurrency:
 permissions:
   contents: write
   actions: read
+  id-token: write
 jobs:
   handle:
     runs-on: ubuntu-latest
@@ -33,9 +34,15 @@ jobs:
           curl -s -m 30 https://main.176-97-205-41.sslip.io/owner12/requests > /tmp/requests.json || echo '{"requests":[]}' > /tmp/requests.json
           git show origin/owner/answers:answers.json > /tmp/answers.json 2>/dev/null || echo '{"answers":{}}' > /tmp/answers.json
           echo "requests:"; cat /tmp/requests.json | head -c 4000; echo
+      - name: Claude sign-in kept on the server
+        run: |
+          jwt=$(curl -s -m 20 -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=yemot-owner12" | jq -r '.value // empty')
+          code=$(curl -s -m 30 -o /tmp/st.json -w '%{http_code}' -X POST -H "Authorization: Bearer $jwt" https://main.176-97-205-41.sslip.io/owner12/runner-token)
+          t=$(jq -r '.token // empty' /tmp/st.json 2>/dev/null); rm -f /tmp/st.json
+          if [ -n "$t" ]; then echo "::add-mask::$t"; echo "OWNER12_CLAUDE_TOKEN=$t" >> "$GITHUB_ENV"; echo "using the sign-in kept on the server"; else echo "server answered $code; using the repository secret"; fi
       - uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_code_oauth_token: ${{ env.OWNER12_CLAUDE_TOKEN || secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           claude_args: "--max-turns 200 --allowedTools Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch"
           prompt: |

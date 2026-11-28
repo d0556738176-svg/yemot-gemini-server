@@ -6567,6 +6567,53 @@ async function ownerTurn(text){
 }
 // The scheduled Claude session reads the waiting requests here (only their
 // texts and numbers, nothing secret).
+// 28.11 (owner): the Claude sign-in for extension 12 is made on the server
+// (deploy/vps/claude-login.sh) and kept there. The GitHub run owner12.yml
+// receives it only with GitHub's signed OIDC proof that the caller is that
+// very workflow, on main, of this repository.
+const OWNER12_TOKEN_FILE='/opt/yemot/owner12-claude.token';
+const OWNER12_LOGIN_FILE='/var/lib/yemot-data/owner12-login.json';
+let ghJwks={at:0,keys:[]};
+async function ghOidcVerify(jwt){
+  const [h,p,s]=String(jwt||'').split('.'); if(!h||!p||!s) throw new Error('no token');
+  const hdr=JSON.parse(Buffer.from(h,'base64url').toString()), pl=JSON.parse(Buffer.from(p,'base64url').toString());
+  if(hdr.alg!=='RS256') throw new Error('alg');
+  if(Date.now()-ghJwks.at>3600e3||!ghJwks.keys.some(k=>k.kid===hdr.kid)) {
+    const r=await fetch('https://token.actions.githubusercontent.com/.well-known/jwks',{signal:AbortSignal.timeout(15000)});
+    ghJwks={at:Date.now(),keys:(await r.json()).keys||[]};
+  }
+  const jwk=ghJwks.keys.find(k=>k.kid===hdr.kid); if(!jwk) throw new Error('kid');
+  const ok=crypto.verify('RSA-SHA256',Buffer.from(h+'.'+p),crypto.createPublicKey({key:jwk,format:'jwk'}),Buffer.from(s,'base64url'));
+  if(!ok) throw new Error('signature');
+  const repo=(process.env.SONG_WORKER_REPO||'d0556738176-svg/yemot-gemini-server').trim(), now=Date.now()/1000;
+  if(pl.iss!=='https://token.actions.githubusercontent.com') throw new Error('iss');
+  if(pl.aud!=='yemot-owner12'&&!(Array.isArray(pl.aud)&&pl.aud.includes('yemot-owner12'))) throw new Error('aud');
+  if(pl.repository!==repo||pl.ref!=='refs/heads/main') throw new Error('repo');
+  if(!String(pl.workflow_ref||'').startsWith(repo+'/.github/workflows/owner12.yml@refs/heads/main')) throw new Error('workflow');
+  if(!(pl.exp>now)||(pl.nbf&&pl.nbf>now+60)) throw new Error('time');
+  return pl;
+}
+app.post('/owner12/runner-token',rateLimit(10,60*1000,'owner12tok'),async(req,res)=>{
+  res.set('cache-control','no-store');
+  try {
+    const pl=await ghOidcVerify(String(req.get('authorization')||'').replace(/^Bearer\s+/i,''));
+    const { readFile }=await import('node:fs/promises');
+    const t=(await readFile(OWNER12_TOKEN_FILE,'utf8').catch(()=>'')).trim();
+    if(!/^sk-ant-oat[A-Za-z0-9_-]{20,}$/.test(t)) { console.info('[OWNER12] runner asked, no sign-in saved yet'); return res.status(404).json({error:'no sign-in yet'}); }
+    console.info('[OWNER12] runner token given',{run:pl.run_id});
+    res.json({token:t});
+  } catch(e) { console.warn('[OWNER12] runner token refused',String(e?.message||e).slice(0,40)); res.status(403).json({error:'denied'}); }
+});
+app.get('/owner12/login',async(req,res)=>{
+  res.set('cache-control','no-store');
+  const { readFile }=await import('node:fs/promises');
+  let d=null; try { d=JSON.parse(await readFile(OWNER12_LOGIN_FILE,'utf8')); } catch {}
+  const fresh=d&&/^https:\/\/[a-z.]+\/oauth\/authorize\?[\x21-\x7e]+$/.test(d.url||'')&&Date.now()/1000-d.at<20*60;
+  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  res.type('html').send('<!doctype html><html dir="rtl" lang="he"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>חיבור שלוחה 12</title><body style="font-family:Arial;font-size:20px;max-width:640px;margin:40px auto;line-height:1.6">'+
+    (fresh?'<h2>חיבור שלוחה 12 ל-Claude</h2><p>1. לחץ על הכפתור והתחבר לחשבון Claude שלך.</p><p><a id="go" href="'+esc(d.url)+'" target="_blank" rel="noopener" style="display:inline-block;background:#1f883d;color:#fff;padding:14px 26px;border-radius:8px;text-decoration:none">פתח את החיבור</a></p><p>2. אשר, ובסוף יופיע קוד. העתק אותו.</p><p>3. הדבק את הקוד בקונסולה של השרת ולחץ Enter.</p>'
+      :'<h2>אין כרגע חיבור פתוח</h2><p>הרץ בקונסולה של השרת:</p><p dir="ltr" style="background:#eee;padding:10px;font-family:monospace">bash /opt/yemot/main/deploy/vps/claude-login.sh</p><p>ואז רענן את הדף הזה.</p>')+'</body></html>');
+});
 app.get('/owner12/requests',rateLimit(20,60*1000,'owner12'),async(req,res)=>{ const d=await owner12Requests(); res.set('cache-control','no-store').json({requests:(d.requests||[]).map(r=>({id:r.id,at:r.at,text:r.text,answered:!!r.answer}))}); });
 // Owner, 27.11: a file deleted with key 2 in extension 7 leaves the AI
 // extensions' list of saved songs at once (not after the 5-minute cache).
