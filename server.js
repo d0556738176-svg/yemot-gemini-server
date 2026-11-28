@@ -5634,6 +5634,8 @@ app.get('/yemot-media', async (req, res) => {
       language: async (vid, title) => (await import('./youtube-video-facts.js')).videoLanguage(await fetchVideoFacts(vid, process.env).catch(() => null), title),
     });
     console.info('[MEDIA KEYS]', { key: req.query?.PressKey, what: req.query?.what, answer: req.query?.dub_ok ?? req.query?.del_ok, reply: out.slice(0, 140) });
+    // 28.11: the last key presses (which file, what was answered) for /news-status.
+    globalThis.mediaKeyLog ||= []; globalThis.mediaKeyLog.unshift({ at: new Date().toISOString(), key: req.query?.PressKey, what: req.query?.what, reply: out.slice(0, 90) }); globalThis.mediaKeyLog.length = Math.min(globalThis.mediaKeyLog.length, 40);
     res.type('text/plain').send(out);
   } catch (e) {
     console.warn('[MEDIA KEYS] failed', { message: String(e?.message || e).slice(0, 200) });
@@ -6029,7 +6031,7 @@ app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)
       mainMenu:(lines(await rio.getText('ivr2:/ext.ini').catch(()=>null))||[]).filter(l=>/^(type|digits|timeout|text_extensions)=/.test(l)) };
     const { metaLog }=await import('./video-meta.js');
     const topics={}; for(const k of Object.keys(N.TOPICS)) { const ti=await N.readIndex(await newsIo(),k).catch(()=>({})); const it=Object.entries(ti.items||{}).map(([v,e])=>({id:v,...e})).sort((a,b)=>String(b.at).localeCompare(String(a.at))); topics[k]={title:N.TOPICS[k].title,next:ti.next||0,archives:ti.archives||0,files:it.length,newest:it.slice(0,6).map(e=>({file:e.dir+'/'+e.file,title:String(e.title||'').slice(0,70),ch:e.chTitle,yt:e.ytChannel}))}; }
-    res.json({ settings, topics, searchSeen:N.searchSeen, key8:metaLog.slice(0,5), status:N.status, inYemot:{ next:idx.next||0, archives:idx.archives||0, files:items.length, newest:items.slice(0,15) }, disk, tvRecordingsGB:Math.round(sizeOf(REC_DIR)/1e8)/10, tvDisk:diskInfo() });
+    res.json({ keyPresses:globalThis.mediaKeyLog||[], settings, topics, searchSeen:N.searchSeen, key8:metaLog.slice(0,5), status:N.status, inYemot:{ next:idx.next||0, archives:idx.archives||0, files:items.length, newest:items.slice(0,15) }, disk, tvRecordingsGB:Math.round(sizeOf(REC_DIR)/1e8)/10, tvDisk:diskInfo() });
   } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
 });
 // Replays (owner, 19.11): every finished hour of every channel is uploaded to

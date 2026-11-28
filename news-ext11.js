@@ -375,7 +375,7 @@ export function moveNewsToMainPart(io, t = '1', oldDir = NEWS_DIR) {
       e.dir = to;
     }
     idx.layout = 'main-part';
-    await io.writeJson(indexOf(t), idx);
+    await io.writeJson(indexOf(t), idx); rememberIndex(t, idx);
     note({ movedToMainPart: moved, topic: t });
     return moved;
   });
@@ -408,8 +408,8 @@ export function moveChannelFiles(io, st) {
         moved++;
       }
       from.moves = [...(from.moves || []), mv.id];
-      await io.writeJson(indexOf(mv.to), to);
-      await io.writeJson(indexOf(mv.from), from);
+      await io.writeJson(indexOf(mv.to), to); rememberIndex(mv.to, to);
+      await io.writeJson(indexOf(mv.from), from); rememberIndex(mv.from, from);
       for (const q of Object.values(st?.queue || {})) if (q.topic === mv.from && movesChannel(mv, q.ch)) q.topic = mv.to;
     }
     if (moved) note({ channelFilesMoved: moved });
@@ -514,7 +514,32 @@ export async function pollOnce(deps, now = Date.now()) {
 
 // ---- The index of what is in Yemot (one per topic) ----
 const indexOf = t => (TOPICS[t] || TOPICS['1']).index;
-export async function readIndex(io, t = '1') { return (await io.readJson(indexOf(t)).catch(() => null)) || { version: 1, next: 0, items: {}, archives: 0 }; }
+// Owner, 28.11 ("8 says there are no details"): reading a list from Yemot can
+// fail for a moment when the system is busy. That used to count as "no list"
+// - an empty list - so the key 8 lookup found nothing (and a write after such
+// a read could have lost the list). Now: a missing list is new and empty; a
+// failed read is tried again, and if it still fails it is an error, never an
+// empty list. The last good copy of each list is kept for key 8.
+const lastGood = new Map();
+export async function readIndex(io, t = '1') {
+  let last = null;
+  for (const w of io.indexRetryWaits || [0, 700, 2000, 5000]) {
+    if (w) await new Promise(r => setTimeout(r, w));
+    try {
+      const j = await io.readJson(indexOf(t));
+      const idx = j || { version: 1, next: 0, items: {}, archives: 0 };
+      if (j) lastGood.set(t, { at: Date.now(), idx });
+      return j ? structuredClone(idx) : idx;
+    } catch (e) { last = e; }
+  }
+  throw Object.assign(new Error('list of ' + t + ' not readable: ' + String(last?.message || last).slice(0, 80)), { code: 'index_unreadable' });
+}
+// For key 8 and the menus only (never for a write): the list, or its last good copy.
+export async function readIndexForLookup(io, t = '1') {
+  try { return await readIndex(io, t); }
+  catch (e) { const g = lastGood.get(t); if (g) return structuredClone(g.idx); throw e; }
+}
+const rememberIndex = (t, idx) => lastGood.set(t, { at: Date.now(), idx: structuredClone(idx) });
 let chain = Promise.resolve();
 const serial = fn => { const j = chain.then(fn); chain = j.catch(() => {}); return j; };
 
@@ -523,7 +548,7 @@ export async function lookupNews(dir, file, io) {
   dir = String(dir || '').replace(/\/$/, '');
   const where = topicOfDir(dir);
   if (!where) return null;
-  const idx = await readIndex(io, where.t);
+  const idx = await readIndexForLookup(io, where.t);
   for (const [id, e] of Object.entries(idx.items || {})) if (e.dir === dir && e.file === String(file)) {
     return e.src === 'url' ? { videoId: null, url: e.url || null, title: e.title || '', dub: false, channel: e.ytChannel || e.chTitle || '' }
       : { videoId: id, title: e.title || '', dub: false, channel: e.ytChannel || e.chTitle || '' };
@@ -542,7 +567,7 @@ export function deleteNews(dir, file, io) {
     const idx = await readIndex(io, where.t);
     let videoId = null;
     for (const [v, e] of Object.entries(idx.items || {})) if (e.dir === dir && e.file === String(file)) videoId = v;
-    if (videoId) { delete idx.items[videoId]; await io.writeJson(indexOf(where.t), idx); }
+    if (videoId) { delete idx.items[videoId]; await io.writeJson(indexOf(where.t), idx); rememberIndex(where.t, idx); }
     const nums = Object.values(idx.items || {}).filter(e => e.dir === dir).map(e => Number(e.file)).sort((a, b) => a - b);
     const n = Number(file);
     const older = nums.filter(x => x < n).pop();
@@ -567,7 +592,7 @@ export async function rotate(io, idx, t = '1') {
       if (n < half) delete idx.items[v]; else e.file = file3(n - half);
     }
     idx.next = Math.max(0, (idx.next || MAX_FILES) - half);
-    await io.writeJson(indexOf(t), idx);
+    await io.writeJson(indexOf(t), idx); rememberIndex(t, idx);
     status.rotation.state = 'done';
     note({ rotated: dir, dropped: half });
     return idx;
@@ -587,7 +612,7 @@ export async function rotate(io, idx, t = '1') {
   }
   idx.archives = a - FIRST_ARCHIVE + 1;
   idx.next = Math.max(0, (idx.next || MAX_FILES) - half);
-  await io.writeJson(indexOf(t), idx);
+  await io.writeJson(indexOf(t), idx); rememberIndex(t, idx);
   status.rotation.state = 'done';
   note({ rotated: target });
   return idx;
@@ -605,7 +630,7 @@ export function publishNews(videoId, wav, meta, io) {
     const file = file3(n);
     // The number is reserved first: a failure leaves a gap, never two on one.
     idx.next = n + 1;
-    await io.writeJson(indexOf(t), idx);
+    await io.writeJson(indexOf(t), idx); rememberIndex(t, idx);
     await io.saveSettings(dir, playIni(io.publicUrl, dir, TOPICS[t].title));
     let last = null;
     for (const w of io.retryWaits || [0, 15000, 45000, 120000]) {
@@ -617,7 +642,7 @@ export function publishNews(videoId, wav, meta, io) {
     const fresh = await readIndex(io, t);
     fresh.next = Math.max(fresh.next || 0, n + 1);
     fresh.items = { ...(fresh.items || {}), [videoId]: { dir, file, title: String(meta.title || '').slice(0, 160), ch: meta.ch, chTitle: meta.chTitle, ytChannel: meta.ytChannel || null, published: meta.published, at: new Date().toISOString(), minutes: meta.minutes, ...(meta.url ? { src: 'url', url: meta.url } : {}) } };
-    await io.writeJson(indexOf(t), fresh);
+    await io.writeJson(indexOf(t), fresh); rememberIndex(t, fresh);
     return fresh.items[videoId];
   });
 }

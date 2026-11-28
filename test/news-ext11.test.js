@@ -13,7 +13,7 @@ const feed = (title, items) => `<?xml version="1.0"?><feed><title>${title}</titl
 function fakeYemot() {
   const files = new Map(), json = new Map(), ini = new Map();
   return { files, json, ini, publicUrl: 'https://ext2.example',
-    readJson: async x => { if (!json.has(x)) throw new Error('none'); return structuredClone(json.get(x)); },
+    readJson: async x => (json.has(x) ? structuredClone(json.get(x)) : null),
     writeJson: async (x, d) => { json.set(x, structuredClone(d)); },
     upload: async (f, r) => { files.set(r, f); },
     del: async w => { files.delete(w); },
@@ -317,4 +317,17 @@ test('news: the newest video goes first, main news before other news; chosen Tor
   const deps = { log: { info() {}, warn() {} }, busy: () => true, probe: async v => { order.push(v); return { live: 'is_upcoming' }; } };
   await (await N.workOnce(deps)).done;
   assert.deepEqual(order.sort(), ['new0000000b', 'tor0000000d'].sort());
+});
+
+test('a busy moment in Yemot never empties a list: key 8 still finds the file, and nothing is written over it', async () => {
+  const io = fakeYemot(); io.indexRetryWaits = [0, 0, 0];
+  await io.writeJson(N.INDEX, { next: 2, items: { aaaaaaaaaaa: { dir: N.TOPICS['1'].dir, file: '001', title: 'כותרת' } } });
+  const real = io.readJson; let fails = 2;
+  io.readJson = async x => { if (fails-- > 0) throw new Error('busy'); return real(x); };
+  assert.equal((await N.lookupNews(N.TOPICS['1'].dir, '001', io)).videoId, 'aaaaaaaaaaa');
+  io.readJson = async () => { throw new Error('busy'); };
+  assert.equal((await N.lookupNews(N.TOPICS['1'].dir, '001', io)).videoId, 'aaaaaaaaaaa', 'the last good copy');
+  await assert.rejects(N.publishNews('bbbbbbbbbbb', '/tmp/x.wav', { title: 't' }, io));
+  io.readJson = real;
+  assert.ok((await io.readJson(N.INDEX)).items.aaaaaaaaaaa, 'the list was not written over');
 });
