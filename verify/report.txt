@@ -1,7 +1,3 @@
-log extract, last 1 h, units main, pattern extension 12|OWNER12|Started yemot-main
-
-==== yemot-main: 2 entries ====
-2026-11-28T17:39:31+00:00 EM-208 systemd[1]: Started yemot-main.service - Yemot main.
-2026-11-28T17:39:37+00:00 EM-208 node[1587507]: [Yemot automatic setup] extension 12 set
+log extract, last 1 h, units , pattern owner answers updated
 
 exit=0
