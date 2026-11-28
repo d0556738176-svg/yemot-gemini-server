@@ -561,3 +561,17 @@ test('15.11: an unrelated song is not offered from the library', async () => {
   assert.equal(r.choices, undefined);
   assert.equal(r.confirm?.videoId, 'zzzzzzzzzzz');
 });
+
+test('a named business: open now from its Google Maps listing, no web search', async () => {
+  let searched = false;
+  const { deps } = baseDeps(['{"intent":"web","search":"רמי לוי קניון השדרה בית שמש שעות פתיחה","business":"רמי לוי","town":"בית שמש","place":"קניון השדרה"}'], {
+    webSearch: async () => { searched = true; return []; },
+    mapsHours: async ({ name, place, town }) => {
+      assert.equal(name, 'רמי לוי'); assert.equal(town, 'בית שמש'); assert.equal(place, 'קניון השדרה');
+      return { found: true, place: { title: 'רמי לוי', address: 'קניון השדרה, בית שמש', phone: '02-1' }, state: { state: 'open', until: 1380, tomorrow: 'משבע בבוקר עד אחת עשרה בלילה' }, text: 'x' };
+    }
+  });
+  const r = await ext3Turn({ utterance: 'האם רמי לוי בקניון השדרה בבית שמש פתוח עכשיו', now }, deps);
+  assert.match(r.reply, /פתוח עכשיו, עד אחת עשרה בלילה/);
+  assert.equal(searched, false);
+});

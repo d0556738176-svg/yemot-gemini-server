@@ -27,6 +27,7 @@
 import { isCapabilityQuestion, SYSTEM_FACTS } from './caller-intent.js';
 import { travelFacts as realTravel } from './travel-tools.js';
 import { isTorahQuestion, torahSources } from './torah-sources.js';
+import { spokenClock } from './maps-hours.js';
 import { isZmanimQuestion, isNearbyQuestion, nearbyKind, spokenTime, sameTown, zmanimFacts as realZmanim, nearbyFacts as realNearby, spokenDistance, businessHours as realBusinessHours, OPEN_NOW } from './place-tools.js';
 
 const HE_NUMBER_WORDS = { 'אחת': 1, 'אחד': 1, 'שתיים': 2, 'שניים': 2, 'שלוש': 3, 'שלושה': 3 };
@@ -122,7 +123,7 @@ export function plannerPrompt({ context, utterance, now, video, older = null, me
     'recall = שאלה על שיחות קודמות או על פרטים שהמתקשר סיפר על עצמו.',
     'בנוסף: כשהמתקשר נותן הוראה קבועה לגבי איך לדבר איתו או על מה לא לדבר (למשל "אל תדברי איתי על חדשות", "תמיד תעני קצר", "תקראי לי בשם דוד"), כתבי אותה בשדה instruction כמשפט ברור, אחרת השאירי ריק.',
     'החזר JSON בלבד, בלי טקסט נוסף, בצורה:',
-    '{"intent":"...","standalone":"השאלה כמשפט עצמאי וברור בעברית עם כל הפרטים מההקשר","search":"שאילתת חיפוש קצרה לאינטרנט אם intent=web או read_page","searches":["כששאל כמה דברים שונים שצריך לחפש (למשל מזג אוויר וגם שער הדולר): שאילתה קצרה נפרדת לכל אחד, עד 3; אחרת רשימה ריקה"],"yt_he":"שאילתת חיפוש ביוטיוב בעברית: לסרטון/שיר שהמתקשר מתכוון אליו לפי ההקשר (למשל שם הזמר והשיר שדובר עליהם), לא המשפט שאמר","yt_en":"אותה שאילתה באנגלית אם מתאים","min_minutes":0,"max_minutes":0,"recent_days":0,"order":"relevance או date או views","play":"audio או video","continue_offer":false,"instruction":"","place":"ל-zmanim/nearby: המקום עצמו (רחוב, שכונה, חוף, מקום מוכר או יישוב) בלי מילות יחס, ואם לא נאמר עכשיו - המקום שדובר עליו קודם בשיחה, אחרת ריק","town":"ל-zmanim/nearby: העיר או היישוב שבו המקום נמצא, ריק אם לא ידוע","date":"ל-zmanim: התאריך שעליו שאל בפורמט YYYY-MM-DD לפי הזמן עכשיו, ריק = היום","kind":"ל-nearby: סוג המקום שהוא מחפש, למשל בית כנסת","from_place":"ל-route: המקום שממנו יוצא (רחוב, שכונה, מקום מוכר), בלי מילות יחס","from_town":"ל-route: העיר או היישוב של נקודת המוצא","to_place":"ל-route: המקום שאליו רוצה להגיע","to_town":"ל-route: העיר או היישוב של היעד","mode":"ל-route: bus או car או any","business":"כששואל על עסק או מקום מסוים בשמו (שעות פתיחה, טלפון, כתובת): שם העסק בלבד, למשל רמי לוי; אחרת ריק"}',
+    '{"intent":"...","standalone":"השאלה כמשפט עצמאי וברור בעברית עם כל הפרטים מההקשר","search":"שאילתת חיפוש קצרה לאינטרנט אם intent=web או read_page","searches":["כששאל כמה דברים שונים שצריך לחפש (למשל מזג אוויר וגם שער הדולר): שאילתה קצרה נפרדת לכל אחד, עד 3; אחרת רשימה ריקה"],"yt_he":"שאילתת חיפוש ביוטיוב בעברית: לסרטון/שיר שהמתקשר מתכוון אליו לפי ההקשר (למשל שם הזמר והשיר שדובר עליהם), לא המשפט שאמר","yt_en":"אותה שאילתה באנגלית אם מתאים","min_minutes":0,"max_minutes":0,"recent_days":0,"order":"relevance או date או views","play":"audio או video","continue_offer":false,"instruction":"","place":"ל-zmanim/nearby/שעות של עסק: המקום עצמו (גם קניון או מרכז מסחרי) (רחוב, שכונה, חוף, מקום מוכר או יישוב) בלי מילות יחס, ואם לא נאמר עכשיו - המקום שדובר עליו קודם בשיחה, אחרת ריק","town":"ל-zmanim/nearby/שעות של עסק: העיר או היישוב שבו המקום נמצא, ריק אם לא ידוע","date":"ל-zmanim: התאריך שעליו שאל בפורמט YYYY-MM-DD לפי הזמן עכשיו, ריק = היום","kind":"ל-nearby: סוג המקום שהוא מחפש, למשל בית כנסת","from_place":"ל-route: המקום שממנו יוצא (רחוב, שכונה, מקום מוכר), בלי מילות יחס","from_town":"ל-route: העיר או היישוב של נקודת המוצא","to_place":"ל-route: המקום שאליו רוצה להגיע","to_town":"ל-route: העיר או היישוב של היעד","mode":"ל-route: bus או car או any","business":"כששואל על עסק או מקום מסוים בשמו (שעות פתיחה, טלפון, כתובת): שם העסק בלבד, למשל רמי לוי; אחרת ריק"}',
     'שימי לב לשיבושי תמלול בשמות מקומות: "משוב" הוא כמעט תמיד "מושב", "קיבוצ" = "קיבוץ", "קביעת גאט" = "קריית גת". כשהמילה נשמעת כמו שם של יישוב בישראל, כתבי את שם היישוב הנכון כפי שהוא מוכר. כשהמתקשר אומר עכשיו מקום חדש, הוא מחליף את המקום שדובר עליו קודם.',
     'recent_days: כשביקש משהו חדש (השבוע=7, לאחרונה/חדש=30, היום=2). order: date כשביקש "הכי חדש", views כשביקש "הכי הרבה צפיות". שיר בודד = max_minutes 8, ואם אמר שאינו רוצה סט/רשימה/מיקס אל תחפשי סט.',
     'play = "video" רק כשהמתקשר ביקש במפורש להוריד את הווידאו/הסרטון עצמו. continue_offer = true כשהמתקשר רק מסכים להמשיך את מה שהוצע לו בתשובה הקודמת.',
@@ -1319,10 +1320,27 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     // Owner, 19.11: a named business's hours come first from the map's own
     // entry, worked out for this minute, then from the web sources.
     const bizName = hours ? (plan.business || '') : '';
+    // Owner, 28.11 (Rami Levy in the Hasdera mall got no answer): the branch's
+    // own Google Maps listing has its hours; "open now / until when / opens at"
+    // is worked out from them for this minute, and said without a model or a
+    // web search when the listing is certain (exact, fast, and no quota spent).
+    let gmaps = null;
+    if (bizName && (plan.town || plan.place) && deps.mapsHours) {
+      gmaps = await within(6500, deps.mapsHours({ name: bizName, place: plan.place && !sameTown(plan.place, bizName) && !sameTown(plan.place, plan.town || '') ? plan.place : '', town: plan.town || plan.place })).catch(() => null);
+      log.info?.('[EXT3_BRAIN] business hours from Google Maps', { found: !!gmaps?.found, state: gmaps?.state?.state || '', candidates: gmaps?.candidates?.length || 0 });
+      if (gmaps?.found && gmaps.state.state !== 'unknown' && !/(?:כל ה?שבוע|כל יום|לפי ימים|בכל הימים)/u.test(utterance)) {
+        const p = gmaps.place, st = gmaps.state;
+        const head = st.state === 'open' ? 'כן, ' + p.title + ' פתוח עכשיו, עד ' + spokenClock(st.until) + '.'
+          : p.title + ' סגור עכשיו' + (st.opensAt != null ? '. הוא נפתח ' + st.opensDay + ' ב' + spokenClock(st.opensAt) : '') + '.';
+        const reply = head + (p.address ? ' הכתובת: ' + p.address + '.' : '') + (st.tomorrow && st.tomorrow !== 'לא ידוע' ? ' מחר הוא ' + (st.tomorrow === 'סגור' ? 'סגור.' : 'פתוח ' + st.tomorrow + '.') : '') +
+          (!brief && p.phone ? ' הטלפון שלהם: ' + p.phone + '.' : '') + ' זה לפי השעות שרשומות בגוגל מפות; בחגים הן יכולות להשתנות.';
+        return out({ reply });
+      }
+    }
     const mapHoursP = bizName && (plan.town || plan.place) ? within(9000, (deps.businessHours || realBusinessHours)({ name: bizName, place: plan.place && !sameTown(plan.place, bizName) ? plan.place : '', town: plan.town }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() })).catch(() => null) : Promise.resolve(null);
     // 24.11: a business's phone, address or hours: its Google map listing too.
     const placeAsk = deps.placesSearch && /(?:טלפון|מספר של|המספר|כתובת|איפה נמצא|איפה נמצאת|שעות פתיחה|פתוח|פתוחה|עד מתי)/u.test(utterance + ' ' + plan.standalone);
-    const placesP = placeAsk ? deps.placesSearch((plan.business ? plan.business + ' ' + (plan.town || plan.place || '') : q1).replace(/(?:מה|מהו|תגיד|תגידי|לי|את|ה?טלפון|ה?מספר|של|ה?כתובת|שעות פתיחה)(?=\s|$)/gu, ' ').replace(/\s+/g, ' ').trim(), { timeoutMs: 4500 }).catch(() => []) : Promise.resolve([]);
+    const placesP = placeAsk && !gmaps?.found ? deps.placesSearch((plan.business ? plan.business + ' ' + (plan.town || plan.place || '') : q1).replace(/(?:מה|מהו|תגיד|תגידי|לי|את|ה?טלפון|ה?מספר|של|ה?כתובת|שעות פתיחה)(?=\s|$)/gu, ' ').replace(/\s+/g, ' ').trim(), { timeoutMs: 4500 }).catch(() => []) : Promise.resolve([]);
     const sets = await Promise.allSettled(queries.map(q => deps.webSearch(q, { timeoutMs: 4500 })));
     const mapHours = await mapHoursP;
     const listedPlaces = await placesP;
@@ -1331,7 +1349,7 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     const BUY = /(?:איפה מוכרים|איפה קונים|איפה אפשר לקנות|איפה משיגים|איפה להשיג|איפה יש לקנות|מי מוכר)/u;
     const shopKind = BUY.test(utterance + ' ' + plan.standalone) && (plan.town || plan.place) ? (nearbyKind(utterance + ' ' + plan.standalone + ' ' + (plan.kind || '')) || (/(?:^|\s)ה?ספר(?=\s|$)/u.test(utterance + ' ' + plan.standalone) ? nearbyKind('ספרים') : null)) : null;
     const shops = shopKind ? await within(9000, (deps.nearbyFacts || realNearby)({ kindText: shopKind.label, place: plan.place, town: plan.town }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() })).catch(() => null) : null;
-    const mapText = [mapHours?.items?.length ? mapHours.text : '', shops?.items?.length ? shops.text : ''].filter(Boolean).join('\n\n');
+    const mapText = [gmaps?.found ? gmaps.text : '', mapHours?.items?.length ? mapHours.text : '', shops?.items?.length ? shops.text : ''].filter(Boolean).join('\n\n');
     if (shops?.items?.length) log.info?.('[EXT3_BRAIN] shops of that kind from the map', { kind: shopKind.label, found: shops.items.length });
     if (mapHours?.items?.length) log.info?.('[EXT3_BRAIN] business hours from the map', { found: mapHours.items.length, withHours: mapHours.items.filter(x => x.hours).length });
     const seen = new Set(), results = [];

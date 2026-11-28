@@ -4780,6 +4780,13 @@ async function runExt3Brain(utterance, phone, callId, turnHistory, now, media=''
     webSearch:(q,o)=>ext3WebSearch(q,{timeoutMs:Math.min(o?.timeoutMs||3500,3500)}),
     geminiReady:()=>geminiAvailable(),
     placesSearch:(q,o)=>serperPlaces(q,{timeoutMs:Math.min(o?.timeoutMs||4500,4500)}),
+    // 28.11: a named business's hours from its Google Maps listing (Serper maps).
+    mapsHours:async({name,place,town})=>{
+      const [{ mapsBusinessHours },{ geocode }]=await Promise.all([import('./maps-hours.js'),import('./place-tools.js')]);
+      const geo=town?await geocode({town},{log:{info(){},warn(){}}}).catch(()=>null):null;
+      countSearch('serper-maps');
+      return mapsBusinessHours({name,place,town},{keys:keysFor('SERPER_API_KEY'),geo,log:console});
+    },
     youtubeProxy:async(kind,params)=>{
       const secret=String(process.env.EXT3_MEDIA_SECRET||'').trim(); if(!secret) throw Object.assign(new Error('no proxy'),{status:503});
       const u=new URL(String(process.env.EXT2_MEDIA_URL||'https://yemot-branch2-confirm-yes-staging.onrender.com').replace(/\/+$/,'')+'/api/ext3/youtube/'+kind);
