@@ -64,7 +64,11 @@ export async function findYoutubeLive(name, { timeoutMs = 14000, execImpl = null
   const words = q.toLowerCase().split(/\s+/).filter(w => w.length > 1);
   const ok = entries.filter(e => /^[A-Za-z0-9_-]{11}$/.test(String(e?.id || '')) && (e.live_status === 'is_live' || e.live_status == null) && Number(e.age_limit || 0) < 18);
   const fit = e => { const t = (String(e.title || '') + ' ' + String(e.channel || e.uploader || '')).toLowerCase(); return words.filter(w => t.includes(w)).length; };
-  const best = ok.map((e, i) => ({ e, s: fit(e) * 10 - i })).sort((a, b) => b.s - a.s)[0];
+  // 28.11: a number in the name must be in the title or channel as a number of
+  // its own ("ערוץ 14" got "ערוץ 10 בשידור חי" because "ערוץ" matched).
+  const nums = q.match(/\d+/g) || [];
+  const hasNums = e => { const t = String(e.title || '') + ' ' + String(e.channel || e.uploader || ''); return nums.every(n => new RegExp('(?:^|\\D)' + n + '(?:\\D|$)').test(t)); };
+  const best = ok.filter(hasNums).map((e, i) => ({ e, s: fit(e) * 10 - i })).sort((a, b) => b.s - a.s)[0];
   if (!best || fit(best.e) === 0) return null;
   return { url: 'https://www.youtube.com/watch?v=' + best.e.id, title: String(best.e.title || q).slice(0, 120), channel: String(best.e.channel || best.e.uploader || '') };
 }
