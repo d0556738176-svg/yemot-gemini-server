@@ -118,6 +118,9 @@ export async function keyReport() {
       // Key text with spaces, quotes or line breaks inside is a paste problem.
       if (/[\s"'<>]/.test(String(process.env[s.name] || '').trim())) status += ' (the value has spaces or quotes inside: paste the key again)';
       if (/^(?:rejected|out of quota)/.test(status) && !/^(?:TAVILY|SERPER|LANGSEARCH|EXA|JINA|FIRECRAWL|YOUTUBE|DEEPGRAM)/.test(base)) markDeadKey(s.key);
+      // 28.11: a key found out of quota at startup rests from the first call
+      // (parallel page reads all tried the empty Jina keys before one rested).
+      if (/^(?:rejected|out of quota)/.test(status)) restKey(s.key, 402, 'quota');
       rows.push({ field: s.name, status });
     }
   }

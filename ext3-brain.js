@@ -1322,7 +1322,9 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     // News: today's real headlines (with time and outlet) instead of news-site home pages.
     const news = deps.newsSearch && /(?:חדשות|מבזק|מבזקים|כותרות|מה קורה בארץ|מה קרה היום|מה חדש בעולם|מה חדש בארץ)/u.test(utterance + ' ' + plan.standalone);
     if (news) {
-      const items = await deps.newsSearch(q1, { timeoutMs: 4000 }).catch(() => []);
+      // 28.11: sports, entertainment and celebrity items are left out of the news.
+      const OFF = /(?:כדורגל|כדורסל|ספורט|ליגת|ליגה|מכבי תל אביב|הפועל|בית"ר|ביתר ירושלים|מונדיאל|אולימפ|שער ניצחון|ניצחה \d|הפסידה \d|\d+:\d+ (?:על|את)|זמר|זמרת|שחקנית|שחקן קולנוע|סרט|סדרה|נטפליקס|אירוויזיון|רכילות|סלב|דוגמנית|פסטיבל)/u;
+      const items = (await deps.newsSearch(q1, { timeoutMs: 4000 }).catch(() => [])).filter(x => !OFF.test(String(x.title || '') + ' ' + String(x.snippet || '')));
       if (items.length >= 3) {
         const list = items.slice(0, 9).map((x, i) => 'כותרת ' + (i + 1) + ': ' + clip(x.title, 140) + (x.source ? ' (' + x.source + (x.date ? ', ' + x.date : '') + ')' : '') + (x.snippet ? '. ' + clip(x.snippet, 200) : '')).join('\n');
         log.info?.('[EXT3_BRAIN] news headlines', { count: items.length });
