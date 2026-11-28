@@ -6522,6 +6522,17 @@ async function ownerStatus(){
   return parts.join(' ');
 }
 async function owner12Wake(id){
+  // 28.11 (owner chose): the request starts the GitHub run owner12.yml at
+  // once, with the same token the song worker is started with.
+  const gh=(process.env.GITHUB_DISPATCH_TOKEN||'').trim();
+  if(gh) {
+    const repo=(process.env.SONG_WORKER_REPO||'d0556738176-svg/yemot-gemini-server').trim();
+    const r=await fetch('https://api.github.com/repos/'+repo+'/actions/workflows/owner12.yml/dispatches',{method:'POST',
+      headers:{authorization:'Bearer '+gh,accept:'application/vnd.github+json','user-agent':'yemot-owner12','content-type':'application/json'},
+      body:JSON.stringify({ref:'main',inputs:{request_id:String(id)}}),signal:AbortSignal.timeout(20000)}).catch(e=>({ok:false,status:String(e?.message||e).slice(0,60)}));
+    console.info('[OWNER12] github run started',{id,status:r.status});
+    if(r.ok) return true;
+  }
   const token=(process.env.OWNER12_ROUTINE_TOKEN||'').trim();
   const routine=(process.env.OWNER12_ROUTINE_ID||'trig_01LTxE5g8WJdWDTZBcWjh7m2').trim();
   if(!token) { console.info('[OWNER12] no wake token yet; the hourly run will take it',{id}); return false; }
