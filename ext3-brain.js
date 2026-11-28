@@ -1298,6 +1298,12 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
     torah = await within(7000, torahSources(plan.standalone || utterance, { llm: deps.llm, fetchImpl: deps.fetchImpl || fetch, log })).catch(() => null);
   if (torah) plan.intent = 'chat';
 
+  // 28.11: exchange rates straight from the Bank of Israel (exact, no search credits).
+  if (['web', 'chat'].includes(plan.intent) && !plan.about) {
+    const { rateAnswer } = await import('./boi-rates.js');
+    const rate = await within(6000, (deps.rateAnswer || rateAnswer)(utterance + ' ' + (plan.standalone || ''), { fetchImpl: deps.fetchImpl || fetch, log })).catch(() => '');
+    if (rate) return out({ reply: rate });
+  }
   if (plan.intent === 'web') {
     const q1 = plan.search || plan.standalone || utterance;
     const reuse = cacheableQuestion(q1) && cacheableQuestion(utterance) && !(plan.searches || []).length ? cachedAnswer(q1 + (brief ? ' קצר' : '')) : '';
