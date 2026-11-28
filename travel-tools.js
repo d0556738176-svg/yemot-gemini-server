@@ -61,7 +61,12 @@ async function rideStops(params, { fetchImpl }) {
  */
 export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), windowMin = 90, transfersOn = true } = {}) {
   const [fs, ts] = await Promise.all([townStops(from.town || from.label, { fetchImpl, now }), sameCity(from, to) ? null : townStops(to.town || to.label, { fetchImpl, now })]);
-  const fromStops = nearest(fs, from, 0.6, 10), toStops = nearest(ts || fs, to, 0.6, 12);
+  // 28.11: a whole town as an end ("to Beit Shemesh"): any stop in that town
+  // counts (live check: from Jerusalem central station to Beit Shemesh found
+  // nothing, because no line stops within 600 m of the town's middle).
+  const fromStops = from.wholeTown ? nearest(fs, from, 2.5, 25) : nearest(fs, from, 0.6, 10);
+  const toStops = to.wholeTown ? (ts || fs).map(s => ({ ...s, km: distanceKm(to, s) })) : nearest(ts || fs, to, 0.6, 12);
+  const townIds = to.wholeTown ? new Set(toStops.map(s => s.id)) : null;
   if (!fromStops.length) return { error: 'no_stops_from', fromStops, toStops };
   if (!toStops.length) return { error: 'no_stops_to', fromStops, toStops };
   const t0 = new Date(now.getTime() - 2 * 60000).toISOString(), t1 = new Date(now.getTime() + windowMin * 60000).toISOString();
@@ -83,7 +88,12 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
   const nearTo = r => Number.isFinite(r.gtfs_stop__lat) ? distanceKm(to, { lat: r.gtfs_stop__lat, lon: r.gtfs_stop__lon }) : (toStops.find(s => s.id === r.gtfs_stop_id)?.km ?? 99);
   let arriving = lists.flat().filter(r => board.has(r.gtfs_ride_id)).map(r => ({ ...r, _km: nearTo(r) }));
   const close = arriving.filter(r => r._km <= 0.6);
-  arriving = close.length ? close : arriving.filter(r => r._km <= 1.0);
+  if (townIds) {
+    // In the town: per ride, the stop nearest its middle.
+    const per = new Map();
+    for (const r of arriving.filter(r => townIds.has(r.gtfs_stop_id))) { const p = per.get(r.gtfs_ride_id); if (!p || r._km < p._km) per.set(r.gtfs_ride_id, r); }
+    arriving = [...per.values()];
+  } else arriving = close.length ? close : arriving.filter(r => r._km <= 1.0);
   const fromKm = new Map(fromStops.map(s => [s.id, s.km])), toKm = new Map(toStops.map(s => [s.id, s.km]));
   const trips = [];
   for (const a of arriving) {
@@ -92,7 +102,7 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
     trips.push({
       line: String(b.gtfs_route__route_short_name || ''), agency: b.gtfs_route__agency_name || '', routeName: String(b.gtfs_route__route_long_name || '').replace(/-\d+$/, ''),
       board: b.gtfs_stop__name, boardWalkKm: fromKm.get(b.gtfs_stop_id) ?? null, leaves: israelHHMM(b.departure_time || b.arrival_time), leavesAt: Date.parse(b.departure_time || b.arrival_time),
-      alight: a.gtfs_stop__name, alightWalkKm: a._km ?? toKm.get(a.gtfs_stop_id) ?? null, arrives: israelHHMM(a.arrival_time), arrivesAt: Date.parse(a.arrival_time),
+      alight: a.gtfs_stop__name, alightWalkKm: townIds ? null : a._km ?? toKm.get(a.gtfs_stop_id) ?? null, arrives: israelHHMM(a.arrival_time), arrivesAt: Date.parse(a.arrival_time),
       rail: String(b.gtfs_route__route_type) === '2'
     });
   }
@@ -121,7 +131,7 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
 const cell = (lat, lon) => Math.round(lat / 0.0025) + '|' + Math.round(lon / 0.003);
 async function busTransfers({ board, firstStops, toStops, to, now, windowMin, t0, fetchImpl }) {
   const t3 = new Date(now.getTime() + (windowMin + 180) * 60000).toISOString();
-  const reaching = await rideStops({ gtfs_stop_ids: toStops.map(s => s.id).join(','), arrival_time_from: t0, arrival_time_to: t3, limit: 2000 }, { fetchImpl });
+  const reaching = await rideStops({ gtfs_stop_ids: (to.wholeTown ? toStops.slice().sort((x, y) => x.km - y.km).slice(0, 25) : toStops).map(s => s.id).join(','), arrival_time_from: t0, arrival_time_to: t3, limit: 2000 }, { fetchImpl });
   const last = new Map(); // ride -> where it lets him off near the destination
   for (const r of reaching) {
     if (r.drop_off_type === 1 || board.has(r.gtfs_ride_id)) continue;
@@ -162,7 +172,7 @@ async function busTransfers({ board, firstStops, toStops, to, now, windowMin, t0
         line1, agency1: b.gtfs_route__agency_name || '', board: b.gtfs_stop__name, leaves: israelHHMM(b.departure_time || b.arrival_time), leavesAt: Date.parse(b.departure_time || b.arrival_time),
         change: a.gtfs_stop__name, changeTo: r.gtfs_stop__name, changeWalkKm: walkKm, reachChange: israelHHMM(a.arrival_time), waitMin: Math.round(gap),
         line2, agency2: r.gtfs_route__agency_name || end.gtfs_route__agency_name || '', leaves2: israelHHMM(r.departure_time || r.arrival_time),
-        alight: end.gtfs_stop__name, alightWalkKm: toKm.get(end.gtfs_stop_id) ?? (Number.isFinite(end.gtfs_stop__lat) ? distanceKm(to, { lat: end.gtfs_stop__lat, lon: end.gtfs_stop__lon }) : null), arrives: israelHHMM(end.arrival_time), arrivesAt: arrive
+        alight: end.gtfs_stop__name, alightWalkKm: to.wholeTown ? null : toKm.get(end.gtfs_stop_id) ?? (Number.isFinite(end.gtfs_stop__lat) ? distanceKm(to, { lat: end.gtfs_stop__lat, lon: end.gtfs_stop__lon }) : null), arrives: israelHHMM(end.arrival_time), arrivesAt: arrive
       };
       if (!best.has(key) || arrive < best.get(key).arrivesAt) best.set(key, t);
     }
@@ -175,6 +185,7 @@ async function busTransfers({ board, firstStops, toStops, to, now, windowMin, t0
   }
   return out.slice(0, 3);
 }
+const sameCityName = (p, t) => !!plainCity(t) && plainCity(p) === plainCity(t);
 function sameCity(a, b) { return plainCity(a.town) && plainCity(a.town) === plainCity(b.town); }
 
 /** Driving: distance, usual time and the main roads in order. */
@@ -244,6 +255,8 @@ export async function travelFacts({ from = {}, to = {}, mode = 'any' } = {}, { f
   const [a, b] = await Promise.all([geocode(from, { fetchImpl, log }).catch(() => null), geocode(to, { fetchImpl, log }).catch(() => null)]);
   if (!a || !b) return { unknown: !a ? (from.place || from.town || 'נקודת המוצא') : (to.place || to.town || 'היעד'), missing: !a ? 'from' : 'to' };
   if (!a.town) a.town = from.town || ''; if (!b.town) b.town = to.town || '';
+  if (!String(from.place || '').trim() || sameCityName(from.place, from.town)) a.wholeTown = true;
+  if (!String(to.place || '').trim() || sameCityName(to.place, to.town)) b.wholeTown = true;
   const wantBus = mode !== 'car', wantCar = mode !== 'bus';
   const [bus, car, live] = await Promise.all([
     wantBus ? busTrips(a, b, { fetchImpl, now }).catch(e => { log.warn?.('[TRAVEL] bus timetable unavailable', String(e?.message || e).slice(0, 80)); return { error: 'down' }; }) : null,

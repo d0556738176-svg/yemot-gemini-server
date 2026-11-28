@@ -37,3 +37,13 @@ test('live traffic: TomTom when it is the key set, the faster route first', asyn
   assert.equal(r.source, 'tomtom'); assert.equal(r.routes[0].minutes, 50); assert.equal(r.routes[1].delayMin, 15);
   assert.equal(await trafficRoute(A, B, { fetchImpl: f, env: {} }), null);
 });
+
+test('to a whole town: any stop in that town counts', async () => {
+  clearTravelCache();
+  const C = { lat: 31.789, lon: 35.203, town: 'ירושלים' }, T = { lat: 31.75, lon: 34.99, town: 'בית שמש', wholeTown: true };
+  const st = { 'ירושלים': [{ id: 5, code: 5, name: 'מרכזית', lat: 31.789, lon: 35.203, city: 'ירושלים' }], 'בית שמש': [{ id: 7, code: 7, name: 'יגאל אלון', lat: 31.73, lon: 34.98, city: 'בית שמש' }] };
+  const r1 = [row(300, 5, 1, 5, '417', 31.789, 35.203, 'מרכזית'), row(300, 7, 8, 45, '417', 31.73, 34.98, 'יגאל אלון')];
+  const f = async url => { const u = new URL(url); let b = []; if (u.pathname.endsWith('/gtfs_stops/list')) b = st[u.searchParams.get('city')] || []; else if (u.searchParams.get('gtfs_stop_ids') === '5') b = [r1[0]]; else if (u.searchParams.get('gtfs_ride_ids') === '300') b = r1; return { ok: true, json: async () => b }; };
+  const r = await busTrips(C, T, { fetchImpl: f, now });
+  assert.equal(r.trips.length, 1); assert.equal(r.trips[0].line, '417'); assert.equal(r.trips[0].alightWalkKm, null);
+});
