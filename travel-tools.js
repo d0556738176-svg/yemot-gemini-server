@@ -43,6 +43,14 @@ export function townStops(town, { fetchImpl = fetch, now = new Date() } = {}) {
     return (Array.isArray(list) ? list : []).filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lon)).map(s => ({ id: s.id, code: s.code, name: s.name, lat: s.lat, lon: s.lon, city: s.city }));
   });
 }
+function spread(stops, loc) {
+  const best = new Map();
+  for (const s of stops) {
+    const k = Math.round(s.lat / 0.009) + '|' + Math.round(s.lon / 0.011), km = distanceKm(loc, s);
+    if (!best.has(k) || km < best.get(k).km) best.set(k, { ...s, km });
+  }
+  return [...best.values(), ...nearest(stops, loc, 0.6, 10)].filter((s, i, a) => a.findIndex(x => x.id === s.id) === i).sort((a, b) => a.km - b.km).slice(0, 45);
+}
 function nearest(stops, loc, maxKm = 0.6, n = 10) {
   let near = stops.map(s => ({ ...s, km: distanceKm(loc, s) })).filter(s => s.km <= maxKm);
   if (!near.length) near = stops.map(s => ({ ...s, km: distanceKm(loc, s) })).filter(s => s.km <= maxKm * 1.8);
@@ -64,7 +72,10 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
   // 28.11: a whole town as an end ("to Beit Shemesh"): any stop in that town
   // counts (live check: from Jerusalem central station to Beit Shemesh found
   // nothing, because no line stops within 600 m of the town's middle).
-  const fromStops = from.wholeTown ? nearest(fs, from, 2.5, 25) : nearest(fs, from, 0.6, 10);
+  // A bus terminal has dozens of platforms within a few hundred metres (the
+  // Jerusalem central station's intercity platforms were not among the nearest
+  // 10), and a whole town is covered by one stop per square kilometre.
+  const fromStops = from.wholeTown ? spread(fs, from) : nearest(fs, from, 0.6, 30);
   const toStops = to.wholeTown ? (ts || fs).map(s => ({ ...s, km: distanceKm(to, s) })) : nearest(ts || fs, to, 0.6, 12);
   const townIds = to.wholeTown ? new Set(toStops.map(s => s.id)) : null;
   if (!fromStops.length) return { error: 'no_stops_from', fromStops, toStops };
@@ -82,7 +93,7 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
   // list too it returned nothing, 19.11), kept where they pass near the
   // destination: by the stop's own position, so no stop is missed.
   const t2 = new Date(now.getTime() + (windowMin + 240) * 60000).toISOString();
-  const ids = [...board.keys()].slice(0, 80);
+  const ids = [...board.keys()].slice(0, 120);
   const chunks = []; for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
   const lists = await Promise.all(chunks.map(c => rideStops({ gtfs_ride_ids: c.join(','), arrival_time_from: t0, arrival_time_to: t2, limit: 3000 }, { fetchImpl }).catch(() => [])));
   const nearTo = r => Number.isFinite(r.gtfs_stop__lat) ? distanceKm(to, { lat: r.gtfs_stop__lat, lon: r.gtfs_stop__lon }) : (toStops.find(s => s.id === r.gtfs_stop_id)?.km ?? 99);
