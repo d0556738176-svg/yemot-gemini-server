@@ -5181,9 +5181,15 @@ async function callHandler(call) {
   if(!call.selfTest && !resumed) {
     try {
       const withHistory=typeof brainBranch==='function'&&!!brainBranch()&&callerPhone!=='לא מזוהה';
-      const choice=String(await call.read([{type:'text',data:'לשיחה בדיבור הקש 1. להקלדה במקשי הטלפון הקש 2.'+(withHistory?' להיסטוריית השיחות הקש 3.':'')}],'tap',
+      // 28.11 (owner): in extension 12, 4 = hear the answers to his requests.
+      const isOwner12=!!callPersona.getStore()?.owner;
+      const choice=String(await call.read([{type:'text',data:'לשיחה בדיבור הקש 1. להקלדה במקשי הטלפון הקש 2.'+(withHistory?' להיסטוריית השיחות הקש 3.':'')+(isOwner12?' לשמיעת התשובות על הבקשות שלך הקש 4.':'')}],'tap',
         {max_digits:1,min_digits:1,sec_wait:5,typing_playback_mode:'No',allow_empty:true,empty_val:'None',
-         digits_allowed:withHistory?['1','2','3','*']:['1','2','*'],timeout:10*60*1000})||'').trim();
+         digits_allowed:[...(withHistory?['1','2','3']:['1','2']),...(isOwner12?['4']:[]),'*'],timeout:10*60*1000})||'').trim();
+      if(choice==='4'&&isOwner12) {
+        const r=await owner12AnswersMenu(call);
+        if(r?.hangup) { activeCalls.delete(activeKey); return; }
+      }
       console.info('[CALL_FLOW] input mode chosen',{callId:activeKey,choice});
       if(choice.includes('*')) { activeCalls.delete(activeKey); return call.go_to_folder('/'); }
       typingMode=choice==='2';
@@ -6501,6 +6507,33 @@ async function owner12Requests(){
   const ans=await owner12Read(OWNER12_ANSWERS,{answers:{}});
   for(const r of d.requests||[]) { const a=ans.answers?.[r.id]; if(a) { r.answer=a.text; r.status=a.status||'done'; } }
   return d;
+}
+// 28.11 (owner): extension 12, key 4 - the answers, newest first, one at a
+// time: 1 next, 2 again, 3 back to the conversation. Each heard answer is
+// marked heard.
+async function owner12AnswersMenu(call){
+  const d=await owner12Requests();
+  const rs=(d.requests||[]).slice().reverse();
+  if(!rs.length) { await call.read([{type:'text',data:'אין עדיין בקשות שלך. אפשר לדבר.'}],'tap',{max_digits:1,min_digits:1,sec_wait:1,allow_empty:true,empty_val:'None',typing_playback_mode:'No'}).catch(()=>{}); return {}; }
+  const fresh=rs.filter(r=>r.answer&&!r.heard).length;
+  let i=0, intro=(fresh?'יש '+fresh+' תשובות חדשות. ':'')+'התשובות מהחדשה לישנה. ';
+  while(i<rs.length){
+    const r=rs[i];
+    const say=intro+'בקשה מספר '+r.id+': '+String(r.text||'').slice(0,200)+'. '+(r.answer?(r.status==='in_progress'?'עדיין בטיפול. עד עכשיו: ':r.status==='needs_confirmation'?'מחכה לאישור שלך בצ\'אט. ':'התשובה: ')+r.answer:'עדיין בטיפול, אין עדיין תשובה.')+
+      ' לתשובה הבאה הקש 1. לשמיעה חוזרת הקש 2. לחזרה לשיחה הקש 3.';
+    intro='';
+    if(r.answer&&!r.heard) { try { const raw=await owner12Read(OWNER12_FILE,{requests:[]}); for(const x of raw.requests||[]) if(x.id===r.id) x.heard=true; await owner12Write(raw); } catch {} }
+    let k='';
+    try {
+      k=String(await call.read(branch1SpeechItems(say),'tap',{max_digits:1,min_digits:1,sec_wait:10,typing_playback_mode:'No',allow_empty:true,empty_val:'None',digits_allowed:['1','2','3','*'],timeout:10*60*1000})||'').trim();
+    } catch(e) { if(isCallerHangupError(e)) return {hangup:true}; if(e instanceof ExitError) throw e; return {}; }
+    if(k==='3'||k==='*') return {};
+    if(k==='2') continue;
+    if(k==='1') { i++; continue; }
+    i++; // no key: go on to the next one
+  }
+  await call.read([{type:'text',data:'אלה כל התשובות. חוזרים לשיחה.'}],'tap',{max_digits:1,min_digits:1,sec_wait:1,allow_empty:true,empty_val:'None',typing_playback_mode:'No'}).catch(e=>{ if(isCallerHangupError(e)) return; });
+  return {};
 }
 async function ownerStatus(){
   const parts=[];
