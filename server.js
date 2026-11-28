@@ -6518,6 +6518,11 @@ async function ownerStatus(){
     const w=Object.values(n.status?.working||{}); if(w.length) parts.push('יורדים עכשיו '+w.length+' קבצים.');
   }
   try { const sp=getSongProviderHealth?.(); if(sp) parts.push('מנוע השירים בשלוחה 4 מוכן.'); } catch {}
+  try { const { readFile }=await import('node:fs/promises');
+    for(const [n,he] of [['main','השרת הראשי'],['ext2','שרת שלוחה 2']]){
+      const rb=JSON.parse(await readFile('/var/lib/yemot-data/rollback-'+n+'.json','utf8').catch(()=>'null'));
+      if(rb&&Date.now()-Date.parse(rb.at)<48*3600e3) parts.push('שים לב: עדכון של '+he+' לא עלה כראוי, והמערכת חזרה לבד לגרסה הקודמת והתקינה.');
+    } } catch {}
   const d=await owner12Requests(); const open=(d.requests||[]).filter(r=>!r.answer).length, answered=(d.requests||[]).filter(r=>r.answer&&!r.heard).length;
   if(open) parts.push('יש '+open+' בקשות שלך שעוד בטיפול.');
   if(answered) parts.push('יש '+answered+' תשובות חדשות לבקשות שלך. אמור: תשובות.');
@@ -6671,6 +6676,19 @@ app.get('/owner12/login',async(req,res)=>{
   res.type('html').send('<!doctype html><html dir="rtl" lang="he"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>חיבור שלוחה 12</title><body style="font-family:Arial;font-size:20px;max-width:640px;margin:40px auto;line-height:1.6">'+
     (fresh?'<h2>חיבור שלוחה 12 ל-Claude</h2><p>1. לחץ על הכפתור והתחבר לחשבון Claude שלך.</p><p><a id="go" href="'+esc(d.url)+'" target="_blank" rel="noopener" style="display:inline-block;background:#1f883d;color:#fff;padding:14px 26px;border-radius:8px;text-decoration:none">פתח את החיבור</a></p><p>2. אשר, ובסוף יופיע קוד. העתק אותו.</p><p>3. הדבק את הקוד בקונסולה של השרת ולחץ Enter.</p>'
       :'<h2>אין כרגע חיבור פתוח</h2><p>הרץ בקונסולה של השרת:</p><p dir="ltr" style="background:#eee;padding:10px;font-family:monospace">bash /opt/yemot/main/deploy/vps/claude-login.sh</p><p>ואז רענן את הדף הזה.</p>')+'</body></html>');
+});
+// 28.11: what really runs on the VPS, and any automatic roll-back (a new
+// version that did not answer /health in time) - read by the extension 12
+// runs to verify their own deploys. Versions only; no secrets.
+app.get('/deploy-status',rateLimit(30,60*1000,'deploy-status'),async(req,res)=>{
+  const { readFile }=await import('node:fs/promises');
+  const rd=async f=>(await readFile(f,'utf8').catch(()=>'')).trim();
+  const out={};
+  for(const n of ['main','ext2']){
+    let rb=null; try { rb=JSON.parse(await rd('/var/lib/yemot-data/rollback-'+n+'.json')); } catch {}
+    out[n]={running:(await rd('/opt/yemot/.running-'+n)).slice(0,40)||null,lastRollback:rb};
+  }
+  res.set('cache-control','no-store').json(out);
 });
 app.get('/owner12/requests',rateLimit(20,60*1000,'owner12'),async(req,res)=>{ const d=await owner12Requests(); res.set('cache-control','no-store').json({requests:(d.requests||[]).map(r=>({id:r.id,at:r.at,text:r.text,answered:!!r.answer}))}); });
 // Owner, 27.11: a file deleted with key 2 in extension 7 leaves the AI

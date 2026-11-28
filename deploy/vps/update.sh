@@ -12,16 +12,37 @@ for n in main ext2; do
   # restart), not the folder: a manual "git pull" must never skip a restart.
   want=$(git -C $d rev-parse origin/$b)
   [ "$(cat $ROOT/.running-$n 2>/dev/null)" = "$want" ] && { rm -f /run/yemot-wait-$n; continue; }
+  # 28.11 (extension 12): a version that once failed to start is never
+  # installed again; only a newer commit is tried.
+  [ "$(cat $ROOT/.bad-$n 2>/dev/null)" = "$want" ] && continue
   busy=$(journalctl -u yemot-$n --since -90s -q -o cat 2>/dev/null | grep -c . || true)
   [ -f /run/yemot-wait-$n ] || date +%s > /run/yemot-wait-$n
   waited=$(( $(date +%s) - $(cat /run/yemot-wait-$n) ))
   if [ "${busy:-0}" -gt 0 ] && [ $waited -lt 1800 ]; then continue; fi
+  prev=$(cat $ROOT/.running-$n 2>/dev/null); [ -n "$prev" ] || prev=$(git -C $d rev-parse HEAD)
   git -C $d reset -q --hard "origin/$b"
   (cd $d && npm install --omit=dev --no-audit --no-fund >/dev/null 2>&1)
   systemctl restart yemot-$n
-  echo "$want" > $ROOT/.running-$n
   rm -f /run/yemot-wait-$n
-  logger -t yemot-update "$n updated to $(git -C $d rev-parse --short HEAD) (waited ${waited}s)"
+  # 28.11 (extension 12 fixes are deployed with no one watching): the new
+  # version must answer /health within 4 minutes, or the version that ran
+  # before is put back at once, so a bad fix never leaves the line down.
+  port=3000; [ $n = ext2 ] && port=3001
+  ok=0; for i in $(seq 1 80); do sleep 3; curl -sf -m 4 http://127.0.0.1:$port/health >/dev/null && { ok=1; break; }; done
+  if [ $ok = 1 ] || [ "$prev" = "$want" ]; then
+    echo "$want" > $ROOT/.running-$n
+    logger -t yemot-update "$n updated to $(git -C $d rev-parse --short HEAD) (waited ${waited}s)"
+  else
+    echo "$want" > $ROOT/.bad-$n
+    git -C $d reset -q --hard "$prev"
+    (cd $d && npm install --omit=dev --no-audit --no-fund >/dev/null 2>&1)
+    systemctl restart yemot-$n
+    echo "$prev" > $ROOT/.running-$n
+    mkdir -p /var/lib/yemot-data
+    printf '{"app":"%s","bad":"%s","back_to":"%s","at":"%s"}\n' "$n" "$want" "$prev" "$(date -u +%FT%TZ)" > /var/lib/yemot-data/rollback-$n.json
+    logger -t yemot-update "$n ROLLED BACK: ${want:0:7} did not start, back to ${prev:0:7}"
+    continue
+  fi
   [ $n = main ] && bash $ROOT/main/deploy/vps/maintain.sh >/dev/null 2>&1
 done
 # Live conversation checks of extensions 1 and 3 (owner, 24.11): a question
@@ -70,4 +91,6 @@ if [ -n "$ans_sha" ] && [ "$ans_sha" != "$(cat $ROOT/.answers-seen 2>/dev/null)"
   fi
 fi
 # keep this script itself current
-cmp -s $ROOT/main/deploy/vps/update.sh /usr/local/bin/yemot-update || install -m 755 $ROOT/main/deploy/vps/update.sh /usr/local/bin/yemot-update
+# (28.11: only a copy that parses is installed, so a broken edit can never
+# stop the automatic updates and roll-backs)
+cmp -s $ROOT/main/deploy/vps/update.sh /usr/local/bin/yemot-update || { bash -n $ROOT/main/deploy/vps/update.sh && install -m 755 $ROOT/main/deploy/vps/update.sh /usr/local/bin/yemot-update; }
