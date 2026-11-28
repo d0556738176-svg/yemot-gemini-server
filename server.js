@@ -6516,6 +6516,16 @@ async function ownerStatus(){
   if(answered) parts.push('יש '+answered+' תשובות חדשות לבקשות שלך. אמור: תשובות.');
   return parts.join(' ');
 }
+async function owner12Wake(id){
+  const token=(process.env.OWNER12_ROUTINE_TOKEN||'').trim();
+  const routine=(process.env.OWNER12_ROUTINE_ID||'trig_01LTxE5g8WJdWDTZBcWjh7m2').trim();
+  if(!token) { console.info('[OWNER12] no wake token yet; the hourly run will take it',{id}); return false; }
+  const r=await fetch('https://api.anthropic.com/v1/claude_code/routines/'+encodeURIComponent(routine)+'/fire',{method:'POST',
+    headers:{authorization:'Bearer '+token,'anthropic-version':'2023-06-01','anthropic-beta':'experimental-cc-routine-2026-04-01','content-type':'application/json'},
+    body:JSON.stringify({text:'בקשה חדשה מספר '+id+' משלוחה 12. טפל בה עכשיו לפי ההוראות.'}),signal:AbortSignal.timeout(20000)});
+  console.info('[OWNER12] wake',{id,status:r.status});
+  return r.ok;
+}
 async function ownerTurn(text){
   const t=String(text||'').trim();
   if(/^(מה\s+)?(ה)?(מצב|סטטוס)|מצב המערכת|בדיקת מערכת|תבדקי? את המערכת|מה קורה במערכת|יש תקלות/.test(t)) return await ownerStatus();
@@ -6532,7 +6542,10 @@ async function ownerTurn(text){
     raw.requests=[...(raw.requests||[]),{id,at:new Date().toISOString(),text:t.slice(0,1500),status:'pending'}].slice(-200);
     await owner12Write(raw);
     console.info('[OWNER12] request',{id,text:t.slice(0,1500)});
-    return 'רשמתי את הבקשה, מספר '+id+'. אני מטפלת בה, והתשובה תחכה לך כאן. כדי לשמוע אותה אמור: תשובות.';
+    // 28.11 (owner): the request wakes the Claude session at once (the
+    // routine's API trigger); the hourly run stays as a backup.
+    void owner12Wake(id).catch(()=>{});
+    return 'רשמתי את הבקשה, מספר '+id+'. אני מתחילה לטפל בה עכשיו, והתשובה תחכה לך כאן. כדי לשמוע אותה אמור: תשובות.';
   }
   return '';
 }
