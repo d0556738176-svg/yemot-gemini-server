@@ -54,5 +54,20 @@ if [ -n "$logs_sha" ] && [ "$logs_sha" != "$(cat $ROOT/.logs-seen 2>/dev/null)" 
     [ -n "$req" ] && timeout 120 node $ROOT/main/deploy/vps/log-extract.mjs "$req" >/dev/null 2>&1 && logger -t yemot-update "log extract written"
   fi
 fi
+# Extension 12 (owner, 28.11): answers to the owner's requests, written by
+# the scheduled Claude session on the side branch owner/answers, are heard
+# in extension 12. Only the answers file; nothing else changes or restarts.
+ans_sha=$(git -C $ROOT/main ls-remote -q origin refs/heads/owner/answers 2>/dev/null | cut -f1)
+if [ -n "$ans_sha" ] && [ "$ans_sha" != "$(cat $ROOT/.answers-seen 2>/dev/null)" ]; then
+  if git -C $ROOT/main fetch -q origin owner/answers 2>/dev/null; then
+    git -C $ROOT/main show FETCH_HEAD:answers.json 2>/dev/null | head -c 400000 | node -e '
+      let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{
+        const j=JSON.parse(s), fs=require("fs"), out={answers:{}};
+        for(const [id,a] of Object.entries(j.answers||{})) if(/^[0-9]{1,6}$/.test(id)) out.answers[id]={text:String(a.text||"").slice(0,3000),status:String(a.status||"done").slice(0,20),at:String(a.at||"").slice(0,40)};
+        fs.mkdirSync("/var/lib/yemot-data",{recursive:true});
+        fs.writeFileSync("/var/lib/yemot-data/owner12-answers.json",JSON.stringify(out));
+      }catch{}});' && echo "$ans_sha" > $ROOT/.answers-seen && logger -t yemot-update "owner answers updated"
+  fi
+fi
 # keep this script itself current
 cmp -s $ROOT/main/deploy/vps/update.sh /usr/local/bin/yemot-update || install -m 755 $ROOT/main/deploy/vps/update.sh /usr/local/bin/yemot-update

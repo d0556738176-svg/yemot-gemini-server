@@ -5357,7 +5357,11 @@ async function callHandler(call) {
           } }
         // Owner, 19.11: "שיחה חדשה" starts over; "היסטוריה" goes back to an
         // earlier conversation of this extension.
-        const convCmd=callerPhone!=='לא מזוהה'?conversationCommand(userTranscript):'';
+        if(callPersona.getStore()?.owner) {
+          const o=await ownerTurn(userTranscript).catch(e=>{ console.warn('[OWNER12] turn failed',String(e?.message||e).slice(0,120)); return ''; });
+          if(o) { replyText=o; ext3Done=true; turnContext.noThreadSave=true; }
+        }
+        const convCmd=!ext3Done&&callerPhone!=='לא מזוהה'?conversationCommand(userTranscript):'';
         if(convCmd==='new') {
           await newThread(brainBranch(),normalizePhone(callerPhone)).catch(()=>null);
           turnHistory.length=0; turnContext.noThreadSave=true;
@@ -6427,7 +6431,7 @@ app.post('/song-worker/callback', rateLimit(60, 60 * 1000, 'song-worker'), expre
 app.get('/song-worker/next', rateLimit(120, 60 * 1000, 'song-worker-next'), handleWorkerNext);
 app.get('/health/songs', rateLimit(10, 60 * 1000, 'song-health'), (req, res) => res.json({ ok: true, cloudWorker: isCloudWorkerConfigured(), warmRunners: warmStatus(), ...getSongProviderHealth() }));
 
-app.get(['/yemot', '/yemot-backup'], (req, res, next) => {
+app.get(['/yemot', '/yemot-backup', '/yemot-owner'], (req, res, next) => {
   if (req.query?.hangup === 'yes') return next();
   const starKeys = Object.entries(req.query || {}).filter(([k, v]) => /^val_\d+$/.test(k) && String(v).includes('*')).map(([k, v]) => k + '=' + String(v).slice(0, 20));
   if (starKeys.length) console.info('[STAR] star seen in Yemot request', { path: req.path, keys: starKeys, ext: req.query?.ApiExtension });
@@ -6444,6 +6448,20 @@ router.get('/yemot', callHandler);
 // self-reference in every model answer.
 router.get('/yemot-backup', call => callPersona.run({persona:'female',branch:'3'}, () => callHandler(call)));
 router.get('/yemot-youtube', youtubeCallHandler);
+// Extension 12 (owner, 28.11): the owner talks to the system - the full
+// extension-3 assistant, plus his system commands: the state of every part,
+// requests to change or fix the system (kept, handled by a scheduled Claude
+// session, answer heard here). Only his own number gets in.
+const OWNER_PHONE=String(process.env.OWNER_PHONE||'0556738176').replace(/[^0-9]/g,'');
+router.get('/yemot-owner', async call => {
+  const phone=getCallerNumber(call);
+  if(phone!==OWNER_PHONE) {
+    console.warn('[OWNER12] closed to another caller',{last4:String(phone).slice(-4)});
+    call.id_list_message([{type:'text',data:'שלוחה זו פתוחה רק לבעל המערכת.'}],{prependToNextAction:true});
+    return call.go_to_folder('/');
+  }
+  return callPersona.run({persona:'female',branch:'3',owner:true},()=>callHandler(call));
+});
 // Extension 5: live internet broadcast channels, opened only when the owner turns them on.
 router.get('/yemot-live', liveBroadcastHandler);
 // Extension 4: AI song maker.
@@ -6458,6 +6476,62 @@ app.get('/api/conversations', rateLimit(60, 60 * 1000, 'dashboard'), requireDash
   serverTime:new Date().toISOString()
 }));
 app.get('/health',(req,res)=>res.json({ok:true, service:'yemot-gemini-server'}));
+
+// ---- Extension 12: the owner's system line ----
+const OWNER12_FILE='/var/lib/yemot-data/owner12.json';
+const OWNER12_ANSWERS='/var/lib/yemot-data/owner12-answers.json';
+async function owner12Read(f,fallback){ const { readFile }=await import('node:fs/promises'); try { return JSON.parse(await readFile(f,'utf8')); } catch { return fallback; } }
+async function owner12Write(data){ const { writeFile, mkdir }=await import('node:fs/promises'); await mkdir('/var/lib/yemot-data',{recursive:true}).catch(()=>{}); await writeFile(OWNER12_FILE,JSON.stringify(data,null,1)); }
+async function owner12Requests(){
+  const d=await owner12Read(OWNER12_FILE,{requests:[]});
+  const ans=await owner12Read(OWNER12_ANSWERS,{answers:{}});
+  for(const r of d.requests||[]) { const a=ans.answers?.[r.id]; if(a) { r.answer=a.text; r.status=a.status||'done'; } }
+  return d;
+}
+async function ownerStatus(){
+  const parts=[];
+  const base=(process.env.PUBLIC_BASE_URL||'').replace(/\/$/,'');
+  const ext2=base.replace('://main.','://ext2.'), ext1=base.replace('://main.','://ext1.');
+  const get=async u=>{ try { const r=await fetch(u,{signal:AbortSignal.timeout(15000)}); return r.ok?await r.json().catch(()=>({})):null; } catch { return null; } };
+  parts.push('השרת הראשי, שלוחות 1, 3 ו 4, עובד.');
+  const e1=await get(ext1+'/health'); parts.push(e1?'שרת השלוחה הראשונה עובד.':'שרת השלוחה הראשונה לא עונה.');
+  const n=await get(ext2+'/news-status');
+  if(!n) parts.push('שרת שלוחה 2, שבו גם שלוחות 5, 7 ו 11, לא עונה.');
+  else {
+    const q=n.status?.queue||[]; const T=n.topics||{};
+    const cnt=t=>q.filter(x=>x.topic===t).length;
+    parts.push('שרת שלוחה 2 עובד. בשלוחה 11: בחדשות המרכזיות '+(T['1']?.files??'?')+' קבצים, ו '+cnt('1')+' ממתינים להורדה. בחדשות השונות '+(T['5']?.files??'?')+' קבצים. בשיעורי התורה הנבחרים '+(T['2']?.files??'?')+' קבצים. בסך הכל ממתינים בתור '+q.length+' סרטונים.');
+    const w=Object.values(n.status?.working||{}); if(w.length) parts.push('יורדים עכשיו '+w.length+' קבצים.');
+  }
+  try { const sp=getSongProviderHealth?.(); if(sp) parts.push('מנוע השירים בשלוחה 4 מוכן.'); } catch {}
+  const d=await owner12Requests(); const open=(d.requests||[]).filter(r=>!r.answer).length, answered=(d.requests||[]).filter(r=>r.answer&&!r.heard).length;
+  if(open) parts.push('יש '+open+' בקשות שלך שעוד בטיפול.');
+  if(answered) parts.push('יש '+answered+' תשובות חדשות לבקשות שלך. אמור: תשובות.');
+  return parts.join(' ');
+}
+async function ownerTurn(text){
+  const t=String(text||'').trim();
+  if(/^(מה\s+)?(ה)?(מצב|סטטוס)|מצב המערכת|בדיקת מערכת|תבדקי? את המערכת|מה קורה במערכת|יש תקלות/.test(t)) return await ownerStatus();
+  if(/תשובות|מה עם הבקש|מה התקדמת|מה נעשה עם/.test(t)) {
+    const d=await owner12Requests(); const rs=(d.requests||[]).slice(-6);
+    if(!rs.length) return 'אין עדיין בקשות שלך.';
+    const say=rs.map(r=>'בקשה מספר '+r.id+': '+r.text.slice(0,80)+'. '+(r.answer?'התשובה: '+r.answer:'עדיין בטיפול.')).join(' ');
+    const raw=await owner12Read(OWNER12_FILE,{requests:[]}); for(const r of raw.requests||[]) if(rs.some(x=>x.id===r.id&&x.answer)) r.heard=true; await owner12Write(raw).catch(()=>{});
+    return say;
+  }
+  if(/^(תתקני?|תוסיפי?|תשני?|תסירי?|תמחקי?|תעבירי?|תבני?|תפתחי?|תגדירי?|תעדכני?|תסדרי?|בקשה)\b|במערכת|בשלוחה|בשרת/.test(t)) {
+    const raw=await owner12Read(OWNER12_FILE,{requests:[]});
+    const id=(raw.requests||[]).reduce((m,r)=>Math.max(m,r.id),0)+1;
+    raw.requests=[...(raw.requests||[]),{id,at:new Date().toISOString(),text:t.slice(0,1500),status:'pending'}].slice(-200);
+    await owner12Write(raw);
+    console.info('[OWNER12] request',{id,text:t.slice(0,1500)});
+    return 'רשמתי את הבקשה, מספר '+id+'. אני מטפלת בה, והתשובה תחכה לך כאן. כדי לשמוע אותה אמור: תשובות.';
+  }
+  return '';
+}
+// The scheduled Claude session reads the waiting requests here (only their
+// texts and numbers, nothing secret).
+app.get('/owner12/requests',rateLimit(20,60*1000,'owner12'),async(req,res)=>{ const d=await owner12Requests(); res.set('cache-control','no-store').json({requests:(d.requests||[]).map(r=>({id:r.id,at:r.at,text:r.text,answered:!!r.answer}))}); });
 // Owner, 27.11: a file deleted with key 2 in extension 7 leaves the AI
 // extensions' list of saved songs at once (not after the 5-minute cache).
 // It only empties the cache; nothing is read or changed.
@@ -6948,6 +7022,17 @@ async function configureYemotStructure() {
       }
     } catch(e) {
       console.warn('[Yemot automatic setup] extension 3 setup failed',String(e?.message||e).slice(0,200));
+    }
+  }
+  // Extension 12: the owner's line (28.11) - the extension-3 assistant with
+  // his system commands, only from his own number.
+  if (process.env.BRANCH12_AUTO_CONFIGURE !== 'false') {
+    const voice=(process.env.BRANCH3_VOICE||'Osnat').trim();
+    const silence=Math.max(1,Math.min(10,Number(process.env.YEMOT_RECORD_SILENCE_SECONDS||3)||3));
+    try { await updateExtension('ivr2:/12',{type:'api',api_link:publicUrl + '/yemot-owner',title:'הקו של בעל המערכת',voice,option_record:silence+'-1-60'}); console.log('[Yemot automatic setup] extension 12 set'); }
+    catch(e) {
+      try { await updateExtension('ivr2:/12',{type:'api',api_link:publicUrl + '/yemot-owner'}); } catch {}
+      console.warn('[Yemot automatic setup] extension 12 full setting rejected',String(e?.message||e).slice(0,200));
     }
   }
   // Extension 4: AI song maker (owner, 13.11). Non-fatal.
