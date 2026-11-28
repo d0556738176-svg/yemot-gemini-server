@@ -4521,7 +4521,7 @@ async function searchSearxng(q,{timeoutMs=4000}={}) {
   const local=String(process.env.SEARXNG_LOCAL_URL||'http://127.0.0.1:8888');
   if(Date.now()>localSearxDownUntil) {
     try {
-      const u=new URL(local+'/search'); u.searchParams.set('q',q); u.searchParams.set('format','json'); u.searchParams.set('language','auto'); u.searchParams.set('safesearch','2');
+      const u=new URL(local+'/search'); u.searchParams.set('q',q); u.searchParams.set('format','json'); u.searchParams.set('language',/[\u0590-\u05FF]/.test(q)?'he':'auto'); u.searchParams.set('safesearch','2');
       const r=await fetch(u,{signal:AbortSignal.timeout(timeoutMs),headers:{'Accept':'application/json'}});
       if(r.ok) { const j=await r.json(); const out=(j.results||[]).slice(0,12).map(x=>({title:String(x.title||''),url:String(x.url||''),snippet:String(x.content||''),engines:x.engines})); console.info('[SEARXNG] local results',{count:out.length}); if(out.length) return out; }
     } catch(e) { if(/ECONNREFUSED|fetch failed/i.test(String(e?.cause?.code||e?.message||''))) localSearxDownUntil=Date.now()+5*60000; }
@@ -4582,7 +4582,12 @@ const webSearchCache=new Map();
 // 25.11 (owner): how many requests each model and search engine got today
 // (Israel date), for /health/usage. Names and counts only, never a key.
 const usageToday=new Map();
-function countUse(name){ const d=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Jerusalem'}); const k=d+'|'+name; usageToday.set(k,(usageToday.get(k)||0)+1); if(usageToday.size>600) usageToday.delete(usageToday.keys().next().value); }
+// 28.11: kept on disk too (a restart used to zero the day's counts), saved at most once a minute.
+const USAGE_FILE='/var/lib/yemot-data/usage.json';
+try { for(const [k,n] of Object.entries(JSON.parse(readFileSync(USAGE_FILE,'utf8')))) usageToday.set(k,Number(n)||0); } catch {}
+let usageSaveTimer=null;
+function countUse(name){ const d=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Jerusalem'}); const k=d+'|'+name; usageToday.set(k,(usageToday.get(k)||0)+1); if(usageToday.size>600) usageToday.delete(usageToday.keys().next().value);
+  if(!usageSaveTimer){ usageSaveTimer=setTimeout(()=>{ usageSaveTimer=null; import('node:fs/promises').then(f=>f.mkdir('/var/lib/yemot-data',{recursive:true}).then(()=>f.writeFile(USAGE_FILE,JSON.stringify(Object.fromEntries(usageToday))))).catch(()=>{}); },60000); usageSaveTimer.unref?.(); } }
 function countSearch(engine){ countUse('search '+engine); }
 function searchCacheKey(q){ return String(q||'').toLowerCase().replace(/[\s"'?!.,:;]+/g,' ').trim(); }
 function searchTtlMs(q){ return /(?:חדשות|מבזק|עכשיו|כרגע|היום|הבוקר|הערב|שער|מחיר|בורסה|מניה|מזג|תחזית|פתוח|פתוחה|עומס|פקק|תוצאות|live|today|now)/iu.test(String(q||''))?10*60000:60*60000; }
