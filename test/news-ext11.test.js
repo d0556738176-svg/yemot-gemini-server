@@ -356,3 +356,17 @@ test('live check by the YouTube Data API', () => {
   assert.deepEqual(N.liveFromApi({ snippet: { liveBroadcastContent: 'none' }, contentDetails: { duration: 'P0D' }, liveStreamingDetails: { actualEndTime: 'x' } }), { live: 'post_live', durationSec: null });
   assert.equal(N.liveFromApi(undefined).gone, true);
 });
+
+test('a folder with files its list does not know: numbering goes above them, nothing deleted', async () => {
+  N._resetForTests();
+  const io = fakeYemot(); io.indexRetryWaits = [0];
+  const dir = N.TOPICS['1'].dir;
+  for (const n of [0, 1, 2, 266]) io.files.set('ivr2:' + dir + '/' + N.file3(n) + '.wav', 'x');
+  await io.writeJson(N.INDEX, { next: 3, items: { a0000000000: { dir, file: '000' }, a0000000001: { dir, file: '001' }, a0000000002: { dir, file: '002' } } });
+  io.list = async d => [...io.files.keys()].filter(k => k.startsWith(d + '/')).map(k => k.slice(d.length + 1));
+  const r = await N.reconcileTopic('1', io);
+  assert.equal(r.unknown, 1); assert.equal(r.next, 267);
+  assert.ok(io.files.has('ivr2:' + dir + '/266.wav'), 'nothing deleted');
+  const e = await N.publishNews('newvideo123', '/tmp/x.wav', { title: 'newest', topic: '1' }, io);
+  assert.equal(e.file, '267', 'the newest plays first');
+});

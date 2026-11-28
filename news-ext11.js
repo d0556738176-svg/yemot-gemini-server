@@ -619,6 +619,33 @@ export async function rotate(io, idx, t = '1') {
 }
 
 // Uploads one prepared phone file under the next number of its topic folder.
+// Owner, 28.11 ("8 says no details", seen on 11/1/1/266): the folder held
+// files the folder's list did not know - left from before the folders were
+// split and the list renumbered. Yemot plays the highest number first, so an
+// old unknown file (266) played before the newest news (162), and key 8 had
+// nothing to say on it. The list is now checked against the folder itself,
+// and the numbering always continues above the highest file in the folder,
+// so the newest is really played first. Nothing in the folder is deleted.
+export function reconcileTopic(t, io) {
+  return serial(async () => {
+    const dir = topicDir(t);
+    if (!io.list) return null;
+    const names = await io.list('ivr2:' + dir);
+    if (!names) return null;
+    const nums = names.map(n => /^(\d{3})\.wav$/i.exec(n)?.[1]).filter(Boolean).map(Number);
+    const idx = await readIndex(io, t);
+    const known = new Set(Object.values(idx.items || {}).filter(e => e.dir === dir).map(e => Number(e.file)));
+    const unknown = nums.filter(n => !known.has(n));
+    const top = nums.length ? Math.max(...nums) + 1 : 0;
+    let moved = false;
+    if (top > (idx.next || 0) && top < MAX_FILES) { idx.next = top; await io.writeJson(indexOf(t), idx); rememberIndex(t, idx); moved = true; }
+    const r = { t, dir, files: nums.length, unknown: unknown.length, unknownFiles: unknown.slice(-20).map(file3), next: idx.next || 0, moved };
+    (status.reconcile ||= {})[t] = { ...r, at: new Date().toISOString() };
+    if (moved) note({ reconciled: dir, unknown: unknown.length, next: idx.next || 0 });
+    return r;
+  });
+}
+
 export function publishNews(videoId, wav, meta, io) {
   const t = TOPICS[meta?.topic] ? String(meta.topic) : '1';
   const dir = topicDir(t);

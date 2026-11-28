@@ -5948,6 +5948,8 @@ async function newsIo() {
   return {
     publicUrl:(process.env.PUBLIC_BASE_URL||'').replace(/\/$/,''),
     readJson:x=>p.readCacheJson(x), writeJson:(x,d)=>p.writeCacheJson(x,d),
+    // 28.11: the file names really in a Yemot folder (null when it is missing).
+    list:async dir=>(await ext7DeleteIo()).list(dir),
     upload:(f,rr)=>p.uploadToYemot(f,rr,undefined,{convertAudio:true}),
     del:async what=>{ const u=new URL(p.YEMOT_API_BASE+'/FileAction'); for(const [k,v] of Object.entries({token:p.yemotApiKey(),action:'delete',what})) u.searchParams.set(k,v); const j=await (await fetch(u,{signal:AbortSignal.timeout(20000)})).json().catch(()=>null); if(j?.responseStatus!=='OK') throw new Error('delete: '+String(j?.message||'failed').slice(0,80)); },
     move:async(what,target)=>{ const u=new URL(p.YEMOT_API_BASE+'/FileAction'); for(const [k,v] of Object.entries({token:p.yemotApiKey(),action:'move',what,target})) u.searchParams.set(k,v); const j=await (await fetch(u,{signal:AbortSignal.timeout(30000)})).json().catch(()=>null); if(j?.responseStatus!=='OK') throw new Error('move: '+String(j?.message||'failed').slice(0,80)); },
@@ -5996,7 +5998,10 @@ if (String(process.env.NEWS11 || 'on').toLowerCase() !== 'off') setTimeout(()=>{
   let polling=false;
   const poll=async()=>{ if(polling) return; polling=true; try { const N=await import('./news-ext11.js'); await N.pollOnce(await newsDeps()); } catch(e) { console.warn('[NEWS11] feed round skipped',{message:String(e?.message||e).slice(0,160)}); } finally { polling=false; } };
   const work=async()=>{ try { const N=await import('./news-ext11.js'); N.status.started ||= new Date().toISOString(); await N.workOnce(await newsDeps()); } catch(e) { console.warn('[NEWS11] work round skipped',{message:String(e?.message||e).slice(0,160)}); } };
-  poll(); setInterval(poll, 2*60*1000).unref?.(); setInterval(work, 20*1000).unref?.();
+  poll(); setInterval(poll, 2*60*1000).unref?.();
+  // 28.11: each folder's list checked against the folder itself (start, then every 30 minutes).
+  const reconcile=async()=>{ try { const N=await import('./news-ext11.js'); const io=await newsIo(); for(const t of Object.keys(N.TOPICS)) await N.reconcileTopic(t, io).catch(e=>console.warn('[NEWS11] folder check skipped',{t,message:String(e?.message||e).slice(0,120)})); } catch {} };
+  setTimeout(reconcile, 30*1000); setInterval(reconcile, 30*60*1000).unref?.(); setInterval(work, 20*1000).unref?.();
 }, 90*1000).unref?.();
 // 27.11 (owner): the channel lists of the LobbyTube topics, read in the
 // owner's own browser on lobbytube.co.il and sent from that page. Open for
@@ -6042,7 +6047,7 @@ app.get('/news-health', rateLimit(30, 60 * 1000, 'news-health'), async (req,res)
     const home=osm.homedir(); const diskUse={};
     for(const d of [...readdirSync(home).map(n=>pth.join(home,n)), osm.tmpdir()]) { try { if(statSync(d).isDirectory()) { const g=GB(sizeOf(d)); if(g>=0.05) diskUse[d]=g; } } catch {} }
     let disk=null; try { const s=statfsSync('/'); disk={ totalGB:GB(s.blocks*s.bsize), freeGB:GB(s.bavail*s.bsize) }; } catch {}
-    res.json({ now:new Date().toISOString(), disk, diskUseGB:diskUse, botPauseUntil:N.status.botPauseUntil||null, started:N.status.started, lastPoll:N.status.lastPoll, working:N.status.working, feedErrors:errs,
+    res.json({ now:new Date().toISOString(), reconcile:N.status.reconcile||null, disk, diskUseGB:diskUse, botPauseUntil:N.status.botPauseUntil||null, started:N.status.started, lastPoll:N.status.lastPoll, working:N.status.working, feedErrors:errs,
       recentProblems:(N.status.log||[]).filter(x=>x.failed||x.gaveUp).slice(0,15), recentDone:(N.status.log||[]).filter(x=>x.done).slice(0,10).map(x=>({at:x.at,topic:x.topic,file:x.file,seconds:x.seconds,lateMin:x.lateMin})),
       keyPresses:(globalThis.mediaKeyLog||[]).slice(0,15), topics });
   } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
