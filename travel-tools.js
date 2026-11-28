@@ -245,7 +245,8 @@ export async function trafficRoute(from, to, { fetchImpl = fetch, env = process.
   return null;
 }
 
-const spokenMin = m => m < 60 ? m + ' דקות' : Math.floor(m / 60) + ' שעות' + (m % 60 ? ' ו-' + (m % 60) + ' דקות' : '');
+const spokenHours = h => h === 1 ? 'שעה' : h === 2 ? 'שעתיים' : h + ' שעות';
+const spokenMin = m => m < 60 ? (m === 1 ? 'דקה' : m + ' דקות') : spokenHours(Math.floor(m / 60)) + (m % 60 ? ' ו' + (m % 60 === 1 ? 'דקה' : m % 60 + ' דקות') : '');
 
 /**
  * Everything for the answer: geocodes both ends, then bus and/or car.

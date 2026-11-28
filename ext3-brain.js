@@ -703,8 +703,15 @@ export function extractAnswer(raw) {
   const s = noThinking(raw);
   const m = s.match(/\{[\s\S]*\}/);
   if (m) { try { const j = JSON.parse(m[0]); if (typeof j.answer === 'string' && j.answer.trim()) return j.answer.trim(); } catch {} }
-  const loose = s.match(/"answer"\s*:\s*"([\s\S]*?)"\s*}?\s*$/);
-  if (loose) return loose[1].replace(/\\n/g, ' ').replace(/\\"/g, '"').trim();
+  // 28.11: an unescaped quote inside the Hebrew (ה"ס, לפי ה"מדריך") broke the
+  // JSON and the answer was cut ("...מנחם פרוש 1, לפי ה"). Everything up to
+  // the last quote of the answer field is the answer.
+  const start = s.search(/"answer"\s*:\s*"/);
+  if (start >= 0) {
+    let body = s.slice(start).replace(/^"answer"\s*:\s*"/, '');
+    body = body.replace(/"\s*,\s*"[a-z_]+"\s*:[\s\S]*$/i, '').replace(/"?\s*}?\s*(?:```)?\s*$/, '');
+    if (body.trim()) return body.replace(/\\n/g, ' ').replace(/\\"/g, '"').trim();
+  }
   return s.replace(/^```(?:json)?|```$/g, '').trim();
 }
 // Weak models sometimes slip a Chinese or Cyrillic word into Hebrew.
