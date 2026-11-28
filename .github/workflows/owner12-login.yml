@@ -1,0 +1,45 @@
+# Extension 12 (owner, 28.11): connect the system to the owner's Claude
+# account from the browser only (his console cannot type capitals and
+# NetFree blocks other terminals).
+#   Run 1, code empty: the server starts Claude Code's "setup-token" and the
+#     sign-in link is shown in this run's log.
+#   Run 2, code = the code the sign-in site showed: the server finishes the
+#     sign-in and keeps the token itself (never shown, never in GitHub).
+# The server accepts these calls only with GitHub's signed proof that they
+# come from this workflow, on main, of this repository.
+name: owner12-login
+run-name: "owner12 sign-in ${{ inputs.code == '' && '(link)' || '(code)' }}"
+on:
+  workflow_dispatch:
+    inputs:
+      code:
+        description: "empty = get the link; then paste the code here"
+        required: false
+        default: ""
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Sign in
+        env:
+          CODE: ${{ inputs.code }}
+        run: |
+          [ -n "$CODE" ] && echo "::add-mask::$CODE"
+          jwt=$(curl -s -m 20 -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=yemot-owner12" | jq -r '.value // empty')
+          body=$(jq -n --arg c "$CODE" '{code:$c}')
+          curl -s -m 200 -o /tmp/r.json -w '%{http_code}\n' -X POST -H "Authorization: Bearer $jwt" -H 'content-type: application/json' --data "$body" https://main.176-97-205-41.sslip.io/owner12/login/run
+          url=$(jq -r '.url // empty' /tmp/r.json)
+          if [ -n "$url" ]; then
+            echo "################ SIGN-IN LINK ################"
+            echo "$url"
+            echo "##############################################"
+            echo "### Sign-in link" >> "$GITHUB_STEP_SUMMARY"; echo "[$url]($url)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$(jq -r '.ok // empty' /tmp/r.json)" = "true" ]; then
+            echo "OK: Claude sign-in saved on the server" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "failed:"; jq -r '.error // .' /tmp/r.json; exit 1
+          fi

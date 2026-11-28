@@ -6574,7 +6574,7 @@ async function ownerTurn(text){
 const OWNER12_TOKEN_FILE='/opt/yemot/owner12-claude.token';
 const OWNER12_LOGIN_FILE='/var/lib/yemot-data/owner12-login.json';
 let ghJwks={at:0,keys:[]};
-async function ghOidcVerify(jwt){
+async function ghOidcVerify(jwt,wf='owner12.yml'){
   const [h,p,s]=String(jwt||'').split('.'); if(!h||!p||!s) throw new Error('no token');
   const hdr=JSON.parse(Buffer.from(h,'base64url').toString()), pl=JSON.parse(Buffer.from(p,'base64url').toString());
   if(hdr.alg!=='RS256') throw new Error('alg');
@@ -6589,7 +6589,7 @@ async function ghOidcVerify(jwt){
   if(pl.iss!=='https://token.actions.githubusercontent.com') throw new Error('iss');
   if(pl.aud!=='yemot-owner12'&&!(Array.isArray(pl.aud)&&pl.aud.includes('yemot-owner12'))) throw new Error('aud');
   if(pl.repository!==repo||pl.ref!=='refs/heads/main') throw new Error('repo');
-  if(!String(pl.workflow_ref||'').startsWith(repo+'/.github/workflows/owner12.yml@refs/heads/main')) throw new Error('workflow');
+  if(!String(pl.workflow_ref||'').startsWith(repo+'/.github/workflows/'+wf+'@refs/heads/main')) throw new Error('workflow');
   if(!(pl.exp>now)||(pl.nbf&&pl.nbf>now+60)) throw new Error('time');
   return pl;
 }
@@ -6603,6 +6603,62 @@ app.post('/owner12/runner-token',rateLimit(10,60*1000,'owner12tok'),async(req,re
     console.info('[OWNER12] runner token given',{run:pl.run_id});
     res.json({token:t});
   } catch(e) { console.warn('[OWNER12] runner token refused',String(e?.message||e).slice(0,40)); res.status(403).json({error:'denied'}); }
+});
+// 28.11: the whole Claude sign-in from the owner's browser, with no console:
+// the GitHub run owner12-login.yml (only he can start it) asks the server to
+// start Claude Code's own "setup-token" here and shows the sign-in link; a
+// second run hands in the code the site showed. The token stays on the
+// server (OWNER12_TOKEN_FILE) and is never returned or logged.
+const owner12Login={proc:null,out:'',url:'',at:0};
+const ansiStrip=s=>String(s).replace(/\x1b\][^\x07]*\x07/g,'').replace(/\x1b\[[0-9;?]*[A-Za-z]/g,'');
+async function owner12LoginStart(){
+  const { spawn }=await import('node:child_process');
+  if(owner12Login.proc&&Date.now()-owner12Login.at<15*60e3&&owner12Login.url) return owner12Login.url;
+  try { owner12Login.proc?.kill('SIGKILL'); } catch {}
+  Object.assign(owner12Login,{out:'',url:'',at:Date.now()});
+  const p=spawn('script',['-qfec','stty cols 1000 rows 50; npx -y @anthropic-ai/claude-code@latest setup-token','/dev/null'],{env:{...process.env,TERM:'xterm-256color',BROWSER:'true'}});
+  owner12Login.proc=p;
+  p.stdout.on('data',d=>{ owner12Login.out=(owner12Login.out+d).slice(-200000); });
+  p.on('exit',()=>{ if(owner12Login.proc===p) owner12Login.proc=null; });
+  setTimeout(()=>{ try { p.kill('SIGKILL'); } catch {} },20*60e3).unref?.();
+  for(let i=0;i<240&&!owner12Login.url;i++){
+    const m=ansiStrip(owner12Login.out).match(/https:\/\/[a-z.]+\/oauth\/authorize\?[\x21-\x7e]+/);
+    if(m) owner12Login.url=m[0]; else { if(!owner12Login.proc) break; await new Promise(r=>setTimeout(r,500)); }
+  }
+  if(!owner12Login.url) throw new Error('no link: '+ansiStrip(owner12Login.out).replace(/\s+/g,' ').slice(-200));
+  const { writeFile }=await import('node:fs/promises');
+  await writeFile(OWNER12_LOGIN_FILE,JSON.stringify({url:owner12Login.url,at:Math.floor(Date.now()/1000)})).catch(()=>{});
+  return owner12Login.url;
+}
+async function owner12LoginCode(code){
+  const p=owner12Login.proc; if(!p) throw new Error('no sign-in running - start again');
+  const mark=owner12Login.out.length;
+  p.stdin.write(String(code).trim()); await new Promise(r=>setTimeout(r,400)); p.stdin.write('\r');
+  for(let i=0;i<120;i++){
+    const tail=ansiStrip(owner12Login.out.slice(mark));
+    const m=tail.match(/sk-ant-oat[A-Za-z0-9_-]{20,}/);
+    if(m){
+      const { writeFile, rename }=await import('node:fs/promises');
+      await writeFile(OWNER12_TOKEN_FILE+'.new',m[0]+'\n',{mode:0o600}); await rename(OWNER12_TOKEN_FILE+'.new',OWNER12_TOKEN_FILE);
+      try { p.kill('SIGKILL'); } catch {}
+      owner12Login.out=''; owner12Login.url=''; await (await import('node:fs/promises')).unlink(OWNER12_LOGIN_FILE).catch(()=>{});
+      return true;
+    }
+    if(/invalid|error|expired|failed/i.test(tail)&&i>6) throw new Error(tail.replace(/sk-ant-[A-Za-z0-9_-]+/g,'[x]').replace(/\s+/g,' ').slice(-160));
+    await new Promise(r=>setTimeout(r,500));
+  }
+  throw new Error('no answer after the code: '+ansiStrip(owner12Login.out.slice(mark)).replace(/sk-ant-[A-Za-z0-9_-]+/g,'[x]').replace(/\s+/g,' ').slice(-160));
+}
+app.post('/owner12/login/run',rateLimit(10,60*1000,'owner12login'),async(req,res)=>{
+  res.set('cache-control','no-store');
+  try { await ghOidcVerify(String(req.get('authorization')||'').replace(/^Bearer\s+/i,''),'owner12-login.yml'); }
+  catch(e) { console.warn('[OWNER12] login refused',String(e?.message||e).slice(0,40)); return res.status(403).json({error:'denied'}); }
+  const code=String(req.body?.code||'').trim();
+  try {
+    if(!code) { const url=await owner12LoginStart(); console.info('[OWNER12] sign-in link ready'); return res.json({url}); }
+    await owner12LoginCode(code); console.info('[OWNER12] claude sign-in saved');
+    return res.json({ok:true});
+  } catch(e) { console.warn('[OWNER12] sign-in step failed',String(e?.message||e).slice(0,200)); return res.status(500).json({error:String(e?.message||e).slice(0,240)}); }
 });
 app.get('/owner12/login',async(req,res)=>{
   res.set('cache-control','no-store');
