@@ -112,7 +112,7 @@ export function plannerPrompt({ context, utterance, now, video, older = null, me
     'zmanim = שאלה על זמן הלכתי של היום במקום מסוים (סוף זמן קריאת שמע או תפילה לפי הגר"א או המגן אברהם, הנץ, שקיעה, עלות השחר, חצות, מנחה, פלג המנחה, צאת הכוכבים, כניסת שבת והדלקת נרות, צאת שבת). אלה זמנים שמחשבים לפי מיקום ותאריך, לא מחפשים באינטרנט.',
     'song_make = המתקשר מבקש עכשיו ליצור, להלחין ולהקליט שיר חדש בבינה מלאכותית (לא למצוא שיר קיים, ולא רק לכתוב מילים בשיחה). שיחה על מילים, סגנון או קול לשיר בלי בקשה ליצור אותו עכשיו היא chat.',
     'nearby = המתקשר שואל איפה יש מקום מסוג מסוים (בית כנסת, מקווה, בית מרקחת, סופר, מסעדה, כספומט, תחנת דלק, מרפאה, חניון וכו\') הכי קרוב או ליד מקום מסוים (רחוב, שכונה, חוף, מקום מוכר, יישוב).',
-    'route = המתקשר שואל איך להגיע ממקום למקום, מבקש לתכנן מסלול נסיעה או ניווט, או שואל על פקקים בדרך: באיזה אוטובוס או רכבת, באיזה כבישים לנסוע ברכב, כמה זמן נסיעה, מה הדרך הכי מהירה עכשיו. מלאי from_place/from_town (מאיפה יוצא; אם אמר "אני נמצא ב..." או אמר קודם בשיחה איפה הוא) ו-to_place/to_town (לאן), ו-mode: bus כשביקש תחבורה ציבורית, car כשביקש ברכב, any כששאל באופן כללי או על שניהם.',
+    'route = המתקשר שואל איך להגיע ממקום למקום, מבקש לתכנן מסלול נסיעה או ניווט, שואל על המרחק בין שני מקומות, או שואל על פקקים בדרך: באיזה אוטובוס או רכבת, באיזה כבישים לנסוע ברכב, כמה זמן נסיעה, מה הדרך הכי מהירה עכשיו. מלאי from_place/from_town (מאיפה יוצא; אם אמר "אני נמצא ב..." או אמר קודם בשיחה איפה הוא) ו-to_place/to_town (לאן), ו-mode: bus כשביקש תחבורה ציבורית, car כשביקש ברכב, any כששאל באופן כללי או על שניהם.',
     'video_find = המתקשר רוצה שתמליצי או תמצאי לו סרטון, הרצאה, סיפור או סרט ביוטיוב.',
     'video_about = שאלה על סרטון שכבר הוזכר בשיחה (מה השם, תרגום השם, אורך, ערוץ, על מה הוא, האם הוא בעברית).',
     'video_play = המתקשר מבקש עכשיו לשמוע, להשמיע, להפעיל או להוריד סרטון או שיר מסוים (הסרטון שהוזכר, או שיר/סרטון שהוא מתאר בשמו). שאלה על מצב הורדה אינה video_play.',
@@ -1199,6 +1199,8 @@ async function ext3TurnInner({ utterance, summary = '', prior = [], current = []
   if (plan.intent === 'route') {
     if (!(plan.toPlace || plan.toTown)) return out({ reply: 'לאן אתה רוצה להגיע? אמור לי את המקום ואת העיר, ואבדוק לך אוטובוסים ודרך ברכב.' });
     if (!(plan.fromPlace || plan.fromTown)) return out({ reply: 'מאיפה אתה יוצא? אמור לי את המקום שבו אתה נמצא ואת העיר, ואבדוק לך איך להגיע ל' + (plan.toPlace || plan.toTown) + '.' });
+    // "How many km from A to B": the road and air distance from the map, not web pages that disagree.
+    if (/(?:כמה קילומטר|כמה ק"מ|מרחק|כמה רחוק)/u.test(utterance + ' ' + plan.standalone) && !/(?:אוטובוס|קו |רכבת|תחבורה ציבורית)/u.test(utterance)) plan.mode = 'car';
     const wantsTraffic = /(?:פקק|פקקים|עומס|עומסים|תנועה|הכי מהר|הכי מהיר|מהירה|כרגע|עכשיו)/u.test(utterance + ' ' + plan.standalone);
     const facts = await within(Number(deps.travelBudgetMs || 22000), (deps.travelFacts || realTravel)({ from: { place: plan.fromPlace, town: plan.fromTown }, to: { place: plan.toPlace, town: plan.toTown }, mode: plan.mode }, { fetchImpl: deps.fetchImpl || fetch, log, now: deps.nowDate || new Date() }))
       .catch(e => { log.warn?.('[TRAVEL] failed', String(e?.message || e).slice(0, 100)); return null; });
@@ -1491,7 +1493,7 @@ function sameWords() {
   const words = q => new Set(String(q).replace(/[?!.,"']/g, ' ').split(/\s+/).filter(w => w.length > 1).map(w => w.replace(/^[בהלו](?=\S{3})/u, '')));
   return q => { const w = words(q); if (seen.some(prev => [...w].every(x => prev.has(x)))) return false; seen.push(w); return true; };
 }
-const ROUTE = /(?:מסלול|תכנון נסיעה|תתכנן|תכנן לי|ניווט|תנווט|נווט אותי|כמה זמן (?:ייקח|יקח|לוקח|נסיעה|נוסעים)|זמן נסיעה|פקקים|עומסי תנועה|איך מגיעים|איך אני מגיע|איך להגיע|להגיע ל|באיזה קו|איזה קו|קו אוטובוס|קווי אוטובוס|תחבורה ציבורית|אוטובוס ל|רכבת ל|מסלול נסיעה|הדרך הכי מהירה|הכי מהר ל|נסיעה ל)/u;
+const ROUTE = /(?:כמה קילומטר|כמה ק"מ|מה המרחק|המרחק בין|המרחק מ|כמה רחוק|מסלול|תכנון נסיעה|תתכנן|תכנן לי|ניווט|תנווט|נווט אותי|כמה זמן (?:ייקח|יקח|לוקח|נסיעה|נוסעים)|זמן נסיעה|פקקים|עומסי תנועה|איך מגיעים|איך אני מגיע|איך להגיע|להגיע ל|באיזה קו|איזה קו|קו אוטובוס|קווי אוטובוס|תחבורה ציבורית|אוטובוס ל|רכבת ל|מסלול נסיעה|הדרך הכי מהירה|הכי מהר ל|נסיעה ל)/u;
 
 // A map or calendar service that hangs must not keep the caller waiting.
 function within(ms, p) { return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('place tools too slow'), { status: 504 })), ms).unref?.())]); }
