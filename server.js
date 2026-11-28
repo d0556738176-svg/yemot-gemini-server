@@ -6014,6 +6014,30 @@ app.post('/lobby-import', rateLimit(10, 60 * 1000, 'lobby-import'), express.json
     for (const k of Object.keys(N.TOPICS)) if (N.TOPICS[k].lobby) await io.saveSettings(N.topicDir(k), N.playIni(io.publicUrl || (process.env.PUBLIC_BASE_URL || ''), N.topicDir(k), N.TOPICS[k].title)).catch(() => {});
   } catch (e) { if (!res.headersSent) res.status(400).json({ ok: false, error: String(e?.message || e).slice(0, 120) }); }
 });
+// 28.11: a short health report of extension 11 (the full /news-status is huge):
+// per folder - files, the newest file's time, waiting downloads; feed errors;
+// recent failures; the last key presses. Reads only.
+app.get('/news-health', rateLimit(30, 60 * 1000, 'news-health'), async (req,res)=>{
+  try {
+    const N=await import('./news-ext11.js'); const io=await newsIo();
+    const st=N.loadState(); const q=Object.values(st.queue||{});
+    const topics={};
+    for(const k of Object.keys(N.TOPICS)) {
+      const ti=await N.readIndexForLookup(io,k).catch(e=>({error:String(e?.message||e).slice(0,80)}));
+      const it=Object.values(ti.items||{}); const newest=it.map(e=>e.at).filter(Boolean).sort().pop()||null;
+      const qq=q.filter(x=>(x.topic||'1')===k);
+      const chs=(N.TOPICS[k].channels||[]);
+      const sc=chs.map(c=>N.status.channels[c.key]).filter(Boolean);
+      topics[k]={dir:N.TOPICS[k].dir||N.topicDir(k),title:N.TOPICS[k].title,files:it.length,newest,minutesSinceNewest:newest?Math.round((Date.now()-Date.parse(newest))/60000):null,
+        queued:qq.length,waiting:qq.filter(x=>x.wait).slice(0,3).map(x=>x.wait),channels:chs.length,channelsChecked:sc.length,feedErrors:sc.filter(c=>c.error).length,
+        today:(st.perDay||{})[new Date().toISOString().slice(0,10)+':'+k]||0,listError:ti.error||null};
+    }
+    const errs={}; for(const c of Object.values(N.status.channels||{})) if(c.error) errs[c.error]=(errs[c.error]||0)+1;
+    res.json({ now:new Date().toISOString(), started:N.status.started, lastPoll:N.status.lastPoll, working:N.status.working, feedErrors:errs,
+      recentProblems:(N.status.log||[]).filter(x=>x.failed||x.gaveUp).slice(0,15), recentDone:(N.status.log||[]).filter(x=>x.done).slice(0,10).map(x=>({at:x.at,topic:x.topic,file:x.file,seconds:x.seconds,lateMin:x.lateMin})),
+      keyPresses:(globalThis.mediaKeyLog||[]).slice(0,15), topics });
+  } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
+});
 app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)=>{
   try {
     const N=await import('./news-ext11.js'); const { statfsSync }=await import('node:fs');
