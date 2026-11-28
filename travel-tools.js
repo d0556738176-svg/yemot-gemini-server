@@ -239,8 +239,16 @@ export async function carRoute(from, to, { fetchImpl = fetch } = {}) {
 // have no public interface; the legal live-traffic routers are Google Routes
 // (GOOGLE_MAPS_API_KEY) and TomTom (TOMTOM_API_KEY, free 2,500 a day). With
 // neither key set, the usual time from the open map is said, honestly so.
+// The key pasted in the owner's page (28.11: the server console drops capital
+// letters, so the key typed there arrived in small letters only) wins.
+import { readFileSync as readKeyFile } from 'node:fs';
+export const TOMTOM_KEY_FILE = '/var/lib/yemot-data/tomtom.key';
+export function tomtomKey(env = process.env) {
+  try { const k = readKeyFile(TOMTOM_KEY_FILE, 'utf8').trim(); if (k) return k; } catch {}
+  return String(env.TOMTOM_API_KEY || '').trim();
+}
 export async function trafficRoute(from, to, { fetchImpl = fetch, env = process.env, now = new Date() } = {}) {
-  const g = String(env.GOOGLE_MAPS_API_KEY || '').trim(), tt = String(env.TOMTOM_API_KEY || '').trim();
+  const g = String(env.GOOGLE_MAPS_API_KEY || '').trim(), tt = tomtomKey(env);
   const key5 = x => x.lat.toFixed(4) + ',' + x.lon.toFixed(4);
   if (g) {
     try {
