@@ -190,6 +190,10 @@ const NEIGHBOURHOODS = [
 const GENERIC = new Set(['חוף', 'החוף', 'רחוב', 'שכונת', 'שכונה', 'אזור', 'ליד', 'של', 'את', 'בית', 'מרכז', 'כיכר', 'גן', 'פארק', 'הים', 'ים']);
 // The place he named, on the map: { lat, lon, label, approx }.
 // town: the town he said (results elsewhere are rejected).
+let googleGeocoder = null;
+/** fn(query) -> { lat, lon, address } from Google Maps (set by the server when a key exists). */
+export function setGoogleGeocoder(fn) { googleGeocoder = typeof fn === 'function' ? fn : null; }
+const sameTownText = (address, town) => String(address || '').split(',').some(p => sameTown(p.trim(), town)) || plain(address).includes(plain(town));
 export async function geocode({ place = '', town = '' } = {}, { fetchImpl = fetch, log = console } = {}) {
   const strip = s => String(s || '').replace(/^(?:ב|ל)?(?:ה)?(?:מושב|משוב|קיבוץ|יישוב|ישוב|עיר|העיר|שכונת|ליד|באזור)\s+/u, '').trim();
   place = strip(place); town = strip(town);
@@ -208,6 +212,12 @@ export async function geocode({ place = '', town = '' } = {}, { fetchImpl = fetc
   if (hit) return { lat: hit.lat, lon: hit.lon, label: hit.name || full, town: hit.town || town, approx: false };
   // The town itself, then the landmark inside it by its distinctive words
   // ("נפרד" of "החוף הנפרד"), searched only within that town.
+  // 28.11: a named landmark the open map does not know by name ("קניון השדרה"
+  // was placed kilometres away): its Google Maps listing, when one is set up.
+  if (place && !alias && googleGeocoder && !sameTown(place, town)) {
+    const g = await googleGeocoder([place, town].filter(Boolean).join(' ')).catch(() => null);
+    if (g && Number.isFinite(g.lat) && (!town || sameTownText(g.address, town))) return { lat: g.lat, lon: g.lon, label: place, town: town || '', approx: false, source: 'google' };
+  }
   let townHit = null;
   if (town) {
     const t = await nominatim(town, { fetchImpl, limit: 3 }).catch(() => []);

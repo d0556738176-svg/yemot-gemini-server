@@ -6591,11 +6591,18 @@ app.get('/live-probe',rateLimit(4,60*1000,'live-probe'),async (req,res)=>{
   liveProbe={ at:Date.now(), out };
   res.set('cache-control','no-store').json(out);
 });
+// 28.11: landmarks the open map does not know by name are placed by their
+// Google Maps listing (Serper maps, cached 6 hours).
+import('./place-tools.js').then(async P=>{
+  if(!keysFor('SERPER_API_KEY').length) return;
+  const { serperMaps }=await import('./maps-hours.js');
+  P.setGoogleGeocoder(async q=>{ countSearch('serper-maps geo'); const r=await serperMaps(q,{keys:keysFor('SERPER_API_KEY'),log:{info(){},warn(){}}}); const p=r.find(x=>Number.isFinite(x.lat)); return p?{lat:p.lat,lon:p.lon,address:p.address}:null; });
+}).catch(()=>{});
 // Read-only live check of extensions 1 and 3 (owner, 28.11): runs one of the
 // fixed question sets (live-qa-sets.js) as a simulated text call in the running
 // code, with the system's own log lines for each answer. Nothing is saved.
 const liveQa=new Map();
-app.get('/live-qa/:set',rateLimit(6,60*60*1000,'live-qa'),async (req,res)=>{
+app.get('/live-qa/:set',rateLimit(12,60*60*1000,'live-qa'),async (req,res)=>{
   const { LIVE_QA_SETS }=await import('./live-qa-sets.js');
   const set=String(req.params.set||''), questions=LIVE_QA_SETS[set];
   if(!questions) return res.status(404).json({sets:Object.keys(LIVE_QA_SETS)});
