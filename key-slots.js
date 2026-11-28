@@ -30,13 +30,22 @@ function restKey(key, status, message) {
   const ms = status === 401 || status === 403 || status === 402 || status === 432 || status === 433 || quota ? 6 * 3600e3 : status === 429 ? 60e3 : 0;
   if (ms) resting.set(key, Date.now() + ms);
 }
+const lastProbe = new Map();
 const isResting = key => (resting.get(key) || 0) > Date.now();
 
 // Runs fn(key) with the first usable key; on a quota/limit/auth failure moves to the next one.
 export async function withKeys(base, fn, { label = base } = {}) {
   const slots = keySlots(base);
   if (!slots.length) throw Object.assign(new Error(label + ' key not configured'), { status: 412 });
-  const order = [...slots.filter(s => !isResting(s.key)), ...slots.filter(s => isResting(s.key))];
+  // 28.11: keys that ran out are not asked again on every request (the live
+  // check showed three wasted Jina calls per question); when all of them rest,
+  // one is tried again at most every 30 minutes, in case its quota came back.
+  let order = slots.filter(s => !isResting(s.key));
+  if (!order.length) {
+    if (Date.now() - (lastProbe.get(base) || 0) < 30 * 60e3) throw Object.assign(new Error(label + ': every key is out of quota for now'), { status: 429, resting: true });
+    lastProbe.set(base, Date.now());
+    order = [slots.reduce((a, b) => (resting.get(a.key) || 0) <= (resting.get(b.key) || 0) ? a : b)];
+  }
   let last;
   for (const s of order) {
     try { return await fn(s.key, s.name); }
