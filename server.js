@@ -5969,7 +5969,8 @@ async function newsDeps() {
   const io=await newsIo();
   return {
     fetch, log:console,
-    probe:v=>N.probeVideo(v, ytdlpPath()),
+    // 28.11: the YouTube Data API first (no visit to the YouTube site), yt-dlp only when no key answers.
+    probe:async v=>(await N.probeViaApi(v, (await import('./youtube-ivr.js')).youtubeKeysFrom(process.env)).catch(()=>null)) || N.probeVideo(v, ytdlpPath()),
     // The free path only (our own server); never the paid engine.
     download:(v,out)=>p.downloadApifySource(v,out,undefined,()=>{},false),
     // Speech (news, lessons, technology) or music (kind 'song': no low cut or
@@ -6033,7 +6034,7 @@ app.get('/news-health', rateLimit(30, 60 * 1000, 'news-health'), async (req,res)
         today:(st.perDay||{})[new Date().toISOString().slice(0,10)+':'+k]||0,listError:ti.error||null};
     }
     const errs={}; for(const c of Object.values(N.status.channels||{})) if(c.error) errs[c.error]=(errs[c.error]||0)+1;
-    res.json({ now:new Date().toISOString(), started:N.status.started, lastPoll:N.status.lastPoll, working:N.status.working, feedErrors:errs,
+    res.json({ now:new Date().toISOString(), botPauseUntil:N.status.botPauseUntil||null, started:N.status.started, lastPoll:N.status.lastPoll, working:N.status.working, feedErrors:errs,
       recentProblems:(N.status.log||[]).filter(x=>x.failed||x.gaveUp).slice(0,15), recentDone:(N.status.log||[]).filter(x=>x.done).slice(0,10).map(x=>({at:x.at,topic:x.topic,file:x.file,seconds:x.seconds,lateMin:x.lateMin})),
       keyPresses:(globalThis.mediaKeyLog||[]).slice(0,15), topics });
   } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }

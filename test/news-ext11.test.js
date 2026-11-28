@@ -331,3 +331,28 @@ test('a busy moment in Yemot never empties a list: key 8 still finds the file, a
   io.readJson = real;
   assert.ok((await io.readJson(N.INDEX)).items.aaaaaaaaaaa, 'the list was not written over');
 });
+
+test('the shared lanes go round the folders in turn (a folder with hundreds waiting never takes every turn)', async () => {
+  N._resetForTests();
+  const lob = Object.keys(N.TOPICS).find(k => N.TOPICS[k].lobby);
+  assert.ok(lob, 'LobbyTube folders exist');
+  const st = N.loadState(); st.queue = {}; st.turn = {}; st.perDay = {};
+  const pub = new Date().toISOString();
+  for (let i = 0; i < 30; i++) st.queue['m' + String(i).padStart(10, '0')] = { topic: '3', title: 'm' + i, published: pub, nextAt: 0 };
+  st.queue.lobbyvideo1 = { topic: lob, lobby: true, maxAgeDays: 3, title: 'l', published: pub, nextAt: 0 };
+  N.saveState(st);
+  const started = [];
+  const deps = { busy: () => false, log: { info() {}, warn() {} }, probe: async v => { started.push(v); return { live: 'is_upcoming' }; } };
+  await (await N.workOnce(deps)).done;
+  assert.ok(started.includes('lobbyvideo1'), 'the LobbyTube folder got a turn at once: ' + started.join(','));
+  assert.equal(started.filter(v => v.startsWith('m')).length, 1, 'music got one turn, not both lanes');
+  assert.ok(Object.keys(N.loadState().queue).filter(v => v.startsWith('m')).length <= 25, 'a folder keeps at most 25 waiting');
+});
+
+test('live check by the YouTube Data API', () => {
+  assert.deepEqual(N.liveFromApi({ snippet: { liveBroadcastContent: 'live' } }), { live: 'is_live', durationSec: null });
+  assert.deepEqual(N.liveFromApi({ snippet: { liveBroadcastContent: 'upcoming' } }), { live: 'is_upcoming', durationSec: null });
+  assert.deepEqual(N.liveFromApi({ snippet: { liveBroadcastContent: 'none' }, contentDetails: { duration: 'PT1H2M3S' } }), { live: 'not_live', durationSec: 3723 });
+  assert.deepEqual(N.liveFromApi({ snippet: { liveBroadcastContent: 'none' }, contentDetails: { duration: 'P0D' }, liveStreamingDetails: { actualEndTime: 'x' } }), { live: 'post_live', durationSec: null });
+  assert.equal(N.liveFromApi(undefined).gone, true);
+});

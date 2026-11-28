@@ -653,6 +653,39 @@ export function parseProbe(out) {
   const [live, dur] = line.split('|');
   return { live: live || 'unknown', durationSec: Number(dur) > 0 ? Number(dur) : null };
 }
+// Owner, 28.11 (downloads checked): every video used to be checked with
+// yt-dlp before its download - two visits to YouTube per video - and YouTube
+// answered more and more often "sign in to confirm you're not a bot", so
+// files waited for hours. The check now asks the YouTube Data API (the keys
+// already in the system; no visit to the YouTube site): live or not, and the
+// length. yt-dlp is only the fallback when no key answers.
+const isoDur = d => { const m = /^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(String(d || '')); return m ? ((+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0)) || null : null; };
+export function liveFromApi(item) {
+  if (!item) return { live: 'error', error: 'video not found (removed or private)', gone: true };
+  const lbc = item.snippet?.liveBroadcastContent;
+  const lsd = item.liveStreamingDetails;
+  if (lbc === 'live') return { live: 'is_live', durationSec: null };
+  if (lbc === 'upcoming') return { live: 'is_upcoming', durationSec: null };
+  const dur = isoDur(item.contentDetails?.duration);
+  // Just ended: YouTube is still preparing the recording (no length yet).
+  if (lsd?.actualEndTime && !dur) return { live: 'post_live', durationSec: null };
+  return { live: lsd ? 'was_live' : 'not_live', durationSec: dur };
+}
+const apiRest = new Map();
+export async function probeViaApi(videoId, keys, fetchImpl = fetch) {
+  for (const k of keys) {
+    if ((apiRest.get(k) || 0) > Date.now()) continue;
+    try {
+      const u = 'https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,liveStreamingDetails&id=' + encodeURIComponent(videoId) + '&key=' + encodeURIComponent(k);
+      const r = await fetchImpl(u, { signal: AbortSignal.timeout(8000) });
+      if (r.status === 403 || r.status === 429) { apiRest.set(k, Date.now() + 3600e3); continue; }
+      if (!r.ok) continue;
+      const j = await r.json();
+      return liveFromApi((j.items || [])[0]);
+    } catch {}
+  }
+  return null;
+}
 export function probeVideo(videoId, bin, timeoutMs = 60000) {
   return new Promise(resolve => {
     const p = spawn(bin, ['--skip-download', '--no-warnings', '--no-playlist', '--print', '%(live_status)s|%(duration)s', 'https://www.youtube.com/watch?v=' + videoId], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -671,10 +704,34 @@ export function probeVideo(videoId, bin, timeoutMs = 60000) {
 // session never holds up a one-minute news item); the other topics share one
 // more lane, and wait while the server is busy, so news and calls come first.
 const LONG_SEC = 20 * 60;
-const busy = { short: false, long: false, other: false };
+const busy = { short: false, long: false, other: false, other2: false };
+// Owner, 28.11: when YouTube says "confirm you're not a bot", the server
+// slows down for a while (news only; the other folders wait), longer each
+// time it repeats, so the address is not blocked for everything.
+export const BOT = /confirm you.?re not a bot|sign in to confirm/i;
+const bot = { until: 0, step: 0 };
+export function botPause(now = Date.now()) { bot.step = now - bot.until < 3600e3 ? Math.min(bot.step + 1, 4) : 1; bot.until = now + [0, 10, 20, 40, 60][bot.step] * 60000; status.botPauseUntil = new Date(bot.until).toISOString(); }
+// Owner, 28.11 (every folder updated): the shared lane goes round the
+// folders in turn - before, the folders came by a fixed order, so music,
+// technology and the other news (hundreds waiting) took every turn and the
+// LobbyTube folders (11/5 on) never got a single file. A folder's waiting
+// list is also kept short: only its newest videos wait.
+const QUEUE_CAP = t => TOPICS[t]?.news ? 120 : TOPICS[t]?.ownLane ? 200 : 25;
+export function trimQueue(st) {
+  const by = {};
+  for (const [v, q] of Object.entries(st.queue || {})) (by[topicOf(q)] ||= []).push([v, q]);
+  let dropped = 0;
+  for (const [t, list] of Object.entries(by)) {
+    if (list.length <= QUEUE_CAP(t)) continue;
+    list.sort((a, b) => (Date.parse(b[1].published) || 0) - (Date.parse(a[1].published) || 0));
+    for (const [v] of list.slice(QUEUE_CAP(t))) { if (status.working[v]) continue; delete st.queue[v]; st.seen[v] = 'backlog'; dropped++; }
+  }
+  return dropped;
+}
 export function serverBusy(load = os.loadavg()[0], freeMB = os.freemem() / 1048576) { return load > Number(process.env.NEWS11_MAX_LOAD || 3) || freeMB < Number(process.env.NEWS11_MIN_FREE_MB || 450); }
 export async function workOnce(deps, now = Date.now()) {
   const st = loadState(); st.queue ||= {}; st.seen ||= {};
+  if (trimQueue(st)) saveState(st);
   const due = Object.entries(st.queue).filter(([, q]) => (q.nextAt || 0) <= now)
     // 27.11 (owner: the news always up to date): the newest video first.
     // Before, the oldest went first, so a week-old backlog of a newly added
@@ -682,7 +739,13 @@ export async function workOnce(deps, now = Date.now()) {
     .sort((a, b) => (TOPICS[topicOf(a[1])].priority - TOPICS[topicOf(b[1])].priority) || ((Date.parse(b[1].published) || 0) - (Date.parse(a[1].published) || 0)));
   const started = [];
   const tooBusy = (deps.busy || serverBusy)();
+  const botWait = bot.until > now;
   const day = new Date(now).toISOString().slice(0, 10);
+  // The shared lane: one video from the folder whose turn came longest ago.
+  st.turn ||= {};
+  const firstOf = {};
+  for (const [v, q] of due) { const t = topicOf(q); if (!TOPICS[t].news && !TOPICS[t].ownLane || q.dub) { if (!firstOf[t] && !status.working[v] && !(q.lobby && ((st.perDay || {})[day + ':' + t] || 0) >= (TOPICS[t].perDay || LOBBY_PER_DAY))) firstOf[t] = v; } }
+  const turnOrder = Object.keys(firstOf).sort((a, b) => (st.turn[a] || 0) - (st.turn[b] || 0) || (TOPICS[a].priority - TOPICS[b].priority));
   for (const [videoId, q] of due) {
     if (status.working[videoId]) continue;
     const t = topicOf(q);
@@ -693,7 +756,18 @@ export async function workOnce(deps, now = Date.now()) {
     // The owner's chosen Torah channels (11/2/1) have a lane of their own, so
     // they never wait behind the LobbyTube topics or a dubbing.
     const lane = TOPICS[t].ownLane ? 'own' + t : !TOPICS[t].news || q.dub ? 'other' : q.durationSec && q.durationSec > LONG_SEC ? 'long' : 'short';
-    if (busy[lane] || (lane === 'other' && tooBusy)) continue;
+    if (lane === 'other') continue; // the shared lanes are filled below, folder by folder
+    if (busy[lane]) continue;
+    busy[lane] = true; status.working[videoId] = { lane, topic: t, since: new Date().toISOString(), title: q.title?.slice(0, 80) };
+    started.push(runOne(videoId, q, lane, deps).finally(() => { busy[lane] = false; delete status.working[videoId]; }));
+  }
+  // The shared lanes (two when the server is not busy): the next folder in turn.
+  if (!tooBusy && !botWait) for (const t of turnOrder) {
+    const lane = !busy.other ? 'other' : !busy.other2 ? 'other2' : null;
+    if (!lane) break;
+    const videoId = firstOf[t], q = st.queue[videoId];
+    if (!q || status.working[videoId]) continue;
+    st.turn[t] = now; update(videoId, s2 => { s2.turn ||= {}; s2.turn[t] = now; });
     busy[lane] = true; status.working[videoId] = { lane, topic: t, since: new Date().toISOString(), title: q.title?.slice(0, 80) };
     started.push(runOne(videoId, q, lane, deps).finally(() => { busy[lane] = false; delete status.working[videoId]; }));
   }
@@ -717,7 +791,8 @@ async function runOne(videoId, q, lane, deps) {
     retryLater(videoId, 10, pr.live); return;
   }
   if (pr.live === 'error') {
-    if ((q.tries || 0) >= 12) { update(videoId, st => { delete st.queue[videoId]; st.seen[videoId] = 'unavailable'; }); note({ gaveUp: videoId, why: pr.error }); return; }
+    if (pr.gone || (q.tries || 0) >= 12) { update(videoId, st => { delete st.queue[videoId]; st.seen[videoId] = 'unavailable'; }); note({ gaveUp: videoId, why: pr.error }); return; }
+    if (BOT.test(pr.error || '')) botPause();
     retryLater(videoId, Math.min(60, 5 * 2 ** Math.min(4, q.tries || 0)), 'check failed: ' + (pr.error || '')); return;
   }
   // A long news item that came to the short lane goes to the long lane (next round).
@@ -745,13 +820,14 @@ async function runOne(videoId, q, lane, deps) {
   } catch (e) {
     const msg = String(e?.message || e).slice(0, 200);
     note({ failed: videoId, topic: t, ch: q.ch, error: msg });
+    if (BOT.test(msg)) botPause();
     log.warn?.('[NEWS11] not published; tried again later', { videoId, topic: t, message: msg });
     if ((q.tries || 0) >= 8) update(videoId, st => { delete st.queue[videoId]; st.seen[videoId] = 'failed'; });
     else retryLater(videoId, Math.min(120, 5 * 2 ** Math.min(5, q.tries || 0)), 'failed: ' + msg.slice(0, 80));
   } finally { await fs.rm(tmp, { recursive: true, force: true }).catch(() => {}); }
 }
 
-export function _resetForTests() { busy.short = busy.long = busy.other = false; status.working = {}; status.log.length = 0; chain = Promise.resolve(); }
+export function _resetForTests() { bot.until = 0; bot.step = 0; busy.other2 = false; busy.short = busy.long = busy.other = false; status.working = {}; status.log.length = 0; chain = Promise.resolve(); }
 
 // The LobbyTube topics, as saved last time.
 loadLobby();
