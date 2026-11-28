@@ -6696,7 +6696,7 @@ app.get('/live-probe',rateLimit(4,60*1000,'live-probe'),async (req,res)=>{
   const quiet={ info(){}, warn(){} };
   const out=Object.fromEntries(await Promise.all([
     t('travel',async()=>{ const f=await T.travelFacts({ from:{ place:'רמה א', town:'בית שמש' }, to:{ place:'התחנה המרכזית', town:'ירושלים' } },{ log:quiet }); return { text:String(f.text||f.unknown||'').slice(0,1500), busTrips:f.bus?.trips?.length||0, busError:f.bus?.error||'', car:!!f.car?.best, to:f.to?{ label:f.to.label, lat:f.to.lat, lon:f.to.lon }:null, fromStops:(f.bus?.fromStops||[]).slice(0,4).map(x=>x.name+' '+Math.round(x.km*1000)+'m'), toStops:(f.bus?.toStops||[]).slice(0,4).map(x=>x.name+' '+Math.round(x.km*1000)+'m'), busDebug:f.bus?.debug||null }; }),
-    t('liveTraffic',async()=>{ const r=await T.trafficRoute({lat:31.7469,lon:34.9887},{lat:32.0853,lon:34.7818}); const tk=String(process.env.TOMTOM_API_KEY||'').trim(); return { google:!!String(process.env.GOOGLE_MAPS_API_KEY||'').trim(), tomtom:!!tk, tomtomShape:tk?{ length:tk.length, capitals:(tk.match(/[A-Z]/g)||[]).length, small:(tk.match(/[a-z]/g)||[]).length, digits:(tk.match(/[0-9]/g)||[]).length }:null, result:r }; }),
+    t('liveTraffic',async()=>{ const r=await T.trafficRoute({lat:31.7469,lon:34.9887},{lat:32.0853,lon:34.7818}); const tk=T.tomtomKey(); return { google:!!String(process.env.GOOGLE_MAPS_API_KEY||'').trim(), tomtom:!!tk, tomtomShape:tk?{ length:tk.length, capitals:(tk.match(/[A-Z]/g)||[]).length, small:(tk.match(/[a-z]/g)||[]).length, digits:(tk.match(/[0-9]/g)||[]).length }:null, result:r }; }),
     t('transfer',async()=>{ const f=await T.travelFacts({ from:{ place:'רמה א', town:'בית שמש' }, to:{ place:'רחוב רבי עקיבא', town:'בני ברק' }, mode:'bus' },{ log:quiet }); return { text:String(f.text||f.unknown||'').slice(0,1500), direct:f.bus?.trips?.length||0, transfers:f.bus?.transfers?.length||0, debug:f.bus?.debug||null }; }),
     t('ramiLevyGoogle',async()=>{ const M=await import('./maps-hours.js'); const geo=await P.geocode({town:'בית שמש'},{log:quiet}).catch(()=>null); const r=await M.mapsBusinessHours({ name:'רמי לוי', place:'קניון השדרה', town:'בית שמש' },{ keys:keysFor('SERPER_API_KEY'), geo, log:quiet }); return { found:!!r?.found, text:String(r?.text||'').slice(0,700), candidates:r?.candidates||[], week:r?.week||null }; }),
     t('boiRates',async()=>{ const B2=await import('./boi-rates.js'); return { text:await B2.rateAnswer('כמה עולה דולר היום ויורו',{log:quiet}) }; }),
@@ -6716,6 +6716,33 @@ import('./place-tools.js').then(async P=>{
   const { serperMaps }=await import('./maps-hours.js');
   P.setGoogleGeocoder(async q=>{ countSearch('serper-maps geo'); const r=await serperMaps(q,{keys:keysFor('SERPER_API_KEY'),log:{info(){},warn(){}}}); const p=r.find(x=>Number.isFinite(x.lat)); return p?{lat:p.lat,lon:p.lon,address:p.address}:null; });
 }).catch(()=>{});
+// Owner, 28.11: the TomTom key pasted in a browser page (the server console
+// drops capital letters). Only the same key as the one set in the console is
+// accepted (equal when both are in small letters), and only after TomTom
+// itself answers with a route for it; it is never shown back.
+app.get('/tomtom-key',(req,res)=>{
+  res.set('cache-control','no-store').type('html').send(`<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>מפתח TomTom</title>
+<body style="font-family:Arial;max-width:520px;margin:40px auto;padding:0 16px;font-size:18px">
+<h2>הדבקת מפתח TomTom</h2><p>הדבק כאן את המפתח מ־my.tomtom.com ולחץ שמור.</p>
+<form method="post" action="/tomtom-key"><input name="key" autocomplete="off" style="width:100%;font-size:18px;padding:8px" dir="ltr"><br><br>
+<button style="font-size:20px;padding:8px 24px">שמור</button></form></body></html>`);
+});
+app.post('/tomtom-key',rateLimit(6,60*60*1000,'tomtom-key'),express.urlencoded({extended:false,limit:'2kb'}),async (req,res)=>{
+  const page=t=>res.set('cache-control','no-store').type('html').send('<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><body style="font-family:Arial;max-width:520px;margin:40px auto;font-size:20px">'+t+'</body></html>');
+  const key=String(req.body?.key||'').replace(/\s+/g,'');
+  const typed=String(process.env.TOMTOM_API_KEY||'').trim();
+  if(!/^[A-Za-z0-9]{20,64}$/.test(key)) return page('זה לא נראה כמו מפתח. נסה להעתיק שוב.');
+  if(!typed || typed.toLowerCase()!==key.toLowerCase()) return page('המפתח לא תואם למפתח שהוכנס במסוף השרת. לא נשמר דבר.');
+  const T=await import('./travel-tools.js');
+  T.clearTravelCache();
+  const r=await T.trafficRoute({lat:31.7469,lon:34.9887},{lat:32.0853,lon:34.7818},{env:{TOMTOM_API_KEY:key}}).catch(e=>({error:String(e?.message||e)}));
+  if(!r?.routes?.length) return page('TomTom לא קיבל את המפתח ('+String(r?.error||'').replace(/[<>]/g,'').slice(0,60)+'). ייתכן שצריך לסמן במפתח את "ממשק API לניתוב". לא נשמר דבר.');
+  const { mkdir, writeFile }=await import('node:fs/promises');
+  await mkdir('/var/lib/yemot-data',{recursive:true}); await writeFile(T.TOMTOM_KEY_FILE,key,{mode:0o600});
+  T.clearTravelCache();
+  console.info('[TOMTOM_KEY] saved from the owner page',{minutesBeitShemeshTelAviv:r.routes[0].minutes});
+  page('✅ נשמר ועובד. עכשיו מבית שמש לתל אביב ברכב: '+r.routes[0].minutes+' דקות לפי הפקקים של עכשיו.');
+});
 // Read-only live check of extensions 1 and 3 (owner, 28.11): runs one of the
 // fixed question sets (live-qa-sets.js) as a simulated text call in the running
 // code, with the system's own log lines for each answer. Nothing is saved.
