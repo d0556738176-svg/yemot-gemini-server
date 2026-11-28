@@ -59,7 +59,7 @@ async function rideStops(params, { fetchImpl }) {
  * Direct bus trips (no change of bus) from near `from` to near `to`, leaving in
  * the next `windowMin` minutes. Returns { trips, fromStops, toStops } or { error }.
  */
-export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), windowMin = 90 } = {}) {
+export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), windowMin = 90, transfersOn = true } = {}) {
   const [fs, ts] = await Promise.all([townStops(from.town || from.label, { fetchImpl, now }), sameCity(from, to) ? null : townStops(to.town || to.label, { fetchImpl, now })]);
   const fromStops = nearest(fs, from, 0.6, 10), toStops = nearest(ts || fs, to, 0.6, 12);
   if (!fromStops.length) return { error: 'no_stops_from', fromStops, toStops };
@@ -105,7 +105,75 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
     if (n >= 2) continue;
     perLine.set(t.line, n + 1); out.push(t);
   }
-  return { trips: out.slice(0, 5), fromStops, toStops, debug: { leaving: leaving.length, rides: board.size, arriving: arriving.length, matched: trips.length } };
+  const result = { trips: out.slice(0, 5), fromStops, toStops, debug: { leaving: leaving.length, rides: board.size, arriving: arriving.length, matched: trips.length } };
+  // 28.11 (owner: plan the trip the way Moovit does): when there is no direct
+  // line, or the direct ones are few, one change of bus is searched too.
+  if (result.trips.length < 2 && transfersOn) {
+    result.transfers = await busTransfers({ board, firstStops: lists.flat(), toStops, to, now, windowMin, t0, fetchImpl }).catch(e => { result.debug.transferError = String(e?.message || e).slice(0, 80); return []; });
+    result.debug.transfers = result.transfers.length;
+  }
+  return result;
+}
+
+// One change of bus: rides that leave near him (with all their later stops)
+// meet rides that reach near the destination, at the same stop or within a
+// short walk, with at least 3 minutes to change. Earliest arrival first.
+const cell = (lat, lon) => Math.round(lat / 0.0025) + '|' + Math.round(lon / 0.003);
+async function busTransfers({ board, firstStops, toStops, to, now, windowMin, t0, fetchImpl }) {
+  const t3 = new Date(now.getTime() + (windowMin + 180) * 60000).toISOString();
+  const reaching = await rideStops({ gtfs_stop_ids: toStops.map(s => s.id).join(','), arrival_time_from: t0, arrival_time_to: t3, limit: 2000 }, { fetchImpl });
+  const last = new Map(); // ride -> where it lets him off near the destination
+  for (const r of reaching) {
+    if (r.drop_off_type === 1 || board.has(r.gtfs_ride_id)) continue;
+    const prev = last.get(r.gtfs_ride_id);
+    if (!prev || r.stop_sequence < prev.stop_sequence) last.set(r.gtfs_ride_id, r);
+  }
+  if (!last.size) return [];
+  const ids = [...last.keys()].slice(0, 80);
+  const chunks = []; for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
+  const second = (await Promise.all(chunks.map(c => rideStops({ gtfs_ride_ids: c.join(','), arrival_time_from: t0, arrival_time_to: t3, limit: 3000 }, { fetchImpl }).catch(() => [])))).flat();
+  // Where each second ride can be boarded (before the stop near the destination).
+  const grid = new Map();
+  for (const r of second) {
+    const end = last.get(r.gtfs_ride_id);
+    if (!end || r.stop_sequence >= end.stop_sequence || r.pickup_type === 1 || !Number.isFinite(r.gtfs_stop__lat)) continue;
+    const k = cell(r.gtfs_stop__lat, r.gtfs_stop__lon);
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(r);
+  }
+  const toKm = new Map(toStops.map(s => [s.id, s.km]));
+  const best = new Map();
+  for (const a of firstStops) {
+    const b = board.get(a.gtfs_ride_id);
+    if (!b || a.stop_sequence <= b.stop_sequence || a.drop_off_type === 1 || !Number.isFinite(a.gtfs_stop__lat)) continue;
+    const arrive1 = Date.parse(a.arrival_time);
+    const [ci, cj] = cell(a.gtfs_stop__lat, a.gtfs_stop__lon).split('|').map(Number);
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) for (const r of grid.get((ci + di) + '|' + (cj + dj)) || []) {
+      const walkKm = distanceKm({ lat: a.gtfs_stop__lat, lon: a.gtfs_stop__lon }, { lat: r.gtfs_stop__lat, lon: r.gtfs_stop__lon });
+      if (walkKm > 0.3) continue;
+      const leave2 = Date.parse(r.departure_time || r.arrival_time);
+      const gap = (leave2 - arrive1) / 60000;
+      if (gap < 3 + walkKm * 12 || gap > 40) continue;
+      const end = last.get(r.gtfs_ride_id), arrive = Date.parse(end.arrival_time);
+      const line1 = String(b.gtfs_route__route_short_name || ''), line2 = String(r.gtfs_route__route_short_name || end.gtfs_route__route_short_name || '');
+      if (!line2 || line1 === line2) continue;
+      const key = line1 + '>' + line2 + '|' + israelHHMM(b.departure_time || b.arrival_time);
+      const t = {
+        line1, agency1: b.gtfs_route__agency_name || '', board: b.gtfs_stop__name, leaves: israelHHMM(b.departure_time || b.arrival_time), leavesAt: Date.parse(b.departure_time || b.arrival_time),
+        change: a.gtfs_stop__name, changeTo: r.gtfs_stop__name, changeWalkKm: walkKm, reachChange: israelHHMM(a.arrival_time), waitMin: Math.round(gap),
+        line2, agency2: r.gtfs_route__agency_name || end.gtfs_route__agency_name || '', leaves2: israelHHMM(r.departure_time || r.arrival_time),
+        alight: end.gtfs_stop__name, alightWalkKm: toKm.get(end.gtfs_stop_id) ?? (Number.isFinite(end.gtfs_stop__lat) ? distanceKm(to, { lat: end.gtfs_stop__lat, lon: end.gtfs_stop__lon }) : null), arrives: israelHHMM(end.arrival_time), arrivesAt: arrive
+      };
+      if (!best.has(key) || arrive < best.get(key).arrivesAt) best.set(key, t);
+    }
+  }
+  const perPair = new Map(), out = [];
+  for (const t of [...best.values()].sort((x, y) => x.arrivesAt - y.arrivesAt)) {
+    const k = t.line1 + '>' + t.line2;
+    if ((perPair.get(k) || 0) >= 1) continue;
+    perPair.set(k, 1); out.push(t);
+  }
+  return out.slice(0, 3);
 }
 function sameCity(a, b) { return plainCity(a.town) && plainCity(a.town) === plainCity(b.town); }
 
@@ -131,21 +199,58 @@ export async function carRoute(from, to, { fetchImpl = fetch } = {}) {
   return { best: describe(j.routes[0]), other: j.routes[1] ? describe(j.routes[1]) : null };
 }
 
+// Live traffic (owner, 28.11: "like Waze, with today's jams"). Waze and Moovit
+// have no public interface; the legal live-traffic routers are Google Routes
+// (GOOGLE_MAPS_API_KEY) and TomTom (TOMTOM_API_KEY, free 2,500 a day). With
+// neither key set, the usual time from the open map is said, honestly so.
+export async function trafficRoute(from, to, { fetchImpl = fetch, env = process.env, now = new Date() } = {}) {
+  const g = String(env.GOOGLE_MAPS_API_KEY || '').trim(), tt = String(env.TOMTOM_API_KEY || '').trim();
+  const key5 = x => x.lat.toFixed(4) + ',' + x.lon.toFixed(4);
+  if (g) {
+    try {
+      return await cached('gdrive|' + key5(from) + '|' + key5(to), 4 * 60000, async () => {
+        const r = await fetchImpl('https://routes.googleapis.com/directions/v2:computeRoutes', { method: 'POST', signal: AbortSignal.timeout(8000),
+          headers: { 'content-type': 'application/json', 'X-Goog-Api-Key': g, 'X-Goog-FieldMask': 'routes.duration,routes.staticDuration,routes.distanceMeters,routes.description' },
+          body: JSON.stringify({ origin: { location: { latLng: { latitude: from.lat, longitude: from.lon } } }, destination: { location: { latLng: { latitude: to.lat, longitude: to.lon } } }, travelMode: 'DRIVE', routingPreference: 'TRAFFIC_AWARE_OPTIMAL', computeAlternativeRoutes: true, languageCode: 'he', units: 'METRIC' }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.routes?.length) throw Object.assign(new Error('Google routes HTTP ' + r.status + ' ' + String(j?.error?.message || '').slice(0, 80)), { status: r.status });
+        const routes = j.routes.map(x => ({ minutes: Math.round(parseFloat(x.duration) / 60), freeMinutes: Math.round(parseFloat(x.staticDuration || x.duration) / 60), km: x.distanceMeters / 1000, via: String(x.description || '') })).sort((a, b) => a.minutes - b.minutes);
+        return { source: 'google', routes };
+      });
+    } catch (e) { if (!tt) return { error: String(e?.message || e).slice(0, 120) }; }
+  }
+  if (tt) {
+    try {
+      return await cached('tomtom|' + key5(from) + '|' + key5(to), 4 * 60000, async () => {
+        const u = 'https://api.tomtom.com/routing/1/calculateRoute/' + key5(from) + ':' + key5(to) + '/json?traffic=true&maxAlternatives=2&routeRepresentation=summaryOnly&computeTravelTimeFor=all&departAt=now&key=' + encodeURIComponent(tt);
+        const r = await fetchImpl(u, { signal: AbortSignal.timeout(8000) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.routes?.length) throw Object.assign(new Error('TomTom HTTP ' + r.status), { status: r.status });
+        const routes = j.routes.map(x => ({ minutes: Math.round(x.summary.travelTimeInSeconds / 60), freeMinutes: Math.round((x.summary.noTrafficTravelTimeInSeconds || x.summary.travelTimeInSeconds) / 60), delayMin: Math.round((x.summary.trafficDelayInSeconds || 0) / 60), km: x.summary.lengthInMeters / 1000 })).sort((a, b) => a.minutes - b.minutes);
+        return { source: 'tomtom', routes };
+      });
+    } catch (e) { return { error: String(e?.message || e).slice(0, 120) }; }
+  }
+  return null;
+}
+
 const spokenMin = m => m < 60 ? m + ' דקות' : Math.floor(m / 60) + ' שעות' + (m % 60 ? ' ו-' + (m % 60) + ' דקות' : '');
 
 /**
  * Everything for the answer: geocodes both ends, then bus and/or car.
  * from/to: { place, town }. mode: 'bus' | 'car' | 'any'.
  */
-export async function travelFacts({ from = {}, to = {}, mode = 'any' } = {}, { fetchImpl = fetch, log = console, now = new Date() } = {}) {
+export async function travelFacts({ from = {}, to = {}, mode = 'any' } = {}, { fetchImpl = fetch, log = console, now = new Date(), env = process.env } = {}) {
   const [a, b] = await Promise.all([geocode(from, { fetchImpl, log }).catch(() => null), geocode(to, { fetchImpl, log }).catch(() => null)]);
   if (!a || !b) return { unknown: !a ? (from.place || from.town || 'נקודת המוצא') : (to.place || to.town || 'היעד'), missing: !a ? 'from' : 'to' };
   if (!a.town) a.town = from.town || ''; if (!b.town) b.town = to.town || '';
   const wantBus = mode !== 'car', wantCar = mode !== 'bus';
-  const [bus, car] = await Promise.all([
+  const [bus, car, live] = await Promise.all([
     wantBus ? busTrips(a, b, { fetchImpl, now }).catch(e => { log.warn?.('[TRAVEL] bus timetable unavailable', String(e?.message || e).slice(0, 80)); return { error: 'down' }; }) : null,
-    wantCar ? carRoute(a, b, { fetchImpl }).catch(e => { log.warn?.('[TRAVEL] car route unavailable', String(e?.message || e).slice(0, 80)); return null; }) : null
+    wantCar ? carRoute(a, b, { fetchImpl }).catch(e => { log.warn?.('[TRAVEL] car route unavailable', String(e?.message || e).slice(0, 80)); return null; }) : null,
+    wantCar ? trafficRoute(a, b, { fetchImpl, env, now }).catch(() => null) : null
   ]);
+  if (live?.error) log.warn?.('[TRAVEL] live traffic unavailable', live.error);
   const where = l => l.label + (l.town && !String(l.label).includes(l.town) ? ' ב' + l.town : '');
   const lines = ['מ' + where(a) + ' אל ' + where(b) + ', מרחק בקו אווירי ' + spokenDistance(distanceKm(a, b)) + '.'];
   if (wantBus) {
@@ -155,14 +260,28 @@ export async function travelFacts({ from = {}, to = {}, mode = 'any' } = {}, { f
     } else if (bus?.error === 'down') lines.push('לוח הזמנים של האוטובוסים לא היה זמין עכשיו.');
     else if (bus?.error === 'no_stops_from') lines.push('לא מצאתי בלוח הזמנים תחנות אוטובוס ליד נקודת המוצא.');
     else if (bus?.error === 'no_stops_to') lines.push('לא מצאתי בלוח הזמנים תחנות אוטובוס ליד היעד.');
-    else if (bus) lines.push('לא מצאתי קו ישיר (בלי החלפה) שיוצא בשעה וחצי הקרובה מתחנה ליד נקודת המוצא ומגיע ליד היעד. ייתכן שצריך החלפה' + (bus.fromStops?.length ? '; התחנות הקרובות אליו: ' + bus.fromStops.slice(0, 2).map(s => s.name).join(', ') : '') + '.');
+    if (bus?.transfers?.length) {
+      lines.push((bus.trips?.length ? 'ועוד ' : '') + 'אפשרויות עם החלפה אחת (לוח הזמנים הרשמי), לפי שעת ההגעה:');
+      bus.transfers.forEach((t, i) => lines.push((i + 1) + '. קו ' + t.line1 + (t.agency1 ? ' של ' + t.agency1 : '') + ' מהתחנה ' + t.board + ' ב' + spokenTime(t.leaves) + ', יורדים בתחנה ' + t.change + ' ב' + spokenTime(t.reachChange) +
+        (t.changeTo && t.changeTo !== t.change ? ', הולכים ' + spokenDistance(t.changeWalkKm) + ' לתחנה ' + t.changeTo : '') + ', ועולים לקו ' + t.line2 + (t.agency2 && t.agency2 !== t.agency1 ? ' של ' + t.agency2 : '') + ' שיוצא ב' + spokenTime(t.leaves2) + ' (המתנה של ' + spokenMin(Math.max(1, t.waitMin)) + '), יורדים בתחנה ' + t.alight + ' ב' + spokenTime(t.arrives) +
+        (t.alightWalkKm != null ? ', ומשם ' + spokenDistance(t.alightWalkKm) + ' הליכה' : '') + '. סך הכל ' + spokenMin(Math.max(1, Math.round((t.arrivesAt - t.leavesAt) / 60000))) + '.'));
+    }
+    else if (bus && !bus.trips?.length && !bus.error) lines.push('לא מצאתי קו ישיר (בלי החלפה) שיוצא בשעה וחצי הקרובה מתחנה ליד נקודת המוצא ומגיע ליד היעד. ולא מצאתי גם אפשרות עם החלפה אחת בזמן הזה' + (bus.fromStops?.length ? '; התחנות הקרובות אליו: ' + bus.fromStops.slice(0, 2).map(s => s.name).join(', ') : '') + '.');
   }
   if (wantCar) {
-    if (car?.best) {
+    const fast = live?.routes?.[0];
+    if (fast) {
+      const delay = fast.delayMin ?? Math.max(0, fast.minutes - fast.freeMinutes);
+      lines.push('ברכב, לפי מצב התנועה עכשיו (' + (live.source === 'google' ? 'גוגל מפות' : 'טום טום') + ', כולל פקקים): ' + spokenMin(fast.minutes) + ', ' + spokenDistance(fast.km) + (fast.via ? ' דרך ' + fast.via : '') +
+        (delay >= 3 ? '; בגלל העומס זה ' + spokenMin(delay) + ' יותר מבלי פקקים' : '; כמעט בלי עיכובי תנועה') + '.');
+      const alt = live.routes[1];
+      if (alt) lines.push('דרך אחרת עכשיו: ' + spokenMin(alt.minutes) + ', ' + spokenDistance(alt.km) + (alt.via ? ' דרך ' + alt.via : '') + '.');
+      if (car?.best) lines.push('הכבישים במסלול הרגיל לפי המפה, לפי הסדר: ' + car.best.roads.map(r => r.label).join(', ') + '.');
+    } else if (car?.best) {
       lines.push('ברכב (מסלול רגיל לפי המפה, בלי נתוני עומסים חיים): ' + spokenDistance(car.best.km) + ', בערך ' + spokenMin(car.best.minutes) + ' בלי פקקים. הדרכים לפי הסדר: ' + car.best.roads.map(r => r.label).join(', ') + '.');
       if (car.other && Math.abs(car.other.minutes - car.best.minutes) <= 15) lines.push('דרך חלופית: ' + car.other.roads.map(r => r.label).join(', ') + ', ' + spokenDistance(car.other.km) + ', בערך ' + spokenMin(car.other.minutes) + '.');
     } else lines.push('מסלול הנסיעה ברכב לא היה זמין עכשיו.');
   }
   const roads = car?.best ? [...new Set(car.best.roads.map(r => (r.label.match(/^כביש (\d+)/) || [])[1]).filter(Boolean))] : [];
-  return { from: a, to: b, bus, car, roads, text: lines.join('\n') };
+  return { from: a, to: b, bus, car, live: live?.routes ? live : null, roads, text: lines.join('\n') };
 }

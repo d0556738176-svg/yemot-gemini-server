@@ -23,6 +23,9 @@ function cached(key, ms, fn) {
 }
 
 const plain = s => String(s || '').toLowerCase().replace(/[״"׳'`\-–־.,()]/g, ' ').replace(/\s+/g, ' ').trim();
+// "+972 2 561 3580" -> "02-561-3580"; "..., בית שמש, 9903024, ישראל" -> "..., בית שמש".
+export const localPhone = p => { const d = String(p || '').replace(/[^\d+]/g, ''); const m = d.match(/^\+?972(\d{1,2})(\d{3})(\d{4})$/); return m ? '0' + m[1] + '-' + m[2] + '-' + m[3] : String(p || ''); };
+export const cleanAddress = a => String(a || '').replace(/,?\s*(?:ישראל|Israel)\s*$/u, '').replace(/,\s*\d{5,7}(?=,|$)/g, '').trim();
 const STOP = new Set(['סניף', 'חנות', 'הסניף', 'החנות', 'של', 'את', 'ב', 'ה', 'פתוח', 'פתוחה', 'עכשיו', 'היום', 'קניון', 'הקניון', 'מרכז', 'שעות', 'פתיחה']);
 const wordsOf = s => plain(s).split(' ').filter(w => w.length >= 2 && !STOP.has(w));
 // "ברמי" / "הרמי" / "לרמי" still match "רמי".
@@ -136,8 +139,12 @@ export async function mapsBusinessHours({ name = '', place = '', town = '' } = {
     const placeHits = pw.filter(w => has(hay, w)).length;
     return { p, ok: nameOk && townOk, score: placeHits * 2 + (p.openingHours ? 1 : 0) };
   }).filter(x => x.ok).sort((a, b) => b.score - a.score);
+  // He named a mall or street: a listing that does not mention it is another
+  // branch (live check: "Super-Pharm in the Zahav mall" got the Gallery branch).
+  // One branch only in that town: that is the one he means.
+  if (pw.length && scored.length > 1 && !(scored[0].score >= 2)) return { found: false, otherBranch: true, candidates: scored.slice(0, 3).map(x => x.p.title + ', ' + x.p.address) };
   if (!scored.length) return { found: false, candidates: places.slice(0, 3).map(p => p.title + ', ' + p.address) };
-  const pick = scored[0].p, week = parseWeek(pick.openingHours), st = openStateNow(week, now);
+  const pick = { ...scored[0].p, address: cleanAddress(scored[0].p.address), phone: localPhone(scored[0].p.phone) }, week = parseWeek(pick.openingHours), st = openStateNow(week, now);
   const others = scored.slice(1, 3).map(x => x.p);
   const nowText = spokenClock(israelClock(now).min);
   const line = st.state === 'open' ? 'פתוח עכשיו (השעה ' + nowText + '), עד ' + spokenClock(st.until) + '.'

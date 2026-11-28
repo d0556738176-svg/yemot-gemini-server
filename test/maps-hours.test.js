@@ -39,3 +39,8 @@ test('picks the branch in the town and mall he named', async () => {
   assert.equal(r.found, true); assert.match(r.place.address, /בית שמש/); assert.equal(r.state.state, 'open');
   assert.match(r.text, /פתוח עכשיו/);
 });
+test('a mall he named that no listing mentions: not another branch', async () => {
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ places: [{ title: 'סופר פארם גאלרי', address: 'ילדי טהרן 7, ראשון לציון', openingHours: { Saturday: '8 PM–11 PM' } }, { title: 'סופר פארם רוטשילד', address: 'רוטשילד 1, ראשון לציון' }] }) });
+  const r = await mapsBusinessHours({ name: 'סופר פארם', place: 'קניון הזהב', town: 'ראשון לציון' }, { keys: ['k'], fetchImpl, log: {} });
+  assert.equal(r.found, false); assert.equal(r.otherBranch, true);
+});
