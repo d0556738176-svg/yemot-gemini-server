@@ -97,7 +97,16 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
   const chunks = []; for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
   const lists = await Promise.all(chunks.map(c => rideStops({ gtfs_ride_ids: c.join(','), arrival_time_from: t0, arrival_time_to: t2, limit: 3000 }, { fetchImpl }).catch(() => [])));
   const nearTo = r => Number.isFinite(r.gtfs_stop__lat) ? distanceKm(to, { lat: r.gtfs_stop__lat, lon: r.gtfs_stop__lon }) : (toStops.find(s => s.id === r.gtfs_stop_id)?.km ?? 99);
-  let arriving = lists.flat().filter(r => board.has(r.gtfs_ride_id)).map(r => ({ ...r, _km: nearTo(r) }));
+  // 28.11: from a busy stop (the Jerusalem central station has hundreds of
+  // rides) only part of the rides' stops can be read, and the right lines were
+  // missed. The stops near the destination are asked too, and the rides that
+  // reach them from his stops are kept: every line that really goes there.
+  const near = to.wholeTown
+    ? [...new Map([...toStops].sort((a, b) => distanceKm(from, a) - distanceKm(from, b)).slice(0, 60).concat([...toStops].sort((a, b) => a.km - b.km).slice(0, 30)).map(s => [s.id, s])).values()]
+    : toStops;
+  const destChunks = []; for (let i = 0; i < near.length; i += 30) destChunks.push(near.slice(i, i + 30));
+  const reach = await Promise.all(destChunks.map(c => rideStops({ gtfs_stop_ids: c.map(s => s.id).join(','), arrival_time_from: t0, arrival_time_to: t2, limit: 5000 }, { fetchImpl }).catch(() => [])));
+  let arriving = [...lists.flat(), ...reach.flat()].filter(r => board.has(r.gtfs_ride_id)).map(r => ({ ...r, _km: nearTo(r) }));
   const close = arriving.filter(r => r._km <= 0.6);
   if (townIds) {
     // In the town: the rides that stop there, asked at the town's own stops
@@ -272,8 +281,8 @@ export async function travelFacts({ from = {}, to = {}, mode = 'any' } = {}, { f
   const [a, b] = await Promise.all([geocode(from, { fetchImpl, log }).catch(() => null), geocode(to, { fetchImpl, log }).catch(() => null)]);
   if (!a || !b) return { unknown: !a ? (from.place || from.town || 'נקודת המוצא') : (to.place || to.town || 'היעד'), missing: !a ? 'from' : 'to' };
   if (!a.town) a.town = from.town || ''; if (!b.town) b.town = to.town || '';
-  if (!String(from.place || '').trim() || sameCityName(from.place, from.town)) a.wholeTown = true;
-  if (!String(to.place || '').trim() || sameCityName(to.place, to.town)) b.wholeTown = true;
+  if (!String(from.place || '').trim() || sameCityName(from.place, from.town) || sameCityName(from.place, a.town)) { a.wholeTown = true; if (!a.town) a.town = from.place; }
+  if (!String(to.place || '').trim() || sameCityName(to.place, to.town) || sameCityName(to.place, b.town)) { b.wholeTown = true; if (!b.town) b.town = to.place; }
   const wantBus = mode !== 'car', wantCar = mode !== 'bus';
   const [bus, car, live] = await Promise.all([
     wantBus ? busTrips(a, b, { fetchImpl, now }).catch(e => { log.warn?.('[TRAVEL] bus timetable unavailable', String(e?.message || e).slice(0, 80)); return { error: 'down' }; }) : null,
