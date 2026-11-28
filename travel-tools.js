@@ -81,7 +81,7 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
   if (!fromStops.length) return { error: 'no_stops_from', fromStops, toStops };
   if (!toStops.length) return { error: 'no_stops_to', fromStops, toStops };
   const t0 = new Date(now.getTime() - 2 * 60000).toISOString(), t1 = new Date(now.getTime() + windowMin * 60000).toISOString();
-  const leaving = await rideStops({ gtfs_stop_ids: fromStops.map(s => s.id).join(','), arrival_time_from: t0, arrival_time_to: t1, limit: 1500 }, { fetchImpl });
+  const leaving = await rideStops({ gtfs_stop_ids: fromStops.map(s => s.id).join(','), arrival_time_from: t0, arrival_time_to: t1, limit: 5000 }, { fetchImpl });
   const board = new Map();
   for (const r of leaving) {
     if (r.pickup_type === 1) continue;
@@ -100,9 +100,14 @@ export async function busTrips(from, to, { fetchImpl = fetch, now = new Date(), 
   let arriving = lists.flat().filter(r => board.has(r.gtfs_ride_id)).map(r => ({ ...r, _km: nearTo(r) }));
   const close = arriving.filter(r => r._km <= 0.6);
   if (townIds) {
-    // In the town: per ride, the stop nearest its middle.
+    // In the town: the rides that stop there, asked at the town's own stops
+    // (one per square kilometre), met with the rides that leave near him.
+    const reach = await rideStops({ gtfs_stop_ids: spread(toStops, to).map(s => s.id).join(','), arrival_time_from: t0, arrival_time_to: t2, limit: 5000 }, { fetchImpl }).catch(() => []);
     const per = new Map();
-    for (const r of arriving.filter(r => townIds.has(r.gtfs_stop_id))) { const p = per.get(r.gtfs_ride_id); if (!p || r._km < p._km) per.set(r.gtfs_ride_id, r); }
+    for (const r of [...arriving.filter(r => townIds.has(r.gtfs_stop_id)), ...reach.filter(r => board.has(r.gtfs_ride_id)).map(r => ({ ...r, _km: Number.isFinite(r.gtfs_stop__lat) ? distanceKm(to, { lat: r.gtfs_stop__lat, lon: r.gtfs_stop__lon }) : 9 }))]) {
+      if (r.drop_off_type === 1 || r.stop_sequence <= (board.get(r.gtfs_ride_id)?.stop_sequence ?? 1e9)) continue;
+      const p = per.get(r.gtfs_ride_id); if (!p || r._km < p._km) per.set(r.gtfs_ride_id, r);
+    }
     arriving = [...per.values()];
   } else arriving = close.length ? close : arriving.filter(r => r._km <= 1.0);
   const fromKm = new Map(fromStops.map(s => [s.id, s.km])), toKm = new Map(toStops.map(s => [s.id, s.km]));
