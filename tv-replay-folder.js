@@ -149,6 +149,15 @@ export async function publishHour(item, io) {
     if (s2.redo) delete s2.redo[ch.key + '/' + id];
     s2.done[ch.key + '/' + id] = { file: number, minutes: Math.round((m?.durationSec || 0) / 60), at: new Date().toISOString(), ...(m?.hissCut ? { hissCut: true } : {}) };
     saveState(s2);
+    // Owner, 28.11: what is saved in Yemot does not stay on the server. Once
+    // Yemot confirms the hour's file is there (size > 0), the hour's
+    // recordings are deleted from the server at once (they used to stay 48
+    // hours - about 10 GB). Not confirmed: they stay, and the 48-hour rule
+    // removes them later.
+    if (io.exists) {
+      const ok = await io.exists(folder + '/' + number + '.wav').catch(() => false);
+      if (ok) { let n = 0; for (const f of files) { if (await fs.unlink(f).then(() => true, () => false)) n++; } io.log?.info?.('[TV REPLAY] hour in Yemot; recordings deleted from the server', { key: ch.key, id, files: n }); }
+    }
     note({ key: ch.key, hour: id, ok: true, file: number, minutes: Math.round((m?.durationSec || 0) / 60), ...(redo ? { redo: true } : {}), ...(m?.hissCut ? { hissCut: true } : {}) });
     io.log?.info?.('[TV REPLAY] hour published', { key: ch.key, id, file: number });
     return folder.replace(/^ivr2:/, '');
@@ -156,6 +165,27 @@ export async function publishHour(item, io) {
     note({ key: ch.key, hour: id, ok: false, files: files.length, error: String(e?.message || e).slice(0, 600) });
     throw e;
   } finally { await fs.rm(tmp, { recursive: true, force: true }).catch(() => {}); }
+}
+
+// Owner, 28.11: hours published before this rule still have their
+// recordings on the server. Each round clears them: an hour already marked
+// done whose file Yemot confirms (exists, size > 0) leaves the server. A few
+// hours a round, so Yemot is not flooded with checks.
+export async function clearPublished(io, max = 40) {
+  if (!io.exists) return 0;
+  const st = loadState(); let hours = 0;
+  for (const [k, d] of Object.entries(st.done || {})) {
+    if (hours >= max) break;
+    const m = k.match(/^([^/]+)\/((\d{8})-(\d\d))$/); if (!m || !d?.file) continue;
+    const names = (await fs.readdir(path.join(REC_DIR, m[1])).catch(() => [])).filter(n => n.startsWith(m[2]) && /\.mp3$/.test(n));
+    if (!names.length) continue;
+    if (st.redo?.[k]) continue; // waiting to be made again: needs its recordings
+    hours++;
+    if (!(await io.exists(hourFolder(m[1], Number(m[4])) + '/' + d.file + '.wav').catch(() => false))) continue;
+    for (const n of names) await fs.unlink(path.join(REC_DIR, m[1], n)).catch(() => {});
+    io.log?.info?.('[TV REPLAY] old recordings of an hour already in Yemot deleted', { hour: k, files: names.length });
+  }
+  return hours;
 }
 
 // Runs every few minutes: publishes every finished hour, oldest first, one

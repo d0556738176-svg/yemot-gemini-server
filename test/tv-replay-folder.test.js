@@ -78,3 +78,30 @@ test('one hour that fails does not hold up the other channels', async () => {
   await RF.publishPending(chs, io);
   assert.equal(tried.filter(r => r.includes('/5/9/5/')).length, tried.slice(0, before).filter(r => r.includes('/5/9/5/')).length, 'the failed hour waits before the next try');
 });
+
+test('an hour confirmed in Yemot leaves the server at once; not confirmed, it stays', async () => {
+  const RF = await import('../tv-replay-folder.js');
+  const { existsSync } = await import('node:fs');
+  mp3('7', '20261120-090000.mp3'); mp3('7', '20261120-091000.mp3'); mp3('7', '20261120-100000.mp3');
+  const now = new Date('2026-11-20T09:30:00Z'); // 11:30 in Israel: 9 and 10 are over
+  const ch = { key: '7', title: 'ערוץ' };
+  const yemot = {};
+  const mk = confirm => ({ list: async () => ({ files: [] }), del: async r => { delete yemot[r]; }, putText: async (w, c) => { yemot[w] = c; }, getText: async w => yemot[w] ?? null,
+    upload: async (f, r) => { yemot[r] = 'audio'; }, exists: async r => confirm && yemot[r] === 'audio', log: { info() {}, warn() {} } });
+  const [h9, h10] = await RF.hoursToPublish([ch], now);
+  await RF.publishHour(h9, mk(true));
+  assert.ok(!existsSync(path.join(dir, '7', '20261120-090000.mp3')) && !existsSync(path.join(dir, '7', '20261120-091000.mp3')), 'confirmed: deleted');
+  await RF.publishHour(h10, mk(false));
+  assert.ok(existsSync(path.join(dir, '7', '20261120-100000.mp3')), 'not confirmed: kept');
+});
+
+test('hours published before the rule: cleared once Yemot confirms them', async () => {
+  const RF = await import('../tv-replay-folder.js');
+  const { existsSync } = await import('node:fs');
+  // Channel 1's 21:00 hours were published in the first test (without a check) and are still here.
+  assert.ok(existsSync(path.join(dir, '1', '20261118-210000.mp3')));
+  const confirmed = new Set(['ivr2:/5/9/1/21/000.wav']);
+  await RF.clearPublished({ exists: async r => confirmed.has(r), log: { info() {} } });
+  assert.ok(!existsSync(path.join(dir, '1', '20261118-210000.mp3')) && !existsSync(path.join(dir, '1', '20261118-211000.mp3')), 'day 1 confirmed: deleted');
+  assert.ok(existsSync(path.join(dir, '1', '20261119-210000.mp3')), 'day 2 not confirmed: kept');
+});

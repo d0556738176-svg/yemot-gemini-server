@@ -5911,6 +5911,8 @@ async function replayIo() {
     // A whole hour is bigger than one upload: Yemot gets it in parts and joins it.
     upload:(f,r)=>p.uploadToYemot(f,r,undefined,{convertAudio:true}),
     del:async remote=>{ await fetch(api('FileAction',{action:'delete',what:remote}),{signal:AbortSignal.timeout(8000)}).catch(()=>{}); },
+    // 28.11: is the file really in Yemot (exists, size > 0)? Only then the server copy goes.
+    exists:async remote=>{ const j=await (await fetch(api('GetFile',{what:remote}),{signal:AbortSignal.timeout(15000)})).json().catch(()=>null); return j?.file?.exists===true&&Number(j?.file?.size)>0; },
     log:console,
   };
 }
@@ -6034,7 +6036,13 @@ app.get('/news-health', rateLimit(30, 60 * 1000, 'news-health'), async (req,res)
         today:(st.perDay||{})[new Date().toISOString().slice(0,10)+':'+k]||0,listError:ti.error||null};
     }
     const errs={}; for(const c of Object.values(N.status.channels||{})) if(c.error) errs[c.error]=(errs[c.error]||0)+1;
-    res.json({ now:new Date().toISOString(), botPauseUntil:N.status.botPauseUntil||null, started:N.status.started, lastPoll:N.status.lastPoll, working:N.status.working, feedErrors:errs,
+    const { readdirSync, statSync, statfsSync }=await import('node:fs'); const pth=await import('node:path'); const osm=await import('node:os');
+    const sizeOf=(d,depth=0)=>{ let n=0; try { for(const e of readdirSync(d,{withFileTypes:true})){ const f=pth.join(d,e.name); try { n+=e.isDirectory()?(depth<12?sizeOf(f,depth+1):0):statSync(f).size; } catch {} } } catch {} return n; };
+    const GB=b=>Math.round(b/1e7)/100;
+    const home=osm.homedir(); const diskUse={};
+    for(const d of [...readdirSync(home).map(n=>pth.join(home,n)), osm.tmpdir()]) { try { if(statSync(d).isDirectory()) { const g=GB(sizeOf(d)); if(g>=0.05) diskUse[d]=g; } } catch {} }
+    let disk=null; try { const s=statfsSync('/'); disk={ totalGB:GB(s.blocks*s.bsize), freeGB:GB(s.bavail*s.bsize) }; } catch {}
+    res.json({ now:new Date().toISOString(), disk, diskUseGB:diskUse, botPauseUntil:N.status.botPauseUntil||null, started:N.status.started, lastPoll:N.status.lastPoll, working:N.status.working, feedErrors:errs,
       recentProblems:(N.status.log||[]).filter(x=>x.failed||x.gaveUp).slice(0,15), recentDone:(N.status.log||[]).filter(x=>x.done).slice(0,10).map(x=>({at:x.at,topic:x.topic,file:x.file,seconds:x.seconds,lateMin:x.lateMin})),
       keyPresses:(globalThis.mediaKeyLog||[]).slice(0,15), topics });
   } catch(e) { res.status(500).json({error:String(e?.message||e).slice(0,160)}); }
@@ -6064,6 +6072,7 @@ app.get('/news-status', rateLimit(30, 60 * 1000, 'news-status'), async (req,res)
 setTimeout(()=>{ const run=async()=>{ try {
   const TV=await import('./branch2-tv.js'); const RF=await import('./tv-replay-folder.js');
   await RF.publishPending(TV.TV_CHANNELS, await replayIo());
+  await RF.clearPublished(await replayIo()).catch(()=>{});
 } catch(e) { console.warn('[TV REPLAY] publishing round skipped',{message:String(e?.message||e).slice(0,160)}); } };
   run(); setInterval(run, 5*60*1000).unref?.(); }, 3*60*1000).unref?.();
 app.get('/tv-replay-check', rateLimit(20, 60 * 1000, 'tv-replay-check'), async (req,res)=>{
