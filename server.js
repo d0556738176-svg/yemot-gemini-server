@@ -6563,6 +6563,46 @@ app.get('/live-probe',rateLimit(4,60*1000,'live-probe'),async (req,res)=>{
   liveProbe={ at:Date.now(), out };
   res.set('cache-control','no-store').json(out);
 });
+// Read-only live check of extensions 1 and 3 (owner, 28.11): runs one of the
+// fixed question sets (live-qa-sets.js) as a simulated text call in the running
+// code, with the system's own log lines for each answer. Nothing is saved.
+const liveQa=new Map();
+app.get('/live-qa/:set',rateLimit(6,60*60*1000,'live-qa'),async (req,res)=>{
+  const { LIVE_QA_SETS }=await import('./live-qa-sets.js');
+  const set=String(req.params.set||''), questions=LIVE_QA_SETS[set];
+  if(!questions) return res.status(404).json({sets:Object.keys(LIVE_QA_SETS)});
+  const branch=req.query.b==='1'?'1':'3', key=set+'-'+branch;
+  if(liveQa.get(key)?.running) return res.type('text/plain; charset=utf-8').send('already running; read /live-qa-report/'+set+'?b='+branch);
+  const rec={ running:true, at:new Date().toISOString(), lines:['live-qa '+set+' extension '+branch+' '+new Date().toISOString()] };
+  liveQa.set(key,rec);
+  res.type('text/plain; charset=utf-8').send('started '+questions.length+' questions in extension '+branch+'; read /live-qa-report/'+set+'?b='+branch);
+  const logs=[]; const orig={ info:console.info, warn:console.warn, error:console.error };
+  const keep=lvl=>(...a)=>{ try { const t=a.map(x=>typeof x==='string'?x:JSON.stringify(x)).join(' '); if(/^\[/.test(t)) logs.push(lvl+' '+t.replace(/\b(?:key|token|secret)\w*["=:]+[^,"\s}]+/gi,'[hidden]').slice(0,400)); } catch {} return orig[lvl==='I'?'info':lvl==='W'?'warn':'error'](...a); };
+  console.info=keep('I'); console.warn=keep('W'); console.error=keep('E');
+  let index=0, askedAt=Date.now();
+  const id='live-qa-'+Date.now();
+  const call={
+    selfTest:{next:()=>questions[index++]||''},
+    values:{ApiPhone:'0000000009',ApiCallId:id},callId:id,
+    read:async items=>{
+      const text=(Array.isArray(items)?items:[]).map(x=>x?.type==='file'?'[file '+x.data+']':(x?.data||'')).join(' ').replace(/\s*¶\s*/g,'. ').trim();
+      if(index>0) rec.lines.push('Q'+index+': '+questions[index-1]+'\n  ('+(Date.now()-askedAt)+'ms) '+text+'\n'+logs.splice(0).slice(-40).map(l=>'    '+l).join('\n'));
+      else logs.splice(0);
+      if(index>=questions.length) throw new Error('call was disconnected by the caller');
+      askedAt=Date.now();
+      return '/e2e-selftest.wav';
+    },
+    id_list_message:async()=>{},go_to_folder:async()=>{},hangup:async()=>{}
+  };
+  try { await callPersona.run({persona:branch==='1'?'male':'female',branch},()=>callHandler(call)); }
+  catch(e) { rec.lines.push('CRASH '+String(e?.stack||e).slice(0,400)); }
+  finally { Object.assign(console,orig); rec.running=false; }
+});
+app.get('/live-qa-report/:set',rateLimit(60,60*1000,'live-qa-report'),(req,res)=>{
+  const rec=liveQa.get(String(req.params.set||'')+'-'+(req.query.b==='1'?'1':'3'));
+  if(!rec) return res.status(404).end();
+  res.set('cache-control','no-store').type('text/plain; charset=utf-8').send((rec.running?'(still running)\n':'')+rec.lines.join('\n'));
+});
 // Owner's live check (19.11): deploy/vps/ask.mjs (run by the owner on the
 // server) writes questions under a long random name; opening this address
 // runs them as one simulated text call in extension 1 or 3 of the RUNNING
