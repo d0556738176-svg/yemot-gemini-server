@@ -5896,6 +5896,8 @@ async function callHandler(call) {
       console.warn('[CALL_FLOW] long_answer_trimmed',{callId:activeKey,chars:replyText.length,max:LONG_ANSWER_MAX_CHARS});
       replyText=replyText.slice(0,LONG_ANSWER_MAX_CHARS).replace(/\s+\S*$/,'').trim()+'.';
     }
+    // 28.11 (owner, extension 12): every answer ends with "בהצלחה".
+    if(callPersona.getStore()?.owner && !/בהצלחה[.!\s]*$/u.test(replyText)) replyText=replyText.replace(/[\s]+$/,'')+' בהצלחה.';
     console.info('[CALL_FLOW] reply_ready', { callId: activeKey, chars: replyText.length, elapsedMs:Date.now()-turnStartedAt });
     // Short preview of phone-number answers so their accuracy can be audited from the logs.
     {
