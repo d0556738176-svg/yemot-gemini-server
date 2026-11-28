@@ -258,10 +258,20 @@ export async function trafficRoute(from, to, { fetchImpl = fetch, env = process.
   if (tt) {
     try {
       return await cached('tomtom|' + key5(from) + '|' + key5(to), 4 * 60000, async () => {
-        const u = 'https://api.tomtom.com/routing/1/calculateRoute/' + key5(from) + ':' + key5(to) + '/json?traffic=true&maxAlternatives=2&routeRepresentation=summaryOnly&computeTravelTimeFor=all&departAt=now&key=' + encodeURIComponent(tt);
-        const r = await fetchImpl(u, { signal: AbortSignal.timeout(8000) });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok || !j.routes?.length) throw Object.assign(new Error('TomTom HTTP ' + r.status), { status: r.status });
+        // New MyTomTom keys may serve only the Orbis routing; the classic one is tried first.
+        const pts = key5(from) + ':' + key5(to);
+        const urls = [
+          'https://api.tomtom.com/routing/1/calculateRoute/' + pts + '/json?traffic=true&maxAlternatives=2&routeRepresentation=summaryOnly&computeTravelTimeFor=all&departAt=now&key=' + encodeURIComponent(tt),
+          'https://api.tomtom.com/maps/orbis/routing/calculateRoute/' + pts + '/json?apiVersion=2&traffic=live&travelMode=car&maxAlternatives=2&routeRepresentation=summaryOnly&key=' + encodeURIComponent(tt)
+        ];
+        let r, j, statuses = [];
+        for (const u of urls) {
+          r = await fetchImpl(u, { signal: AbortSignal.timeout(8000) });
+          j = await r.json().catch(() => ({}));
+          statuses.push(r.status);
+          if (r.ok && j.routes?.length) break;
+        }
+        if (!r.ok || !j.routes?.length) throw Object.assign(new Error('TomTom HTTP ' + statuses.join('/')), { status: r.status });
         const routes = j.routes.map(x => ({ minutes: Math.round(x.summary.travelTimeInSeconds / 60), freeMinutes: Math.round((x.summary.noTrafficTravelTimeInSeconds || x.summary.travelTimeInSeconds) / 60), delayMin: Math.round((x.summary.trafficDelayInSeconds || 0) / 60), km: x.summary.lengthInMeters / 1000 })).sort((a, b) => a.minutes - b.minutes);
         return { source: 'tomtom', routes };
       });
