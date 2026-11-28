@@ -715,7 +715,13 @@ export function extractAnswer(raw) {
   return s.replace(/^```(?:json)?|```$/g, '').trim();
 }
 // Weak models sometimes slip a Chinese or Cyrillic word into Hebrew.
-function cleanScript(t) { return String(t || '').replace(/[\u3000-\u9fff\uac00-\ud7af\u0400-\u04ff]+/g, '').replace(/\s{2,}/g, ' ').trim(); }
+// 28.11: an English number word slipped into a Hebrew answer ("בעשר פחות ten").
+const EN_NUM = { one: 'אחת', two: 'שתיים', three: 'שלוש', four: 'ארבע', five: 'חמש', six: 'שש', seven: 'שבע', eight: 'שמונה', nine: 'תשע', ten: 'עשר', eleven: 'אחת עשרה', twelve: 'שתים עשרה', fifteen: 'חמש עשרה', twenty: 'עשרים', thirty: 'שלושים', forty: 'ארבעים', fifty: 'חמישים', half: 'חצי', quarter: 'רבע' };
+function cleanScript(t) {
+  let x = String(t || '').replace(/[\u3000-\u9fff\uac00-\ud7af\u0400-\u04ff]+/g, '');
+  if (/[\u0590-\u05FF]/.test(x)) x = x.replace(/(?<=[\u0590-\u05FF][\s,]{0,3})\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|half|quarter)\b/gi, w => EN_NUM[w.toLowerCase()]);
+  return x.replace(/\s{2,}/g, ' ').trim();
+}
 
 // Words that mean "the next step" in a lesson.
 function looksLikeLessonRequest(text) {
